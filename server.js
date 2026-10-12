@@ -375,14 +375,18 @@ app.post('/api/limit', checkAuth, (req, res) => {
 });
 
 app.get('/api/backup', checkAuth, (req, res) => {
-    const dateStr = new Date().toISOString().replace(/T/, '-').replace(/:/g, '-').slice(0, 16);
-    const fileName = `awg-full-backup-${dateStr}.tar.gz`;
-    const tempPath = `/tmp/${fileName}`;
-    const cmd = `sudo tar -czf ${tempPath} /etc/amnezia/amneziawg /root/awg /root/awg-admin /etc/nginx/sites-available/awg-admin /etc/nginx/.htpasswd`;
-    exec(cmd, (error) => {
-        if (error) return res.status(500).send("Ошибка архива");
-        res.download(tempPath, fileName, () => { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); });
-    });
+const dateStr = new Date().toISOString().replace(/T/, '-').replace(/:/g, '-').slice(0, 16);
+const fileName = `awg-full-backup-${dateStr}.tar.gz`;
+const tempPath = `/tmp/${fileName}`;
+
+// Пытаемся заархивировать все возможные пути. 
+// Конструкция "2>/dev/null || true" подавляет ошибки, если какой-то папки нет
+const cmd = `sudo tar -czf ${tempPath} /etc/amnezia/amneziawg /root/awg /root/servpanel /root/awg-admin /etc/nginx/sites-available/awg-admin /etc/nginx/.htpasswd 2>/dev/null || true`;
+
+exec(cmd, () => {
+    if (!fs.existsSync(tempPath)) return res.status(500).send("Не удалось создать архив");
+    res.download(tempPath, fileName, () => { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); });
+});
 });
 
 app.post('/api/restore', checkAuth, (req, res) => {
