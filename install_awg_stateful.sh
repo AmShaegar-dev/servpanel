@@ -7,10 +7,14 @@ INSTALLER_URL="https://raw.githubusercontent.com/bivlked/amneziawg-installer/mai
 echo "=== СТАРТ УСТАНОВКИ AMNEZIAWG (Через Панель) ===" | tee -a "$LOG_FILE"
 
 # Защищаем порты панели ДО запуска установщика (если UFW активен)
+PORT_TO_OPEN="${PANEL_PORT:-4444}"
+echo "Проверка портов панели (${PORT_TO_OPEN}, 80, 443, 22, 2233, 4443)..." | tee -a "$LOG_FILE"
 if command -v ufw >/dev/null 2>&1; then
-    sudo ufw allow 3000/tcp >/dev/null 2>&1 || true
+    sudo ufw allow ${PORT_TO_OPEN}/tcp >/dev/null 2>&1 || true
     sudo ufw allow 80/tcp >/dev/null 2>&1 || true
     sudo ufw allow 443/tcp >/dev/null 2>&1 || true
+    sudo ufw allow 22/tcp >/dev/null 2>&1 || true
+    sudo ufw allow 2233/tcp >/dev/null 2>&1 || true
 fi
 
 echo "Скачиваем оригинальный скрипт AmneziaWG..." | tee -a "$LOG_FILE"
@@ -60,7 +64,7 @@ $INSTALL_CMD >> "$LOG_FILE" 2>&1
 if grep -q "Установка завершена" "$LOG_FILE" || grep -q "Installation complete" "$LOG_FILE"; then
     echo "=== INSTALLATION DONE ===" | tee -a "$LOG_FILE"
     if command -v ufw >/dev/null 2>&1; then
-        sudo ufw allow 3000/tcp >/dev/null 2>&1 || true
+        sudo ufw allow ${PANEL_PORT:-4444}/tcp >/dev/null 2>&1 || true
     fi
     rm -f /root/install_amneziawg.sh
 fi
