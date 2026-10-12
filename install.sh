@@ -74,12 +74,14 @@ if [ -z "$ADMIN_PASS" ]; then
 fi
 
 echo -e "\nКак будем заходить в панель управления?"
-echo "1) По IP-адресу (например, http://$SERVER_IP:3000)"
+echo "1) По IP-адресу"
 echo "2) По Домену (с бесплатным SSL сертификатом HTTPS)"
 read -p "Ваш выбор (1 или 2): " ACCESS_TYPE < /dev/tty
 
 if [ "$ACCESS_TYPE" == "2" ]; then
     read -p "Введите ваш домен (например, vpn.mydomain.com): " DOMAIN_NAME < /dev/tty
+    read -p "Укажите порт для HTTPS-доступа (По умолчанию 443): " PANEL_PORT < /dev/tty
+    PANEL_PORT=${PANEL_PORT:-443}
 else
     read -p "Укажите порт для панели (По умолчанию 3000): " PANEL_PORT < /dev/tty
     PANEL_PORT=${PANEL_PORT:-3000}
@@ -126,6 +128,11 @@ cd servpanel
 echo "Применение заданного пароля..."
 sed -i "s/mysecretpassword/$ADMIN_PASS/g" server.js
 
+if [ "$ACCESS_TYPE" != "2" ]; then
+    echo "Применение кастомного порта $PANEL_PORT..."
+    sed -i "s/app.listen(3000/app.listen($PANEL_PORT/g" server.js
+fi
+
 echo "Установка Node.js зависимостей..."
 npm install
 npm install -g pm2
@@ -142,6 +149,9 @@ ufw allow ssh
 
 if [ "$ACCESS_TYPE" == "2" ] && [ -n "$DOMAIN_NAME" ]; then
     ufw allow "Nginx Full"
+    if [ "$PANEL_PORT" != "443" ]; then
+        ufw allow $PANEL_PORT/tcp
+    fi
     
     cat << EOF > /etc/nginx/sites-available/awg-admin
 server {
@@ -165,8 +175,18 @@ EOF
     echo "Получение SSL сертификата для $DOMAIN_NAME..."
     certbot --nginx -d $DOMAIN_NAME --non-interactive --agree-tos -m admin@$DOMAIN_NAME || echo -e "${RED}Ошибка получения SSL. Проверьте A-запись домена.${NC}"
     
+    if [ "$PANEL_PORT" != "443" ]; then
+        echo "Смена порта Nginx с 443 на $PANEL_PORT..."
+        sed -i "s/ 443 ssl/ $PANEL_PORT ssl/g" /etc/nginx/sites-available/awg-admin
+        systemctl restart nginx
+    fi
+    
     echo -e "\n${GREEN}Панель успешно установлена!${NC}"
-    echo -e "Доступ по ссылке: https://$DOMAIN_NAME"
+    if [ "$PANEL_PORT" == "443" ]; then
+        echo -e "Доступ по ссылке: https://$DOMAIN_NAME"
+    else
+        echo -e "Доступ по ссылке: https://$DOMAIN_NAME:$PANEL_PORT"
+    fi
 else
     ufw allow $PANEL_PORT/tcp
     echo -e "\n${GREEN}Панель успешно установлена!${NC}"
