@@ -545,6 +545,7 @@ app.post('/api/install/module', checkAuth, (req, res) => {
         execSync(`sudo rm -f ${logFile} && sudo touch ${logFile} && sudo chmod 666 ${logFile}`);
         
         let runScript = `#!/bin/bash\n`;
+        runScript += `export PANEL_PORT="${PORT}"\n`; 
         
         if (module === 'awg') {
             runScript += `export AWG_VERSION="${data.version || ''}"\n`;
