@@ -122,6 +122,8 @@
                 <h3 id="currentTabTitle" style="margin: 0;">Дашборд</h3>
             </div>
             <div class="topbar-actions">
+    			<button class="btn-dark" onclick="updatePanel()" style="color: var(--rx-color);">🔄 Обновить с GitHub</button>
+			    <button class="btn-dark" onclick="window.location.href='/api/backup'" title="Скачать">💾 Скачать бэкап</button>
                 <button class="btn-dark" onclick="window.location.href='/api/backup'" title="Скачать">💾 Скачать бэкап</button>
                 <button class="btn-dark" onclick="document.getElementById('backupUpload').click()" title="Восстановить" style="color: var(--sys-color);">📥 Загрузить архив</button>
                 <input type="file" id="backupUpload" accept=".tar.gz" style="display:none" onchange="restoreBackup(event)">
@@ -334,6 +336,24 @@
     </main>
 
     <script>
+		async function updatePanel() {
+if (!confirm("Загрузить последнюю версию панели с GitHub? Интерфейс будет перезагружен.")) return;
+document.getElementById('loaderOverlay').style.display = 'flex';
+document.getElementById('loaderText').innerText = "Обновление файлов...";
+try {
+    const res = await fetch('/api/update', { method: 'POST' });
+    if (res.ok) {
+        document.getElementById('loaderText').innerText = "Перезапуск сервера...";
+        setTimeout(() => { window.location.reload(); }, 6000); // Ждем 6 секунд пока PM2 перезапустится
+    } else {
+        alert("Ошибка при обновлении");
+        document.getElementById('loaderOverlay').style.display = 'none';
+    }
+} catch (e) {
+    // Если PM2 убил процесс быстрее, чем пришел ответ
+    setTimeout(() => { window.location.reload(); }, 6000);
+}
+}
         let lastStats = {}; let isFetching = false; 
         let pollingInterval = null; let historyInterval = null; let agInterval = null;
         let chartData = { global: { labels: [], rx: [], tx: [] } };
