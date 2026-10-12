@@ -530,10 +530,10 @@ app.post('/api/install/module', checkAuth, (req, res) => {
         installScriptUrl = 'https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install_awg_stateful.sh';
         logFile = '/var/log/awg_install.log';
     } else if (module === 'mtproto') {
-        installScriptUrl = 'https://raw.githubusercontent.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/main/install.sh';
+        installScriptUrl = 'https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install_mtproto_silent.sh';
         logFile = '/var/log/mtproto_install.log';
     } else if (module === 'adguard') {
-        installScriptUrl = 'https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh';
+        installScriptUrl = 'https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install_adguard_silent.sh';
         logFile = '/var/log/adguard_install.log';
     } else {
         return res.status(400).json({ error: "Неизвестный модуль" });
