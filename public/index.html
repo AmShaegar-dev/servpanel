@@ -123,7 +123,6 @@
             </div>
             <div class="topbar-actions">
     			<button class="btn-dark" onclick="updatePanel()" style="color: var(--rx-color);">🔄 Обновить с GitHub</button>
-			    <button class="btn-dark" onclick="window.location.href='/api/backup'" title="Скачать">💾 Скачать бэкап</button>
                 <button class="btn-dark" onclick="window.location.href='/api/backup'" title="Скачать">💾 Скачать бэкап</button>
                 <button class="btn-dark" onclick="document.getElementById('backupUpload').click()" title="Восстановить" style="color: var(--sys-color);">📥 Загрузить архив</button>
                 <input type="file" id="backupUpload" accept=".tar.gz" style="display:none" onchange="restoreBackup(event)">
