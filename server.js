@@ -522,6 +522,7 @@ app.post('/api/awg/config', checkAuth, (req, res) => {
 });
 // УСТАНОВКА МОДУЛЕЙ (AWG, MTPROTO, ADGUARD)
 // УСТАНОВКА МОДУЛЕЙ (AWG, MTPROTO, ADGUARD)
+// УСТАНОВКА МОДУЛЕЙ (AWG, MTPROTO, ADGUARD)
 app.post('/api/install/module', checkAuth, (req, res) => {
     const data = req.body;
     const module = data.module;
@@ -545,7 +546,7 @@ app.post('/api/install/module', checkAuth, (req, res) => {
         execSync(`sudo rm -f ${logFile} && sudo touch ${logFile} && sudo chmod 666 ${logFile}`);
         
         let runScript = `#!/bin/bash\n`;
-        runScript += `export PANEL_PORT="${PORT}"\n`; 
+        runScript += `export PANEL_PORT="${PORT}"\n`; // Передаем порт панели!
         
         if (module === 'awg') {
             runScript += `export AWG_VERSION="${data.version || ''}"\n`;
@@ -557,11 +558,6 @@ app.post('/api/install/module', checkAuth, (req, res) => {
             runScript += `export AWG_ISOLATION="${data.isolation ? 'on' : 'off'}"\n`;
             runScript += `export AWG_KEEP_PACKAGES="${data.keepPackages ? '1' : '0'}"\n`;
             runScript += `export AWG_NO_TWEAKS="${data.noTweaks ? '1' : '0'}"\n`;
-            let runScript = `#!/bin/bash\n`;
-        runScript += `export PANEL_PORT="${PORT}"\n`; // Передаем порт панели!
-        
-        if (module === 'awg') {
-            runScript += `export AWG_VERSION="${data.version || ''}"\n`;
         }
 
         runScript += `curl -fsSL ${installScriptUrl} > /tmp/installer.sh\nbash /tmp/installer.sh > ${logFile} 2>&1\nrm -f /tmp/installer.sh\n`;
