@@ -347,32 +347,80 @@
 <!-- УСТАНОВКА МОДУЛЕЙ -->
 <div id="tab-install" class="tab-pane">
     <div class="stats-cards">
-        <!-- AmneziaWG -->
-<div class="card" style="flex: 1; min-width: 250px;">
+      <!-- AmneziaWG -->
+<div class="card" style="flex: 1; min-width: 320px;">
     <h3>AmneziaWG (С перезагрузками)</h3>
     <p style="color: var(--text-muted); font-size: 13px;">Полная установка AWG. Потребует 3 перезагрузки сервера.</p>
     
-    <div class="controls-row" style="margin-bottom: 10px;">
-        <select id="awgInstallVersion" style="width: 100%; margin-bottom: 5px;">
-            <option value="3.1">Версия 3.1 (Последняя)</option>
-            <option value="2.0" selected>Версия 2.0 (Стабильная)</option>
-            <option value="1.5">Версия 1.5 (Legacy)</option>
-        </select>
+    <div class="controls-row" style="margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
         
-        <div style="font-size: 13px; color: var(--text-main); margin-bottom: 5px;">
+        <!-- Версия -->
+        <div>
+            <label style="font-size: 11px; color: var(--text-muted);">Версия протокола</label>
+            <select id="awgInstallVersion" style="width: 100%; margin-top: 3px;">
+                <option value="3.1">Версия 3.1 (Последняя)</option>
+                <option value="2.0" selected>Версия 2.0 (Стабильная)</option>
+                <option value="1.5">Версия 1.5 (Legacy)</option>
+            </select>
+        </div>
+
+        <!-- Пресет -->
+        <div>
+            <label style="font-size: 11px; color: var(--text-muted);">Профиль обфускации</label>
+            <select id="awgInstallPreset" style="width: 100%; margin-top: 3px;">
+                <option value="default" selected>Стандартный (default)</option>
+                <option value="mobile">Мобильный (mobile)</option>
+            </select>
+        </div>
+
+        <!-- Маршрутизация -->
+        <div style="grid-column: span 2;">
+            <label style="font-size: 11px; color: var(--text-muted);">Режим маршрутизации (IPv4)</label>
+            <select id="awgInstallRoute" style="width: 100%; margin-top: 3px;" onchange="document.getElementById('awgCustomRouteContainer').style.display = this.value === 'custom' ? 'block' : 'none'">
+                <option value="all" selected>Весь трафик (0.0.0.0/0)</option>
+                <option value="amnezia">Список Amnezia + DNS</option>
+                <option value="custom">Пользовательский список (Split-tunnel)</option>
+            </select>
+        </div>
+
+        <!-- Кастомный маршрут (скрыт по умолчанию) -->
+        <div id="awgCustomRouteContainer" style="grid-column: span 2; display: none;">
+            <input type="text" id="awgCustomRoute" placeholder="Пример: 192.168.1.0/24,10.50.0.0/16" style="width: 100%; font-size: 12px; box-sizing: border-box;">
+        </div>
+
+        <!-- IPv6 -->
+        <div>
+            <label style="font-size: 11px; color: var(--text-muted);">Настройки IPv6</label>
+            <select id="awgInstallIpv6" style="width: 100%; margin-top: 3px;">
+                <option value="disallow" selected>Отключить (disallow)</option>
+                <option value="allow">Оставить включенным (allow)</option>
+                <option value="tunnel">Dual-stack в туннеле (ULA)</option>
+            </select>
+        </div>
+
+        <!-- Порт -->
+        <div>
+            <label style="font-size: 11px; color: var(--text-muted);">UDP Порт</label>
+            <input type="number" id="awgInstallPort" placeholder="39743" style="width: 100%; margin-top: 3px; box-sizing: border-box;" title="Для обхода ТСПУ на моб. сетях рекомендуется 443">
+        </div>
+
+        <!-- Чекбоксы -->
+        <div style="grid-column: span 2; font-size: 12px; color: var(--text-main); margin-top: 5px; display: flex; flex-direction: column; gap: 8px;">
+            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                <input type="checkbox" id="awgIsolation" checked>
+                Изолировать клиентов друг от друга (isolation=on)
+            </label>
             <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
                 <input type="checkbox" id="awgKeepPackages" checked>
-                Сохранить сист. пакеты (snapd и др.)
+                Сохранить системные пакеты (snapd и др.)
             </label>
-        </div>
-        <div style="font-size: 13px; color: var(--text-main); margin-bottom: 10px;">
             <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
                 <input type="checkbox" id="awgNoTweaks">
                 Без UFW, Fail2Ban и оптимизаций
             </label>
         </div>
     </div>
-    <button class="btn-primary" onclick="startInstall('awg', '/var/log/awg_install.log')">Начать установку AWG</button>
+    <button class="btn-primary" style="width: 100%;" onclick="startInstall('awg', '/var/log/awg_install.log')">Начать установку AWG</button>
 </div>
         
         <!-- MTProto -->
@@ -409,27 +457,28 @@
 		let logInterval = null;
 
 async function startInstall(module, expectedLogFile) {
-    let version = '';
-    let keepPackages = false;
-    let noTweaks = false;
+    let options = {};
 
     if (module === 'awg') {
-        version = document.getElementById('awgInstallVersion').value;
-        keepPackages = document.getElementById('awgKeepPackages').checked;
-        noTweaks = document.getElementById('awgNoTweaks').checked;
-        
-        // ЖЕСТКОЕ ПОДТВЕРЖДЕНИЕ
         const check = prompt("ВНИМАНИЕ! Установка AWG перезагрузит сервер 3 раза.\n\nДля подтверждения введите слово INSTALL (большими буквами):");
-        if (check !== 'INSTALL') {
-            alert("Установка отменена.");
-            return;
-        }
+        if (check !== 'INSTALL') { alert("Установка отменена."); return; }
+        
+        options = {
+            version: document.getElementById('awgInstallVersion').value,
+            preset: document.getElementById('awgInstallPreset').value,
+            route: document.getElementById('awgInstallRoute').value,
+            customRoute: document.getElementById('awgCustomRoute').value,
+            ipv6: document.getElementById('awgInstallIpv6').value,
+            port: document.getElementById('awgInstallPort').value,
+            isolation: document.getElementById('awgIsolation').checked,
+            keepPackages: document.getElementById('awgKeepPackages').checked,
+            noTweaks: document.getElementById('awgNoTweaks').checked
+        };
     } else {
         if(!confirm(`Запустить процесс установки модуля ${module}? Следите за логами в окне ниже.`)) return;
     }
     
     document.getElementById('installLogWrapper').style.display = 'block';
-    // ... далее старый код функции ...
     document.getElementById('installLogText').value = "Инициализация...\n";
     document.getElementById('installStatusBadge').innerText = "Подготовка...";
     
@@ -437,7 +486,7 @@ async function startInstall(module, expectedLogFile) {
         const res = await fetch('/api/install/module', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ module, version, keepPackages, noTweaks }) // Передаем все флаги
+            body: JSON.stringify({ module, ...options }) // Передаем все собранные опции
         });
         if (res.ok) {
             if (logInterval) clearInterval(logInterval);
