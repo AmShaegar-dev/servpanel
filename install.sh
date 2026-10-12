@@ -11,49 +11,60 @@ echo -e "${GREEN}  Менеджер FileManager 4.0 и VPN Инфраструк�
 echo -e "${CYAN}=================================================${NC}"
 
 echo -e "1) Установить панель и компоненты"
-echo -e "2) Удалить панель и очистить сервер"
+echo -e "2) Выборочно удалить компоненты"
 read -p "Выберите действие (1 или 2): " MAIN_ACTION < /dev/tty
 
 if [ "$MAIN_ACTION" == "2" ]; then
-    echo -e "\n${RED}Начинаем полное удаление всех компонентов...${NC}"
-    read -p "Вы уверены? Это необратимо удалит VPN, AdGuard, MTProto и панель! [y/N]: " CONFIRM_UNINSTALL < /dev/tty
-    if [[ ! "$CONFIRM_UNINSTALL" =~ ^[Yy]$ ]]; then
-        echo "Отмена."
-        exit 0
-    fi
-
-    echo "[1/5] Остановка и удаление панели FileManager..."
-    pm2 stop awg-admin 2>/dev/null || true
-    pm2 delete awg-admin 2>/dev/null || true
-    pm2 save --force 2>/dev/null || true
-    rm -rf /root/servpanel
+    echo -e "\n${RED}Режим выборочного удаления...${NC}"
     
-    echo "[2/5] Удаление настроек Nginx..."
-    rm -f /etc/nginx/sites-available/awg-admin /etc/nginx/sites-enabled/awg-admin
-    systemctl restart nginx 2>/dev/null || true
+    read -p "Удалить саму панель FileManager 4.0? [Y/n]: " DEL_PANEL < /dev/tty
+    read -p "Удалить настройки Nginx (конфиги панели и SSL)? [Y/n]: " DEL_NGINX < /dev/tty
+    read -p "Удалить AdGuard Home? [Y/n]: " DEL_ADGUARD < /dev/tty
+    read -p "Удалить MTProto Proxy? [Y/n]: " DEL_MTPROTO < /dev/tty
+    read -p "Удалить AmneziaWG (ВНИМАНИЕ: удалит все профили)? [Y/n]: " DEL_AWG < /dev/tty
 
-    echo "[3/5] Удаление AdGuard Home..."
-    if [ -f "/opt/AdGuardHome/AdGuardHome" ]; then
-        /opt/AdGuardHome/AdGuardHome -s uninstall 2>/dev/null || true
-        rm -rf /opt/AdGuardHome
+    if [[ ! "$DEL_PANEL" =~ ^[Nn]$ ]]; then
+        echo "[*] Остановка и удаление панели FileManager..."
+        pm2 stop awg-admin 2>/dev/null || true
+        pm2 delete awg-admin 2>/dev/null || true
+        pm2 save --force 2>/dev/null || true
+        rm -rf /root/servpanel
+    fi
+    
+    if [[ ! "$DEL_NGINX" =~ ^[Nn]$ ]]; then
+        echo "[*] Удаление настроек Nginx..."
+        rm -f /etc/nginx/sites-available/awg-admin /etc/nginx/sites-enabled/awg-admin
+        systemctl restart nginx 2>/dev/null || true
     fi
 
-    echo "[4/5] Удаление MTProto (Telemt/MTG)..."
-    systemctl stop telemt mtg 2>/dev/null || true
-    systemctl disable telemt mtg 2>/dev/null || true
-    rm -rf /opt/mtproto-proxy /etc/telemt-panel /etc/systemd/system/telemt.service /etc/systemd/system/mtg.service
-    systemctl daemon-reload
-
-    echo "[5/5] Удаление AmneziaWG..."
-    if [ -f "/root/install_amneziawg.sh" ]; then
-        bash /root/install_amneziawg.sh --uninstall --yes || true
-    else
-        wget -qO uninstall_awg.sh https://raw.githubusercontent.com/bivlked/amneziawg-installer/main/install_amneziawg.sh
-        bash uninstall_awg.sh --uninstall --yes || true
-        rm -f uninstall_awg.sh
+    if [[ ! "$DEL_ADGUARD" =~ ^[Nn]$ ]]; then
+        echo "[*] Удаление AdGuard Home..."
+        if [ -f "/opt/AdGuardHome/AdGuardHome" ]; then
+            /opt/AdGuardHome/AdGuardHome -s uninstall 2>/dev/null || true
+            rm -rf /opt/AdGuardHome
+        fi
     fi
 
-    echo -e "${GREEN}Удаление успешно завершено! Сервер очищен.${NC}"
+    if [[ ! "$DEL_MTPROTO" =~ ^[Nn]$ ]]; then
+        echo "[*] Удаление MTProto (Telemt/MTG)..."
+        systemctl stop telemt mtg 2>/dev/null || true
+        systemctl disable telemt mtg 2>/dev/null || true
+        rm -rf /opt/mtproto-proxy /etc/telemt-panel /etc/systemd/system/telemt.service /etc/systemd/system/mtg.service
+        systemctl daemon-reload
+    fi
+
+    if [[ ! "$DEL_AWG" =~ ^[Nn]$ ]]; then
+        echo "[*] Удаление AmneziaWG..."
+        if [ -f "/root/install_amneziawg.sh" ]; then
+            bash /root/install_amneziawg.sh --uninstall --yes || true
+        else
+            wget -qO uninstall_awg.sh https://raw.githubusercontent.com/bivlked/amneziawg-installer/main/install_amneziawg.sh
+            bash uninstall_awg.sh --uninstall --yes || true
+            rm -f uninstall_awg.sh
+        fi
+    fi
+
+    echo -e "\n${GREEN}Выборочное удаление успешно завершено!${NC}"
     exit 0
 fi
 
