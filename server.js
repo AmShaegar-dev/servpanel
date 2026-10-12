@@ -25,18 +25,33 @@ app.use(express.static('public'));
 app.post('/api/login', (req, res) => {
     if (req.body.password === ADMIN_PASSWORD) {
         req.session.loggedIn = true;
+        // Генерируем токен из пароля и сохраняем его в постоянную cookie на 30 дней
+        const token = Buffer.from(ADMIN_PASSWORD).toString('base64');
+        res.cookie('awg_auth', token, { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true });
         res.json({ success: true });
     } else res.status(401).json({ error: "Неверный пароль" });
 });
 
 app.post('/api/logout', (req, res) => {
     req.session.destroy();
+    res.clearCookie('awg_auth'); // Удаляем cookie при ручном выходе
     res.json({ success: true });
 });
 
 const checkAuth = (req, res, next) => {
-    if (req.session.loggedIn) next();
-    else res.status(401).json({ error: "Unauthorized" });
+    // 1. Если сессия в памяти жива - пропускаем
+    if (req.session && req.session.loggedIn) return next();
+    
+    // 2. Если сервер перезагружался (сессия убита), но у браузера осталась наша cookie - восстанавливаем
+    const cookies = req.headers.cookie || '';
+    const token = Buffer.from(ADMIN_PASSWORD).toString('base64');
+    
+    if (cookies.includes('awg_auth=' + token)) {
+        if (req.session) req.session.loggedIn = true; // Восстанавливаем сессию в памяти
+        return next();
+    }
+    
+    res.status(401).json({ error: "Unauthorized" });
 };
 
 // СБОР ИСТОРИИ ТРАФИКА
@@ -409,6 +424,9 @@ app.post('/api/change-password', checkAuth, (req, res) => {
     try {
         fs.writeFileSync(passFile, newPassword);
         ADMIN_PASSWORD = newPassword;
+        // Обновляем cookie новым паролем
+        const token = Buffer.from(ADMIN_PASSWORD).toString('base64');
+        res.cookie('awg_auth', token, { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true });
         res.json({success: true});
     } catch (e) {
         res.status(500).json({error: "Ошибка изменения пароля"});
