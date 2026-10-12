@@ -112,6 +112,7 @@
             <li onclick="switchTab('tab-services', this)"><span class="menu-icon">⚙️</span> Службы & DNS</li>
             <li onclick="switchTab('tab-security', this)"><span class="menu-icon">🛡️</span> Защита и Cron</li>
             <li onclick="switchTab('tab-diag', this)"><span class="menu-icon">📡</span> Диагностика</li>
+			<li onclick="switchTab('tab-install', this)"><span class="menu-icon">📥</span> Установка Модулей</li>
         </ul>
     </aside>
 
@@ -343,11 +344,100 @@
                     <button class="btn-dark" disabled>Функция в разработке</button>
                 </div>
             </div>
+<!-- УСТАНОВКА МОДУЛЕЙ -->
+<div id="tab-install" class="tab-pane">
+    <div class="stats-cards">
+        <!-- AmneziaWG -->
+        <div class="card" style="flex: 1;">
+            <h3>AmneziaWG (С перезагрузками)</h3>
+            <p style="color: var(--text-muted); font-size: 13px;">Полная установка AWG с оптимизацией ядра, Fail2Ban и UFW. Потребует 3 перезагрузки сервера.</p>
+            <button class="btn-primary" onclick="startInstall('awg', '/var/log/awg_install.log')">Начать установку AWG</button>
+        </div>
+        
+        <!-- MTProto -->
+        <div class="card" style="flex: 1;">
+            <h3>MTProto / WEB Proxy (MEKO)</h3>
+            <p style="color: var(--text-muted); font-size: 13px;">Установка MTProtoL, Telemt или MTG с фиксами от MEKO.</p>
+            <button class="btn-primary" onclick="startInstall('mtproto', '/var/log/mtproto_install.log')">Установить MTProto</button>
+        </div>
 
+        <!-- AdGuard Home -->
+        <div class="card" style="flex: 1;">
+            <h3>AdGuard Home</h3>
+            <p style="color: var(--text-muted); font-size: 13px;">Установка персонального DNS-блокировщика рекламы.</p>
+            <button class="btn-primary" onclick="startInstall('adguard', '/var/log/adguard_install.log')">Установить AdGuard</button>
+        </div>
+    </div>
+
+    <!-- Окно Live-логов -->
+    <div id="installLogWrapper" class="card" style="display: none; margin-top: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h3 style="margin:0; color: var(--sys-color);">Терминал установки</h3>
+            <span id="installStatusBadge" class="val-sys">В процессе...</span>
+        </div>
+        <textarea id="installLogText" readonly rows="20" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; background: #000; color: #0f0; border: 1px solid var(--border); border-radius: 6px; padding: 10px; resize: none;"></textarea>
+    </div>
+</div>
         </div>
     </main>
 
     <script>
+		let logInterval = null;
+
+async function startInstall(module, expectedLogFile) {
+    if(!confirm(`Запустить процесс установки модуля ${module}? Следите за логами в окне ниже.`)) return;
+    
+    document.getElementById('installLogWrapper').style.display = 'block';
+    document.getElementById('installLogText').value = "Инициализация...\n";
+    document.getElementById('installStatusBadge').innerText = "Подготовка...";
+    
+    try {
+        const res = await fetch('/api/install/module', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ module })
+        });
+        if (res.ok) {
+            // Начинаем читать логи
+            if (logInterval) clearInterval(logInterval);
+            logInterval = setInterval(() => pollLog(expectedLogFile), 2000);
+        } else {
+            alert("Ошибка запуска установки");
+        }
+    } catch(e) {
+        alert("Сетевая ошибка");
+    }
+}
+
+async function pollLog(logFile) {
+    try {
+        const res = await fetch(`/api/install/log?file=${logFile}`);
+        if (res.ok) {
+            const text = await res.text();
+            const textArea = document.getElementById('installLogText');
+            
+            // Если текст изменился, обновляем и скроллим вниз
+            if (textArea.value !== text) {
+                textArea.value = text;
+                textArea.scrollTop = textArea.scrollHeight;
+            }
+            
+            document.getElementById('installStatusBadge').innerText = "Установка идет...";
+            document.getElementById('installStatusBadge').className = "val-sys";
+
+            // Если скрипт завершился (нужно будет добавить слово DONE в конец наших скриптов)
+            if (text.includes('=== INSTALLATION DONE ===')) {
+                clearInterval(logInterval);
+                document.getElementById('installStatusBadge').innerText = "Успешно завершено!";
+                document.getElementById('installStatusBadge').className = "val-rx";
+            }
+        }
+    } catch(e) {
+        // Ошибка сети тут означает, что сервер ушел в REBOOT!
+        document.getElementById('installStatusBadge').innerText = "Сервер перезагружается... Ожидание (до 30 сек)";
+        document.getElementById('installStatusBadge').className = "val-tx";
+    }
+}
 		async function loadAwgConfig() {
     try {
         const res = await fetch('/api/awg/config');
