@@ -450,4 +450,36 @@ pm2 restart awg-admin
     res.status(500).json({error: "Ошибка запуска обновления"});
 }
 });
+// НАСТРОЙКИ AMNEZIAWG
+const AWG_CONF_PATHS = ['/etc/amnezia/amneziawg/amn0.conf', '/etc/amnezia/amneziawg/awg0.conf', '/etc/wireguard/wg0.conf'];
+
+app.get('/api/awg/config', checkAuth, (req, res) => {
+    try {
+        let confPath = AWG_CONF_PATHS.find(p => fs.existsSync(p));
+        if (!confPath) return res.status(404).json({error: "Конфиг не найден"});
+        const content = fs.readFileSync(confPath, 'utf8');
+        res.json({ content, file: confPath });
+    } catch (e) {
+        res.status(500).json({error: "Ошибка чтения конфига"});
+    }
+});
+
+app.post('/api/awg/config', checkAuth, (req, res) => {
+    const { content, file } = req.body;
+    if (!content || !file) return res.status(400).json({error: "Пустой конфиг"});
+    try {
+        fs.writeFileSync('/tmp/awg_tmp.conf', content);
+        execSync(`sudo cp /tmp/awg_tmp.conf ${file}`);
+        
+        const iface = path.basename(file, '.conf');
+        try {
+            // Пытаемся перезапустить сервис разными методами (systemd или docker)
+            execSync(`sudo systemctl restart awg-quick@${iface} || sudo docker restart amnezia-awg || sudo systemctl restart amnezia-awg || true`);
+        } catch(e){}
+        
+        res.json({success: true});
+    } catch (e) {
+        res.status(500).json({error: "Ошибка сохранения конфига"});
+    }
+});
 app.listen(3000, () => console.log('AWG Admin v18 running'));
