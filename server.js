@@ -414,7 +414,7 @@ app.post('/api/change-password', checkAuth, (req, res) => {
 // ИНФОРМАЦИЯ О СЕРВЕРЕ (АДРЕСА ADGUARD)
 app.get('/api/server-info', checkAuth, (req, res) => {
     try {
-        const ip = execSync('curl -s ifconfig.me || wget -qO- ifconfig.me').toString().trim();
+        const ip = execSync('curl -4s ifconfig.me || wget -4 -qO- ifconfig.me').toString().trim();
         let domain = "";
         try {
             const nginxConf = execSync('cat /etc/nginx/sites-available/awg-admin || true').toString();
