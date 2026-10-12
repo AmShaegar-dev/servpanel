@@ -521,8 +521,10 @@ app.post('/api/awg/config', checkAuth, (req, res) => {
     }
 });
 // УСТАНОВКА МОДУЛЕЙ (AWG, MTPROTO, ADGUARD)
+// УСТАНОВКА МОДУЛЕЙ (AWG, MTPROTO, ADGUARD)
 app.post('/api/install/module', checkAuth, (req, res) => {
-    const { module, version, keepPackages, noTweaks } = req.body;
+    const data = req.body;
+    const module = data.module;
     let installScriptUrl = '';
     let logFile = '';
 
@@ -542,22 +544,29 @@ app.post('/api/install/module', checkAuth, (req, res) => {
     try {
         execSync(`sudo rm -f ${logFile} && sudo touch ${logFile} && sudo chmod 666 ${logFile}`);
         
-        // Экспортируем все настройки как переменные окружения
-        const runScript = `#!/bin/bash
-export AWG_VERSION="${version || ''}"
-export AWG_KEEP_PACKAGES="${keepPackages ? '1' : '0'}"
-export AWG_NO_TWEAKS="${noTweaks ? '1' : '0'}"
+        let runScript = `#!/bin/bash\n`;
+        
+        if (module === 'awg') {
+            runScript += `export AWG_VERSION="${data.version || ''}"\n`;
+            runScript += `export AWG_PRESET="${data.preset || ''}"\n`;
+            runScript += `export AWG_ROUTE="${data.route || ''}"\n`;
+            runScript += `export AWG_CUSTOM_ROUTE="${data.customRoute || ''}"\n`;
+            runScript += `export AWG_IPV6="${data.ipv6 || ''}"\n`;
+            runScript += `export AWG_PORT="${data.port || ''}"\n`;
+            runScript += `export AWG_ISOLATION="${data.isolation ? 'on' : 'off'}"\n`;
+            runScript += `export AWG_KEEP_PACKAGES="${data.keepPackages ? '1' : '0'}"\n`;
+            runScript += `export AWG_NO_TWEAKS="${data.noTweaks ? '1' : '0'}"\n`;
+        }
 
-curl -fsSL ${installScriptUrl} > /tmp/installer.sh
-bash /tmp/installer.sh > ${logFile} 2>&1
-rm -f /tmp/installer.sh
-`;
+        runScript += `curl -fsSL ${installScriptUrl} > /tmp/installer.sh\nbash /tmp/installer.sh > ${logFile} 2>&1\nrm -f /tmp/installer.sh\n`;
+        
         fs.writeFileSync('/tmp/run_install.sh', runScript);
         
         const { spawn } = require('child_process');
         const child = spawn('bash', ['/tmp/run_install.sh'], { detached: true, stdio: 'ignore' });
         child.unref();
 
+        auditLog(req, `Запущена установка модуля ${module}`);
         res.json({ success: true, logFile });
     } catch (e) {
         res.status(500).json({ error: "Ошибка запуска установки" });
