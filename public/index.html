@@ -125,6 +125,7 @@
                 <button class="btn-dark" onclick="window.location.href='/api/backup'" title="Скачать">💾 Скачать бэкап</button>
                 <button class="btn-dark" onclick="document.getElementById('backupUpload').click()" title="Восстановить" style="color: var(--sys-color);">📥 Загрузить архив</button>
                 <input type="file" id="backupUpload" accept=".tar.gz" style="display:none" onchange="restoreBackup(event)">
+                <button class="btn-dark" onclick="changePassword()" style="color: #58a6ff;">🔑 Сменить пароль</button>
                 <button class="btn-dark" onclick="logout()" style="color: #f85149;">✕ Выход</button>
             </div>
         </header>
@@ -236,6 +237,13 @@
 
             <!-- СЛУЖБЫ & DNS -->
             <div id="tab-services" class="tab-pane">
+                <div id="tab-services" class="tab-pane">
+                    <div class="card" style="margin-bottom: 20px;">
+        <h3>Данные для подключения устройств к AdGuard DNS</h3>
+        <div id="dnsAddressesList" style="margin-top: 10px; font-family: monospace; color: var(--text-main); font-size: 14px; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 6px; border: 1px solid var(--border);">
+            Загрузка данных...
+        </div>
+    </div>
                 <div class="card" style="margin-bottom: 20px;">
                     <h3>Перехват DNS (Iptables)</h3>
                     <div style="margin-bottom: 15px;"><span id="dnsStatus">Ожидание...</span></div>
@@ -425,7 +433,42 @@
                 }
             } catch(e) { errEl.innerText = "Ошибка запроса API."; errEl.style.display = 'block'; if (agInterval) { clearInterval(agInterval); agInterval = null; } }
         }
+async function changePassword() {
+    const newPassword = prompt("Введите новый пароль для панели (минимум 4 символа):");
+    if (!newPassword) return;
+    if (newPassword.length < 4) return alert("Пароль слишком короткий!");
+    
+    try {
+        const res = await fetch('/api/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newPassword })
+        });
+        if (res.ok) alert("Пароль успешно изменен! Вы можете использовать его при следующем входе.");
+        else alert("Ошибка изменения пароля");
+    } catch (e) {
+        alert("Ошибка сети");
+    }
+}
 
+async function loadServerInfo() {
+    try {
+        const res = await fetch('/api/server-info');
+        if (res.ok) {
+            const data = await res.json();
+            let html = `<div style="margin-bottom: 8px;"><span class="val-sys">Обычный DNS (IPv4):</span> ${data.ip}</div>`;
+            if (data.domain) {
+                html += `<div style="margin-bottom: 8px;"><span class="val-rx">DNS-over-TLS (DoT):</span> tls://${data.domain}</div>`;
+                html += `<div><span class="val-tx">DNS-over-HTTPS (DoH):</span> https://${data.domain}/dns-query</div>`;
+            } else {
+                html += `<div style="color: var(--text-muted); font-size: 12px; margin-top: 5px;">* Для настройки DoT и DoH (Private DNS) привяжите домен к серверу.</div>`;
+            }
+            document.getElementById('dnsAddressesList').innerHTML = html;
+        }
+    } catch(e) {
+        document.getElementById('dnsAddressesList').innerHTML = "Не удалось загрузить данные сервера";
+    }
+}
         function initChart() {
             const ctx = document.getElementById('trafficChart').getContext('2d');
             const gradRx = ctx.createLinearGradient(0, 0, 0, 300); gradRx.addColorStop(0, 'rgba(46, 160, 67, 0.5)'); gradRx.addColorStop(1, 'rgba(46, 160, 67, 0)');
@@ -558,9 +601,9 @@
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('dashboardScreen').style.display = 'flex';
             if(!trafficChart) initChart();
-            loadNetworkTools(); loadUfwData(); loadHistory(); loadStats();   
+            loadNetworkTools(); loadUfwData(); loadHistory(); loadStats(); loadServerInfo();
             if (!pollingInterval) pollingInterval = setInterval(loadStats, 2000);
-            if (!historyInterval) historyInterval = setInterval(loadHistory, 10000); 
+            if (!historyInterval) historyInterval = setInterval(loadHistory, 10000);
         }
 
         function showLogin() {
