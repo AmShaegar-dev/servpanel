@@ -484,20 +484,17 @@ app.post('/api/awg/config', checkAuth, (req, res) => {
 });
 // УСТАНОВКА МОДУЛЕЙ (AWG, MTPROTO, ADGUARD)
 app.post('/api/install/module', checkAuth, (req, res) => {
-    const { module } = req.body;
+    const { module, version } = req.body;
     let installScriptUrl = '';
     let logFile = '';
 
     if (module === 'awg') {
-        // Мы напишем этот скрипт на Этапе 2. Он будет иметь "память" (стейт-машину).
         installScriptUrl = 'https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install_awg_stateful.sh';
         logFile = '/var/log/awg_install.log';
     } else if (module === 'mtproto') {
-        // Используем ваш скрипт MEKO
         installScriptUrl = 'https://raw.githubusercontent.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/main/install.sh';
         logFile = '/var/log/mtproto_install.log';
     } else if (module === 'adguard') {
-        // Официальный скрипт AdGuard
         installScriptUrl = 'https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh';
         logFile = '/var/log/adguard_install.log';
     } else {
@@ -505,14 +502,12 @@ app.post('/api/install/module', checkAuth, (req, res) => {
     }
 
     try {
-        // Очищаем старый лог перед новой установкой
         execSync(`sudo rm -f ${logFile} && sudo touch ${logFile} && sudo chmod 666 ${logFile}`);
         
-        // Создаем временный скрипт-пускач
-        const runScript = `#!/bin/bash\ncurl -fsSL ${installScriptUrl} > /tmp/installer.sh\nbash /tmp/installer.sh > ${logFile} 2>&1\nrm -f /tmp/installer.sh\n`;
+        // Передаем переменную AWG_VERSION в скрипт
+        const runScript = `#!/bin/bash\nexport AWG_VERSION="${version || ''}"\ncurl -fsSL ${installScriptUrl} > /tmp/installer.sh\nbash /tmp/installer.sh > ${logFile} 2>&1\nrm -f /tmp/installer.sh\n`;
         fs.writeFileSync('/tmp/run_install.sh', runScript);
         
-        // Запускаем в отвязанном фоновом режиме
         const { spawn } = require('child_process');
         const child = spawn('bash', ['/tmp/run_install.sh'], { detached: true, stdio: 'ignore' });
         child.unref();
