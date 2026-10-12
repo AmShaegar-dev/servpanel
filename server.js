@@ -556,6 +556,11 @@ app.post('/api/install/module', checkAuth, (req, res) => {
             runScript += `export AWG_ISOLATION="${data.isolation ? 'on' : 'off'}"\n`;
             runScript += `export AWG_KEEP_PACKAGES="${data.keepPackages ? '1' : '0'}"\n`;
             runScript += `export AWG_NO_TWEAKS="${data.noTweaks ? '1' : '0'}"\n`;
+            let runScript = `#!/bin/bash\n`;
+        runScript += `export PANEL_PORT="${PORT}"\n`; // Передаем порт панели!
+        
+        if (module === 'awg') {
+            runScript += `export AWG_VERSION="${data.version || ''}"\n`;
         }
 
         runScript += `curl -fsSL ${installScriptUrl} > /tmp/installer.sh\nbash /tmp/installer.sh > ${logFile} 2>&1\nrm -f /tmp/installer.sh\n`;
@@ -586,4 +591,5 @@ app.get('/api/install/log', checkAuth, (req, res) => {
         res.send("Ошибка чтения лога...");
     }
 });
-app.listen(3000, () => console.log('AWG Admin v18 running'));
+const PORT = process.env.PORT || 4444; // Используем 4444 по умолчанию, если не задано окружение
+app.listen(PORT, () => console.log(`AWG Admin v18 running on port ${PORT}`));
