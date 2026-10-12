@@ -482,4 +482,58 @@ app.post('/api/awg/config', checkAuth, (req, res) => {
         res.status(500).json({error: "Ошибка сохранения конфига"});
     }
 });
+// УСТАНОВКА МОДУЛЕЙ (AWG, MTPROTO, ADGUARD)
+app.post('/api/install/module', checkAuth, (req, res) => {
+    const { module } = req.body;
+    let installScriptUrl = '';
+    let logFile = '';
+
+    if (module === 'awg') {
+        // Мы напишем этот скрипт на Этапе 2. Он будет иметь "память" (стейт-машину).
+        installScriptUrl = 'https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install_awg_stateful.sh';
+        logFile = '/var/log/awg_install.log';
+    } else if (module === 'mtproto') {
+        // Используем ваш скрипт MEKO
+        installScriptUrl = 'https://raw.githubusercontent.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/main/install.sh';
+        logFile = '/var/log/mtproto_install.log';
+    } else if (module === 'adguard') {
+        // Официальный скрипт AdGuard
+        installScriptUrl = 'https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh';
+        logFile = '/var/log/adguard_install.log';
+    } else {
+        return res.status(400).json({ error: "Неизвестный модуль" });
+    }
+
+    try {
+        // Очищаем старый лог перед новой установкой
+        execSync(`sudo rm -f ${logFile} && sudo touch ${logFile} && sudo chmod 666 ${logFile}`);
+        
+        // Создаем временный скрипт-пускач
+        const runScript = `#!/bin/bash\ncurl -fsSL ${installScriptUrl} > /tmp/installer.sh\nbash /tmp/installer.sh > ${logFile} 2>&1\nrm -f /tmp/installer.sh\n`;
+        fs.writeFileSync('/tmp/run_install.sh', runScript);
+        
+        // Запускаем в отвязанном фоновом режиме
+        const { spawn } = require('child_process');
+        const child = spawn('bash', ['/tmp/run_install.sh'], { detached: true, stdio: 'ignore' });
+        child.unref();
+
+        res.json({ success: true, logFile });
+    } catch (e) {
+        res.status(500).json({ error: "Ошибка запуска установки" });
+    }
+});
+
+// ЧТЕНИЕ ЛОГОВ УСТАНОВКИ
+app.get('/api/install/log', checkAuth, (req, res) => {
+    const logFile = req.query.file;
+    if (!logFile || !logFile.startsWith('/var/log/')) return res.status(400).send("Неверный путь");
+    try {
+        if (!fs.existsSync(logFile)) return res.send("Ожидание старта установки...");
+        // Читаем последние 50 строк, чтобы не грузить браузер
+        const logContent = execSync(`tail -n 50 ${logFile}`).toString();
+        res.send(logContent);
+    } catch (e) {
+        res.send("Ошибка чтения лога...");
+    }
+});
 app.listen(3000, () => console.log('AWG Admin v18 running'));
