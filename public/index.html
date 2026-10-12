@@ -348,11 +348,18 @@
 <div id="tab-install" class="tab-pane">
     <div class="stats-cards">
         <!-- AmneziaWG -->
-        <div class="card" style="flex: 1;">
-            <h3>AmneziaWG (С перезагрузками)</h3>
-            <p style="color: var(--text-muted); font-size: 13px;">Полная установка AWG с оптимизацией ядра, Fail2Ban и UFW. Потребует 3 перезагрузки сервера.</p>
-            <button class="btn-primary" onclick="startInstall('awg', '/var/log/awg_install.log')">Начать установку AWG</button>
-        </div>
+<div class="card" style="flex: 1;">
+    <h3>AmneziaWG (С перезагрузками)</h3>
+    <p style="color: var(--text-muted); font-size: 13px;">Полная установка AWG с оптимизацией ядра, Fail2Ban и UFW. Потребует 3 перезагрузки сервера.</p>
+    <div class="controls-row" style="margin-bottom: 10px;">
+        <select id="awgInstallVersion" style="width: 100%;">
+            <option value="3.1">Версия 3.1 (Последняя)</option>
+            <option value="2.0">Версия 2.0 (Стабильная)</option>
+            <option value="1.5">Версия 1.5 (Legacy)</option>
+        </select>
+    </div>
+    <button class="btn-primary" onclick="startInstall('awg', '/var/log/awg_install.log')">Начать установку AWG</button>
+</div>
         
         <!-- MTProto -->
         <div class="card" style="flex: 1;">
@@ -385,7 +392,12 @@
 		let logInterval = null;
 
 async function startInstall(module, expectedLogFile) {
-    if(!confirm(`Запустить процесс установки модуля ${module}? Следите за логами в окне ниже.`)) return;
+    let version = '';
+    if (module === 'awg') {
+        version = document.getElementById('awgInstallVersion').value;
+    }
+    
+    if(!confirm(`Запустить процесс установки модуля ${module}${version ? ' (версия ' + version + ')' : ''}? Следите за логами в окне ниже.`)) return;
     
     document.getElementById('installLogWrapper').style.display = 'block';
     document.getElementById('installLogText').value = "Инициализация...\n";
@@ -395,10 +407,9 @@ async function startInstall(module, expectedLogFile) {
         const res = await fetch('/api/install/module', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ module })
+            body: JSON.stringify({ module, version }) // Передаем версию на сервер
         });
         if (res.ok) {
-            // Начинаем читать логи
             if (logInterval) clearInterval(logInterval);
             logInterval = setInterval(() => pollLog(expectedLogFile), 2000);
         } else {
