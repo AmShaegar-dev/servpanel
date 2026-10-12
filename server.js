@@ -1,5 +1,6 @@
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
+const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const { exec, execSync } = require('child_process');
@@ -10,6 +11,18 @@ const app = express();
 
 const passFile = path.join(__dirname, 'admin_pass.txt');
 let ADMIN_PASSWORD = fs.existsSync(passFile) ? fs.readFileSync(passFile, 'utf8').trim() : "admin123";
+// СЕКРЕТНЫЙ КЛЮЧ ДЛЯ КУКИ (можно поменять на любую случайную строку)
+const AUTH_SECRET = 'awg-secure-secret-9912';
+
+function getAuthToken(password) {
+    return crypto.createHmac('sha256', AUTH_SECRET).update(password).digest('hex');
+}
+
+function auditLog(req, action) {
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    const date = new Date().toISOString().replace(/T/, ' ').slice(0, 19);
+    try { fs.appendFileSync('/var/log/awg_audit.log', `[${date}] IP: ${ip} | ACTION: ${action}\n`); } catch(e){}
+}
 
 app.use(express.json({ limit: '100mb' }));
 
@@ -25,32 +38,30 @@ app.use(express.static('public'));
 app.post('/api/login', (req, res) => {
     if (req.body.password === ADMIN_PASSWORD) {
         req.session.loggedIn = true;
-        // Генерируем токен из пароля и сохраняем его в постоянную cookie на 30 дней
-        const token = Buffer.from(ADMIN_PASSWORD).toString('base64');
-        res.cookie('awg_auth', token, { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true });
+        res.cookie('awg_auth', getAuthToken(ADMIN_PASSWORD), { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true });
+        auditLog(req, 'Успешный вход в панель');
         res.json({ success: true });
-    } else res.status(401).json({ error: "Неверный пароль" });
+    } else {
+        auditLog(req, 'Неудачная попытка входа (неверный пароль)');
+        res.status(401).json({ error: "Неверный пароль" });
+    }
 });
 
 app.post('/api/logout', (req, res) => {
     req.session.destroy();
-    res.clearCookie('awg_auth'); // Удаляем cookie при ручном выходе
+    res.clearCookie('awg_auth');
+    auditLog(req, 'Выход из панели');
     res.json({ success: true });
 });
 
 const checkAuth = (req, res, next) => {
-    // 1. Если сессия в памяти жива - пропускаем
     if (req.session && req.session.loggedIn) return next();
     
-    // 2. Если сервер перезагружался (сессия убита), но у браузера осталась наша cookie - восстанавливаем
     const cookies = req.headers.cookie || '';
-    const token = Buffer.from(ADMIN_PASSWORD).toString('base64');
-    
-    if (cookies.includes('awg_auth=' + token)) {
-        if (req.session) req.session.loggedIn = true; // Восстанавливаем сессию в памяти
+    if (cookies.includes('awg_auth=' + getAuthToken(ADMIN_PASSWORD))) {
+        if (req.session) req.session.loggedIn = true;
         return next();
     }
-    
     res.status(401).json({ error: "Unauthorized" });
 };
 
@@ -375,6 +386,10 @@ app.delete('/api/delete/:name', checkAuth, (req, res) => {
             const response = JSON.parse(stdout);
             if (!response.ok) return res.status(500).json({ error: response.error });
             delete historyData[name]; delete lastHistoryStats[name];
+            
+            // ВСТАВЛЯЕМ ЛОГИРОВАНИЕ СЮДА
+            auditLog(req, 'Удален клиент ' + name);
+            
             res.json({ success: true });
         } catch (e) { res.status(500).json({ error: "Ошибка при удалении" }); }
     });
@@ -424,10 +439,8 @@ app.post('/api/change-password', checkAuth, (req, res) => {
     try {
         fs.writeFileSync(passFile, newPassword);
         ADMIN_PASSWORD = newPassword;
-        // Обновляем cookie новым паролем
-        const token = Buffer.from(ADMIN_PASSWORD).toString('base64');
-        res.cookie('awg_auth', token, { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true });
-        res.json({success: true});
+        res.cookie('awg_auth', getAuthToken(ADMIN_PASSWORD), { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true });
+        auditLog(req, 'Изменен пароль администратора');
     } catch (e) {
         res.status(500).json({error: "Ошибка изменения пароля"});
     }
@@ -486,12 +499,19 @@ app.post('/api/awg/config', checkAuth, (req, res) => {
     const { content, file } = req.body;
     if (!content || !file) return res.status(400).json({error: "Пустой конфиг"});
     try {
+        auditLog(req, `Изменение конфигурации AWG: ${file}`);
+        
+        // СОЗДАЕМ АВТО-БЭКАП СТАРОГО КОНФИГА
+        if (fs.existsSync(file)) {
+            const backupPath = `${file}.bak_${Date.now()}`;
+            execSync(`sudo cp ${file} ${backupPath}`);
+        }
+
         fs.writeFileSync('/tmp/awg_tmp.conf', content);
         execSync(`sudo cp /tmp/awg_tmp.conf ${file}`);
         
         const iface = path.basename(file, '.conf');
         try {
-            // Пытаемся перезапустить сервис разными методами (systemd или docker)
             execSync(`sudo systemctl restart awg-quick@${iface} || sudo docker restart amnezia-awg || sudo systemctl restart amnezia-awg || true`);
         } catch(e){}
         
