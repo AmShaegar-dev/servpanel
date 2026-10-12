@@ -8,7 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const app = express();
 
-const ADMIN_PASSWORD = "K.,bvfz_Aktirf_761";
+const ADMIN_PASSWORD = "admin123";
 
 app.use(express.json({ limit: '100mb' }));
 
