@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FileManager 4.0</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-main: #0d1117; --bg-panel: #161b22; --border: #30363d;
+            --text-main: #c9d1d9; --text-muted: #8b949e;
+            --rx-color: #2ea043; --tx-color: #58a6ff; --sys-color: #d29922; 
+            --accent: #2f81f7;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg-main); margin: 0; color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
+        
+        .login-wrapper { display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; position: absolute; z-index: 1000; background: var(--bg-main); }
+        .login-card { background: var(--bg-panel); padding: 40px; border-radius: 8px; border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,0.5); width: 100%; max-width: 320px; text-align: center; box-sizing: border-box;}
+        .login-card h2 { margin-top: 0; color: #fff; margin-bottom: 25px; }
+        .error-msg { color: #f85149; font-size: 14px; margin-top: 10px; display: none; }
+
+        #loaderOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(13, 17, 23, 0.9); z-index: 9999; justify-content: center; align-items: center; flex-direction: column; }
+        .spinner { width: 50px; height: 50px; border: 5px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;}
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .sidebar { width: 250px; background: var(--bg-panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; transition: 0.3s; z-index: 100; }
+        .sidebar-header { padding: 20px; font-size: 18px; font-weight: bold; color: #fff; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;}
+        .menu { list-style: none; padding: 10px 0; margin: 0; flex: 1; overflow-y: auto; }
+        .menu li { padding: 12px 20px; cursor: pointer; color: var(--text-muted); transition: 0.2s; border-left: 3px solid transparent; display: flex; align-items: center; gap: 10px;}
+        .menu li:hover { background: rgba(255,255,255,0.05); color: #fff; }
+        .menu li.active { background: rgba(47, 129, 247, 0.1); color: var(--accent); border-left-color: var(--accent); }
+        .menu-icon { font-size: 16px; width: 20px; text-align: center; }
+
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-main); }
+        .topbar { background: var(--bg-panel); padding: 15px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;}
+        .mobile-toggle { display: none; background: none; border: none; color: #fff; font-size: 24px; cursor: pointer; }
+        .topbar-actions { display: flex; gap: 5px; flex-wrap: wrap; }
+        .topbar-actions button { font-size: 13px; padding: 6px 10px; }
+        
+        .content-area { flex: 1; overflow-y: auto; padding: 20px; box-sizing: border-box; }
+        .tab-pane { display: none; animation: fadeIn 0.3s; }
+        .tab-pane.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        .stats-cards { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
+        .card { flex: 1; background: var(--bg-panel); padding: 20px; border-radius: 8px; border: 1px solid var(--border); min-width: 220px; box-sizing: border-box;}
+        .card h3 { margin: 0 0 10px 0; color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .card .value { font-size: 18px; font-weight: bold; font-family: monospace; }
+        
+        input, select { background: var(--bg-main); color: #fff; padding: 9px 12px; border: 1px solid var(--border); border-radius: 6px; outline: none; }
+        input:focus, select:focus { border-color: var(--accent); }
+        button { padding: 9px 15px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; color: #fff; transition: 0.2s; white-space: nowrap; }
+        button:hover { filter: brightness(1.2); }
+        .btn-primary { background: var(--accent); }
+        .btn-success { background: var(--rx-color); }
+        .btn-danger { background: #f85149; }
+        .btn-dark { background: #21262d; border: 1px solid var(--border); }
+        
+        .table-wrapper { width: 100%; overflow-x: auto; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 20px; background: var(--bg-panel); }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 1000px; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
+        th { background: #0d1117; font-weight: 600; color: var(--text-muted); font-size: 13px; text-transform: uppercase; user-select: none; }
+        th.sortable:hover { color: #fff; }
+        .sort-arrow { font-size: 10px; margin-left: 5px; color: var(--accent); }
+
+        .status-active { color: var(--rx-color); font-weight: bold; }
+        .status-recent { color: var(--sys-color); font-weight: bold; }
+        .status-inactive { color: #f85149; }
+        .val-rx { color: var(--rx-color); } .val-tx { color: var(--tx-color); } .val-sys { color: var(--sys-color); }
+        .speed-cell { font-family: monospace; font-size: 13px; background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 4px; display: inline-block; width: 100%; text-align: center;}
+        .sub-text { font-size: 11px; color: var(--text-muted); display: block; margin-top: 3px; }
+
+        .controls-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
+
+        @media (max-width: 768px) {
+            .sidebar { position: fixed; left: -250px; height: 100%; box-shadow: 5px 0 15px rgba(0,0,0,0.5); }
+            .sidebar.open { left: 0; }
+            .mobile-toggle { display: block; }
+            .stats-cards { flex-direction: column; }
+            .controls-row { flex-direction: column; align-items: stretch; }
+            .controls-row > * { width: 100%; }
+            .topbar-actions { width: 100%; justify-content: space-between; margin-top: 10px;}
+        }
+    </style>
+</head>
+<body>
+    
+    <div id="loaderOverlay">
+        <div class="spinner"></div>
+        <h3 style="color: #fff; margin:0;" id="loaderText">Восстановление системы...</h3>
+        <p style="color: var(--text-muted); font-size: 14px;">Пожалуйста, не закрывайте вкладку.</p>
+    </div>
+
+    <div id="loginScreen" class="login-wrapper">
+        <div class="login-card">
+            <h2>FileManager 4.0</h2>
+            <input type="password" id="authPassword" placeholder="Пароль доступа" style="width:100%; margin-bottom:15px;" onkeypress="if(event.key === 'Enter') login()">
+            <button class="btn-primary" style="width:100%;" onclick="login()">Войти</button>
+            <div id="loginError" class="error-msg">Неверный пароль</div>
+        </div>
+    </div>
+
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <span>FM 4.0</span>
+            <button class="mobile-toggle" onclick="toggleMenu()" style="font-size: 16px;">✕</button>
+        </div>
+        <ul class="menu">
+            <li class="active" onclick="switchTab('tab-dashboard', this)"><span class="menu-icon">📊</span> Дашборд</li>
+            <li onclick="switchTab('tab-clients', this)"><span class="menu-icon">👥</span> Клиенты VPN</li>
+            <li onclick="switchTab('tab-network', this)"><span class="menu-icon">🌐</span> Сеть и Фаервол</li>
+            <li onclick="switchTab('tab-services', this)"><span class="menu-icon">⚙️</span> Службы & DNS</li>
+            <li onclick="switchTab('tab-security', this)"><span class="menu-icon">🛡️</span> Защита и Cron</li>
+            <li onclick="switchTab('tab-diag', this)"><span class="menu-icon">📡</span> Диагностика</li>
+        </ul>
+    </aside>
+
+    <main class="main-content" id="dashboardScreen" style="display: none;">
+        <header class="topbar">
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <button class="mobile-toggle" onclick="toggleMenu()">☰</button>
+                <h3 id="currentTabTitle" style="margin: 0;">Дашборд</h3>
+            </div>
+            <div class="topbar-actions">
+                <button class="btn-dark" onclick="window.location.href='/api/backup'" title="Скачать">💾 Скачать бэкап</button>
+                <button class="btn-dark" onclick="document.getElementById('backupUpload').click()" title="Восстановить" style="color: var(--sys-color);">📥 Загрузить архив</button>
+                <input type="file" id="backupUpload" accept=".tar.gz" style="display:none" onchange="restoreBackup(event)">
+                <button class="btn-dark" onclick="logout()" style="color: #f85149;">✕ Выход</button>
+            </div>
+        </header>
+
+        <div class="content-area">
+            
+            <!-- ДАШБОРД -->
+            <div id="tab-dashboard" class="tab-pane active">
+                <div class="stats-cards">
+                    <div class="card">
+                        <h3>Общий Трафик</h3>
+                        <div class="value" id="globalTraffic"><span class="val-rx">0 B</span> / <span class="val-tx">0 B</span></div>
+                    </div>
+                    <div class="card">
+                        <h3>Общая Скорость</h3>
+                        <div class="value" id="globalSpeed"><span class="val-rx">0 B/s</span> / <span class="val-tx">0 B/s</span></div>
+                    </div>
+                    <div class="card">
+                        <h3>Сервер (CPU / RAM)</h3>
+                        <div class="value">
+                            <span id="sysCpu" class="val-sys">0%</span> / <span id="sysRam" class="val-sys">0%</span>
+                            <span class="sub-text">UPTIME: <span id="sysUptime">0д 0ч 0м</span></span>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3>Диск (Занято / Свободно)</h3>
+                        <div class="value">
+                            <span id="diskUsed" class="val-tx">0 B</span> / <span id="diskFree" class="val-rx">0 B</span>
+                            <span class="sub-text">ВСЕГО: <span id="diskTotal">0 B</span></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card" style="margin-bottom: 20px;">
+                    <div class="controls-row" style="justify-content: space-between; margin-bottom: 0;">
+                        <h3 style="margin:0;">Мониторинг трафика (История 1ч)</h3>
+                        <select id="chartSelector" onchange="switchChart()"><option value="global">Общий трафик</option></select>
+                    </div>
+                    <div style="height: 300px; width: 100%; margin-top: 15px;"><canvas id="trafficChart"></canvas></div>
+                </div>
+            </div>
+
+            <!-- КЛИЕНТЫ -->
+            <div id="tab-clients" class="tab-pane">
+                <div class="card" style="margin-bottom: 20px;">
+                    <h3 style="margin-bottom: 15px;">Создание клиентов (Одиночно / Массово)</h3>
+                    <div class="controls-row" style="margin-bottom:0;">
+                        <input type="text" id="clientName" placeholder="Имя / Префикс (en)" style="width: 200px;">
+                        <input type="number" id="clientCount" placeholder="Кол-во (шт)" style="width: 120px;" title="Если указано >1, скачается ZIP архив">
+                        <select id="clientExpires" style="width: 140px;">
+                            <option value="">Навсегда</option><option value="1d">1 день</option><option value="7d">7 дней</option><option value="30d">30 дней</option>
+                        </select>
+                        <button class="btn-primary" onclick="createConfig()">Сгенерировать конфигурации</button>
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px;">
+                    <h3 style="margin:0; color: var(--text-muted);">АКТИВНЫЕ КЛИЕНТЫ</h3>
+                    <div style="background: var(--bg-panel); padding: 5px 12px; border-radius: 4px; border: 1px solid var(--border); font-size: 13px;">
+                        Всего: <strong id="totalClientsCount" style="color: #fff;">0</strong> &nbsp;|&nbsp; В сети: <strong id="activeClientsCount" class="val-rx">0</strong>
+                    </div>
+                </div>
+
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 40px; text-align:center;">#</th>
+                                <th class="sortable" onclick="setSort('name')" style="width: 15%; cursor:pointer;">Клиент / IP <span class="sort-arrow" id="sort-name">▲</span></th>
+                                <th class="sortable" onclick="setSort('status')" style="width: 15%; cursor:pointer;">Активность <span class="sort-arrow" id="sort-status"></span></th>
+                                <th class="sortable" onclick="setSort('traffic')" style="width: 20%; cursor:pointer;">Трафик (Rx/Tx) <span class="sort-arrow" id="sort-traffic"></span></th>
+                                <th class="sortable" onclick="setSort('speed')" style="width: 25%; cursor:pointer;">Скорость <span class="sort-arrow" id="sort-speed"></span></th>
+                                <th style="width: 120px;">Лимит</th>
+                                <th style="width: 150px;">Управление</th>
+                            </tr>
+                        </thead>
+                        <tbody id="clientsTable"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- СЕТЬ И ФАЕРВОЛ -->
+            <div id="tab-network" class="tab-pane">
+                <div class="card" style="margin-bottom: 20px;">
+                    <h3 style="margin-bottom: 15px;">Управление портами (UFW)</h3>
+                    <div class="controls-row">
+                        <input type="number" id="ufwPort" placeholder="Порт" style="width: 100px;">
+                        <select id="ufwProto" style="width: 120px;"><option value="any">TCP/UDP</option><option value="tcp">TCP</option><option value="udp">UDP</option></select>
+                        <select id="ufwIface" style="width: 120px;"><option value="any">Все интерфейсы</option></select>
+                        <button class="btn-primary" onclick="addUfwRule()">Открыть порт</button>
+                    </div>
+                    <div class="table-wrapper" style="margin-bottom: 0;">
+                        <table style="min-width: 600px;">
+                            <thead><tr><th>ID / Правило</th><th>Статус</th><th>Назначение</th><th style="width:80px;">Удал.</th></tr></thead>
+                            <tbody id="ufwTable"><tr><td colspan="4">Загрузка...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-bottom: 20px;">
+                    <h3 style="margin-bottom: 15px;">Прослушиваемые порты (SS)</h3>
+                    <div class="table-wrapper" style="margin-bottom: 0;">
+                        <table style="min-width: 600px;">
+                            <thead><tr><th>Протокол / Порт</th><th>Локальный адрес</th><th>Процесс (PID)</th><th>Служба</th></tr></thead>
+                            <tbody id="portsTable"><tr><td colspan="4">Загрузка...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- СЛУЖБЫ & DNS -->
+            <div id="tab-services" class="tab-pane">
+                <div class="card" style="margin-bottom: 20px;">
+                    <h3>Перехват DNS (Iptables)</h3>
+                    <div style="margin-bottom: 15px;"><span id="dnsStatus">Ожидание...</span></div>
+                    <div class="controls-row">
+                        <select id="dnsIface" style="width: 120px;"></select>
+                        <input type="text" id="dnsTarget" placeholder="IP AdGuard (напр. 10.8.1.1:5553)" style="width: 240px;">
+                    </div>
+                    <div class="controls-row" style="margin-bottom: 0;">
+                        <button class="btn-primary" onclick="toggleDns(true)">Перехватывать трафик</button>
+                        <button class="btn-dark" onclick="toggleDns(false)">Выключить</button>
+                    </div>
+                </div>
+
+                <div class="stats-cards">
+                    <div class="card" style="flex: 2;">
+                        <h3>Статистика AdGuard Home API</h3>
+                        <div class="controls-row">
+                            <input type="text" id="agUrl" placeholder="URL (172.17.0.1:4443 или 127.0.0.1:8090)" style="width: 240px;">
+                            <input type="text" id="agUser" placeholder="Логин (опционально)" style="width: 140px;">
+                            <input type="password" id="agPass" placeholder="Пароль" style="width: 140px;">
+                            <button class="btn-primary" onclick="connectAdGuard()">Подключить</button>
+                        </div>
+                        <div id="agError" style="color: #f85149; font-size: 13px; display: none; margin-top: 10px;"></div>
+                        
+                        <div id="agStatsDisplay" style="display:flex; gap:20px; flex-wrap:wrap; margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border);">
+                            <div style="flex: 1; min-width: 120px;">
+                                <span class="sub-text">Всего DNS запросов</span>
+                                <strong id="agTotal" class="val-tx" style="font-size:24px;">0</strong>
+                            </div>
+                            <div style="flex: 1; min-width: 120px;">
+                                <span class="sub-text">Заблокировано рекламы</span>
+                                <strong id="agBlocked" class="val-rx" style="font-size:24px;">0</strong>
+                                <span id="agBlockedPercent" style="font-size:12px; color:var(--text-muted);">(0%)</span>
+                            </div>
+                            <div style="flex: 1; min-width: 120px;">
+                                <span class="sub-text">Вредоносных сайтов</span>
+                                <strong id="agMalware" class="val-sys" style="font-size:24px;">0</strong>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card" style="flex: 1;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <h3 style="margin:0;">Системные службы</h3>
+                            <button class="btn-dark" style="padding: 4px 8px; font-size: 11px;" onclick="loadServices()">Обновить</button>
+                        </div>
+                        <div class="table-wrapper" style="margin-bottom: 0; max-height: 250px;">
+                            <table style="min-width: 100%;">
+                                <tbody id="servicesTable"><tr><td>Загрузка...</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ЗАЩИТА И CRON -->
+            <div id="tab-security" class="tab-pane">
+                <div class="stats-cards">
+                    <div class="card">
+                        <h3>Блокировка RU-трафика (GeoIP)</h3>
+                        <div style="margin-bottom: 15px;"><span id="ruDropStatus">Ожидание...</span></div>
+                        <div class="controls-row">
+                            <select id="ruDropIface" style="width: 120px;"></select>
+                            <select id="ruDropSchedule" style="width: 160px;"><option value="weekly">Обновлять раз в неделю</option><option value="daily">Каждый день</option></select>
+                        </div>
+                        <div class="controls-row" style="margin-bottom: 0;">
+                            <button class="btn-danger" onclick="toggleRuDrop(true)">Включить изоляцию</button>
+                            <button class="btn-dark" onclick="toggleRuDrop(false)">Снять блокировку</button>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3>Fail2Ban / Брутфорс (Скоро)</h3>
+                        <p style="color: var(--text-muted); font-size: 14px;">Здесь будет список заблокированных IP-адресов злоумышленников и возможность ручного разбана.</p>
+                        <button class="btn-dark" disabled>Функция в разработке</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ДИАГНОСТИКА -->
+            <div id="tab-diag" class="tab-pane">
+                <div class="card">
+                    <h3>Сетевая диагностика и Логи (Скоро)</h3>
+                    <p style="color: var(--text-muted); font-size: 14px;">Встроенный Ping, Traceroute до внешних узлов, Speedtest серверов и Live Log Viewer для Nginx и SSH.</p>
+                    <button class="btn-dark" disabled>Функция в разработке</button>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        let lastStats = {}; let isFetching = false; 
+        let pollingInterval = null; let historyInterval = null; let agInterval = null;
+        let chartData = { global: { labels: [], rx: [], tx: [] } };
+        let currentChartView = 'global'; let trafficChart = null;
+        let sortCol = 'name'; let sortDesc = false;
+
+        function setSort(col) {
+            if (sortCol === col) sortDesc = !sortDesc;
+            else { sortCol = col; sortDesc = false; }
+            ['name', 'status', 'traffic', 'speed'].forEach(c => {
+                const el = document.getElementById('sort-' + c);
+                if (el) el.innerText = '';
+            });
+            const currentEl = document.getElementById('sort-' + col);
+            if (currentEl) currentEl.innerText = sortDesc ? '▼' : '▲';
+            if (!isFetching) loadStats();
+        }
+
+        function toggleMenu() { document.getElementById('sidebar').classList.toggle('open'); }
+        function switchTab(tabId, el) {
+            document.querySelectorAll('.tab-pane').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.menu li').forEach(l => l.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            if (el) { el.classList.add('active'); document.getElementById('currentTabTitle').innerText = el.innerText.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|\s+/g, ' ').trim(); }
+            if (window.innerWidth <= 768) toggleMenu();
+
+            if (tabId === 'tab-services') { loadServices(); connectAdGuard(false); }
+            else if (agInterval) { clearInterval(agInterval); agInterval = null; }
+        }
+
+        function formatBytes(bytes) {
+            if (!bytes || isNaN(bytes)) return '0 B'; if (bytes === 0) return '0 B';
+            const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'], i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        function formatSpeed(bytesPerSec) { return formatBytes(bytesPerSec) + '/s'; }
+
+        async function loadServices() {
+            try {
+                const res = await fetch('/api/services');
+                if (res.ok) {
+                    const services = await res.json();
+                    const tbody = document.getElementById('servicesTable');
+                    if (services.length === 0) { tbody.innerHTML = '<tr><td>Службы не найдены</td></tr>'; return; }
+                    tbody.innerHTML = services.map(s => {
+                        const statusColor = s.status === 'running' ? 'var(--rx-color)' : '#f85149';
+                        const statusText = s.status === 'running' ? 'Активен' : 'Остановлен';
+                        return `<tr>
+                            <td><strong>${s.name}</strong><br><span style="color:${statusColor}; font-size:12px;">${statusText}</span></td>
+                            <td style="text-align:right; width:60px;"><button class="btn-dark" style="padding: 4px 8px; font-size:11px;" onclick="restartService('${s.name}')">Restart</button></td>
+                        </tr>`;
+                    }).join('');
+                }
+            } catch(e) { document.getElementById('servicesTable').innerHTML = '<tr><td>Ошибка загрузки служб</td></tr>'; }
+        }
+
+        async function restartService(name) {
+            if (!confirm(`Перезапустить службу ${name}?`)) return;
+            try {
+                const res = await fetch('/api/services/restart', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name}) });
+                if (res.ok) { alert(`Служба ${name} успешно перезапущена`); loadServices(); }
+                else alert("Ошибка при перезапуске");
+            } catch (e) { alert("Ошибка соединения"); }
+        }
+
+        async function connectAdGuard(isManualClick = true) {
+            let url = document.getElementById('agUrl').value;
+            let user = document.getElementById('agUser').value;
+            let pass = document.getElementById('agPass').value;
+            const errEl = document.getElementById('agError');
+
+            if (!isManualClick && !url && localStorage.getItem('agUrl')) {
+                url = localStorage.getItem('agUrl'); user = localStorage.getItem('agUser') || ''; pass = localStorage.getItem('agPass') || '';
+                document.getElementById('agUrl').value = url; document.getElementById('agUser').value = user; document.getElementById('agPass').value = pass;
+            }
+            if (!url) return;
+
+            if (isManualClick) { localStorage.setItem('agUrl', url); localStorage.setItem('agUser', user); localStorage.setItem('agPass', pass); }
+
+            try {
+                const res = await fetch('/api/adguard/stats', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({url, user, pass}) });
+                if (res.ok) {
+                    errEl.style.display = 'none';
+                    const data = await res.json();
+                    document.getElementById('agTotal').innerText = data.num_dns_queries.toLocaleString('ru-RU');
+                    document.getElementById('agBlocked').innerText = data.num_blocked_filtering.toLocaleString('ru-RU');
+                    let percent = 0;
+                    if (data.num_dns_queries > 0) percent = ((data.num_blocked_filtering / data.num_dns_queries) * 100).toFixed(1);
+                    document.getElementById('agBlockedPercent').innerText = `(${percent}%)`;
+                    document.getElementById('agMalware').innerText = data.num_replaced_safebrowsing.toLocaleString('ru-RU');
+                    if (!agInterval) agInterval = setInterval(() => connectAdGuard(false), 5000);
+                } else {
+                    const errData = await res.json();
+                    errEl.innerText = errData.error; errEl.style.display = 'block';
+                    if (agInterval) { clearInterval(agInterval); agInterval = null; }
+                }
+            } catch(e) { errEl.innerText = "Ошибка запроса API."; errEl.style.display = 'block'; if (agInterval) { clearInterval(agInterval); agInterval = null; } }
+        }
+
+        function initChart() {
+            const ctx = document.getElementById('trafficChart').getContext('2d');
+            const gradRx = ctx.createLinearGradient(0, 0, 0, 300); gradRx.addColorStop(0, 'rgba(46, 160, 67, 0.5)'); gradRx.addColorStop(1, 'rgba(46, 160, 67, 0)');
+            const gradTx = ctx.createLinearGradient(0, 0, 0, 300); gradTx.addColorStop(0, 'rgba(88, 166, 255, 0.5)'); gradTx.addColorStop(1, 'rgba(88, 166, 255, 0)');
+            Chart.defaults.color = '#8b949e';
+            trafficChart = new Chart(ctx, {
+                type: 'line',
+                data: { labels: [], datasets: [ { label: 'Прием (Rx)', data: [], borderColor: '#2ea043', backgroundColor: gradRx, fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 }, { label: 'Отдача (Tx)', data: [], borderColor: '#58a6ff', backgroundColor: gradTx, fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 } ]},
+                options: { responsive: true, maintainAspectRatio: false, animation: { duration: 0 }, interaction: { mode: 'index', intersect: false }, scales: { x: { grid: { color: '#30363d' }, ticks: { maxTicksLimit: 10 } }, y: { grid: { color: '#30363d' }, ticks: { callback: function(v) { return formatSpeed(v); } } } }, plugins: { legend: { labels: { color: '#c9d1d9' } }, tooltip: { callbacks: { label: function(ctx) { return ctx.dataset.label + ': ' + formatSpeed(ctx.parsed.y); } } } } }
+            });
+        }
+
+        function switchChart() {
+            currentChartView = document.getElementById('chartSelector').value;
+            if (chartData[currentChartView] && trafficChart) { 
+                trafficChart.data.labels = chartData[currentChartView].labels; 
+                trafficChart.data.datasets[0].data = chartData[currentChartView].rx; 
+                trafficChart.data.datasets[1].data = chartData[currentChartView].tx; 
+                trafficChart.update(); 
+            }
+        }
+
+        async function loadHistory() {
+            try {
+                const res = await fetch('/api/history');
+                if (res.ok) {
+                    chartData = await res.json();
+                    const selector = document.getElementById('chartSelector');
+                    const currentClients = Array.from(selector.options).map(o => o.value);
+                    Object.keys(chartData).forEach(k => {
+                        if (k !== 'global' && !currentClients.includes(k)) {
+                            const opt = document.createElement('option'); opt.value = k; opt.text = 'Клиент: ' + k; selector.appendChild(opt);
+                        }
+                    });
+                    switchChart();
+                }
+            } catch (e) {}
+        }
+
+        function getPortDesc(pStr) {
+            if (!pStr) return 'Системная служба';
+            if (pStr.includes('5553')) return 'AdGuard (DNS фильтр)';
+            if (pStr.includes('853')) return 'AdGuard (DoT)';
+            if (pStr.includes('53')) return 'Системный DNS';
+            if (pStr.includes('4444')) return 'Панель FM4.0';
+            if (pStr.includes('4443')) return 'AdGuard Панель';
+            if (pStr.includes('443')) return 'HTTPS (Веб)';
+            if (pStr.includes('80')) return 'HTTP (Веб)';
+            if (pStr.includes('37246')) return 'AmneziaWG (VPN)';
+            if (pStr.includes('2233') || pStr.includes('22')) return 'SSH Терминал';
+            if (pStr.includes('9090') || pStr.includes('9091')) return 'MTProto Прокси';
+            return 'Процесс / Служба';
+        }
+
+        async function loadUfwData() {
+            const res = await fetch('/api/ufw');
+            if (res.ok) {
+                const data = await res.json();
+                const tbodyRules = document.getElementById('ufwTable');
+                if (data.rules.length === 0) tbodyRules.innerHTML = '<tr><td colspan="4">Нет правил</td></tr>';
+                else {
+                    tbodyRules.innerHTML = data.rules.map(r => {
+                        const portMatch = r.to.match(/\d+/);
+                        const desc = portMatch ? getPortDesc(portMatch[0]) : 'Маршрут / PBR';
+                        const statusHtml = r.action.includes('ALLOW') ? '<span class="val-rx">Открыт</span>' : '<span class="val-sys">Закрыт</span>';
+                        return `<tr><td style="white-space:normal; word-wrap:break-word;"><strong>[${r.id}]</strong> <span class="val-tx">${r.to}</span> <span class="val-sys">←</span> ${r.from}</td><td>${statusHtml}</td><td><span class="sub-text" style="font-size:13px">${desc}</span></td><td><button class="btn-dark" onclick="delUfwRule('${r.id}')">✕</button></td></tr>`;
+                    }).join('');
+                }
+
+                const tbodyPorts = document.getElementById('portsTable');
+                if (data.ports.length === 0) tbodyPorts.innerHTML = '<tr><td colspan="4">Нет открытых портов</td></tr>';
+                else {
+                    tbodyPorts.innerHTML = data.ports.map(p => {
+                        const portNum = p.addr.split(':').pop();
+                        return `<tr><td><strong class="val-sys">${p.proto}</strong><br><span style="font-size:12px;color:var(--text-muted)">${portNum}</span></td><td><span class="val-rx">${p.addr}</span></td><td>${p.proc}</td><td><span class="sub-text" style="font-size:13px">${getPortDesc(portNum)}</span></td></tr>`;
+                    }).join('');
+                }
+            }
+        }
+
+        async function addUfwRule() {
+            const port = document.getElementById('ufwPort').value;
+            const proto = document.getElementById('ufwProto').value;
+            const iface = document.getElementById('ufwIface').value;
+            if(!port) return alert("Введите порт");
+            const res = await fetch('/api/ufw', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({port, proto, iface}) });
+            if(res.ok) { document.getElementById('ufwPort').value = ''; loadUfwData(); }
+        }
+
+        async function delUfwRule(id) {
+            if(!confirm(`Удалить правило №${id}?`)) return;
+            const res = await fetch(`/api/ufw/${id}`, { method: 'DELETE' });
+            if(res.ok) loadUfwData();
+        }
+
+        async function loadNetworkTools() {
+            const ifaces = await (await fetch('/api/interfaces')).json();
+            const ruSel = document.getElementById('ruDropIface'); const dnsSel = document.getElementById('dnsIface'); const ufwSel = document.getElementById('ufwIface');
+            ruSel.innerHTML = ''; dnsSel.innerHTML = ''; ufwSel.innerHTML = '<option value="any">Все</option>';
+            ifaces.forEach(i => { ruSel.appendChild(new Option(i, i)); dnsSel.appendChild(new Option(i, i)); ufwSel.appendChild(new Option(i, i)); });
+            if(ifaces.includes('awg0')) { ruSel.value = 'awg0'; dnsSel.value = 'awg0'; }
+
+            const st = await (await fetch('/api/tools/status')).json();
+            const ruEl = document.getElementById('ruDropStatus');
+            if (st.ruDrop.active) { ruEl.innerHTML = `<span class="val-rx">Активно (${st.ruDrop.iface || 'сервер'})</span> <span class="sub-text">Правил: ${st.ruDrop.count}</span>`; if (st.ruDrop.iface) document.getElementById('ruDropIface').value = st.ruDrop.iface; } 
+            else ruEl.innerHTML = `<span class="val-tx">Выключено</span>`;
+
+            const dnsEl = document.getElementById('dnsStatus');
+            window.currentDnsIface = st.dns.iface; window.currentDnsTarget = st.dns.target;
+            if (st.dns.active) { dnsEl.innerHTML = `<span class="val-rx">Активен (${st.dns.iface})</span> <span class="sub-text">Цель: ${st.dns.target}</span>`; document.getElementById('dnsIface').value = st.dns.iface; document.getElementById('dnsTarget').value = st.dns.target; } 
+            else dnsEl.innerHTML = `<span class="val-tx">Не активно</span>`;
+        }
+
+        async function toggleRuDrop(enable) {
+            const iface = document.getElementById('ruDropIface').value; const schedule = document.getElementById('ruDropSchedule').value;
+            document.getElementById('ruDropStatus').innerText = "Применение (до 20 сек)...";
+            const res = await fetch('/api/tools/rudrop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({enable, iface, schedule}) });
+            if (res.ok) loadNetworkTools();
+        }
+
+        async function toggleDns(enable) {
+            const iface = document.getElementById('dnsIface').value; const target = document.getElementById('dnsTarget').value;
+            if (enable && !target) return alert("Укажите IP-адрес DNS сервера");
+            document.getElementById('dnsStatus').innerText = "Применение...";
+            const res = await fetch('/api/tools/dns', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({enable, iface, target, oldIface: window.currentDnsIface, oldTarget: window.currentDnsTarget}) });
+            if (res.ok) loadNetworkTools();
+        }
+
+        function showDashboard() {
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('dashboardScreen').style.display = 'flex';
+            if(!trafficChart) initChart();
+            loadNetworkTools(); loadUfwData(); loadHistory(); loadStats();   
+            if (!pollingInterval) pollingInterval = setInterval(loadStats, 2000);
+            if (!historyInterval) historyInterval = setInterval(loadHistory, 10000); 
+        }
+
+        function showLogin() {
+            document.getElementById('loginScreen').style.display = 'flex';
+            document.getElementById('dashboardScreen').style.display = 'none';
+            if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
+            if (historyInterval) { clearInterval(historyInterval); historyInterval = null; }
+            if (agInterval) { clearInterval(agInterval); agInterval = null; }
+        }
+
+        async function login() {
+            const pass = document.getElementById('authPassword').value;
+            const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pass }) });
+            if (res.ok) { document.getElementById('loginError').style.display = 'none'; document.getElementById('authPassword').value = ''; showDashboard(); }
+            else document.getElementById('loginError').style.display = 'block';
+        }
+
+        async function logout() { await fetch('/api/logout', { method: 'POST' }); showLogin(); }
+        
+        async function restoreBackup(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            if (!confirm(`Вы уверены, что хотите восстановить панель из файла "${file.name}"?`)) { event.target.value = ''; return; }
+            document.getElementById('loaderOverlay').style.display = 'flex';
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                const base64data = e.target.result.split(',')[1];
+                try {
+                    const res = await fetch('/api/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileData: base64data }) });
+                    if (res.ok) { document.getElementById('loaderText').innerText = "Успешно! Перезапуск..."; setTimeout(() => { window.location.reload(); }, 3500); } 
+                    else { const err = await res.json(); alert("Ошибка восстановления: " + err.error); document.getElementById('loaderOverlay').style.display = 'none'; }
+                } catch(err) { alert("Сетевая ошибка при загрузке бэкапа"); document.getElementById('loaderOverlay').style.display = 'none'; }
+                event.target.value = '';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function loadStats() {
+            if (isFetching) return;
+            isFetching = true;
+            try {
+                const [resStats, resSys] = await Promise.all([ fetch('/api/stats'), fetch('/api/sysinfo') ]);
+                if (resStats.status === 401 || resSys.status === 401) { showLogin(); isFetching = false; return; }
+                
+                if (resSys.ok) {
+                    const sys = await resSys.json();
+                    document.getElementById('sysCpu').innerText = sys.cpu + '%'; document.getElementById('sysRam').innerText = sys.ram + '%'; document.getElementById('sysUptime').innerText = sys.uptime;
+                    if (sys.disk && sys.disk.total > 0) { 
+                        document.getElementById('diskUsed').innerText = formatBytes(sys.disk.used); 
+                        document.getElementById('diskFree').innerText = formatBytes(sys.disk.free); 
+                        document.getElementById('diskTotal').innerText = formatBytes(sys.disk.total); 
+                    }
+                }
+
+                const data = await resStats.json();
+                const tbody = document.getElementById('clientsTable'); const now = Date.now();
+                let totalRx = 0, totalTx = 0, totalRxSpeed = 0, totalTxSpeed = 0; let activeCount = 0;
+
+                let enrichedData = data.map(client => {
+                    let rxSpeed = 0, txSpeed = 0;
+                    if (lastStats[client.name]) {
+                        const prev = lastStats[client.name]; const timeDiffSec = (now - prev.time) / 1000;
+                        if (timeDiffSec > 0 && client.rx >= prev.rx) { rxSpeed = (client.rx - prev.rx) / timeDiffSec; txSpeed = (client.tx - prev.tx) / timeDiffSec; }
+                    }
+                    lastStats[client.name] = { rx: client.rx, tx: client.tx, time: now };
+                    totalRx += client.rx; totalTx += client.tx; totalRxSpeed += rxSpeed; totalTxSpeed += txSpeed;
+                    
+                    if (client.status_code === 'active' || client.status_code === 'recent') activeCount++;
+                    return { ...client, rxSpeed, txSpeed, totalTraffic: (client.rx || 0) + (client.tx || 0), totalSpeed: rxSpeed + txSpeed };
+                });
+
+                enrichedData.sort((a, b) => {
+                    let valA, valB;
+                    if (sortCol === 'name') {
+                        valA = a.name.toLowerCase(); valB = b.name.toLowerCase();
+                    } else if (sortCol === 'status') {
+                        const score = s => s === 'active' ? 2 : (s === 'recent' ? 1 : 0);
+                        valA = score(a.status_code); valB = score(b.status_code);
+                    } else if (sortCol === 'traffic') {
+                        valA = a.totalTraffic; valB = b.totalTraffic;
+                    } else if (sortCol === 'speed') {
+                        valA = a.totalSpeed; valB = b.totalSpeed;
+                    }
+                    if (valA < valB) return sortDesc ? 1 : -1;
+                    if (valA > valB) return sortDesc ? -1 : 1;
+                    return 0;
+                });
+
+                enrichedData.forEach((client, idx) => {
+                    const statusClass = client.status_code === 'active' ? 'status-active' : (client.status_code === 'recent' ? 'status-recent' : 'status-inactive');
+                    const safeIpId = client.ip.replace(/\./g, '-');
+                    
+                    let tr = document.getElementById('row-' + client.name);
+                    if (!tr) {
+                        tr = document.createElement('tr'); tr.id = 'row-' + client.name;
+                        tr.innerHTML = `
+                            <td class="idx-cell" style="text-align: center; color: var(--text-muted);"></td>
+                            <td><strong style="font-size:14px;">${client.name}</strong><br><span class="sub-text">${client.ip}</span></td> 
+                            <td><span class="st-cell ${statusClass}">${client.status}</span></td> 
+                            <td class="tr-cell"></td> 
+                            <td class="sp-cell"></td>
+                            <td><input type="number" id="limit-${safeIpId}" style="width:60px; padding:6px; margin-bottom:5px;" placeholder="Мб/с"><br><button class="btn-dark" style="padding:4px 10px; font-size:11px;" onclick="setLimit('${client.ip}')">Применить</button></td>
+                            <td><button class="btn-success" style="margin-bottom:5px; font-size:12px; padding:6px 10px; width:100%" onclick="window.location.href='/api/download/${client.name}'">Скачать Conf</button><br><button class="btn-danger" style="font-size:12px; padding:6px 10px; width:100%" onclick="deleteClient('${client.name}')">Удалить</button></td>
+                        `;
+                        tbody.appendChild(tr);
+                    }
+                    tr.querySelector('.idx-cell').innerText = idx + 1;
+                    tr.querySelector('.st-cell').className = `st-cell ${statusClass}`;
+                    tr.querySelector('.st-cell').innerText = client.status;
+                    tr.querySelector('.tr-cell').innerHTML = `<span class="val-rx">↓ ${formatBytes(client.rx)}</span><br><span class="val-tx">↑ ${formatBytes(client.tx)}</span>`;
+                    tr.querySelector('.sp-cell').innerHTML = `<div class="speed-cell"><span class="val-rx">↓ ${formatSpeed(client.rxSpeed)}</span> &nbsp;|&nbsp; <span class="val-tx">↑ ${formatSpeed(client.txSpeed)}</span></div>`;
+                });
+
+                enrichedData.forEach(client => { const tr = document.getElementById('row-' + client.name); if(tr) tbody.appendChild(tr); });
+
+                document.getElementById('totalClientsCount').innerText = enrichedData.length; 
+                document.getElementById('activeClientsCount').innerText = activeCount;
+                document.getElementById('globalTraffic').innerHTML = `<span class="val-rx">↓ ${formatBytes(totalRx)}</span> <span style="color:var(--text-muted)">|</span> <span class="val-tx">↑ ${formatBytes(totalTx)}</span>`;
+                document.getElementById('globalSpeed').innerHTML = `<span class="val-rx">↓ ${formatSpeed(totalRxSpeed)}</span> <span style="color:var(--text-muted)">|</span> <span class="val-tx">↑ ${formatSpeed(totalTxSpeed)}</span>`;
+            } catch (e) {}
+            isFetching = false;
+        }
+
+        async function createConfig() {
+            const name = document.getElementById('clientName').value; const count = document.getElementById('clientCount').value; const expires = document.getElementById('clientExpires').value;
+            if(!name) return alert("Введите имя (префикс)");
+            if (!count || parseInt(count) <= 1) {
+                const res = await fetch('/api/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, expires }) });
+                if (res.ok) { const a = document.createElement('a'); a.href = window.URL.createObjectURL(await res.blob()); a.download = `Paris_${name}.conf`; a.click(); document.getElementById('clientName').value = ''; loadStats(); }
+            } else {
+                document.getElementById('loaderOverlay').style.display = 'flex'; document.getElementById('loaderText').innerText = "Генерация ZIP архива...";
+                const res = await fetch('/api/create-bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prefix: name, count: parseInt(count), expires }) });
+                if (res.ok) { const a = document.createElement('a'); a.href = window.URL.createObjectURL(await res.blob()); a.download = `Paris_Bulk_${name}.zip`; a.click(); document.getElementById('clientName').value = ''; document.getElementById('clientCount').value = ''; loadStats(); }
+                document.getElementById('loaderOverlay').style.display = 'none';
+            }
+        }
+
+        async function deleteClient(name) {
+            if (!confirm(`Точно удалить клиента ${name}?`)) return;
+            const res = await fetch(`/api/delete/${name}`, { method: 'DELETE' });
+            if (res.ok) { delete lastStats[name]; document.getElementById('row-' + name).remove(); }
+        }
+
+        async function setLimit(ip) {
+            const rate = document.getElementById('limit-' + ip.replace(/\./g, '-')).value;
+            if (!rate) return alert("Введите скорость в Мбит/с");
+            const res = await fetch('/api/limit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip, rate: parseInt(rate) }) });
+            if (res.ok) alert(`Лимит для ${ip} установлен: ${rate} Mbit/s`);
+        }
+
+        loadStats();
+    </script>
+</body>
+</html>
