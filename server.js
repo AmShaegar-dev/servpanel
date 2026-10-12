@@ -484,7 +484,7 @@ app.post('/api/awg/config', checkAuth, (req, res) => {
 });
 // УСТАНОВКА МОДУЛЕЙ (AWG, MTPROTO, ADGUARD)
 app.post('/api/install/module', checkAuth, (req, res) => {
-    const { module, version } = req.body;
+    const { module, version, keepPackages, noTweaks } = req.body;
     let installScriptUrl = '';
     let logFile = '';
 
@@ -504,8 +504,16 @@ app.post('/api/install/module', checkAuth, (req, res) => {
     try {
         execSync(`sudo rm -f ${logFile} && sudo touch ${logFile} && sudo chmod 666 ${logFile}`);
         
-        // Передаем переменную AWG_VERSION в скрипт
-        const runScript = `#!/bin/bash\nexport AWG_VERSION="${version || ''}"\ncurl -fsSL ${installScriptUrl} > /tmp/installer.sh\nbash /tmp/installer.sh > ${logFile} 2>&1\nrm -f /tmp/installer.sh\n`;
+        // Экспортируем все настройки как переменные окружения
+        const runScript = `#!/bin/bash
+export AWG_VERSION="${version || ''}"
+export AWG_KEEP_PACKAGES="${keepPackages ? '1' : '0'}"
+export AWG_NO_TWEAKS="${noTweaks ? '1' : '0'}"
+
+curl -fsSL ${installScriptUrl} > /tmp/installer.sh
+bash /tmp/installer.sh > ${logFile} 2>&1
+rm -f /tmp/installer.sh
+`;
         fs.writeFileSync('/tmp/run_install.sh', runScript);
         
         const { spawn } = require('child_process');
