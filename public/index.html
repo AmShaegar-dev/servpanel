@@ -348,15 +348,29 @@
 <div id="tab-install" class="tab-pane">
     <div class="stats-cards">
         <!-- AmneziaWG -->
-<div class="card" style="flex: 1;">
+<div class="card" style="flex: 1; min-width: 250px;">
     <h3>AmneziaWG (С перезагрузками)</h3>
-    <p style="color: var(--text-muted); font-size: 13px;">Полная установка AWG с оптимизацией ядра, Fail2Ban и UFW. Потребует 3 перезагрузки сервера.</p>
+    <p style="color: var(--text-muted); font-size: 13px;">Полная установка AWG. Потребует 3 перезагрузки сервера.</p>
+    
     <div class="controls-row" style="margin-bottom: 10px;">
-        <select id="awgInstallVersion" style="width: 100%;">
+        <select id="awgInstallVersion" style="width: 100%; margin-bottom: 5px;">
             <option value="3.1">Версия 3.1 (Последняя)</option>
-            <option value="2.0">Версия 2.0 (Стабильная)</option>
+            <option value="2.0" selected>Версия 2.0 (Стабильная)</option>
             <option value="1.5">Версия 1.5 (Legacy)</option>
         </select>
+        
+        <div style="font-size: 13px; color: var(--text-main); margin-bottom: 5px;">
+            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                <input type="checkbox" id="awgKeepPackages" checked>
+                Сохранить сист. пакеты (snapd и др.)
+            </label>
+        </div>
+        <div style="font-size: 13px; color: var(--text-main); margin-bottom: 10px;">
+            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                <input type="checkbox" id="awgNoTweaks">
+                Без UFW, Fail2Ban и оптимизаций
+            </label>
+        </div>
     </div>
     <button class="btn-primary" onclick="startInstall('awg', '/var/log/awg_install.log')">Начать установку AWG</button>
 </div>
@@ -393,8 +407,13 @@
 
 async function startInstall(module, expectedLogFile) {
     let version = '';
+    let keepPackages = false;
+    let noTweaks = false;
+
     if (module === 'awg') {
         version = document.getElementById('awgInstallVersion').value;
+        keepPackages = document.getElementById('awgKeepPackages').checked;
+        noTweaks = document.getElementById('awgNoTweaks').checked;
     }
     
     if(!confirm(`Запустить процесс установки модуля ${module}${version ? ' (версия ' + version + ')' : ''}? Следите за логами в окне ниже.`)) return;
@@ -407,7 +426,7 @@ async function startInstall(module, expectedLogFile) {
         const res = await fetch('/api/install/module', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ module, version }) // Передаем версию на сервер
+            body: JSON.stringify({ module, version, keepPackages, noTweaks }) // Передаем все флаги
         });
         if (res.ok) {
             if (logInterval) clearInterval(logInterval);
