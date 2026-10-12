@@ -8,7 +8,8 @@ const fs = require('fs');
 const os = require('os');
 const app = express();
 
-const ADMIN_PASSWORD = "admin123";
+const passFile = path.join(__dirname, 'admin_pass.txt');
+let ADMIN_PASSWORD = fs.existsSync(passFile) ? fs.readFileSync(passFile, 'utf8').trim() : "admin123";
 
 app.use(express.json({ limit: '100mb' }));
 
@@ -395,6 +396,35 @@ app.post('/api/restore', checkAuth, (req, res) => {
         res.json({ success: true });
         setTimeout(() => { exec('sudo pm2 restart awg-admin'); }, 1000);
     } catch (e) { res.status(500).json({ error: "Ошибка распаковки: " + e.message }); }
+});
+
+// СМЕНА ПАРОЛЯ
+app.post('/api/change-password', checkAuth, (req, res) => {
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 4) return res.status(400).json({error: "Пароль слишком короткий"});
+    try {
+        fs.writeFileSync(passFile, newPassword);
+        ADMIN_PASSWORD = newPassword;
+        res.json({success: true});
+    } catch (e) {
+        res.status(500).json({error: "Ошибка изменения пароля"});
+    }
+});
+
+// ИНФОРМАЦИЯ О СЕРВЕРЕ (АДРЕСА ADGUARD)
+app.get('/api/server-info', checkAuth, (req, res) => {
+    try {
+        const ip = execSync('curl -s ifconfig.me || wget -qO- ifconfig.me').toString().trim();
+        let domain = "";
+        try {
+            const nginxConf = execSync('cat /etc/nginx/sites-available/awg-admin || true').toString();
+            const match = nginxConf.match(/server_name\s+([^;]+);/);
+            if (match && match[1] && match[1] !== '_') domain = match[1].trim();
+        } catch(e) {}
+        res.json({ ip, domain });
+    } catch(e) {
+        res.json({ ip: "Неизвестно", domain: "" });
+    }
 });
 
 app.listen(3000, () => console.log('AWG Admin v18 running'));
