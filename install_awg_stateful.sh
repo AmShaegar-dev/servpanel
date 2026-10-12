@@ -4,10 +4,28 @@ set -e
 LOG_FILE="/var/log/awg_install.log"
 INSTALLER_URL="https://raw.githubusercontent.com/bivlked/amneziawg-installer/main/install_amneziawg.sh"
 
-echo "=== СТАРТ УСТАНОВКИ AMNEZIAWG (Через Панель) ===" | tee -a "$LOG_FILE"
+# --- СИСТЕМА АВТОВОЗОБНОВЛЕНИЯ ПОСЛЕ ПЕРЕЗАГРУЗКИ ---
+STATE_ENV="/root/awg_install_params.env"
+WRAPPER_SCRIPT="/root/awg_installer_wrapper.sh"
+CRON_FILE="/etc/cron.d/awg_resume"
+
+# Если файл состояния существует, значит мы проснулись после ребута
+if [ -f "$STATE_ENV" ]; then
+    echo "=== [Авто-продолжение] Восстановление после перезагрузки... ==="
+    source "$STATE_ENV"
+else
+    echo "=== СТАРТ УСТАНОВКИ AMNEZIAWG (Через Панель) ==="
+    # Сохраняем настройки панели и переданные флаги в файл
+    env | grep -E '^(AWG_|PANEL_PORT)' > "$STATE_ENV" || true
+    # Копируем этот скрипт, чтобы он не удалился панелью
+    cp "$0" "$WRAPPER_SCRIPT"
+    chmod +x "$WRAPPER_SCRIPT"
+    # Создаем задачу для автоматического запуска после перезагрузки
+    echo "@reboot root bash $WRAPPER_SCRIPT >> $LOG_FILE 2>&1" > "$CRON_FILE"
+fi
 
 PORT_TO_OPEN="${PANEL_PORT:-4444}"
-echo "Проверка портов панели (${PORT_TO_OPEN}, 80, 443, 22, 2233, 4443)..." | tee -a "$LOG_FILE"
+echo "Проверка портов панели (${PORT_TO_OPEN}, 80, 443, 22, 2233, 4443)..."
 if command -v ufw >/dev/null 2>&1; then
     sudo ufw allow ${PORT_TO_OPEN}/tcp >/dev/null 2>&1 || true
     sudo ufw allow 80/tcp >/dev/null 2>&1 || true
@@ -16,7 +34,7 @@ if command -v ufw >/dev/null 2>&1; then
     sudo ufw allow 2233/tcp >/dev/null 2>&1 || true
 fi
 
-echo "Скачиваем оригинальный скрипт AmneziaWG..." | tee -a "$LOG_FILE"
+echo "Скачиваем оригинальный скрипт AmneziaWG..."
 curl -fsSL "$INSTALLER_URL" -o /root/install_amneziawg.sh
 chmod +x /root/install_amneziawg.sh
 
@@ -46,15 +64,21 @@ fi
 [ "$AWG_KEEP_PACKAGES" = "1" ] && INSTALL_CMD="$INSTALL_CMD --keep-packages"
 [ "$AWG_NO_TWEAKS" = "1" ] && INSTALL_CMD="$INSTALL_CMD --no-tweaks"
 
-echo "Сформированная команда: $INSTALL_CMD" | tee -a "$LOG_FILE"
-echo "--- Вывод установщика ---" | tee -a "$LOG_FILE"
+echo "Команда: $INSTALL_CMD"
+echo "--- Вывод установщика ---"
 
-$INSTALL_CMD >> "$LOG_FILE" 2>&1
+# Запускаем установку. При ребуте этот процесс будет убит системой.
+eval "$INSTALL_CMD"
 
+# Этот блок выполнится только когда установщик полностью закончит работу без ребутов
 if grep -q "Установка завершена" "$LOG_FILE" || grep -q "Installation complete" "$LOG_FILE"; then
-    echo "=== INSTALLATION DONE ===" | tee -a "$LOG_FILE"
+    echo "=== INSTALLATION DONE ==="
     if command -v ufw >/dev/null 2>&1; then
-        sudo ufw allow ${PANEL_PORT:-4444}/tcp >/dev/null 2>&1 || true
+        sudo ufw allow ${PORT_TO_OPEN}/tcp >/dev/null 2>&1 || true
     fi
+    # Убираем за собой следы авто-возобновления
     rm -f /root/install_amneziawg.sh
+    rm -f "$STATE_ENV"
+    rm -f "$CRON_FILE"
+    rm -f "$WRAPPER_SCRIPT"
 fi
