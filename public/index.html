@@ -376,11 +376,14 @@
 </div>
         
         <!-- MTProto -->
-        <div class="card" style="flex: 1;">
-            <h3>MTProto / WEB Proxy (MEKO)</h3>
-            <p style="color: var(--text-muted); font-size: 13px;">Установка MTProtoL, Telemt или MTG с фиксами от MEKO.</p>
-            <button class="btn-primary" onclick="startInstall('mtproto', '/var/log/mtproto_install.log')">Установить MTProto</button>
-        </div>
+<div class="card" style="flex: 1;">
+    <h3>MTProto / WEB Proxy (MEKO)</h3>
+    <p style="color: var(--text-muted); font-size: 13px;">Установка Telemt, MTG с фиксами от MEKO. Рекомендуется ручная установка через терминал для полного контроля.</p>
+    <div style="background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 11px; margin-bottom: 10px; border: 1px solid var(--border); word-break: break-all; color: #58a6ff;">
+        curl -fsSL https://raw.githubusercontent.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/main/install.sh | sudo bash
+    </div>
+    <button class="btn-dark" onclick="copyMeko()">📋 Скопировать команду</button>
+</div>
 
         <!-- AdGuard Home -->
         <div class="card" style="flex: 1;">
@@ -560,6 +563,14 @@ try {
             if (tabId === 'tab-services') { loadServices(); connectAdGuard(false); }
             else if (agInterval) { clearInterval(agInterval); agInterval = null; }
         }
+		function copyMeko() {
+    const cmd = "curl -fsSL https://raw.githubusercontent.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/main/install.sh | sudo bash";
+    navigator.clipboard.writeText(cmd).then(() => {
+        alert("Команда скопирована! Теперь просто вставьте её в ваш SSH-терминал.");
+    }).catch(() => {
+        alert("Не удалось скопировать. Пожалуйста, выделите и скопируйте текст вручную.");
+    });
+}
 
         function formatBytes(bytes) {
             if (!bytes || isNaN(bytes)) return '0 B'; if (bytes === 0) return '0 B';
