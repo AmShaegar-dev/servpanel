@@ -426,5 +426,24 @@ app.get('/api/server-info', checkAuth, (req, res) => {
         res.json({ ip: "Неизвестно", domain: "" });
     }
 });
-
+// ОБНОВЛЕНИЕ ПАНЕЛИ
+app.post('/api/update', checkAuth, (req, res) => {
+try {
+    const script = `#!/bin/bash
+sleep 2
+cd /root/servpanel
+git fetch --all
+git reset --hard origin/main
+npm install
+pm2 restart awg-admin
+`;
+    fs.writeFileSync('/tmp/update_panel.sh', script);
+    const { spawn } = require('child_process');
+    const child = spawn('bash', ['/tmp/update_panel.sh'], { detached: true, stdio: 'ignore' });
+    child.unref();
+    res.json({success: true});
+} catch (e) {
+    res.status(500).json({error: "Ошибка запуска обновления"});
+}
+});
 app.listen(3000, () => console.log('AWG Admin v18 running'));
