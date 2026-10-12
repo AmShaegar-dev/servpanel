@@ -7,13 +7,61 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 echo -e "${CYAN}=================================================${NC}"
-echo -e "${GREEN}  Установка FileManager 4.0 и VPN Инфраструктуры ${NC}"
+echo -e "${GREEN}  Менеджер FileManager 4.0 и VPN Инфраструктуры  ${NC}"
 echo -e "${CYAN}=================================================${NC}"
+
+echo -e "1) Установить панель и компоненты"
+echo -e "2) Удалить панель и очистить сервер"
+read -p "Выберите действие (1 или 2): " MAIN_ACTION < /dev/tty
+
+if [ "$MAIN_ACTION" == "2" ]; then
+    echo -e "\n${RED}Начинаем полное удаление всех компонентов...${NC}"
+    read -p "Вы уверены? Это необратимо удалит VPN, AdGuard, MTProto и панель! [y/N]: " CONFIRM_UNINSTALL < /dev/tty
+    if [[ ! "$CONFIRM_UNINSTALL" =~ ^[Yy]$ ]]; then
+        echo "Отмена."
+        exit 0
+    fi
+
+    echo "[1/5] Остановка и удаление панели FileManager..."
+    pm2 stop awg-admin 2>/dev/null || true
+    pm2 delete awg-admin 2>/dev/null || true
+    pm2 save --force 2>/dev/null || true
+    rm -rf /root/servpanel
+    
+    echo "[2/5] Удаление настроек Nginx..."
+    rm -f /etc/nginx/sites-available/awg-admin /etc/nginx/sites-enabled/awg-admin
+    systemctl restart nginx 2>/dev/null || true
+
+    echo "[3/5] Удаление AdGuard Home..."
+    if [ -f "/opt/AdGuardHome/AdGuardHome" ]; then
+        /opt/AdGuardHome/AdGuardHome -s uninstall 2>/dev/null || true
+        rm -rf /opt/AdGuardHome
+    fi
+
+    echo "[4/5] Удаление MTProto (Telemt/MTG)..."
+    systemctl stop telemt mtg 2>/dev/null || true
+    systemctl disable telemt mtg 2>/dev/null || true
+    rm -rf /opt/mtproto-proxy /etc/telemt-panel /etc/systemd/system/telemt.service /etc/systemd/system/mtg.service
+    systemctl daemon-reload
+
+    echo "[5/5] Удаление AmneziaWG..."
+    if [ -f "/root/install_amneziawg.sh" ]; then
+        bash /root/install_amneziawg.sh --uninstall --yes || true
+    else
+        wget -qO uninstall_awg.sh https://raw.githubusercontent.com/bivlked/amneziawg-installer/main/install_amneziawg.sh
+        bash uninstall_awg.sh --uninstall --yes || true
+        rm -f uninstall_awg.sh
+    fi
+
+    echo -e "${GREEN}Удаление успешно завершено! Сервер очищен.${NC}"
+    exit 0
+fi
+
+# ==================== УСТАНОВКА ====================
 
 SERVER_IP=$(curl -s ifconfig.me || wget -qO- ifconfig.me)
 
-# 1. Интерактивный опрос пользователя (читаем напрямую из терминала через < /dev/tty)
-echo -e "\n${CYAN}[1/5] Выбор компонентов для установки${NC}"
+echo -e "\n${CYAN}[1/5] Настройка компонентов${NC}"
 read -p "Установить AmneziaWG (bivlked)? [Y/n]: " INSTALL_AWG < /dev/tty
 read -p "Установить AdGuard Home? [Y/n]: " INSTALL_ADGUARD < /dev/tty
 read -p "Установить MTProto FIX (by MEKO)? [Y/n]: " INSTALL_MTPROTO < /dev/tty
@@ -37,7 +85,6 @@ else
     PANEL_PORT=${PANEL_PORT:-3000}
 fi
 
-# 2. Установка зависимостей
 echo -e "\n${CYAN}[2/5] Обновление системы и установка пакетов...${NC}"
 apt-get update && apt-get upgrade -y
 apt-get install -y curl wget git ufw zip tar nginx certbot python3-certbot-nginx
@@ -45,7 +92,6 @@ apt-get install -y curl wget git ufw zip tar nginx certbot python3-certbot-nginx
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get install -y nodejs
 
-# 3. Установка сервисов
 echo -e "\n${CYAN}[3/5] Установка сторонних сервисов...${NC}"
 
 if [[ ! "$INSTALL_AWG" =~ ^[Nn]$ ]]; then
@@ -65,7 +111,6 @@ if [[ ! "$INSTALL_MTPROTO" =~ ^[Nn]$ ]]; then
     curl -fsSL https://raw.githubusercontent.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/main/install.sh | sudo bash
 fi
 
-# 4. Развертывание панели
 echo -e "\n${CYAN}[4/5] Развертывание FileManager 4.0 из GitHub...${NC}"
 
 GITHUB_REPO="https://github.com/makar19977v-glitch/servpanel.git"
@@ -90,7 +135,6 @@ pm2 start server.js --name awg-admin
 pm2 save
 pm2 startup
 
-# 5. Настройка сети
 echo -e "\n${CYAN}[5/5] Настройка сети и фаервола...${NC}"
 
 ufw --force enable
