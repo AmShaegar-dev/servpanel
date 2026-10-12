@@ -11,7 +11,6 @@ const app = express();
 
 const passFile = path.join(__dirname, 'admin_pass.txt');
 let ADMIN_PASSWORD = fs.existsSync(passFile) ? fs.readFileSync(passFile, 'utf8').trim() : "admin123";
-// СЕКРЕТНЫЙ КЛЮЧ ДЛЯ КУКИ (можно поменять на любую случайную строку)
 const AUTH_SECRET = 'awg-secure-secret-9912';
 
 function getAuthToken(password) {
@@ -249,7 +248,6 @@ app.post('/api/tools/dns', checkAuth, (req, res) => {
     res.json({success: true});
 });
 
-// УПРАВЛЕНИЕ СИСТЕМНЫМИ СЛУЖБАМИ
 app.get('/api/services', checkAuth, (req, res) => {
     try {
         const services = ['AdGuardHome', 'nginx', 'sshd', 'mtproxyl-telemt'];
@@ -275,7 +273,6 @@ app.post('/api/services/restart', checkAuth, (req, res) => {
     } catch(e) { res.status(500).json({error: "Ошибка перезапуска"}); }
 });
 
-// ПРОКСИ К ADGUARD API
 app.post('/api/adguard/stats', checkAuth, async (req, res) => {
     let { url, user, pass } = req.body;
     if (!url) return res.status(400).json({error: "Укажите URL API"});
@@ -302,7 +299,6 @@ app.post('/api/adguard/stats', checkAuth, async (req, res) => {
     }
 });
 
-// КЛИЕНТЫ AWG
 app.post('/api/create', checkAuth, (req, res) => {
     const { name, expires } = req.body;
     if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) return res.status(400).json({ error: "Недопустимое имя" });
@@ -386,10 +382,7 @@ app.delete('/api/delete/:name', checkAuth, (req, res) => {
             const response = JSON.parse(stdout);
             if (!response.ok) return res.status(500).json({ error: response.error });
             delete historyData[name]; delete lastHistoryStats[name];
-            
-            // ВСТАВЛЯЕМ ЛОГИРОВАНИЕ СЮДА
             auditLog(req, 'Удален клиент ' + name);
-            
             res.json({ success: true });
         } catch (e) { res.status(500).json({ error: "Ошибка при удалении" }); }
     });
@@ -405,18 +398,14 @@ app.post('/api/limit', checkAuth, (req, res) => {
 });
 
 app.get('/api/backup', checkAuth, (req, res) => {
-const dateStr = new Date().toISOString().replace(/T/, '-').replace(/:/g, '-').slice(0, 16);
-const fileName = `awg-full-backup-${dateStr}.tar.gz`;
-const tempPath = `/tmp/${fileName}`;
-
-// Пытаемся заархивировать все возможные пути. 
-// Конструкция "2>/dev/null || true" подавляет ошибки, если какой-то папки нет
-const cmd = `sudo tar -czf ${tempPath} /etc/amnezia/amneziawg /root/awg /root/servpanel /root/awg-admin /etc/nginx/sites-available/awg-admin /etc/nginx/.htpasswd 2>/dev/null || true`;
-
-exec(cmd, () => {
-    if (!fs.existsSync(tempPath)) return res.status(500).send("Не удалось создать архив");
-    res.download(tempPath, fileName, () => { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); });
-});
+    const dateStr = new Date().toISOString().replace(/T/, '-').replace(/:/g, '-').slice(0, 16);
+    const fileName = `awg-full-backup-${dateStr}.tar.gz`;
+    const tempPath = `/tmp/${fileName}`;
+    const cmd = `sudo tar -czf ${tempPath} /etc/amnezia/amneziawg /root/awg /root/servpanel /root/awg-admin /etc/nginx/sites-available/awg-admin /etc/nginx/.htpasswd 2>/dev/null || true`;
+    exec(cmd, () => {
+        if (!fs.existsSync(tempPath)) return res.status(500).send("Не удалось создать архив");
+        res.download(tempPath, fileName, () => { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); });
+    });
 });
 
 app.post('/api/restore', checkAuth, (req, res) => {
@@ -432,7 +421,6 @@ app.post('/api/restore', checkAuth, (req, res) => {
     } catch (e) { res.status(500).json({ error: "Ошибка распаковки: " + e.message }); }
 });
 
-// СМЕНА ПАРОЛЯ
 app.post('/api/change-password', checkAuth, (req, res) => {
     const { newPassword } = req.body;
     if (!newPassword || newPassword.length < 4) return res.status(400).json({error: "Пароль слишком короткий"});
@@ -441,12 +429,12 @@ app.post('/api/change-password', checkAuth, (req, res) => {
         ADMIN_PASSWORD = newPassword;
         res.cookie('awg_auth', getAuthToken(ADMIN_PASSWORD), { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true });
         auditLog(req, 'Изменен пароль администратора');
+        res.json({ success: true });
     } catch (e) {
         res.status(500).json({error: "Ошибка изменения пароля"});
     }
 });
 
-// ИНФОРМАЦИЯ О СЕРВЕРЕ (АДРЕСА ADGUARD)
 app.get('/api/server-info', checkAuth, (req, res) => {
     try {
         const ip = execSync('curl -4s ifconfig.me || wget -4 -qO- ifconfig.me').toString().trim();
@@ -461,10 +449,10 @@ app.get('/api/server-info', checkAuth, (req, res) => {
         res.json({ ip: "Неизвестно", domain: "" });
     }
 });
-// ОБНОВЛЕНИЕ ПАНЕЛИ
+
 app.post('/api/update', checkAuth, (req, res) => {
-try {
-    const script = `#!/bin/bash
+    try {
+        const script = `#!/bin/bash
 sleep 2
 cd /root/servpanel
 git fetch --all
@@ -472,16 +460,16 @@ git reset --hard origin/main
 npm install
 pm2 restart awg-admin
 `;
-    fs.writeFileSync('/tmp/update_panel.sh', script);
-    const { spawn } = require('child_process');
-    const child = spawn('bash', ['/tmp/update_panel.sh'], { detached: true, stdio: 'ignore' });
-    child.unref();
-    res.json({success: true});
-} catch (e) {
-    res.status(500).json({error: "Ошибка запуска обновления"});
-}
+        fs.writeFileSync('/tmp/update_panel.sh', script);
+        const { spawn } = require('child_process');
+        const child = spawn('bash', ['/tmp/update_panel.sh'], { detached: true, stdio: 'ignore' });
+        child.unref();
+        res.json({success: true});
+    } catch (e) {
+        res.status(500).json({error: "Ошибка запуска обновления"});
+    }
 });
-// НАСТРОЙКИ AMNEZIAWG
+
 const AWG_CONF_PATHS = ['/etc/amnezia/amneziawg/amn0.conf', '/etc/amnezia/amneziawg/awg0.conf', '/etc/wireguard/wg0.conf'];
 
 app.get('/api/awg/config', checkAuth, (req, res) => {
@@ -500,28 +488,18 @@ app.post('/api/awg/config', checkAuth, (req, res) => {
     if (!content || !file) return res.status(400).json({error: "Пустой конфиг"});
     try {
         auditLog(req, `Изменение конфигурации AWG: ${file}`);
-        
-        // СОЗДАЕМ АВТО-БЭКАП СТАРОГО КОНФИГА
         if (fs.existsSync(file)) {
             const backupPath = `${file}.bak_${Date.now()}`;
             execSync(`sudo cp ${file} ${backupPath}`);
         }
-
         fs.writeFileSync('/tmp/awg_tmp.conf', content);
         execSync(`sudo cp /tmp/awg_tmp.conf ${file}`);
-        
         const iface = path.basename(file, '.conf');
-        try {
-            execSync(`sudo systemctl restart awg-quick@${iface} || sudo docker restart amnezia-awg || sudo systemctl restart amnezia-awg || true`);
-        } catch(e){}
-        
+        try { execSync(`sudo systemctl restart awg-quick@${iface} || sudo docker restart amnezia-awg || sudo systemctl restart amnezia-awg || true`); } catch(e){}
         res.json({success: true});
-    } catch (e) {
-        res.status(500).json({error: "Ошибка сохранения конфига"});
-    }
+    } catch (e) { res.status(500).json({error: "Ошибка сохранения конфига"}); }
 });
-// УСТАНОВКА МОДУЛЕЙ (AWG, MTPROTO, ADGUARD)
-// УСТАНОВКА МОДУЛЕЙ (AWG, MTPROTO, ADGUARD)
+
 // УСТАНОВКА МОДУЛЕЙ (AWG, MTPROTO, ADGUARD)
 app.post('/api/install/module', checkAuth, (req, res) => {
     const data = req.body;
@@ -546,7 +524,7 @@ app.post('/api/install/module', checkAuth, (req, res) => {
         execSync(`sudo rm -f ${logFile} && sudo touch ${logFile} && sudo chmod 666 ${logFile}`);
         
         let runScript = `#!/bin/bash\n`;
-        runScript += `export PANEL_PORT="${PORT}"\n`; // Передаем порт панели!
+        runScript += `export PANEL_PORT="4444"\n`; // Принудительно передаем ваш внешний порт Nginx для защиты UFW
         
         if (module === 'awg') {
             runScript += `export AWG_VERSION="${data.version || ''}"\n`;
@@ -575,18 +553,16 @@ app.post('/api/install/module', checkAuth, (req, res) => {
     }
 });
 
-// ЧТЕНИЕ ЛОГОВ УСТАНОВКИ
 app.get('/api/install/log', checkAuth, (req, res) => {
     const logFile = req.query.file;
     if (!logFile || !logFile.startsWith('/var/log/')) return res.status(400).send("Неверный путь");
     try {
         if (!fs.existsSync(logFile)) return res.send("Ожидание старта установки...");
-        // Читаем последние 50 строк, чтобы не грузить браузер
         const logContent = execSync(`tail -n 50 ${logFile}`).toString();
         res.send(logContent);
     } catch (e) {
         res.send("Ошибка чтения лога...");
     }
 });
-const PORT = process.env.PORT || 4444; // Используем 4444 по умолчанию, если не задано окружение
-app.listen(PORT, () => console.log(`AWG Admin v18 running on port ${PORT}`));
+
+app.listen(3000, () => console.log('AWG Admin v18 running on port 3000'));
