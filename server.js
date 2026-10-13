@@ -310,7 +310,7 @@ app.post('/api/create', checkAuth, (req, res) => {
         try {
             const response = JSON.parse(stdout);
             if (!response.ok) return res.status(500).json({ error: response.error });
-            res.download(response.results[0].conf, `Paris_${name}.conf`);
+            res.download(response.results[0].conf, `Serv_${name}.conf`);
         } catch (e) { res.status(500).json({ error: "Ошибка обработки" }); }
     });
 });
@@ -330,13 +330,13 @@ app.post('/api/create-bulk', checkAuth, (req, res) => {
             try {
                 const result = execSync(cmd).toString();
                 const response = JSON.parse(result);
-                if (response.ok && response.results[0].conf) execSync(`sudo cp ${response.results[0].conf} ${tempDir}/Paris_${clientName}.conf`);
+                if (response.ok && response.results[0].conf) execSync(`sudo cp ${response.results[0].conf} ${tempDir}/Serv_${clientName}.conf`);
             } catch(e) {} 
         }
-        const zipPath = `/tmp/Paris_Bulk_${prefix}_${count}.zip`;
+        const zipPath = `/tmp/Serv_Bulk_${prefix}_${count}.zip`;
         execSync(`cd ${tempDir} && zip -r ${zipPath} .`);
         execSync(`rm -rf ${tempDir}`);
-        res.download(zipPath, `Paris_Bulk_${prefix}.zip`, () => { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); });
+        res.download(zipPath, `Serv_Bulk_${prefix}.zip`, () => { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); });
     } catch(err) { res.status(500).json({ error: "Ошибка массового создания" }); }
 });
 
@@ -370,7 +370,7 @@ app.get('/api/download/:name', checkAuth, (req, res) => {
     const name = req.params.name;
     if (!/^[a-zA-Z0-9_-]+$/.test(name)) return res.status(400).send("Invalid name");
     const filePath = `/root/awg/${name}.conf`;
-    if (fs.existsSync(filePath)) res.download(filePath, `Paris_${name}.conf`);
+    if (fs.existsSync(filePath)) res.download(filePath, `Serv_${name}.conf`);
     else res.status(404).send("Конфиг не найден");
 });
 
