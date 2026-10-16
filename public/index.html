@@ -967,22 +967,7 @@ async function toggleRuDrop(enable) {
 }
 
 async function toggleCascade(enable) {
-    const checkedIfaces = Array.from(document.querySelectorAll('.casc-check:checked')).map(cb => cb.value);
-    if (enable && checkedIfaces.length === 0) return alert('Выберите хотя бы один интерфейс для каскада!');
-    
-    document.getElementById('cascadeStatus').innerText = "Настройка маршрутов...";
-    
-    const res = await fetch('/api/tools/cascade', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({enable, ifaces: checkedIfaces}) });
-    if (res.ok) {
-        const data = await res.json();
-        if(data.error) { alert(data.error); }
-        loadNetworkTools();
-    } else {
-        alert("Ошибка настройки каскада. Проверьте логи.");
-    }
-}
-
-		async function toggleCascade(enable) {
+async function toggleCascade(enable) {
     const checkedIfaces = Array.from(document.querySelectorAll('.casc-check:checked')).map(cb => cb.value);
     if (enable && checkedIfaces.length === 0) return alert('Выберите хотя бы один интерфейс для каскада!');
     
@@ -1020,12 +1005,7 @@ async function toggleDns(enable) {
     if (res.ok) loadNetworkTools();
 }
 
-
-        function showDashboard() {
-    document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('dashboardScreen').style.display = 'flex';
-		
-        function showDashboard() {
+function showDashboard() {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('dashboardScreen').style.display = 'flex';
     if(!trafficChart) initChart();
@@ -1034,155 +1014,155 @@ async function toggleDns(enable) {
     if (!historyInterval) historyInterval = setInterval(loadHistory, 10000);
 }
 
-        function showLogin() {
-            document.getElementById('loginScreen').style.display = 'flex';
-            document.getElementById('dashboardScreen').style.display = 'none';
-            if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
-            if (historyInterval) { clearInterval(historyInterval); historyInterval = null; }
-            if (agInterval) { clearInterval(agInterval); agInterval = null; }
-        }
+function showLogin() {
+    document.getElementById('loginScreen').style.display = 'flex';
+    document.getElementById('dashboardScreen').style.display = 'none';
+    if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
+    if (historyInterval) { clearInterval(historyInterval); historyInterval = null; }
+    if (agInterval) { clearInterval(agInterval); agInterval = null; }
+}
 
-        async function login() {
-            const pass = document.getElementById('authPassword').value;
-            const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pass }) });
-            if (res.ok) { document.getElementById('loginError').style.display = 'none'; document.getElementById('authPassword').value = ''; showDashboard(); }
-            else document.getElementById('loginError').style.display = 'block';
-        }
+async function login() {
+    const pass = document.getElementById('authPassword').value;
+    const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pass }) });
+    if (res.ok) { document.getElementById('loginError').style.display = 'none'; document.getElementById('authPassword').value = ''; showDashboard(); }
+    else document.getElementById('loginError').style.display = 'block';
+}
 
-        async function logout() { await fetch('/api/logout', { method: 'POST' }); showLogin(); }
+async function logout() { await fetch('/api/logout', { method: 'POST' }); showLogin(); }
+
+async function restoreBackup(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (!confirm(`Вы уверены, что хотите восстановить панель из файла "${file.name}"?`)) { event.target.value = ''; return; }
+    document.getElementById('loaderOverlay').style.display = 'flex';
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        const base64data = e.target.result.split(',')[1];
+        try {
+            const res = await fetch('/api/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileData: base64data }) });
+            if (res.ok) { document.getElementById('loaderText').innerText = "Успешно! Перезапуск..."; setTimeout(() => { window.location.reload(); }, 3500); } 
+            else { const err = await res.json(); alert("Ошибка восстановления: " + err.error); document.getElementById('loaderOverlay').style.display = 'none'; }
+        } catch(err) { alert("Сетевая ошибка при загрузке бэкапа"); document.getElementById('loaderOverlay').style.display = 'none'; }
+        event.target.value = '';
+    };
+    reader.readAsDataURL(file);
+}
+
+async function loadStats() {
+    if (isFetching) return;
+    isFetching = true;
+    try {
+        const [resStats, resSys] = await Promise.all([ fetch('/api/stats'), fetch('/api/sysinfo') ]);
+        if (resStats.status === 401 || resSys.status === 401) { showLogin(); isFetching = false; return; }
         
-        async function restoreBackup(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            if (!confirm(`Вы уверены, что хотите восстановить панель из файла "${file.name}"?`)) { event.target.value = ''; return; }
-            document.getElementById('loaderOverlay').style.display = 'flex';
-            const reader = new FileReader();
-            reader.onload = async function(e) {
-                const base64data = e.target.result.split(',')[1];
-                try {
-                    const res = await fetch('/api/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileData: base64data }) });
-                    if (res.ok) { document.getElementById('loaderText').innerText = "Успешно! Перезапуск..."; setTimeout(() => { window.location.reload(); }, 3500); } 
-                    else { const err = await res.json(); alert("Ошибка восстановления: " + err.error); document.getElementById('loaderOverlay').style.display = 'none'; }
-                } catch(err) { alert("Сетевая ошибка при загрузке бэкапа"); document.getElementById('loaderOverlay').style.display = 'none'; }
-                event.target.value = '';
-            };
-            reader.readAsDataURL(file);
-        }
-
-        async function loadStats() {
-            if (isFetching) return;
-            isFetching = true;
-            try {
-                const [resStats, resSys] = await Promise.all([ fetch('/api/stats'), fetch('/api/sysinfo') ]);
-                if (resStats.status === 401 || resSys.status === 401) { showLogin(); isFetching = false; return; }
-                
-                if (resSys.ok) {
-                    const sys = await resSys.json();
-                    document.getElementById('sysCpu').innerText = sys.cpu + '%'; document.getElementById('sysRam').innerText = sys.ram + '%'; document.getElementById('sysUptime').innerText = sys.uptime;
-                    if (sys.disk && sys.disk.total > 0) { 
-                        document.getElementById('diskUsed').innerText = formatBytes(sys.disk.used); 
-                        document.getElementById('diskFree').innerText = formatBytes(sys.disk.free); 
-                        document.getElementById('diskTotal').innerText = formatBytes(sys.disk.total); 
-                    }
-                }
-
-                const data = await resStats.json();
-                const tbody = document.getElementById('clientsTable'); const now = Date.now();
-                let totalRx = 0, totalTx = 0, totalRxSpeed = 0, totalTxSpeed = 0; let activeCount = 0;
-
-                let enrichedData = data.map(client => {
-                    let rxSpeed = 0, txSpeed = 0;
-                    if (lastStats[client.name]) {
-                        const prev = lastStats[client.name]; const timeDiffSec = (now - prev.time) / 1000;
-                        if (timeDiffSec > 0 && client.rx >= prev.rx) { rxSpeed = (client.rx - prev.rx) / timeDiffSec; txSpeed = (client.tx - prev.tx) / timeDiffSec; }
-                    }
-                    lastStats[client.name] = { rx: client.rx, tx: client.tx, time: now };
-                    totalRx += client.rx; totalTx += client.tx; totalRxSpeed += rxSpeed; totalTxSpeed += txSpeed;
-                    
-                    if (client.status_code === 'active' || client.status_code === 'recent') activeCount++;
-                    return { ...client, rxSpeed, txSpeed, totalTraffic: (client.rx || 0) + (client.tx || 0), totalSpeed: rxSpeed + txSpeed };
-                });
-
-                enrichedData.sort((a, b) => {
-                    let valA, valB;
-                    if (sortCol === 'name') {
-                        valA = a.name.toLowerCase(); valB = b.name.toLowerCase();
-                    } else if (sortCol === 'status') {
-                        const score = s => s === 'active' ? 2 : (s === 'recent' ? 1 : 0);
-                        valA = score(a.status_code); valB = score(b.status_code);
-                    } else if (sortCol === 'traffic') {
-                        valA = a.totalTraffic; valB = b.totalTraffic;
-                    } else if (sortCol === 'speed') {
-                        valA = a.totalSpeed; valB = b.totalSpeed;
-                    }
-                    if (valA < valB) return sortDesc ? 1 : -1;
-                    if (valA > valB) return sortDesc ? -1 : 1;
-                    return 0;
-                });
-
-                enrichedData.forEach((client, idx) => {
-                    const statusClass = client.status_code === 'active' ? 'status-active' : (client.status_code === 'recent' ? 'status-recent' : 'status-inactive');
-                    const safeIpId = client.ip.replace(/\./g, '-');
-                    
-                    let tr = document.getElementById('row-' + client.name);
-                    if (!tr) {
-                        tr = document.createElement('tr'); tr.id = 'row-' + client.name;
-                        tr.innerHTML = `
-                            <td class="idx-cell" style="text-align: center; color: var(--text-muted);"></td>
-                            <td><strong style="font-size:14px;">${client.name}</strong><br><span class="sub-text">${client.ip}</span></td> 
-                            <td><span class="st-cell ${statusClass}">${client.status}</span></td> 
-                            <td class="tr-cell"></td> 
-                            <td class="sp-cell"></td>
-                            <td><input type="number" id="limit-${safeIpId}" style="width:60px; padding:6px; margin-bottom:5px;" placeholder="Мб/с"><br><button class="btn-dark" style="padding:4px 10px; font-size:11px;" onclick="setLimit('${client.ip}')">Применить</button></td>
-                            <td><button class="btn-success" style="margin-bottom:5px; font-size:12px; padding:6px 10px; width:100%" onclick="window.location.href='/api/download/${client.name}'">Скачать Conf</button><br><button class="btn-danger" style="font-size:12px; padding:6px 10px; width:100%" onclick="deleteClient('${client.name}')">Удалить</button></td>
-                        `;
-                        tbody.appendChild(tr);
-                    }
-                    tr.querySelector('.idx-cell').innerText = idx + 1;
-                    tr.querySelector('.st-cell').className = `st-cell ${statusClass}`;
-                    tr.querySelector('.st-cell').innerText = client.status;
-                    tr.querySelector('.tr-cell').innerHTML = `<span class="val-rx">↓ ${formatBytes(client.rx)}</span><br><span class="val-tx">↑ ${formatBytes(client.tx)}</span>`;
-                    tr.querySelector('.sp-cell').innerHTML = `<div class="speed-cell"><span class="val-rx">↓ ${formatSpeed(client.rxSpeed)}</span> &nbsp;|&nbsp; <span class="val-tx">↑ ${formatSpeed(client.txSpeed)}</span></div>`;
-                });
-
-                enrichedData.forEach(client => { const tr = document.getElementById('row-' + client.name); if(tr) tbody.appendChild(tr); });
-
-                document.getElementById('totalClientsCount').innerText = enrichedData.length; 
-                document.getElementById('activeClientsCount').innerText = activeCount;
-                document.getElementById('globalTraffic').innerHTML = `<span class="val-rx">↓ ${formatBytes(totalRx)}</span> <span style="color:var(--text-muted)">|</span> <span class="val-tx">↑ ${formatBytes(totalTx)}</span>`;
-                document.getElementById('globalSpeed').innerHTML = `<span class="val-rx">↓ ${formatSpeed(totalRxSpeed)}</span> <span style="color:var(--text-muted)">|</span> <span class="val-tx">↑ ${formatSpeed(totalTxSpeed)}</span>`;
-            } catch (e) {}
-            isFetching = false;
-        }
-
-        async function createConfig() {
-            const name = document.getElementById('clientName').value; const count = document.getElementById('clientCount').value; const expires = document.getElementById('clientExpires').value;
-            if(!name) return alert("Введите имя (префикс)");
-            if (!count || parseInt(count) <= 1) {
-                const res = await fetch('/api/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, expires }) });
-                if (res.ok) { const a = document.createElement('a'); a.href = window.URL.createObjectURL(await res.blob()); a.download = `Paris_${name}.conf`; a.click(); document.getElementById('clientName').value = ''; loadStats(); }
-            } else {
-                document.getElementById('loaderOverlay').style.display = 'flex'; document.getElementById('loaderText').innerText = "Генерация ZIP архива...";
-                const res = await fetch('/api/create-bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prefix: name, count: parseInt(count), expires }) });
-                if (res.ok) { const a = document.createElement('a'); a.href = window.URL.createObjectURL(await res.blob()); a.download = `Paris_Bulk_${name}.zip`; a.click(); document.getElementById('clientName').value = ''; document.getElementById('clientCount').value = ''; loadStats(); }
-                document.getElementById('loaderOverlay').style.display = 'none';
+        if (resSys.ok) {
+            const sys = await resSys.json();
+            document.getElementById('sysCpu').innerText = sys.cpu + '%'; document.getElementById('sysRam').innerText = sys.ram + '%'; document.getElementById('sysUptime').innerText = sys.uptime;
+            if (sys.disk && sys.disk.total > 0) { 
+                document.getElementById('diskUsed').innerText = formatBytes(sys.disk.used); 
+                document.getElementById('diskFree').innerText = formatBytes(sys.disk.free); 
+                document.getElementById('diskTotal').innerText = formatBytes(sys.disk.total); 
             }
         }
 
-        async function deleteClient(name) {
-            if (!confirm(`Точно удалить клиента ${name}?`)) return;
-            const res = await fetch(`/api/delete/${name}`, { method: 'DELETE' });
-            if (res.ok) { delete lastStats[name]; document.getElementById('row-' + name).remove(); }
-        }
+        const data = await resStats.json();
+        const tbody = document.getElementById('clientsTable'); const now = Date.now();
+        let totalRx = 0, totalTx = 0, totalRxSpeed = 0, totalTxSpeed = 0; let activeCount = 0;
 
-        async function setLimit(ip) {
-            const rate = document.getElementById('limit-' + ip.replace(/\./g, '-')).value;
-            if (!rate) return alert("Введите скорость в Мбит/с");
-            const res = await fetch('/api/limit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip, rate: parseInt(rate) }) });
-            if (res.ok) alert(`Лимит для ${ip} установлен: ${rate} Mbit/s`);
-        }
+        let enrichedData = data.map(client => {
+            let rxSpeed = 0, txSpeed = 0;
+            if (lastStats[client.name]) {
+                const prev = lastStats[client.name]; const timeDiffSec = (now - prev.time) / 1000;
+                if (timeDiffSec > 0 && client.rx >= prev.rx) { rxSpeed = (client.rx - prev.rx) / timeDiffSec; txSpeed = (client.tx - prev.tx) / timeDiffSec; }
+            }
+            lastStats[client.name] = { rx: client.rx, tx: client.tx, time: now };
+            totalRx += client.rx; totalTx += client.tx; totalRxSpeed += rxSpeed; totalTxSpeed += txSpeed;
+            
+            if (client.status_code === 'active' || client.status_code === 'recent') activeCount++;
+            return { ...client, rxSpeed, txSpeed, totalTraffic: (client.rx || 0) + (client.tx || 0), totalSpeed: rxSpeed + txSpeed };
+        });
 
-        loadStats();
-    </script>
+        enrichedData.sort((a, b) => {
+            let valA, valB;
+            if (sortCol === 'name') {
+                valA = a.name.toLowerCase(); valB = b.name.toLowerCase();
+            } else if (sortCol === 'status') {
+                const score = s => s === 'active' ? 2 : (s === 'recent' ? 1 : 0);
+                valA = score(a.status_code); valB = score(b.status_code);
+            } else if (sortCol === 'traffic') {
+                valA = a.totalTraffic; valB = b.totalTraffic;
+            } else if (sortCol === 'speed') {
+                valA = a.totalSpeed; valB = b.totalSpeed;
+            }
+            if (valA < valB) return sortDesc ? 1 : -1;
+            if (valA > valB) return sortDesc ? -1 : 1;
+            return 0;
+        });
+
+        enrichedData.forEach((client, idx) => {
+            const statusClass = client.status_code === 'active' ? 'status-active' : (client.status_code === 'recent' ? 'status-recent' : 'status-inactive');
+            const safeIpId = client.ip.replace(/\./g, '-');
+            
+            let tr = document.getElementById('row-' + client.name);
+            if (!tr) {
+                tr = document.createElement('tr'); tr.id = 'row-' + client.name;
+                tr.innerHTML = `
+                    <td class="idx-cell" style="text-align: center; color: var(--text-muted);"></td>
+                    <td><strong style="font-size:14px;">${client.name}</strong><br><span class="sub-text">${client.ip}</span></td> 
+                    <td><span class="st-cell ${statusClass}">${client.status}</span></td> 
+                    <td class="tr-cell"></td> 
+                    <td class="sp-cell"></td>
+                    <td><input type="number" id="limit-${safeIpId}" style="width:60px; padding:6px; margin-bottom:5px;" placeholder="Мб/с"><br><button class="btn-dark" style="padding:4px 10px; font-size:11px;" onclick="setLimit('${client.ip}')">Применить</button></td>
+                    <td><button class="btn-success" style="margin-bottom:5px; font-size:12px; padding:6px 10px; width:100%" onclick="window.location.href='/api/download/${client.name}'">Скачать Conf</button><br><button class="btn-danger" style="font-size:12px; padding:6px 10px; width:100%" onclick="deleteClient('${client.name}')">Удалить</button></td>
+                `;
+                tbody.appendChild(tr);
+            }
+            tr.querySelector('.idx-cell').innerText = idx + 1;
+            tr.querySelector('.st-cell').className = `st-cell ${statusClass}`;
+            tr.querySelector('.st-cell').innerText = client.status;
+            tr.querySelector('.tr-cell').innerHTML = `<span class="val-rx">↓ ${formatBytes(client.rx)}</span><br><span class="val-tx">↑ ${formatBytes(client.tx)}</span>`;
+            tr.querySelector('.sp-cell').innerHTML = `<div class="speed-cell"><span class="val-rx">↓ ${formatSpeed(client.rxSpeed)}</span> &nbsp;|&nbsp; <span class="val-tx">↑ ${formatSpeed(client.txSpeed)}</span></div>`;
+        });
+
+        enrichedData.forEach(client => { const tr = document.getElementById('row-' + client.name); if(tr) tbody.appendChild(tr); });
+
+        document.getElementById('totalClientsCount').innerText = enrichedData.length; 
+        document.getElementById('activeClientsCount').innerText = activeCount;
+        document.getElementById('globalTraffic').innerHTML = `<span class="val-rx">↓ ${formatBytes(totalRx)}</span> <span style="color:var(--text-muted)">|</span> <span class="val-tx">↑ ${formatBytes(totalTx)}</span>`;
+        document.getElementById('globalSpeed').innerHTML = `<span class="val-rx">↓ ${formatSpeed(totalRxSpeed)}</span> <span style="color:var(--text-muted)">|</span> <span class="val-tx">↑ ${formatSpeed(totalTxSpeed)}</span>`;
+    } catch (e) {}
+    isFetching = false;
+}
+
+async function createConfig() {
+    const name = document.getElementById('clientName').value; const count = document.getElementById('clientCount').value; const expires = document.getElementById('clientExpires').value;
+    if(!name) return alert("Введите имя (префикс)");
+    if (!count || parseInt(count) <= 1) {
+        const res = await fetch('/api/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, expires }) });
+        if (res.ok) { const a = document.createElement('a'); a.href = window.URL.createObjectURL(await res.blob()); a.download = `Paris_${name}.conf`; a.click(); document.getElementById('clientName').value = ''; loadStats(); }
+    } else {
+        document.getElementById('loaderOverlay').style.display = 'flex'; document.getElementById('loaderText').innerText = "Генерация ZIP архива...";
+        const res = await fetch('/api/create-bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prefix: name, count: parseInt(count), expires }) });
+        if (res.ok) { const a = document.createElement('a'); a.href = window.URL.createObjectURL(await res.blob()); a.download = `Paris_Bulk_${name}.zip`; a.click(); document.getElementById('clientName').value = ''; document.getElementById('clientCount').value = ''; loadStats(); }
+        document.getElementById('loaderOverlay').style.display = 'none';
+    }
+}
+
+async function deleteClient(name) {
+    if (!confirm(`Точно удалить клиента ${name}?`)) return;
+    const res = await fetch(`/api/delete/${name}`, { method: 'DELETE' });
+    if (res.ok) { delete lastStats[name]; document.getElementById('row-' + name).remove(); }
+}
+
+async function setLimit(ip) {
+    const rate = document.getElementById('limit-' + ip.replace(/\./g, '-')).value;
+    if (!rate) return alert("Введите скорость в Мбит/с");
+    const res = await fetch('/api/limit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip, rate: parseInt(rate) }) });
+    if (res.ok) alert(`Лимит для ${ip} установлен: ${rate} Mbit/s`);
+}
+
+loadStats();
+</script>
 </body>
 </html>
