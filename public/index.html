@@ -1150,7 +1150,7 @@ async function createConfig() {
     if(!name) return alert("Введите имя (префикс)");
     if (!count || parseInt(count) <= 1) {
         const res = await fetch('/api/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, expires }) });
-        if (res.ok) { const a = document.createElement('a'); a.href = window.URL.createObjectURL(await res.blob()); a.download = `Paris_${name}.conf`; a.click(); document.getElementById('clientName').value = ''; loadStats(); }
+        if (res.ok) { const a = document.createElement('a'); a.href = window.URL.createObjectURL(await res.blob()); a.download = `serv_${name}.conf`; a.click(); document.getElementById('clientName').value = ''; loadStats(); }
     } else {
         document.getElementById('loaderOverlay').style.display = 'flex'; document.getElementById('loaderText').innerText = "Генерация ZIP архива...";
         const res = await fetch('/api/create-bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prefix: name, count: parseInt(count), expires }) });
