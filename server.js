@@ -448,11 +448,6 @@ app.post('/api/create-bulk', checkAuth, (req, res) => {
     const { prefix, count, expires } = req.body;
     if (!prefix || !/^[a-zA-Z0-9_-]+$/.test(prefix) || isNaN(count) || count < 1 || count > 50) return res.status(400).json({ error: "Недопустимые параметры" });
     try {
-        const batchId = Date.now();
-        const tempDir = `/tmp/awg-bulk-${batchId}`;
-        execSync(`mkdir -p ${tempDir}`);
-        
-        // Получаем домен один раз для всего архива
         let domain = "";
         try {
             if (fs.existsSync('/root/awg_domain.txt')) domain = fs.readFileSync('/root/awg_domain.txt', 'utf8').trim();
@@ -461,6 +456,8 @@ app.post('/api/create-bulk', checkAuth, (req, res) => {
                 if (match && match[1] && match[1] !== '_') domain = match[1].trim();
             }
         } catch(e) {}
+
+        const generatedConfigs = [];
 
         for (let i = 1; i <= count; i++) {
             const clientName = `${prefix}-${i}`;
@@ -472,15 +469,18 @@ app.post('/api/create-bulk', checkAuth, (req, res) => {
                 const response = JSON.parse(result);
                 if (response.ok && response.results[0].conf) {
                     const confPath = response.results[0].conf;
+                    // Подменяем IP на домен, если нужно
                     if (domain) execSync(`sudo sed -i -E 's/Endpoint = [0-9\\.]+(:[0-9]+)/Endpoint = ${domain}\\1/g' ${confPath}`);
-                    execSync(`sudo cp ${confPath} ${tempDir}/Serv_${clientName}.conf`);
+                    
+                    // Читаем готовый файл, чтобы отправить его в браузер
+                    const confContent = fs.readFileSync(confPath, 'utf8');
+                    generatedConfigs.push({ name: clientName, content: confContent });
                 }
             } catch(e) {} 
         }
-        const zipPath = `/tmp/Serv_Bulk_${prefix}_${count}.zip`;
-        execSync(`cd ${tempDir} && zip -r ${zipPath} .`);
-        execSync(`rm -rf ${tempDir}`);
-        res.download(zipPath, `Serv_Bulk_${prefix}.zip`, () => { if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath); });
+        
+        // Отдаем массив со всеми готовыми файлами обратно в браузер
+        res.json({ success: true, configs: generatedConfigs });
     } catch(err) { res.status(500).json({ error: "Ошибка массового создания" }); }
 });
 
