@@ -78,11 +78,9 @@ read -p "Установить AdGuard Home? [Y/n]: " INSTALL_ADGUARD < /dev/tty
 read -p "Установить MTProto FIX (by MEKO)? [Y/n]: " INSTALL_MTPROTO < /dev/tty
 
 echo -e "\n${CYAN}Настройка доступа к панели${NC}"
-read -p "Придумайте пароль для входа в панель: " ADMIN_PASS < /dev/tty
-if [ -z "$ADMIN_PASS" ]; then
-    ADMIN_PASS="admin123"
-    echo "Вы не ввели пароль. Будет использован пароль по умолчанию: admin123"
-fi
+ADMIN_PASS="admin123"
+echo "Для входа будет установлен пароль по умолчанию: $ADMIN_PASS"
+echo "Вы сможете изменить его позже прямо в веб-интерфейсе."
 
 echo -e "\nКак будем заходить в панель управления?"
 echo "1) По IP-адресу"
@@ -136,8 +134,6 @@ rm -rf servpanel
 git clone $GITHUB_REPO servpanel
 cd servpanel
 
-echo "Применение заданного пароля..."
-sed -i "s/mysecretpassword/$ADMIN_PASS/g" server.js
 
 if [ "$ACCESS_TYPE" != "2" ]; then
     echo "Применение кастомного порта $PANEL_PORT..."
