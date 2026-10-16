@@ -490,33 +490,7 @@
     </main>
 
     <script>
-		function startAwgInstall() {
-    // Собираем базовые параметры...
-    const data = {
-        module: 'awg',
-        version: document.getElementById('awgVersion').value,
-        preset: document.getElementById('awgPreset').value,
-        route: document.getElementById('awgRoute').value,
-        ipv6: document.getElementById('awgIpv6').value,
-        port: document.getElementById('awgPort').value,
-        isolation: document.getElementById('awgIsolation').checked,
-        keepPackages: document.getElementById('awgKeepPackages').checked,
-        noTweaks: document.getElementById('awgNoTweaks').checked,
-        
-        // Новые параметры каскада
-        awgMode: document.getElementById('awgMode').value,
-        cascadeRole: document.getElementById('cascadeRole') ? document.getElementById('cascadeRole').value : 'ru',
-        remoteIp: document.getElementById('remoteIp') ? document.getElementById('remoteIp').value : '',
-        remotePort: document.getElementById('remotePort') ? document.getElementById('remotePort').value : '22',
-        remotePass: document.getElementById('remotePass') ? document.getElementById('remotePass').value : ''
-    };
-    
-    if (data.awgMode === 'cascade' && (!data.remoteIp || !data.remotePass)) {
-        alert('Для каскадной установки необходимо указать IP и пароль удаленного сервера!');
-        return;
-    }
-			
-		let logInterval = null;
+let logInterval = null;
 
 async function startInstall(module, expectedLogFile) {
     let options = {};
@@ -526,16 +500,29 @@ async function startInstall(module, expectedLogFile) {
         if (check !== 'INSTALL') { alert("Установка отменена."); return; }
         
         options = {
-            version: document.getElementById('awgInstallVersion').value,
-            preset: document.getElementById('awgInstallPreset').value,
-            route: document.getElementById('awgInstallRoute').value,
-            customRoute: document.getElementById('awgCustomRoute').value,
-            ipv6: document.getElementById('awgInstallIpv6').value,
-            port: document.getElementById('awgInstallPort').value,
+            // Ваши стандартные параметры (с поддержкой обоих вариантов ID)
+            version: document.getElementById('awgInstallVersion') ? document.getElementById('awgInstallVersion').value : document.getElementById('awgVersion').value,
+            preset: document.getElementById('awgInstallPreset') ? document.getElementById('awgInstallPreset').value : document.getElementById('awgPreset').value,
+            route: document.getElementById('awgInstallRoute') ? document.getElementById('awgInstallRoute').value : document.getElementById('awgRoute').value,
+            customRoute: document.getElementById('awgCustomRoute') ? document.getElementById('awgCustomRoute').value : '',
+            ipv6: document.getElementById('awgInstallIpv6') ? document.getElementById('awgInstallIpv6').value : document.getElementById('awgIpv6').value,
+            port: document.getElementById('awgInstallPort') ? document.getElementById('awgInstallPort').value : document.getElementById('awgPort').value,
             isolation: document.getElementById('awgIsolation').checked,
             keepPackages: document.getElementById('awgKeepPackages').checked,
-            noTweaks: document.getElementById('awgNoTweaks').checked
+            noTweaks: document.getElementById('awgNoTweaks').checked,
+            
+            // НОВЫЕ ПАРАМЕТРЫ КАСКАДА
+            awgMode: document.getElementById('awgMode') ? document.getElementById('awgMode').value : 'single',
+            cascadeRole: document.getElementById('cascadeRole') ? document.getElementById('cascadeRole').value : 'ru',
+            remoteIp: document.getElementById('remoteIp') ? document.getElementById('remoteIp').value : '',
+            remotePort: document.getElementById('remotePort') ? document.getElementById('remotePort').value : '22',
+            remotePass: document.getElementById('remotePass') ? document.getElementById('remotePass').value : ''
         };
+
+        if (options.awgMode === 'cascade' && (!options.remoteIp || !options.remotePass)) {
+            alert('Для каскадной установки необходимо указать IP и пароль удаленного сервера!');
+            return;
+        }
     } else {
         if(!confirm(`Запустить процесс установки модуля ${module}? Следите за логами в окне ниже.`)) return;
     }
