@@ -335,8 +335,8 @@
                     </div>
 
                    <!-- Карточка 2: Каскад -->
-					<div class="card">
- 					   <h3 style="color: #58a6ff;">Маршрутизация Каскада (RU ➔ EU)</h3>
+					<div class="card" id="cascadeRoutingCard">
+   					 <h3 style="color: #58a6ff;">Маршрутизация Каскада (RU ➔ EU)</h3>
   					  <p style="color: #ff7b72; font-size: 12px; margin-bottom: 10px; line-height: 1.3;">
       				  ⚠️ <b>Важно:</b> Маршруты каскада настраиваются <b>строго на ВХОДНОМ сервере (RU)</b>. Если эта панель установлена на сервере-выходе (EU), не применяйте здесь эти локальные правила.
   					  </p>
@@ -783,7 +783,7 @@ async function loadServerInfo() {
         const res = await fetch('/api/server-info');
         if (res.ok) {
             const data = await res.json();
-            let html = `<div style="margin-bottom: 8px;"><span class="val-sys">Обычный DNS (IPv4):</span> ${data.ip}</div>`;
+            let html = `<div style="margin-bottom: 8px;"><span class="val-sys">Обычный DNS (IPv4):</span> ${data.ip} <span class="sub-text">(${data.country})</span></div>`;
             if (data.domain) {
                 html += `<div style="margin-bottom: 8px;"><span class="val-rx">DNS-over-TLS (DoT):</span> tls://${data.domain}</div>`;
                 html += `<div><span class="val-tx">DNS-over-HTTPS (DoH):</span> https://${data.domain}/dns-query</div>`;
@@ -791,6 +791,21 @@ async function loadServerInfo() {
                 html += `<div style="color: var(--text-muted); font-size: 12px; margin-top: 5px;">* Для настройки DoT и DoH (Private DNS) привяжите домен к серверу.</div>`;
             }
             document.getElementById('dnsAddressesList').innerHTML = html;
+
+            // Блокировка каскада, если сервер не в РФ
+            const cascadeCard = document.getElementById('cascadeRoutingCard');
+            if (cascadeCard && data.country !== 'RU' && data.country !== 'UNKNOWN') {
+                cascadeCard.innerHTML = `
+                    <h3 style="color: #58a6ff;">Маршрутизация Каскада</h3>
+                    <div style="padding: 20px 0; text-align: center;">
+                        <span style="font-size: 30px;">🌍</span>
+                        <p style="color: var(--text-muted); margin-top: 10px; font-size: 14px;">
+                            Панель обнаружена в регионе <b>${data.country}</b>.<br>
+                            Управление маршрутами доступно только на сервере-входе (RU).
+                        </p>
+                    </div>
+                `;
+            }
         }
     } catch(e) {
         document.getElementById('dnsAddressesList').innerHTML = "Не удалось загрузить данные сервера";
