@@ -351,7 +351,43 @@
 <div class="card" style="flex: 1; min-width: 320px;">
     <h3>AmneziaWG (С перезагрузками)</h3>
     <p style="color: var(--text-muted); font-size: 13px;">Полная установка AWG. Потребует 3 перезагрузки сервера.</p>
+
+<div class="mb-3">
+    <label class="form-label text-info fw-bold">Режим установки</label>
+    <select id="awgMode" class="form-select bg-dark text-white border-secondary" onchange="document.getElementById('cascadeSettings').style.display = this.value === 'cascade' ? 'block' : 'none';">
+        <option value="single">Обычная установка (Текущий сервер)</option>
+        <option value="cascade">Каскад (Раздельный выход: RU + EU)</option>
+    </select>
+</div>
+
+<div id="cascadeSettings" class="p-3 mb-3 border border-info rounded" style="display:none; background: rgba(13, 202, 240, 0.05);">
+    <h6 class="text-info border-bottom border-info pb-2 mb-3">Настройки второго сервера</h6>
     
+    <div class="mb-3">
+        <label class="form-label text-warning small">Где установлена эта панель?</label>
+        <select id="cascadeRole" class="form-select form-select-sm bg-dark text-white border-secondary">
+            <option value="ru">Эта панель в РОССИИ (Вход) -> Подключаем удаленный EU сервер (Выход)</option>
+            <option value="eu">Эта панель в ЕВРОПЕ (Выход) -> Подключаем удаленный RU сервер (Вход)</option>
+        </select>
+    </div>
+
+    <div class="row g-2">
+        <div class="col-md-6">
+            <label class="form-label small">IP удаленного сервера</label>
+            <input type="text" id="remoteIp" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="1.2.3.4">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label small">SSH Порт</label>
+            <input type="number" id="remotePort" class="form-control form-control-sm bg-dark text-white border-secondary" value="22">
+        </div>
+        <div class="col-md-12 mt-2">
+            <label class="form-label small">Root Пароль от удаленного сервера</label>
+            <input type="password" id="remotePass" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="P@ssw0rd123">
+            <small class="text-muted" style="font-size: 0.75rem;">Серверы будут автоматически синхронизированы и настроены по SSH (требуется sshpass)</small>
+        </div>
+    </div>
+</div>
+	
     <div class="controls-row" style="margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
         
         <!-- Версия -->
@@ -454,6 +490,32 @@
     </main>
 
     <script>
+		function startAwgInstall() {
+    // Собираем базовые параметры...
+    const data = {
+        module: 'awg',
+        version: document.getElementById('awgVersion').value,
+        preset: document.getElementById('awgPreset').value,
+        route: document.getElementById('awgRoute').value,
+        ipv6: document.getElementById('awgIpv6').value,
+        port: document.getElementById('awgPort').value,
+        isolation: document.getElementById('awgIsolation').checked,
+        keepPackages: document.getElementById('awgKeepPackages').checked,
+        noTweaks: document.getElementById('awgNoTweaks').checked,
+        
+        // Новые параметры каскада
+        awgMode: document.getElementById('awgMode').value,
+        cascadeRole: document.getElementById('cascadeRole') ? document.getElementById('cascadeRole').value : 'ru',
+        remoteIp: document.getElementById('remoteIp') ? document.getElementById('remoteIp').value : '',
+        remotePort: document.getElementById('remotePort') ? document.getElementById('remotePort').value : '22',
+        remotePass: document.getElementById('remotePass') ? document.getElementById('remotePass').value : ''
+    };
+    
+    if (data.awgMode === 'cascade' && (!data.remoteIp || !data.remotePass)) {
+        alert('Для каскадной установки необходимо указать IP и пароль удаленного сервера!');
+        return;
+    }
+			
 		let logInterval = null;
 
 async function startInstall(module, expectedLogFile) {
