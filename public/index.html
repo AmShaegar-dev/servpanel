@@ -313,26 +313,46 @@
                 </div>
             </div>
 
-            <!-- ЗАЩИТА И CRON -->
+       <!-- ЗАЩИТА И CRON -->
             <div id="tab-security" class="tab-pane">
                 <div class="stats-cards">
+                    
+                    <!-- Карточка 1: GeoIP -->
                     <div class="card">
                         <h3>Блокировка RU-трафика (GeoIP)</h3>
                         <div style="margin-bottom: 15px;"><span id="ruDropStatus">Ожидание...</span></div>
+                        <div id="ruDropIfacesList" style="margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
                         <div class="controls-row">
-                            <select id="ruDropIface" style="width: 120px;"></select>
-                            <select id="ruDropSchedule" style="width: 160px;"><option value="weekly">Обновлять раз в неделю</option><option value="daily">Каждый день</option></select>
+                            <select id="ruDropSchedule" style="width: 100%;">
+                                <option value="weekly">Обновлять раз в неделю</option>
+                                <option value="daily">Каждый день</option>
+                            </select>
                         </div>
                         <div class="controls-row" style="margin-bottom: 0;">
                             <button class="btn-danger" onclick="toggleRuDrop(true)">Включить изоляцию</button>
-                            <button class="btn-dark" onclick="toggleRuDrop(false)">Снять блокировку</button>
+                            <button class="btn-dark" onclick="toggleRuDrop(false)">Отключить</button>
                         </div>
                     </div>
+
+                    <!-- Карточка 2: Каскад -->
+                    <div class="card">
+                        <h3 style="color: #58a6ff;">Маршрутизация Каскада (RU ➔ EU)</h3>
+                        <div style="margin-bottom: 15px;"><span id="cascadeStatus">Ожидание...</span></div>
+                        <div id="cascadeIfacesList" style="margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
+                        <div class="controls-row" style="margin-bottom: 0; margin-top: auto;">
+                            <button class="btn-success" style="background-color: #2ea043; color: white; border: none; border-radius: 6px;" onclick="toggleCascade(true)">Применить маршруты</button>
+                            <button class="btn-dark" onclick="toggleCascade(false)">Отключить</button>
+                        </div>
+                        <p style="color: var(--text-muted); font-size: 11px; margin-top: 10px; margin-bottom: 0;">* Выберите интерфейсы. Требует установки Каскада.</p>
+                    </div>
+
+                    <!-- Карточка 3: Fail2Ban -->
                     <div class="card">
                         <h3>Fail2Ban / Брутфорс (Скоро)</h3>
                         <p style="color: var(--text-muted); font-size: 14px;">Здесь будет список заблокированных IP-адресов злоумышленников и возможность ручного разбана.</p>
-                        <button class="btn-dark" disabled>Функция в разработке</button>
+                        <button class="btn-dark" style="margin-top: auto;" disabled>Функция в разработке</button>
                     </div>
+
                 </div>
             </div>
 
