@@ -458,7 +458,10 @@
                             </div>
                         </div>
                         <button class="btn-primary" style="width: 100%;" onclick="startInstall('awg', '/var/log/awg_install.log')">Начать установку AWG</button>
+                        <div style="margin-top: 15px; border-top: 1px solid var(--border); padding-top: 15px;">
+                        <button class="btn-danger" style="width: 100%; background: #da3633;" onclick="uninstallAwg()">🗑 Полностью удалить AmneziaWG</button>
                     </div>
+                </div>
                     
                     <div class="card" style="flex: 1;">
                         <h3>MTProto / WEB Proxy (MEKO)</h3>
@@ -544,7 +547,30 @@ async function startInstall(module, expectedLogFile) {
         }
     } catch(e) { alert("Сетевая ошибка"); }
 }
-
+async function uninstallAwg() {
+    const check = prompt("ВНИМАНИЕ! Это полностью удалит ядро AmneziaWG, все настройки и ВСЕХ клиентов!\n\nДля подтверждения введите слово DELETE (большими буквами):");
+    if (check !== 'DELETE') return;
+    
+    document.getElementById('loaderOverlay').style.display = 'flex';
+    document.getElementById('loaderText').innerText = "Удаление AmneziaWG (около 15 сек)...";
+    
+    try {
+        const res = await fetch('/api/uninstall/awg', { method: 'POST' });
+        if (res.ok) {
+            setTimeout(() => {
+                alert("AmneziaWG успешно удален вместе с конфигами! Теперь вы можете установить версию 3.1.");
+                window.location.reload();
+            }, 15000); // Ждем 15 секунд, пока скрипт в фоне очистит ядро и файлы
+        } else {
+            alert("Ошибка при запуске удаления");
+            document.getElementById('loaderOverlay').style.display = 'none';
+        }
+    } catch (e) {
+        alert("Ошибка сети");
+        document.getElementById('loaderOverlay').style.display = 'none';
+    }
+}
+    
 async function pollLog(logFile) {
     try {
         const res = await fetch(`/api/install/log?file=${logFile}`);
