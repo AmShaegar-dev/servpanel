@@ -210,11 +210,14 @@ app.get('/api/tools/status', checkAuth, (req, res) => {
         cascActive = cascIfaces.length > 0;
     } catch(e) {}
 
-    let dnsActive = false, dnsTarget = '', dnsIface = '';
-    try {
-        const match = execSync("sudo iptables -t nat -S PREROUTING || true").toString().match(/-i\s+(\S+).*?--dport 53 -j DNAT --to-destination\s+(\S+)/);
-        if (match) { dnsActive = true; dnsIface = match[1]; dnsTarget = match[2]; }
-    } catch(e) {}
+    let dnsActive = false, dnsTarget = '', dnsIfaces = [];
+try {
+    const natStr = execSync("sudo iptables -t nat -S PREROUTING || true").toString();
+    const matches = [...natStr.matchAll(/-A PREROUTING -i\s+(\S+).*?--dport 53 -j DNAT --to-destination\s+(\S+)/g)];
+    dnsIfaces = [...new Set(matches.map(m => m[1]))];
+    if (matches.length > 0) dnsTarget = matches[0][2];
+    dnsActive = dnsIfaces.length > 0;
+} catch(e) {}
     
     res.json({
         ruDrop: { active: ruActive, count: ruCount, ifaces: ruIfaces },
@@ -354,18 +357,26 @@ echo "ОК: Каскад применен."
 });
 
 app.post('/api/tools/dns', checkAuth, (req, res) => {
-    const { iface, target, enable, oldIface, oldTarget } = req.body;
-    if (oldIface && oldTarget) {
-        try { execSync(`sudo iptables -t nat -D PREROUTING -i ${oldIface} -p udp --dport 53 -j DNAT --to-destination ${oldTarget}`); } catch(e){}
-        try { execSync(`sudo iptables -t nat -D PREROUTING -i ${oldIface} -p tcp --dport 53 -j DNAT --to-destination ${oldTarget}`); } catch(e){}
-        try { execSync(`sudo iptables -D FORWARD -i ${oldIface} -p tcp --dport 853 -j DROP`); } catch(e){}
+    const { ifaces, target, enable, oldIfaces, oldTarget } = req.body;
+    
+    // Очищаем старые правила со всех прошлых интерфейсов
+    if (oldIfaces && oldIfaces.length > 0 && oldTarget) {
+        oldIfaces.forEach(oldIface => {
+            try { execSync(`sudo iptables -t nat -D PREROUTING -i ${oldIface} -p udp --dport 53 -j DNAT --to-destination ${oldTarget}`); } catch(e){}
+            try { execSync(`sudo iptables -t nat -D PREROUTING -i ${oldIface} -p tcp --dport 53 -j DNAT --to-destination ${oldTarget}`); } catch(e){}
+            try { execSync(`sudo iptables -D FORWARD -i ${oldIface} -p tcp --dport 853 -j DROP`); } catch(e){}
+        });
     }
-    if (enable && iface && target) {
-        try {
-            execSync(`sudo iptables -t nat -I PREROUTING 1 -i ${iface} -p udp --dport 53 -j DNAT --to-destination ${target}`);
-            execSync(`sudo iptables -t nat -I PREROUTING 1 -i ${iface} -p tcp --dport 53 -j DNAT --to-destination ${target}`);
-            execSync(`sudo iptables -I FORWARD 1 -i ${iface} -p tcp --dport 853 -j DROP`);
-        } catch(e) { return res.status(500).json({error: "Ошибка правил iptables"}); }
+    
+    // Применяем новые правила циклом
+    if (enable && ifaces && ifaces.length > 0 && target) {
+        ifaces.forEach(iface => {
+            try {
+                execSync(`sudo iptables -t nat -I PREROUTING 1 -i ${iface} -p udp --dport 53 -j DNAT --to-destination ${target}`);
+                execSync(`sudo iptables -t nat -I PREROUTING 1 -i ${iface} -p tcp --dport 53 -j DNAT --to-destination ${target}`);
+                execSync(`sudo iptables -I FORWARD 1 -i ${iface} -p tcp --dport 853 -j DROP`);
+            } catch(e) {}
+        });
     }
     res.json({success: true});
 });
