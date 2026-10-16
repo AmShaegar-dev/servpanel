@@ -469,17 +469,17 @@ app.post('/api/create-bulk', checkAuth, (req, res) => {
                 const response = JSON.parse(result);
                 if (response.ok && response.results[0].conf) {
                     const confPath = response.results[0].conf;
-                    // Подменяем IP на домен, если нужно
+                    
+                    // Подменяем IP на домен
                     if (domain) execSync(`sudo sed -i -E 's/Endpoint = [0-9\\.]+(:[0-9]+)/Endpoint = ${domain}\\1/g' ${confPath}`);
                     
-                    // Читаем готовый файл, чтобы отправить его в браузер
-                    const confContent = fs.readFileSync(confPath, 'utf8');
+                    // ИСПРАВЛЕНИЕ: Читаем файл от имени суперпользователя (sudo)
+                    const confContent = execSync(`sudo cat ${confPath}`).toString();
                     generatedConfigs.push({ name: clientName, content: confContent });
                 }
             } catch(e) {} 
         }
         
-        // Отдаем массив со всеми готовыми файлами обратно в браузер
         res.json({ success: true, configs: generatedConfigs });
     } catch(err) { res.status(500).json({ error: "Ошибка массового создания" }); }
 });
