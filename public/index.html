@@ -514,16 +514,19 @@
 
     <script>
 let logInterval = null;
+let lastStats = {}; let isFetching = false; 
+let pollingInterval = null; let historyInterval = null; let agInterval = null;
+let chartData = { global: { labels: [], rx: [], tx: [] } };
+let currentChartView = 'global'; let trafficChart = null;
+let sortCol = 'name'; let sortDesc = false;
 
 async function startInstall(module, expectedLogFile) {
     let options = {};
-
     if (module === 'awg') {
         const check = prompt("ВНИМАНИЕ! Установка AWG перезагрузит сервер 3 раза.\n\nДля подтверждения введите слово INSTALL (большими буквами):");
         if (check !== 'INSTALL') { alert("Установка отменена."); return; }
         
         options = {
-            // Ваши стандартные параметры (с поддержкой обоих вариантов ID)
             version: document.getElementById('awgInstallVersion') ? document.getElementById('awgInstallVersion').value : document.getElementById('awgVersion').value,
             preset: document.getElementById('awgInstallPreset') ? document.getElementById('awgInstallPreset').value : document.getElementById('awgPreset').value,
             route: document.getElementById('awgInstallRoute') ? document.getElementById('awgInstallRoute').value : document.getElementById('awgRoute').value,
@@ -533,8 +536,6 @@ async function startInstall(module, expectedLogFile) {
             isolation: document.getElementById('awgIsolation').checked,
             keepPackages: document.getElementById('awgKeepPackages').checked,
             noTweaks: document.getElementById('awgNoTweaks').checked,
-            
-            // НОВЫЕ ПАРАМЕТРЫ КАСКАДА
             awgMode: document.getElementById('awgMode') ? document.getElementById('awgMode').value : 'single',
             cascadeRole: document.getElementById('cascadeRole') ? document.getElementById('cascadeRole').value : 'ru',
             remoteIp: document.getElementById('remoteIp') ? document.getElementById('remoteIp').value : '',
@@ -558,7 +559,7 @@ async function startInstall(module, expectedLogFile) {
         const res = await fetch('/api/install/module', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ module, ...options }) // Передаем все собранные опции
+            body: JSON.stringify({ module, ...options })
         });
         if (res.ok) {
             if (logInterval) clearInterval(logInterval);
@@ -566,9 +567,7 @@ async function startInstall(module, expectedLogFile) {
         } else {
             alert("Ошибка запуска установки");
         }
-    } catch(e) {
-        alert("Сетевая ошибка");
-    }
+    } catch(e) { alert("Сетевая ошибка"); }
 }
 
 async function pollLog(logFile) {
@@ -577,17 +576,13 @@ async function pollLog(logFile) {
         if (res.ok) {
             const text = await res.text();
             const textArea = document.getElementById('installLogText');
-            
-            // Если текст изменился, обновляем и скроллим вниз
             if (textArea.value !== text) {
                 textArea.value = text;
                 textArea.scrollTop = textArea.scrollHeight;
             }
-            
             document.getElementById('installStatusBadge').innerText = "Установка идет...";
             document.getElementById('installStatusBadge').className = "val-sys";
 
-            // Если скрипт завершился (нужно будет добавить слово DONE в конец наших скриптов)
             if (text.includes('=== INSTALLATION DONE ===')) {
                 clearInterval(logInterval);
                 document.getElementById('installStatusBadge').innerText = "Успешно завершено!";
@@ -595,12 +590,12 @@ async function pollLog(logFile) {
             }
         }
     } catch(e) {
-        // Ошибка сети тут означает, что сервер ушел в REBOOT!
         document.getElementById('installStatusBadge').innerText = "Сервер перезагружается... Ожидание (до 30 сек)";
         document.getElementById('installStatusBadge').className = "val-tx";
     }
 }
-		async function loadAwgConfig() {
+
+async function loadAwgConfig() {
     try {
         const res = await fetch('/api/awg/config');
         if (res.ok) {
@@ -630,142 +625,129 @@ async function saveAwgConfig() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ content, file })
         });
+        if (res.ok) alert("Настройки успешно сохранены, интерфейс перезапущен!");
+        else alert("Ошибка при сохранении конфигурации.");
+    } catch(e) { alert("Ошибка сети"); }
+}
+
+async function updatePanel() {
+    if (!confirm("Загрузить последнюю версию панели с GitHub? Интерфейс будет перезагружен.")) return;
+    document.getElementById('loaderOverlay').style.display = 'flex';
+    document.getElementById('loaderText').innerText = "Обновление файлов...";
+    try {
+        const res = await fetch('/api/update', { method: 'POST' });
         if (res.ok) {
-            alert("Настройки успешно сохранены, интерфейс перезапущен!");
-        } else alert("Ошибка при сохранении конфигурации.");
-    } catch(e) {
-        alert("Ошибка сети");
-    }
-}
-		async function updatePanel() {
-if (!confirm("Загрузить последнюю версию панели с GitHub? Интерфейс будет перезагружен.")) return;
-document.getElementById('loaderOverlay').style.display = 'flex';
-document.getElementById('loaderText').innerText = "Обновление файлов...";
-try {
-    const res = await fetch('/api/update', { method: 'POST' });
-    if (res.ok) {
-        document.getElementById('loaderText').innerText = "Перезапуск сервера...";
-        setTimeout(() => { window.location.reload(); }, 6000); // Ждем 6 секунд пока PM2 перезапустится
-    } else {
-        alert("Ошибка при обновлении");
-        document.getElementById('loaderOverlay').style.display = 'none';
-    }
-} catch (e) {
-    // Если PM2 убил процесс быстрее, чем пришел ответ
-    setTimeout(() => { window.location.reload(); }, 6000);
-}		
-}
-        let lastStats = {}; let isFetching = false; 
-        let pollingInterval = null; let historyInterval = null; let agInterval = null;
-        let chartData = { global: { labels: [], rx: [], tx: [] } };
-        let currentChartView = 'global'; let trafficChart = null;
-        let sortCol = 'name'; let sortDesc = false;
-
-        function setSort(col) {
-            if (sortCol === col) sortDesc = !sortDesc;
-            else { sortCol = col; sortDesc = false; }
-            ['name', 'status', 'traffic', 'speed'].forEach(c => {
-                const el = document.getElementById('sort-' + c);
-                if (el) el.innerText = '';
-            });
-            const currentEl = document.getElementById('sort-' + col);
-            if (currentEl) currentEl.innerText = sortDesc ? '▼' : '▲';
-            if (!isFetching) loadStats();
+            document.getElementById('loaderText').innerText = "Перезапуск сервера...";
+            setTimeout(() => { window.location.reload(); }, 6000);
+        } else {
+            alert("Ошибка при обновлении");
+            document.getElementById('loaderOverlay').style.display = 'none';
         }
+    } catch (e) { setTimeout(() => { window.location.reload(); }, 6000); }       
+}
 
-        function toggleMenu() { document.getElementById('sidebar').classList.toggle('open'); }
-        function switchTab(tabId, el) {
-            document.querySelectorAll('.tab-pane').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.menu li').forEach(l => l.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active');
-            if (el) { el.classList.add('active'); document.getElementById('currentTabTitle').innerText = el.innerText.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|\s+/g, ' ').trim(); }
-            if (window.innerWidth <= 768) toggleMenu();
+function setSort(col) {
+    if (sortCol === col) sortDesc = !sortDesc;
+    else { sortCol = col; sortDesc = false; }
+    ['name', 'status', 'traffic', 'speed'].forEach(c => {
+        const el = document.getElementById('sort-' + c);
+        if (el) el.innerText = '';
+    });
+    const currentEl = document.getElementById('sort-' + col);
+    if (currentEl) currentEl.innerText = sortDesc ? '▼' : '▲';
+    if (!isFetching) loadStats();
+}
 
-            if (tabId === 'tab-services') { loadServices(); connectAdGuard(false); }
-            else if (agInterval) { clearInterval(agInterval); agInterval = null; }
-        }
-		function copyMeko() {
+function toggleMenu() { document.getElementById('sidebar').classList.toggle('open'); }
+function switchTab(tabId, el) {
+    document.querySelectorAll('.tab-pane').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.menu li').forEach(l => l.classList.remove('active'));
+    document.getElementById(tabId).classList.add('active');
+    if (el) { el.classList.add('active'); document.getElementById('currentTabTitle').innerText = el.innerText.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|\s+/g, ' ').trim(); }
+    if (window.innerWidth <= 768) toggleMenu();
+    if (tabId === 'tab-services') { loadServices(); connectAdGuard(false); }
+    else if (agInterval) { clearInterval(agInterval); agInterval = null; }
+}
+
+function copyMeko() {
     const cmd = "curl -fsSL https://raw.githubusercontent.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/main/install.sh | sudo bash";
     navigator.clipboard.writeText(cmd).then(() => {
         alert("Команда скопирована! Теперь просто вставьте её в ваш SSH-терминал.");
-    }).catch(() => {
-        alert("Не удалось скопировать. Пожалуйста, выделите и скопируйте текст вручную.");
-    });
+    }).catch(() => { alert("Не удалось скопировать."); });
 }
 
-        function formatBytes(bytes) {
-            if (!bytes || isNaN(bytes)) return '0 B'; if (bytes === 0) return '0 B';
-            const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'], i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+function formatBytes(bytes) {
+    if (!bytes || isNaN(bytes)) return '0 B'; if (bytes === 0) return '0 B';
+    const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'], i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+function formatSpeed(bytesPerSec) { return formatBytes(bytesPerSec) + '/s'; }
+
+async function loadServices() {
+    try {
+        const res = await fetch('/api/services');
+        if (res.ok) {
+            const services = await res.json();
+            const tbody = document.getElementById('servicesTable');
+            if (services.length === 0) { tbody.innerHTML = '<tr><td>Службы не найдены</td></tr>'; return; }
+            tbody.innerHTML = services.map(s => {
+                const statusColor = s.status === 'running' ? 'var(--rx-color)' : '#f85149';
+                const statusText = s.status === 'running' ? 'Активен' : 'Остановлен';
+                return `<tr>
+                    <td><strong>${s.name}</strong><br><span style="color:${statusColor}; font-size:12px;">${statusText}</span></td>
+                    <td style="text-align:right; width:60px;"><button class="btn-dark" style="padding: 4px 8px; font-size:11px;" onclick="restartService('${s.name}')">Restart</button></td>
+                </tr>`;
+            }).join('');
         }
-        function formatSpeed(bytesPerSec) { return formatBytes(bytesPerSec) + '/s'; }
+    } catch(e) { document.getElementById('servicesTable').innerHTML = '<tr><td>Ошибка загрузки служб</td></tr>'; }
+}
 
-        async function loadServices() {
-            try {
-                const res = await fetch('/api/services');
-                if (res.ok) {
-                    const services = await res.json();
-                    const tbody = document.getElementById('servicesTable');
-                    if (services.length === 0) { tbody.innerHTML = '<tr><td>Службы не найдены</td></tr>'; return; }
-                    tbody.innerHTML = services.map(s => {
-                        const statusColor = s.status === 'running' ? 'var(--rx-color)' : '#f85149';
-                        const statusText = s.status === 'running' ? 'Активен' : 'Остановлен';
-                        return `<tr>
-                            <td><strong>${s.name}</strong><br><span style="color:${statusColor}; font-size:12px;">${statusText}</span></td>
-                            <td style="text-align:right; width:60px;"><button class="btn-dark" style="padding: 4px 8px; font-size:11px;" onclick="restartService('${s.name}')">Restart</button></td>
-                        </tr>`;
-                    }).join('');
-                }
-            } catch(e) { document.getElementById('servicesTable').innerHTML = '<tr><td>Ошибка загрузки служб</td></tr>'; }
+async function restartService(name) {
+    if (!confirm(`Перезапустить службу ${name}?`)) return;
+    try {
+        const res = await fetch('/api/services/restart', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name}) });
+        if (res.ok) { alert(`Служба ${name} успешно перезапущена`); loadServices(); }
+        else alert("Ошибка при перезапуске");
+    } catch (e) { alert("Ошибка соединения"); }
+}
+
+async function connectAdGuard(isManualClick = true) {
+    let url = document.getElementById('agUrl').value;
+    let user = document.getElementById('agUser').value;
+    let pass = document.getElementById('agPass').value;
+    const errEl = document.getElementById('agError');
+
+    if (!isManualClick && !url && localStorage.getItem('agUrl')) {
+        url = localStorage.getItem('agUrl'); user = localStorage.getItem('agUser') || ''; pass = localStorage.getItem('agPass') || '';
+        document.getElementById('agUrl').value = url; document.getElementById('agUser').value = user; document.getElementById('agPass').value = pass;
+    }
+    if (!url) return;
+    if (isManualClick) { localStorage.setItem('agUrl', url); localStorage.setItem('agUser', user); localStorage.setItem('agPass', pass); }
+
+    try {
+        const res = await fetch('/api/adguard/stats', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({url, user, pass}) });
+        if (res.ok) {
+            errEl.style.display = 'none';
+            const data = await res.json();
+            document.getElementById('agTotal').innerText = data.num_dns_queries.toLocaleString('ru-RU');
+            document.getElementById('agBlocked').innerText = data.num_blocked_filtering.toLocaleString('ru-RU');
+            let percent = 0;
+            if (data.num_dns_queries > 0) percent = ((data.num_blocked_filtering / data.num_dns_queries) * 100).toFixed(1);
+            document.getElementById('agBlockedPercent').innerText = `(${percent}%)`;
+            document.getElementById('agMalware').innerText = data.num_replaced_safebrowsing.toLocaleString('ru-RU');
+            if (!agInterval) agInterval = setInterval(() => connectAdGuard(false), 5000);
+        } else {
+            const errData = await res.json();
+            errEl.innerText = errData.error; errEl.style.display = 'block';
+            if (agInterval) { clearInterval(agInterval); agInterval = null; }
         }
+    } catch(e) { errEl.innerText = "Ошибка запроса API."; errEl.style.display = 'block'; if (agInterval) { clearInterval(agInterval); agInterval = null; } }
+}
 
-        async function restartService(name) {
-            if (!confirm(`Перезапустить службу ${name}?`)) return;
-            try {
-                const res = await fetch('/api/services/restart', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name}) });
-                if (res.ok) { alert(`Служба ${name} успешно перезапущена`); loadServices(); }
-                else alert("Ошибка при перезапуске");
-            } catch (e) { alert("Ошибка соединения"); }
-        }
-
-        async function connectAdGuard(isManualClick = true) {
-            let url = document.getElementById('agUrl').value;
-            let user = document.getElementById('agUser').value;
-            let pass = document.getElementById('agPass').value;
-            const errEl = document.getElementById('agError');
-
-            if (!isManualClick && !url && localStorage.getItem('agUrl')) {
-                url = localStorage.getItem('agUrl'); user = localStorage.getItem('agUser') || ''; pass = localStorage.getItem('agPass') || '';
-                document.getElementById('agUrl').value = url; document.getElementById('agUser').value = user; document.getElementById('agPass').value = pass;
-            }
-            if (!url) return;
-
-            if (isManualClick) { localStorage.setItem('agUrl', url); localStorage.setItem('agUser', user); localStorage.setItem('agPass', pass); }
-
-            try {
-                const res = await fetch('/api/adguard/stats', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({url, user, pass}) });
-                if (res.ok) {
-                    errEl.style.display = 'none';
-                    const data = await res.json();
-                    document.getElementById('agTotal').innerText = data.num_dns_queries.toLocaleString('ru-RU');
-                    document.getElementById('agBlocked').innerText = data.num_blocked_filtering.toLocaleString('ru-RU');
-                    let percent = 0;
-                    if (data.num_dns_queries > 0) percent = ((data.num_blocked_filtering / data.num_dns_queries) * 100).toFixed(1);
-                    document.getElementById('agBlockedPercent').innerText = `(${percent}%)`;
-                    document.getElementById('agMalware').innerText = data.num_replaced_safebrowsing.toLocaleString('ru-RU');
-                    if (!agInterval) agInterval = setInterval(() => connectAdGuard(false), 5000);
-                } else {
-                    const errData = await res.json();
-                    errEl.innerText = errData.error; errEl.style.display = 'block';
-                    if (agInterval) { clearInterval(agInterval); agInterval = null; }
-                }
-            } catch(e) { errEl.innerText = "Ошибка запроса API."; errEl.style.display = 'block'; if (agInterval) { clearInterval(agInterval); agInterval = null; } }
-        }
 async function changePassword() {
     const newPassword = prompt("Введите новый пароль для панели (минимум 4 символа):");
     if (!newPassword) return;
     if (newPassword.length < 4) return alert("Пароль слишком короткий!");
-    
     try {
         const res = await fetch('/api/change-password', {
             method: 'POST',
@@ -774,9 +756,7 @@ async function changePassword() {
         });
         if (res.ok) alert("Пароль успешно изменен! Вы можете использовать его при следующем входе.");
         else alert("Ошибка изменения пароля");
-    } catch (e) {
-        alert("Ошибка сети");
-    }
+    } catch (e) { alert("Ошибка сети"); }
 }
 
 async function loadServerInfo() {
@@ -793,7 +773,6 @@ async function loadServerInfo() {
             }
             document.getElementById('dnsAddressesList').innerHTML = html;
 
-            // Блокировка каскада, если сервер не в РФ
             const cascadeCard = document.getElementById('cascadeRoutingCard');
             if (cascadeCard && data.country !== 'RU' && data.country !== 'UNKNOWN') {
                 cascadeCard.innerHTML = `
@@ -808,189 +787,213 @@ async function loadServerInfo() {
                 `;
             }
         }
-    } catch(e) {
-        document.getElementById('dnsAddressesList').innerHTML = "Не удалось загрузить данные сервера";
+    } catch(e) { document.getElementById('dnsAddressesList').innerHTML = "Не удалось загрузить данные сервера"; }
+}
+
+function initChart() {
+    const ctx = document.getElementById('trafficChart').getContext('2d');
+    const gradRx = ctx.createLinearGradient(0, 0, 0, 300); gradRx.addColorStop(0, 'rgba(46, 160, 67, 0.5)'); gradRx.addColorStop(1, 'rgba(46, 160, 67, 0)');
+    const gradTx = ctx.createLinearGradient(0, 0, 0, 300); gradTx.addColorStop(0, 'rgba(88, 166, 255, 0.5)'); gradTx.addColorStop(1, 'rgba(88, 166, 255, 0)');
+    Chart.defaults.color = '#8b949e';
+    trafficChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: [], datasets: [ { label: 'Прием (Rx)', data: [], borderColor: '#2ea043', backgroundColor: gradRx, fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 }, { label: 'Отдача (Tx)', data: [], borderColor: '#58a6ff', backgroundColor: gradTx, fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 } ]},
+        options: { responsive: true, maintainAspectRatio: false, animation: { duration: 0 }, interaction: { mode: 'index', intersect: false }, scales: { x: { grid: { color: '#30363d' }, ticks: { maxTicksLimit: 10 } }, y: { grid: { color: '#30363d' }, ticks: { callback: function(v) { return formatSpeed(v); } } } }, plugins: { legend: { labels: { color: '#c9d1d9' } }, tooltip: { callbacks: { label: function(ctx) { return ctx.dataset.label + ': ' + formatSpeed(ctx.parsed.y); } } } } }
+    });
+}
+
+function switchChart() {
+    currentChartView = document.getElementById('chartSelector').value;
+    if (chartData[currentChartView] && trafficChart) { 
+        trafficChart.data.labels = chartData[currentChartView].labels; 
+        trafficChart.data.datasets[0].data = chartData[currentChartView].rx; 
+        trafficChart.data.datasets[1].data = chartData[currentChartView].tx; 
+        trafficChart.update(); 
     }
 }
-        function initChart() {
-            const ctx = document.getElementById('trafficChart').getContext('2d');
-            const gradRx = ctx.createLinearGradient(0, 0, 0, 300); gradRx.addColorStop(0, 'rgba(46, 160, 67, 0.5)'); gradRx.addColorStop(1, 'rgba(46, 160, 67, 0)');
-            const gradTx = ctx.createLinearGradient(0, 0, 0, 300); gradTx.addColorStop(0, 'rgba(88, 166, 255, 0.5)'); gradTx.addColorStop(1, 'rgba(88, 166, 255, 0)');
-            Chart.defaults.color = '#8b949e';
-            trafficChart = new Chart(ctx, {
-                type: 'line',
-                data: { labels: [], datasets: [ { label: 'Прием (Rx)', data: [], borderColor: '#2ea043', backgroundColor: gradRx, fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 }, { label: 'Отдача (Tx)', data: [], borderColor: '#58a6ff', backgroundColor: gradTx, fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 } ]},
-                options: { responsive: true, maintainAspectRatio: false, animation: { duration: 0 }, interaction: { mode: 'index', intersect: false }, scales: { x: { grid: { color: '#30363d' }, ticks: { maxTicksLimit: 10 } }, y: { grid: { color: '#30363d' }, ticks: { callback: function(v) { return formatSpeed(v); } } } }, plugins: { legend: { labels: { color: '#c9d1d9' } }, tooltip: { callbacks: { label: function(ctx) { return ctx.dataset.label + ': ' + formatSpeed(ctx.parsed.y); } } } } }
+
+async function loadHistory() {
+    try {
+        const res = await fetch('/api/history');
+        if (res.ok) {
+            chartData = await res.json();
+            const selector = document.getElementById('chartSelector');
+            const currentClients = Array.from(selector.options).map(o => o.value);
+            Object.keys(chartData).forEach(k => {
+                if (k !== 'global' && !currentClients.includes(k)) {
+                    const opt = document.createElement('option'); opt.value = k; opt.text = 'Клиент: ' + k; selector.appendChild(opt);
+                }
             });
+            switchChart();
+        }
+    } catch (e) {}
+}
+
+function getPortDesc(pStr) {
+    if (!pStr) return 'Системная служба';
+    if (pStr.includes('5553')) return 'AdGuard (DNS фильтр)';
+    if (pStr.includes('853')) return 'AdGuard (DoT)';
+    if (pStr.includes('53')) return 'Системный DNS';
+    if (pStr.includes('4444')) return 'Панель FM4.0';
+    if (pStr.includes('4443')) return 'AdGuard Панель';
+    if (pStr.includes('443')) return 'HTTPS (Веб)';
+    if (pStr.includes('80')) return 'HTTP (Веб)';
+    if (pStr.includes('37246')) return 'AmneziaWG (VPN)';
+    if (pStr.includes('2233') || pStr.includes('22')) return 'SSH Терминал';
+    if (pStr.includes('9090') || pStr.includes('9091')) return 'MTProto Прокси';
+    return 'Процесс / Служба';
+}
+
+async function loadUfwData() {
+    const res = await fetch('/api/ufw');
+    if (res.ok) {
+        const data = await res.json();
+        const tbodyRules = document.getElementById('ufwTable');
+        if (data.rules.length === 0) tbodyRules.innerHTML = '<tr><td colspan="4">Нет правил</td></tr>';
+        else {
+            tbodyRules.innerHTML = data.rules.map(r => {
+                const portMatch = r.to.match(/\d+/);
+                const desc = portMatch ? getPortDesc(portMatch[0]) : 'Маршрут / PBR';
+                const statusHtml = r.action.includes('ALLOW') ? '<span class="val-rx">Открыт</span>' : '<span class="val-sys">Закрыт</span>';
+                return `<tr><td style="white-space:normal; word-wrap:break-word;"><strong>[${r.id}]</strong> <span class="val-tx">${r.to}</span> <span class="val-sys">←</span> ${r.from}</td><td>${statusHtml}</td><td><span class="sub-text" style="font-size:13px">${desc}</span></td><td><button class="btn-dark" onclick="delUfwRule('${r.id}')">✕</button></td></tr>`;
+            }).join('');
         }
 
-        function switchChart() {
-            currentChartView = document.getElementById('chartSelector').value;
-            if (chartData[currentChartView] && trafficChart) { 
-                trafficChart.data.labels = chartData[currentChartView].labels; 
-                trafficChart.data.datasets[0].data = chartData[currentChartView].rx; 
-                trafficChart.data.datasets[1].data = chartData[currentChartView].tx; 
-                trafficChart.update(); 
+        const tbodyPorts = document.getElementById('portsTable');
+        if (data.ports.length === 0) tbodyPorts.innerHTML = '<tr><td colspan="4">Нет открытых портов</td></tr>';
+        else {
+            tbodyPorts.innerHTML = data.ports.map(p => {
+                const portNum = p.addr.split(':').pop();
+                return `<tr><td><strong class="val-sys">${p.proto}</strong><br><span style="font-size:12px;color:var(--text-muted)">${portNum}</span></td><td><span class="val-rx">${p.addr}</span></td><td>${p.proc}</td><td><span class="sub-text" style="font-size:13px">${getPortDesc(portNum)}</span></td></tr>`;
+            }).join('');
+        }
+    }
+}
+
+async function addUfwRule() {
+    const port = document.getElementById('ufwPort').value;
+    const proto = document.getElementById('ufwProto').value;
+    const iface = document.getElementById('ufwIface').value;
+    if(!port) return alert("Введите порт");
+    const res = await fetch('/api/ufw', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({port, proto, iface}) });
+    if(res.ok) { document.getElementById('ufwPort').value = ''; loadUfwData(); }
+}
+
+async function delUfwRule(id) {
+    if(!confirm(`Удалить правило №${id}?`)) return;
+    const res = await fetch(`/api/ufw/${id}`, { method: 'DELETE' });
+    if(res.ok) loadUfwData();
+}
+
+async function loadNetworkTools() {
+    try {
+        const ifaces = await (await fetch('/api/interfaces')).json();
+        const st = await (await fetch('/api/tools/status')).json();
+
+        // Безопасное чтение массивов на случай старой версии backend'а
+        const ruIfaces = (st.ruDrop && st.ruDrop.ifaces) ? st.ruDrop.ifaces : [];
+        const cascIfaces = (st.cascade && st.cascade.ifaces) ? st.cascade.ifaces : [];
+        window.currentDnsIfaces = (st.dns && st.dns.ifaces) ? st.dns.ifaces : [];
+        window.currentDnsTarget = (st.dns && st.dns.target) ? st.dns.target : '';
+
+        // 1. Отрисовка чекбоксов для GeoIP
+        const ruList = document.getElementById('ruDropIfacesList');
+        if (ruList) {
+            ruList.innerHTML = ifaces.map(i => `
+                <div class="form-check form-check-inline" style="margin-right: 10px;">
+                    <input class="form-check-input ru-check" type="checkbox" value="${i}" id="ru_${i}" ${ruIfaces.includes(i) ? 'checked' : ''}>
+                    <label class="form-check-label text-white small" for="ru_${i}">${i}</label>
+                </div>
+            `).join('');
+        }
+        const ruEl = document.getElementById('ruDropStatus');
+        if (ruEl) {
+            if (st.ruDrop && st.ruDrop.active) {
+                ruEl.innerHTML = `<span class="val-rx">Активно на: ${ruIfaces.join(', ')}</span> <span class="sub-text">(Правил: ${st.ruDrop.count || 0})</span>`;
+            } else {
+                ruEl.innerHTML = `<span class="val-tx">Выключено</span>`;
             }
         }
 
-        async function loadHistory() {
-            try {
-                const res = await fetch('/api/history');
-                if (res.ok) {
-                    chartData = await res.json();
-                    const selector = document.getElementById('chartSelector');
-                    const currentClients = Array.from(selector.options).map(o => o.value);
-                    Object.keys(chartData).forEach(k => {
-                        if (k !== 'global' && !currentClients.includes(k)) {
-                            const opt = document.createElement('option'); opt.value = k; opt.text = 'Клиент: ' + k; selector.appendChild(opt);
-                        }
-                    });
-                    switchChart();
-                }
-            } catch (e) {}
+        // 2. Отрисовка чекбоксов для Каскада
+        const cascList = document.getElementById('cascadeIfacesList');
+        if (cascList) {
+            cascList.innerHTML = ifaces.map(i => `
+                <div class="form-check form-check-inline" style="margin-right: 10px;">
+                    <input class="form-check-input casc-check" type="checkbox" value="${i}" id="casc_${i}" ${cascIfaces.includes(i) ? 'checked' : ''}>
+                    <label class="form-check-label text-white small" for="casc_${i}">${i}</label>
+                </div>
+            `).join('');
         }
-
-        function getPortDesc(pStr) {
-            if (!pStr) return 'Системная служба';
-            if (pStr.includes('5553')) return 'AdGuard (DNS фильтр)';
-            if (pStr.includes('853')) return 'AdGuard (DoT)';
-            if (pStr.includes('53')) return 'Системный DNS';
-            if (pStr.includes('4444')) return 'Панель FM4.0';
-            if (pStr.includes('4443')) return 'AdGuard Панель';
-            if (pStr.includes('443')) return 'HTTPS (Веб)';
-            if (pStr.includes('80')) return 'HTTP (Веб)';
-            if (pStr.includes('37246')) return 'AmneziaWG (VPN)';
-            if (pStr.includes('2233') || pStr.includes('22')) return 'SSH Терминал';
-            if (pStr.includes('9090') || pStr.includes('9091')) return 'MTProto Прокси';
-            return 'Процесс / Служба';
-        }
-
-        async function loadUfwData() {
-            const res = await fetch('/api/ufw');
-            if (res.ok) {
-                const data = await res.json();
-                const tbodyRules = document.getElementById('ufwTable');
-                if (data.rules.length === 0) tbodyRules.innerHTML = '<tr><td colspan="4">Нет правил</td></tr>';
-                else {
-                    tbodyRules.innerHTML = data.rules.map(r => {
-                        const portMatch = r.to.match(/\d+/);
-                        const desc = portMatch ? getPortDesc(portMatch[0]) : 'Маршрут / PBR';
-                        const statusHtml = r.action.includes('ALLOW') ? '<span class="val-rx">Открыт</span>' : '<span class="val-sys">Закрыт</span>';
-                        return `<tr><td style="white-space:normal; word-wrap:break-word;"><strong>[${r.id}]</strong> <span class="val-tx">${r.to}</span> <span class="val-sys">←</span> ${r.from}</td><td>${statusHtml}</td><td><span class="sub-text" style="font-size:13px">${desc}</span></td><td><button class="btn-dark" onclick="delUfwRule('${r.id}')">✕</button></td></tr>`;
-                    }).join('');
-                }
-
-                const tbodyPorts = document.getElementById('portsTable');
-                if (data.ports.length === 0) tbodyPorts.innerHTML = '<tr><td colspan="4">Нет открытых портов</td></tr>';
-                else {
-                    tbodyPorts.innerHTML = data.ports.map(p => {
-                        const portNum = p.addr.split(':').pop();
-                        return `<tr><td><strong class="val-sys">${p.proto}</strong><br><span style="font-size:12px;color:var(--text-muted)">${portNum}</span></td><td><span class="val-rx">${p.addr}</span></td><td>${p.proc}</td><td><span class="sub-text" style="font-size:13px">${getPortDesc(portNum)}</span></td></tr>`;
-                    }).join('');
-                }
+        const cascEl = document.getElementById('cascadeStatus');
+        if (cascEl) {
+            if (st.cascade && st.cascade.active) {
+                cascEl.innerHTML = `<span class="val-rx">Каскад работает для: ${cascIfaces.join(', ')}</span>`;
+            } else {
+                cascEl.innerHTML = `<span class="val-tx">Маршруты каскада отключены</span>`;
             }
         }
 
-        async function addUfwRule() {
-            const port = document.getElementById('ufwPort').value;
-            const proto = document.getElementById('ufwProto').value;
-            const iface = document.getElementById('ufwIface').value;
-            if(!port) return alert("Введите порт");
-            const res = await fetch('/api/ufw', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({port, proto, iface}) });
-            if(res.ok) { document.getElementById('ufwPort').value = ''; loadUfwData(); }
+        // 3. Отрисовка чекбоксов для DNS
+        const dnsList = document.getElementById('dnsIfacesList');
+        if (dnsList) {
+            dnsList.innerHTML = ifaces.map(i => `
+                <div class="form-check form-check-inline" style="margin-right: 10px;">
+                    <input class="form-check-input dns-check" type="checkbox" value="${i}" id="dns_${i}" ${window.currentDnsIfaces.includes(i) ? 'checked' : ''}>
+                    <label class="form-check-label text-white small" for="dns_${i}">${i}</label>
+                </div>
+            `).join('');
+        }
+        const dnsEl = document.getElementById('dnsStatus');
+        if (dnsEl) {
+            if (st.dns && st.dns.active) { 
+                dnsEl.innerHTML = `<span class="val-rx">Активен на: ${window.currentDnsIfaces.join(', ')}</span> <span class="sub-text">Цель: ${window.currentDnsTarget}</span>`; 
+                const targetInput = document.getElementById('dnsTarget');
+                if (targetInput) targetInput.value = window.currentDnsTarget; 
+            } else {
+                dnsEl.innerHTML = `<span class="val-tx">Не активно</span>`;
+            }
         }
 
-        async function delUfwRule(id) {
-            if(!confirm(`Удалить правило №${id}?`)) return;
-            const res = await fetch(`/api/ufw/${id}`, { method: 'DELETE' });
-            if(res.ok) loadUfwData();
+        // 4. UFW остается выпадающим списком
+        const ufwSel = document.getElementById('ufwIface');
+        if (ufwSel) {
+            ufwSel.innerHTML = '<option value="any">Все</option>';
+            ifaces.forEach(i => { ufwSel.appendChild(new Option(i, i)); });
         }
-
-        async function loadNetworkTools() {
-    const ifaces = await (await fetch('/api/interfaces')).json();
-    const st = await (await fetch('/api/tools/status')).json();
-
-    // 1. Отрисовка чекбоксов для GeoIP
-    const ruList = document.getElementById('ruDropIfacesList');
-    if (ruList) {
-        ruList.innerHTML = ifaces.map(i => `
-            <div class="form-check form-check-inline" style="margin-right: 10px;">
-                <input class="form-check-input ru-check" type="checkbox" value="${i}" id="ru_${i}" ${st.ruDrop.ifaces.includes(i) ? 'checked' : ''}>
-                <label class="form-check-label text-white small" for="ru_${i}">${i}</label>
-            </div>
-        `).join('');
+    } catch (e) {
+        console.error("Ошибка загрузки сетевых инструментов:", e);
     }
+}
 
-    const ruEl = document.getElementById('ruDropStatus');
-    if (ruEl) {
-        if (st.ruDrop.active) {
-            ruEl.innerHTML = `<span class="val-rx">Активно на: ${st.ruDrop.ifaces.join(', ')}</span> <span class="sub-text">(Правил: ${st.ruDrop.count})</span>`;
-        } else {
-            ruEl.innerHTML = `<span class="val-tx">Выключено</span>`;
-        }
-    }
+async function toggleRuDrop(enable) {
+    const checkedIfaces = Array.from(document.querySelectorAll('.ru-check:checked')).map(cb => cb.value);
+    if (enable && checkedIfaces.length === 0) return alert('Выберите хотя бы один интерфейс для блокировки!');
+    const schedule = document.getElementById('ruDropSchedule').value;
+    document.getElementById('ruDropStatus').innerText = "Применение (до 20 сек)...";
+    const res = await fetch('/api/tools/rudrop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({enable, ifaces: checkedIfaces, schedule}) });
+    if (res.ok) loadNetworkTools();
+}
 
-    // 2. Отрисовка чекбоксов для Каскада
-    const cascList = document.getElementById('cascadeIfacesList');
-    if (cascList) {
-        cascList.innerHTML = ifaces.map(i => `
-            <div class="form-check form-check-inline" style="margin-right: 10px;">
-                <input class="form-check-input casc-check" type="checkbox" value="${i}" id="casc_${i}" ${st.cascade.ifaces.includes(i) ? 'checked' : ''}>
-                <label class="form-check-label text-white small" for="casc_${i}">${i}</label>
-            </div>
-        `).join('');
-    }
-
-    const cascEl = document.getElementById('cascadeStatus');
-    if (cascEl) {
-        if (st.cascade.active) {
-            cascEl.innerHTML = `<span class="val-rx">Каскад работает для: ${st.cascade.ifaces.join(', ')}</span>`;
-        } else {
-            cascEl.innerHTML = `<span class="val-tx">Маршруты каскада отключены</span>`;
-        }
-    }
-
-    // 3. Отрисовка чекбоксов для DNS (ИСПРАВЛЕНО)
-    const dnsList = document.getElementById('dnsIfacesList');
-    window.currentDnsIfaces = st.dns.ifaces || [];
-    window.currentDnsTarget = st.dns.target;
-
-    if (dnsList) {
-        dnsList.innerHTML = ifaces.map(i => `
-            <div class="form-check form-check-inline" style="margin-right: 10px;">
-                <input class="form-check-input dns-check" type="checkbox" value="${i}" id="dns_${i}" ${window.currentDnsIfaces.includes(i) ? 'checked' : ''}>
-                <label class="form-check-label text-white small" for="dns_${i}">${i}</label>
-            </div>
-        `).join('');
-    }
-
-    const dnsEl = document.getElementById('dnsStatus');
-    if (dnsEl) {
-        if (st.dns.active) { 
-            dnsEl.innerHTML = `<span class="val-rx">Активен на: ${window.currentDnsIfaces.join(', ')}</span> <span class="sub-text">Цель: ${st.dns.target}</span>`; 
-            const targetInput = document.getElementById('dnsTarget');
-            if (targetInput) targetInput.value = st.dns.target; 
-        } else {
-            dnsEl.innerHTML = `<span class="val-tx">Не активно</span>`;
-        }
-    }
-
-    // 4. UFW остается выпадающим списком
-    const ufwSel = document.getElementById('ufwIface');
-    if (ufwSel) {
-        ufwSel.innerHTML = '<option value="any">Все</option>';
-        ifaces.forEach(i => { ufwSel.appendChild(new Option(i, i)); });
+async function toggleCascade(enable) {
+    const checkedIfaces = Array.from(document.querySelectorAll('.casc-check:checked')).map(cb => cb.value);
+    if (enable && checkedIfaces.length === 0) return alert('Выберите хотя бы один интерфейс для каскада!');
+    document.getElementById('cascadeStatus').innerText = "Настройка маршрутов...";
+    const res = await fetch('/api/tools/cascade', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({enable, ifaces: checkedIfaces}) });
+    if (res.ok) {
+        const data = await res.json();
+        if(data.error) alert(data.error);
+        loadNetworkTools();
+    } else {
+        alert("Ошибка настройки каскада. Проверьте логи.");
     }
 }
 
 async function toggleDns(enable) {
     const checkedIfaces = Array.from(document.querySelectorAll('.dns-check:checked')).map(cb => cb.value);
     const target = document.getElementById('dnsTarget').value;
-    
     if (enable && checkedIfaces.length === 0) return alert("Выберите хотя бы один интерфейс для перехвата DNS");
     if (enable && !target) return alert("Укажите IP-адрес DNS сервера");
-    
     document.getElementById('dnsStatus').innerText = "Применение...";
     const res = await fetch('/api/tools/dns', { 
         method: 'POST', 
