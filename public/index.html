@@ -558,7 +558,7 @@ async function uninstallAwg() {
         const res = await fetch('/api/uninstall/awg', { method: 'POST' });
         if (res.ok) {
             setTimeout(() => {
-                alert("AmneziaWG успешно удален вместе с конфигами! Теперь вы можете установить версию 3.1.");
+                alert("AmneziaWG успешно удален вместе с конфигами!");
                 window.location.reload();
             }, 15000); // Ждем 15 секунд, пока скрипт в фоне очистит ядро и файлы
         } else {
