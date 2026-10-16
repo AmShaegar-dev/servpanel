@@ -582,8 +582,8 @@ sleep 2
 cd /root/servpanel
 git fetch --all
 git reset --hard origin/main
-npm install
-pm2 restart awg-admin
+export PATH=$PATH:/usr/local/bin:/usr/bin:/bin
+pm2 restart awg-admin || /usr/local/bin/pm2 restart awg-admin
 `;
         fs.writeFileSync('/tmp/update_panel.sh', script);
         const { spawn } = require('child_process');
