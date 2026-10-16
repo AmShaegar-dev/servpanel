@@ -694,5 +694,29 @@ app.get('/api/install/log', checkAuth, (req, res) => {
         res.send("Ошибка чтения лога...");
     }
 });
-
+// ПОЛНОЕ УДАЛЕНИЕ AMNEZIAWG
+app.post('/api/uninstall/awg', checkAuth, (req, res) => {
+    try {
+        const script = `#!/bin/bash
+echo "Начинаем удаление AmneziaWG..." > /var/log/awg_uninstall.log
+if [ -f "/root/install_amneziawg.sh" ]; then
+    bash /root/install_amneziawg.sh --uninstall --yes >> /var/log/awg_uninstall.log 2>&1
+else
+    wget -qO /tmp/uninstall_awg.sh https://raw.githubusercontent.com/bivlked/amneziawg-installer/main/install_amneziawg.sh
+    bash /tmp/uninstall_awg.sh --uninstall --yes >> /var/log/awg_uninstall.log 2>&1
+fi
+rm -rf /etc/amnezia/amneziawg /root/awg
+systemctl stop awg-routing.timer awg-routing.service 2>/dev/null || true
+`;
+        fs.writeFileSync('/tmp/run_uninstall_awg.sh', script);
+        const { spawn } = require('child_process');
+        const child = spawn('bash', ['/tmp/run_uninstall_awg.sh'], { detached: true, stdio: 'ignore' });
+        child.unref();
+        
+        auditLog(req, 'Запущено полное удаление AmneziaWG');
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: "Ошибка запуска удаления" });
+    }
+});
 app.listen(3000, () => console.log('AWG Admin v18 running on port 3000'));
