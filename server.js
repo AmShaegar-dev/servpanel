@@ -536,6 +536,11 @@ app.post('/api/install/module', checkAuth, (req, res) => {
             runScript += `export AWG_ISOLATION="${data.isolation ? 'on' : 'off'}"\n`;
             runScript += `export AWG_KEEP_PACKAGES="${data.keepPackages ? '1' : '0'}"\n`;
             runScript += `export AWG_NO_TWEAKS="${data.noTweaks ? '1' : '0'}"\n`;
+            runScript += `export AWG_MODE="${data.awgMode || 'single'}"\n`;
+            runScript += `export CASCADE_ROLE="${data.cascadeRole || 'ru'}"\n`;
+            runScript += `export REMOTE_IP="${data.remoteIp || ''}"\n`;
+            runScript += `export REMOTE_PORT="${data.remotePort || '22'}"\n`;
+            runScript += `export REMOTE_PASS="${data.remotePass || ''}"\n`;
         }
 
         runScript += `curl -fsSL ${installScriptUrl} > /tmp/installer.sh\nbash /tmp/installer.sh > ${logFile} 2>&1\nrm -f /tmp/installer.sh\n`;
