@@ -911,75 +911,76 @@ async function loadServerInfo() {
     const ifaces = await (await fetch('/api/interfaces')).json();
     const st = await (await fetch('/api/tools/status')).json();
 
-    // Отрисовка чекбоксов для GeoIP
+    // 1. Отрисовка чекбоксов для GeoIP
     const ruList = document.getElementById('ruDropIfacesList');
-    ruList.innerHTML = ifaces.map(i => `
-        <div class="form-check form-check-inline" style="margin-right: 10px;">
-            <input class="form-check-input ru-check" type="checkbox" value="${i}" id="ru_${i}" ${st.ruDrop.ifaces.includes(i) ? 'checked' : ''}>
-            <label class="form-check-label text-white small" for="ru_${i}">${i}</label>
-        </div>
-    `).join('');
+    if (ruList) {
+        ruList.innerHTML = ifaces.map(i => `
+            <div class="form-check form-check-inline" style="margin-right: 10px;">
+                <input class="form-check-input ru-check" type="checkbox" value="${i}" id="ru_${i}" ${st.ruDrop.ifaces.includes(i) ? 'checked' : ''}>
+                <label class="form-check-label text-white small" for="ru_${i}">${i}</label>
+            </div>
+        `).join('');
+    }
 
     const ruEl = document.getElementById('ruDropStatus');
-    if (st.ruDrop.active) {
-        ruEl.innerHTML = `<span class="val-rx">Активно на: ${st.ruDrop.ifaces.join(', ')}</span> <span class="sub-text">(Правил: ${st.ruDrop.count})</span>`;
-    } else {
-        ruEl.innerHTML = `<span class="val-tx">Выключено</span>`;
+    if (ruEl) {
+        if (st.ruDrop.active) {
+            ruEl.innerHTML = `<span class="val-rx">Активно на: ${st.ruDrop.ifaces.join(', ')}</span> <span class="sub-text">(Правил: ${st.ruDrop.count})</span>`;
+        } else {
+            ruEl.innerHTML = `<span class="val-tx">Выключено</span>`;
+        }
     }
 
-    // Отрисовка чекбоксов для Каскада
+    // 2. Отрисовка чекбоксов для Каскада
     const cascList = document.getElementById('cascadeIfacesList');
-    cascList.innerHTML = ifaces.map(i => `
-        <div class="form-check form-check-inline" style="margin-right: 10px;">
-            <input class="form-check-input casc-check" type="checkbox" value="${i}" id="casc_${i}" ${st.cascade.ifaces.includes(i) ? 'checked' : ''}>
-            <label class="form-check-label text-white small" for="casc_${i}">${i}</label>
-        </div>
-    `).join('');
+    if (cascList) {
+        cascList.innerHTML = ifaces.map(i => `
+            <div class="form-check form-check-inline" style="margin-right: 10px;">
+                <input class="form-check-input casc-check" type="checkbox" value="${i}" id="casc_${i}" ${st.cascade.ifaces.includes(i) ? 'checked' : ''}>
+                <label class="form-check-label text-white small" for="casc_${i}">${i}</label>
+            </div>
+        `).join('');
+    }
 
     const cascEl = document.getElementById('cascadeStatus');
-    if (st.cascade.active) {
-        cascEl.innerHTML = `<span class="val-rx">Каскад работает для: ${st.cascade.ifaces.join(', ')}</span>`;
-    } else {
-        cascEl.innerHTML = `<span class="val-tx">Маршруты каскада отключены</span>`;
+    if (cascEl) {
+        if (st.cascade.active) {
+            cascEl.innerHTML = `<span class="val-rx">Каскад работает для: ${st.cascade.ifaces.join(', ')}</span>`;
+        } else {
+            cascEl.innerHTML = `<span class="val-tx">Маршруты каскада отключены</span>`;
+        }
     }
 
-    // DNS и UFW остаются без изменений
-    const dnsSel = document.getElementById('dnsIface'); const ufwSel = document.getElementById('ufwIface');
-    dnsSel.innerHTML = ''; ufwSel.innerHTML = '<option value="any">Все</option>';
-    ifaces.forEach(i => { dnsSel.appendChild(new Option(i, i)); ufwSel.appendChild(new Option(i, i)); });
-    if(ifaces.includes('awg0')) { dnsSel.value = 'awg0'; }
+    // 3. Отрисовка чекбоксов для DNS (ИСПРАВЛЕНО)
+    const dnsList = document.getElementById('dnsIfacesList');
+    window.currentDnsIfaces = st.dns.ifaces || [];
+    window.currentDnsTarget = st.dns.target;
+
+    if (dnsList) {
+        dnsList.innerHTML = ifaces.map(i => `
+            <div class="form-check form-check-inline" style="margin-right: 10px;">
+                <input class="form-check-input dns-check" type="checkbox" value="${i}" id="dns_${i}" ${window.currentDnsIfaces.includes(i) ? 'checked' : ''}>
+                <label class="form-check-label text-white small" for="dns_${i}">${i}</label>
+            </div>
+        `).join('');
+    }
 
     const dnsEl = document.getElementById('dnsStatus');
-    window.currentDnsIface = st.dns.iface; window.currentDnsTarget = st.dns.target;
-    if (st.dns.active) { dnsEl.innerHTML = `<span class="val-rx">Активен (${st.dns.iface})</span> <span class="sub-text">Цель: ${st.dns.target}</span>`; document.getElementById('dnsIface').value = st.dns.iface; document.getElementById('dnsTarget').value = st.dns.target; } 
-    else dnsEl.innerHTML = `<span class="val-tx">Не активно</span>`;
-}
+    if (dnsEl) {
+        if (st.dns.active) { 
+            dnsEl.innerHTML = `<span class="val-rx">Активен на: ${window.currentDnsIfaces.join(', ')}</span> <span class="sub-text">Цель: ${st.dns.target}</span>`; 
+            const targetInput = document.getElementById('dnsTarget');
+            if (targetInput) targetInput.value = st.dns.target; 
+        } else {
+            dnsEl.innerHTML = `<span class="val-tx">Не активно</span>`;
+        }
+    }
 
-async function toggleRuDrop(enable) {
-    const checkedIfaces = Array.from(document.querySelectorAll('.ru-check:checked')).map(cb => cb.value);
-    if (enable && checkedIfaces.length === 0) return alert('Выберите хотя бы один интерфейс для блокировки!');
-    
-    const schedule = document.getElementById('ruDropSchedule').value;
-    document.getElementById('ruDropStatus').innerText = "Применение (до 20 сек)...";
-    
-    const res = await fetch('/api/tools/rudrop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({enable, ifaces: checkedIfaces, schedule}) });
-    if (res.ok) loadNetworkTools();
-}
-
-async function toggleCascade(enable) {
-async function toggleCascade(enable) {
-    const checkedIfaces = Array.from(document.querySelectorAll('.casc-check:checked')).map(cb => cb.value);
-    if (enable && checkedIfaces.length === 0) return alert('Выберите хотя бы один интерфейс для каскада!');
-    
-    document.getElementById('cascadeStatus').innerText = "Настройка маршрутов...";
-    
-    const res = await fetch('/api/tools/cascade', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({enable, ifaces: checkedIfaces}) });
-    if (res.ok) {
-        const data = await res.json();
-        if(data.error) { alert(data.error); }
-        loadNetworkTools();
-    } else {
-        alert("Ошибка настройки каскада. Проверьте логи.");
+    // 4. UFW остается выпадающим списком
+    const ufwSel = document.getElementById('ufwIface');
+    if (ufwSel) {
+        ufwSel.innerHTML = '<option value="any">Все</option>';
+        ifaces.forEach(i => { ufwSel.appendChild(new Option(i, i)); });
     }
 }
 
