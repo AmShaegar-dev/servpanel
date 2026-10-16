@@ -424,7 +424,22 @@ app.post('/api/create', checkAuth, (req, res) => {
         try {
             const response = JSON.parse(stdout);
             if (!response.ok) return res.status(500).json({ error: response.error });
-            res.download(response.results[0].conf, `Serv_${name}.conf`);
+            
+            const confPath = response.results[0].conf;
+            
+            // --- УМНАЯ ЗАМЕНА IP НА ДОМЕН ---
+            try {
+                let domain = "";
+                if (fs.existsSync('/root/awg_domain.txt')) domain = fs.readFileSync('/root/awg_domain.txt', 'utf8').trim();
+                if (!domain) {
+                    const match = execSync('cat /etc/nginx/sites-available/awg-admin || true').toString().match(/server_name\s+([^;]+);/);
+                    if (match && match[1] && match[1] !== '_') domain = match[1].trim();
+                }
+                if (domain) execSync(`sudo sed -i -E 's/Endpoint = [0-9\\.]+(:[0-9]+)/Endpoint = ${domain}\\1/g' ${confPath}`);
+            } catch(e) {}
+            // --------------------------------
+
+            res.download(confPath, `Serv_${name}.conf`);
         } catch (e) { res.status(500).json({ error: "Ошибка обработки" }); }
     });
 });
@@ -436,6 +451,17 @@ app.post('/api/create-bulk', checkAuth, (req, res) => {
         const batchId = Date.now();
         const tempDir = `/tmp/awg-bulk-${batchId}`;
         execSync(`mkdir -p ${tempDir}`);
+        
+        // Получаем домен один раз для всего архива
+        let domain = "";
+        try {
+            if (fs.existsSync('/root/awg_domain.txt')) domain = fs.readFileSync('/root/awg_domain.txt', 'utf8').trim();
+            if (!domain) {
+                const match = execSync('cat /etc/nginx/sites-available/awg-admin || true').toString().match(/server_name\s+([^;]+);/);
+                if (match && match[1] && match[1] !== '_') domain = match[1].trim();
+            }
+        } catch(e) {}
+
         for (let i = 1; i <= count; i++) {
             const clientName = `${prefix}-${i}`;
             let cmd = `sudo bash /root/awg/manage_amneziawg.sh add ${clientName}`;
@@ -444,7 +470,11 @@ app.post('/api/create-bulk', checkAuth, (req, res) => {
             try {
                 const result = execSync(cmd).toString();
                 const response = JSON.parse(result);
-                if (response.ok && response.results[0].conf) execSync(`sudo cp ${response.results[0].conf} ${tempDir}/Serv_${clientName}.conf`);
+                if (response.ok && response.results[0].conf) {
+                    const confPath = response.results[0].conf;
+                    if (domain) execSync(`sudo sed -i -E 's/Endpoint = [0-9\\.]+(:[0-9]+)/Endpoint = ${domain}\\1/g' ${confPath}`);
+                    execSync(`sudo cp ${confPath} ${tempDir}/Serv_${clientName}.conf`);
+                }
             } catch(e) {} 
         }
         const zipPath = `/tmp/Serv_Bulk_${prefix}_${count}.zip`;
@@ -668,7 +698,11 @@ app.post('/api/install/module', checkAuth, (req, res) => {
             runScript += `export REMOTE_PASS="${data.remotePass || ''}"\n`;
             if (data.domain) {
                 runScript += `export SERVER_PUB_IP="${data.domain}"\n`;
+                fs.writeFileSync('/root/awg_domain.txt', data.domain);
+            } else {
+                try { fs.unlinkSync('/root/awg_domain.txt'); } catch(e){}
             }
+            // --------------------------
         }
 
         runScript += `curl -fsSL ${installScriptUrl} > /tmp/installer.sh\nbash /tmp/installer.sh > ${logFile} 2>&1\nrm -f /tmp/installer.sh\n`;
