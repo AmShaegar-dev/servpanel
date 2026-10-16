@@ -258,18 +258,19 @@
             Загрузка данных...
         </div>
     </div>
-                <div class="card" style="margin-bottom: 20px;">
-                    <h3>Перехват DNS (Iptables)</h3>
-                    <div style="margin-bottom: 15px;"><span id="dnsStatus">Ожидание...</span></div>
-                    <div class="controls-row">
-                        <select id="dnsIface" style="width: 120px;"></select>
-                        <input type="text" id="dnsTarget" placeholder="IP AdGuard (напр. 10.8.1.1:5553)" style="width: 240px;">
-                    </div>
-                    <div class="controls-row" style="margin-bottom: 0;">
-                        <button class="btn-primary" onclick="toggleDns(true)">Перехватывать трафик</button>
-                        <button class="btn-dark" onclick="toggleDns(false)">Выключить</button>
-                    </div>
-                </div>
+               <div class="card">
+    <h3>Перехват DNS (Iptables)</h3>
+    <div style="margin-bottom: 15px;"><span id="dnsStatus">Ожидание...</span></div>
+    
+    <!-- Сюда будут подгружаться галочки -->
+    <div id="dnsIfacesList" style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
+    
+    <input type="text" id="dnsTarget" class="form-control bg-dark text-white border-secondary mb-3" placeholder="IP AdGuard (напр. 10.8.1.1:5553)">
+    <div class="controls-row" style="margin-bottom: 0;">
+        <button class="btn-primary" onclick="toggleDns(true)">Перехватывать трафик</button>
+        <button class="btn-dark" onclick="toggleDns(false)">Выключить</button>
+    </div>
+</div>
 
                 <div class="stats-cards">
                     <div class="card" style="flex: 2;">
@@ -981,6 +982,49 @@ async function toggleCascade(enable) {
     }
 }
 
+		async function toggleCascade(enable) {
+    const checkedIfaces = Array.from(document.querySelectorAll('.casc-check:checked')).map(cb => cb.value);
+    if (enable && checkedIfaces.length === 0) return alert('Выберите хотя бы один интерфейс для каскада!');
+    
+    document.getElementById('cascadeStatus').innerText = "Настройка маршрутов...";
+    
+    const res = await fetch('/api/tools/cascade', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({enable, ifaces: checkedIfaces}) });
+    if (res.ok) {
+        const data = await res.json();
+        if(data.error) { alert(data.error); }
+        loadNetworkTools();
+    } else {
+        alert("Ошибка настройки каскада. Проверьте логи.");
+    }
+}
+
+async function toggleDns(enable) {
+    const checkedIfaces = Array.from(document.querySelectorAll('.dns-check:checked')).map(cb => cb.value);
+    const target = document.getElementById('dnsTarget').value;
+    
+    if (enable && checkedIfaces.length === 0) return alert("Выберите хотя бы один интерфейс для перехвата DNS");
+    if (enable && !target) return alert("Укажите IP-адрес DNS сервера");
+    
+    document.getElementById('dnsStatus').innerText = "Применение...";
+    const res = await fetch('/api/tools/dns', { 
+        method: 'POST', 
+        headers: {'Content-Type':'application/json'}, 
+        body: JSON.stringify({
+            enable, 
+            ifaces: checkedIfaces, 
+            target, 
+            oldIfaces: window.currentDnsIfaces, 
+            oldTarget: window.currentDnsTarget
+        }) 
+    });
+    if (res.ok) loadNetworkTools();
+}
+
+
+        function showDashboard() {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('dashboardScreen').style.display = 'flex';
+		
         function showDashboard() {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('dashboardScreen').style.display = 'flex';
