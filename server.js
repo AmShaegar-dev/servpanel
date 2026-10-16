@@ -559,16 +559,27 @@ app.post('/api/change-password', checkAuth, (req, res) => {
 
 app.get('/api/server-info', checkAuth, (req, res) => {
     try {
-        const ip = execSync('curl -4s ifconfig.me || wget -4 -qO- ifconfig.me').toString().trim();
         let domain = "";
         try {
             const nginxConf = execSync('cat /etc/nginx/sites-available/awg-admin || true').toString();
             const match = nginxConf.match(/server_name\s+([^;]+);/);
             if (match && match[1] && match[1] !== '_') domain = match[1].trim();
         } catch(e) {}
-        res.json({ ip, domain });
+
+        // Запрашиваем данные через ipinfo.io
+        let ip = "Неизвестно";
+        let country = "UNKNOWN";
+        try {
+            const ipinfo = JSON.parse(execSync('curl -s https://ipinfo.io/json || echo "{}"').toString());
+            ip = ipinfo.ip || execSync('curl -4s ifconfig.me || true').toString().trim();
+            country = ipinfo.country || "UNKNOWN";
+        } catch(e) {
+            ip = execSync('curl -4s ifconfig.me || true').toString().trim();
+        }
+
+        res.json({ ip, domain, country });
     } catch(e) {
-        res.json({ ip: "Неизвестно", domain: "" });
+        res.json({ ip: "Неизвестно", domain: "", country: "UNKNOWN" });
     }
 });
 
