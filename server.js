@@ -205,24 +205,25 @@ app.get('/api/tools/status', checkAuth, (req, res) => {
     let cascActive = false, cascIfaces = [];
     try {
         const mangleStr = execSync("sudo iptables -t mangle -S PREROUTING || true").toString();
-        const matches = [...mangleStr.matchAll(/-A PREROUTING.*? -i\s+(\S+).*?-j MARK --set-xmark 0x1/g)];
+        const matches = [...mangleStr.matchAll(/-A PREROUTING.*? -i\s+(\S+).*?-j MARK --set.*mark 0x1/g)];
         cascIfaces = [...new Set(matches.map(m => m[1]))];
         cascActive = cascIfaces.length > 0;
     } catch(e) {}
 
     let dnsActive = false, dnsTarget = '', dnsIfaces = [];
-try {
-    const natStr = execSync("sudo iptables -t nat -S PREROUTING || true").toString();
-    const matches = [...natStr.matchAll(/-A PREROUTING -i\s+(\S+).*?--dport 53 -j DNAT --to-destination\s+(\S+)/g)];
-    dnsIfaces = [...new Set(matches.map(m => m[1]))];
-    if (matches.length > 0) dnsTarget = matches[0][2];
-    dnsActive = dnsIfaces.length > 0;
-} catch(e) {}
+    try {
+        const natStr = execSync("sudo iptables -t nat -S PREROUTING || true").toString();
+        const matches = [...natStr.matchAll(/-A PREROUTING -i\s+(\S+).*?--dport 53 -j DNAT --to-destination\s+(\S+)/g)];
+        dnsIfaces = [...new Set(matches.map(m => m[1]))];
+        if (matches.length > 0) dnsTarget = matches[0][2];
+        dnsActive = dnsIfaces.length > 0;
+    } catch(e) {}
     
+    // Исправленная строчка: теперь сервер корректно возвращает массивы интерфейсов
     res.json({
         ruDrop: { active: ruActive, count: ruCount, ifaces: ruIfaces },
         cascade: { active: cascActive, ifaces: cascIfaces },
-        dns: { active: dnsActive, iface: dnsIface, target: dnsTarget }
+        dns: { active: dnsActive, ifaces: dnsIfaces, target: dnsTarget }
     });
 });
 
@@ -255,6 +256,29 @@ app.post('/api/tools/rudrop', checkAuth, (req, res) => {
     });
 });
 
+app.post('/api/tools/dns', checkAuth, (req, res) => {
+    const { ifaces, target, enable, oldIfaces, oldTarget } = req.body;
+    
+    if (oldIfaces && oldIfaces.length > 0 && oldTarget) {
+        oldIfaces.forEach(oldIface => {
+            try { execSync(`sudo iptables -t nat -D PREROUTING -i ${oldIface} -p udp --dport 53 -j DNAT --to-destination ${oldTarget}`); } catch(e){}
+            try { execSync(`sudo iptables -t nat -D PREROUTING -i ${oldIface} -p tcp --dport 53 -j DNAT --to-destination ${oldTarget}`); } catch(e){}
+            try { execSync(`sudo iptables -D FORWARD -i ${oldIface} -p tcp --dport 853 -j DROP`); } catch(e){}
+        });
+    }
+    
+    if (enable && ifaces && ifaces.length > 0 && target) {
+        ifaces.forEach(iface => {
+            try {
+                execSync(`sudo iptables -t nat -I PREROUTING 1 -i ${iface} -p udp --dport 53 -j DNAT --to-destination ${target}`);
+                execSync(`sudo iptables -t nat -I PREROUTING 1 -i ${iface} -p tcp --dport 53 -j DNAT --to-destination ${target}`);
+                execSync(`sudo iptables -I FORWARD 1 -i ${iface} -p tcp --dport 853 -j DROP`);
+            } catch(e) {}
+        });
+    }
+    res.json({success: true});
+});
+
 app.post('/api/tools/cascade', checkAuth, (req, res) => {
     const { ifaces, enable } = req.body;
     const scriptPath = '/root/awg/awg-routing.sh';
@@ -272,10 +296,9 @@ app.post('/api/tools/cascade', checkAuth, (req, res) => {
         const awg1Endpoint = epMatch[1];
         const awg1If = ifMatch[1];
 
-        // 1. Сначала полностью зачищаем старые правила каскада для ВСЕХ интерфейсов
         const mangleOut = execSync("sudo iptables -t mangle -S PREROUTING || true").toString();
         mangleOut.split('\n').forEach(rule => {
-            if (rule.includes('match-set ru dst -j RETURN') || rule.includes('MARK --set-xmark 0x1')) {
+            if (rule.includes('match-set ru dst -j RETURN') || rule.includes('MARK --set-xmark 0x1') || rule.includes('MARK --set-mark 0x1')) {
                 execSync(`sudo iptables -t mangle -D PREROUTING ${rule.replace(/^-A PREROUTING /, '')} || true`);
             }
         });
@@ -293,7 +316,6 @@ app.post('/api/tools/cascade', checkAuth, (req, res) => {
 
         if (!ifaces || ifaces.length === 0) return res.json({error: "Выберите интерфейсы"});
 
-        // 2. Генерируем новый скрипт с поддержкой массива интерфейсов и динамических подсетей
         const newScript = `#!/bin/bash
 set -euo pipefail
 CASC_IFACES=(${ifaces.join(' ')})
@@ -337,7 +359,7 @@ fi
 
 for IFACE in "\${CASC_IFACES[@]}"; do
     SUBNET=$(ip -o -f inet addr show \$IFACE 2>/dev/null | awk '{print \\$4}' | head -n 1 || true)
-    if [ -n "$SUBNET" ]; then
+    if [ -n "\$SUBNET" ]; then
         iptables -t mangle -C PREROUTING -i \$IFACE -s "\$SUBNET" -m set --match-set ru dst -j RETURN 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i \$IFACE -s "\$SUBNET" -m set --match-set ru dst -j RETURN
         iptables -t mangle -C PREROUTING -i \$IFACE -s "\$SUBNET" -j MARK --set-mark "$FWMARK" 2>/dev/null || iptables -t mangle -A PREROUTING -i \$IFACE -s "\$SUBNET" -j MARK --set-mark "$FWMARK"
         iptables -t nat -C POSTROUTING -s "\$SUBNET" -o "$AWG1_IF" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s "\$SUBNET" -o "$AWG1_IF" -j MASQUERADE
@@ -352,49 +374,8 @@ echo "ОК: Каскад применен."
         execSync('sudo systemctl restart awg-routing || true');
         res.json({success: true});
     } catch(e) {
-        res.json({error: "Системная ошибка настройки каскада"});
+        res.json({error: "Системная ошибка настройки каскада: " + e.message});
     }
-});
-
-app.post('/api/tools/dns', checkAuth, (req, res) => {
-    const { ifaces, target, enable, oldIfaces, oldTarget } = req.body;
-    
-    // Очищаем старые правила со всех прошлых интерфейсов
-    if (oldIfaces && oldIfaces.length > 0 && oldTarget) {
-        oldIfaces.forEach(oldIface => {
-            try { execSync(`sudo iptables -t nat -D PREROUTING -i ${oldIface} -p udp --dport 53 -j DNAT --to-destination ${oldTarget}`); } catch(e){}
-            try { execSync(`sudo iptables -t nat -D PREROUTING -i ${oldIface} -p tcp --dport 53 -j DNAT --to-destination ${oldTarget}`); } catch(e){}
-            try { execSync(`sudo iptables -D FORWARD -i ${oldIface} -p tcp --dport 853 -j DROP`); } catch(e){}
-        });
-    }
-    
-    // Применяем новые правила циклом
-    if (enable && ifaces && ifaces.length > 0 && target) {
-        ifaces.forEach(iface => {
-            try {
-                execSync(`sudo iptables -t nat -I PREROUTING 1 -i ${iface} -p udp --dport 53 -j DNAT --to-destination ${target}`);
-                execSync(`sudo iptables -t nat -I PREROUTING 1 -i ${iface} -p tcp --dport 53 -j DNAT --to-destination ${target}`);
-                execSync(`sudo iptables -I FORWARD 1 -i ${iface} -p tcp --dport 853 -j DROP`);
-            } catch(e) {}
-        });
-    }
-    res.json({success: true});
-});
-
-app.get('/api/services', checkAuth, (req, res) => {
-    try {
-        const services = ['AdGuardHome', 'nginx', 'sshd', 'mtproxyl-telemt'];
-        const result = [];
-        services.forEach(srv => {
-            try {
-                const status = execSync(`systemctl is-active ${srv} || true`).toString().trim();
-                result.push({ name: srv, status: status === 'active' ? 'running' : 'stopped' });
-            } catch(e) {
-                result.push({ name: srv, status: 'unknown' });
-            }
-        });
-        res.json(result);
-    } catch(e) { res.status(500).json({ error: "Ошибка системных служб" }); }
 });
 
 app.post('/api/services/restart', checkAuth, (req, res) => {
