@@ -1146,15 +1146,59 @@ async function loadStats() {
 }
 
 async function createConfig() {
-    const name = document.getElementById('clientName').value; const count = document.getElementById('clientCount').value; const expires = document.getElementById('clientExpires').value;
+    const name = document.getElementById('clientName').value; 
+    const count = document.getElementById('clientCount').value; 
+    const expires = document.getElementById('clientExpires').value;
+    
     if(!name) return alert("Введите имя (префикс)");
+    
     if (!count || parseInt(count) <= 1) {
+        // Одиночное создание (остается как было)
         const res = await fetch('/api/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, expires }) });
-        if (res.ok) { const a = document.createElement('a'); a.href = window.URL.createObjectURL(await res.blob()); a.download = `serv_${name}.conf`; a.click(); document.getElementById('clientName').value = ''; loadStats(); }
+        if (res.ok) { 
+            const a = document.createElement('a'); 
+            a.href = window.URL.createObjectURL(await res.blob()); 
+            a.download = `Serv_${name}.conf`; 
+            a.click(); 
+            document.getElementById('clientName').value = ''; 
+            loadStats(); 
+        }
     } else {
-        document.getElementById('loaderOverlay').style.display = 'flex'; document.getElementById('loaderText').innerText = "Генерация ZIP архива...";
-        const res = await fetch('/api/create-bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prefix: name, count: parseInt(count), expires }) });
-        if (res.ok) { const a = document.createElement('a'); a.href = window.URL.createObjectURL(await res.blob()); a.download = `Paris_Bulk_${name}.zip`; a.click(); document.getElementById('clientName').value = ''; document.getElementById('clientCount').value = ''; loadStats(); }
+        // Массовое создание (Прямое скачивание файлов вместо ZIP)
+        document.getElementById('loaderOverlay').style.display = 'flex'; 
+        document.getElementById('loaderText').innerText = "Генерация конфигов (около 1-2 сек на каждый)...";
+        
+        try {
+            const res = await fetch('/api/create-bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prefix: name, count: parseInt(count), expires }) });
+            if (res.ok) { 
+                const data = await res.json();
+                if (data.configs && data.configs.length > 0) {
+                    // Запускаем поочередное скачивание всех файлов
+                    data.configs.forEach((conf, index) => {
+                        // Задержка 300мс между скачиваниями, чтобы браузер (Chrome/Safari) не заблокировал их как спам-попапы
+                        setTimeout(() => {
+                            const blob = new Blob([conf.content], { type: 'text/plain' });
+                            const a = document.createElement('a');
+                            a.href = window.URL.createObjectURL(blob);
+                            a.download = `Serv_${conf.name}.conf`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                        }, index * 300);
+                    });
+                } else {
+                    alert("Конфиги не сгенерировались. Проверьте логи.");
+                }
+                
+                document.getElementById('clientName').value = ''; 
+                document.getElementById('clientCount').value = ''; 
+                loadStats(); 
+            } else {
+                alert('Ошибка массовой генерации на сервере');
+            }
+        } catch (e) {
+            alert('Сетевая ошибка');
+        }
         document.getElementById('loaderOverlay').style.display = 'none';
     }
 }
