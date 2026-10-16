@@ -112,7 +112,7 @@
             <li onclick="switchTab('tab-services', this)"><span class="menu-icon">⚙️</span> Службы & DNS</li>
             <li onclick="switchTab('tab-security', this)"><span class="menu-icon">🛡️</span> Защита и Cron</li>
             <li onclick="switchTab('tab-diag', this)"><span class="menu-icon">📡</span> Диагностика</li>
-			<li onclick="switchTab('tab-install', this)"><span class="menu-icon">📥</span> Установка Модулей</li>
+            <li onclick="switchTab('tab-install', this)"><span class="menu-icon">📥</span> Установка Модулей</li>
         </ul>
     </aside>
 
@@ -123,7 +123,7 @@
                 <h3 id="currentTabTitle" style="margin: 0;">Дашборд</h3>
             </div>
             <div class="topbar-actions">
-    			<button class="btn-dark" onclick="updatePanel()" style="color: var(--rx-color);">🔄 Обновить с GitHub</button>
+                <button class="btn-dark" onclick="updatePanel()" style="color: var(--rx-color);">🔄 Обновить с GitHub</button>
                 <button class="btn-dark" onclick="window.location.href='/api/backup'" title="Скачать">💾 Скачать бэкап</button>
                 <button class="btn-dark" onclick="document.getElementById('backupUpload').click()" title="Восстановить" style="color: var(--sys-color);">📥 Загрузить архив</button>
                 <input type="file" id="backupUpload" accept=".tar.gz" style="display:none" onchange="restoreBackup(event)">
@@ -210,19 +210,19 @@
 
             <!-- СЕТЬ И ФАЕРВОЛ -->
             <div id="tab-network" class="tab-pane">
-				<div class="card" style="margin-bottom: 20px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-        <h3 style="margin:0;">Редактор конфигурации AmneziaWG</h3>
-        <button class="btn-dark" style="padding: 4px 8px; font-size: 11px;" onclick="loadAwgConfig()">Обновить</button>
-    </div>
-    <p style="color: var(--text-muted); font-size: 12px; margin-top: 0;">Параметры обфускации (Jc, Jmin, Jmax, S1, S2, H1-H4) и ключи. Внимание: при смене портов или ключей старые клиенты перестанут работать!</p>
-    <div id="awgConfigWrapper" style="display:none; flex-direction: column; gap: 10px;">
-        <input type="hidden" id="awgConfigFile">
-        <textarea id="awgConfigText" rows="14" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 13px; background: rgba(0,0,0,0.3); color: #c9d1d9; border: 1px solid var(--border); border-radius: 6px; padding: 10px; resize: vertical;"></textarea>
-        <button class="btn-primary" style="align-self: flex-start;" onclick="saveAwgConfig()">💾 Сохранить и перезапустить AWG</button>
-    </div>
-    <div id="awgConfigError" style="color: #f85149; font-size: 13px; display: none;">Загрузка...</div>
-</div>
+                <div class="card" style="margin-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="margin:0;">Редактор конфигурации AmneziaWG</h3>
+                        <button class="btn-dark" style="padding: 4px 8px; font-size: 11px;" onclick="loadAwgConfig()">Обновить</button>
+                    </div>
+                    <p style="color: var(--text-muted); font-size: 12px; margin-top: 0;">Параметры обфускации (Jc, Jmin, Jmax, S1, S2, H1-H4) и ключи. Внимание: при смене портов или ключей старые клиенты перестанут работать!</p>
+                    <div id="awgConfigWrapper" style="display:none; flex-direction: column; gap: 10px;">
+                        <input type="hidden" id="awgConfigFile">
+                        <textarea id="awgConfigText" rows="14" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 13px; background: rgba(0,0,0,0.3); color: #c9d1d9; border: 1px solid var(--border); border-radius: 6px; padding: 10px; resize: vertical;"></textarea>
+                        <button class="btn-primary" style="align-self: flex-start;" onclick="saveAwgConfig()">💾 Сохранить и перезапустить AWG</button>
+                    </div>
+                    <div id="awgConfigError" style="color: #f85149; font-size: 13px; display: none;">Загрузка...</div>
+                </div>
                 <div class="card" style="margin-bottom: 20px;">
                     <h3 style="margin-bottom: 15px;">Управление портами (UFW)</h3>
                     <div class="controls-row">
@@ -252,25 +252,24 @@
 
             <!-- СЛУЖБЫ & DNS -->
             <div id="tab-services" class="tab-pane">
-		<div class="card" style="margin-bottom: 20px;">
-        <h3>Данные для подключения устройств к AdGuard DNS</h3>
-        <div id="dnsAddressesList" style="margin-top: 10px; font-family: monospace; color: var(--text-main); font-size: 14px; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 6px; border: 1px solid var(--border);">
-            Загрузка данных...
-        </div>
-    </div>
-               <div class="card">
-    <h3>Перехват DNS (Iptables)</h3>
-    <div style="margin-bottom: 15px;"><span id="dnsStatus">Ожидание...</span></div>
-    
-    <!-- Сюда будут подгружаться галочки -->
-    <div id="dnsIfacesList" style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
-    
-    <input type="text" id="dnsTarget" class="form-control bg-dark text-white border-secondary mb-3" placeholder="IP AdGuard (напр. 10.8.1.1:5553)">
-    <div class="controls-row" style="margin-bottom: 0;">
-        <button class="btn-primary" onclick="toggleDns(true)">Перехватывать трафик</button>
-        <button class="btn-dark" onclick="toggleDns(false)">Выключить</button>
-    </div>
-</div>
+                <div class="card" style="margin-bottom: 20px;">
+                    <h3>Данные для подключения устройств к AdGuard DNS</h3>
+                    <div id="dnsAddressesList" style="margin-top: 10px; font-family: monospace; color: var(--text-main); font-size: 14px; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 6px; border: 1px solid var(--border);">
+                        Загрузка данных...
+                    </div>
+                </div>
+                <div class="card">
+                    <h3>Перехват DNS (Iptables)</h3>
+                    <div style="margin-bottom: 15px;"><span id="dnsStatus">Ожидание...</span></div>
+                    
+                    <div id="dnsIfacesList" style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
+                    
+                    <input type="text" id="dnsTarget" class="form-control bg-dark text-white border-secondary mb-3" placeholder="IP AdGuard (напр. 10.8.1.1:5553)">
+                    <div class="controls-row" style="margin-bottom: 0;">
+                        <button class="btn-primary" onclick="toggleDns(true)">Перехватывать трафик</button>
+                        <button class="btn-dark" onclick="toggleDns(false)">Выключить</button>
+                    </div>
+                </div>
 
                 <div class="stats-cards">
                     <div class="card" style="flex: 2;">
@@ -314,11 +313,10 @@
                 </div>
             </div>
 
-       <!-- ЗАЩИТА И CRON -->
+            <!-- ЗАЩИТА И CRON -->
             <div id="tab-security" class="tab-pane">
                 <div class="stats-cards">
                     
-                    <!-- Карточка 1: GeoIP -->
                     <div class="card">
                         <h3>Блокировка RU-трафика (GeoIP)</h3>
                         <div style="margin-bottom: 15px;"><span id="ruDropStatus">Ожидание...</span></div>
@@ -335,21 +333,19 @@
                         </div>
                     </div>
 
-                   <!-- Карточка 2: Каскад -->
-					<div class="card" id="cascadeRoutingCard">
-   					 <h3 style="color: #58a6ff;">Маршрутизация Каскада (RU ➔ EU)</h3>
-  					  <p style="color: #ff7b72; font-size: 12px; margin-bottom: 10px; line-height: 1.3;">
-      				  ⚠️ <b>Важно:</b> Маршруты каскада настраиваются <b>строго на ВХОДНОМ сервере (RU)</b>. Если эта панель установлена на сервере-выходе (EU), не применяйте здесь эти локальные правила.
-  					  </p>
-   					 <div style="margin-bottom: 15px;"><span id="cascadeStatus">Ожидание...</span></div>
-   					 <div id="cascadeIfacesList" style="margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
-   					 <div class="controls-row" style="margin-bottom: 0; margin-top: auto;">
-      			  <button class="btn-success" style="background-color: #2ea043; color: white; border: none; border-radius: 6px;" onclick="toggleCascade(true)">Применить маршруты</button>
-      			  <button class="btn-dark" onclick="toggleCascade(false)">Отключить</button>
-   				 </div>
-			</div>
+                    <div class="card" id="cascadeRoutingCard">
+                        <h3 style="color: #58a6ff;">Маршрутизация Каскада (RU ➔ EU)</h3>
+                        <p style="color: #ff7b72; font-size: 12px; margin-bottom: 10px; line-height: 1.3;">
+                            ⚠️ <b>Важно:</b> Маршруты каскада настраиваются <b>строго на ВХОДНОМ сервере (RU)</b>. Если эта панель установлена на сервере-выходе (EU), не применяйте здесь эти локальные правила.
+                        </p>
+                        <div style="margin-bottom: 15px;"><span id="cascadeStatus">Ожидание...</span></div>
+                        <div id="cascadeIfacesList" style="margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
+                        <div class="controls-row" style="margin-bottom: 0; margin-top: auto;">
+                            <button class="btn-success" style="background-color: #2ea043; color: white; border: none; border-radius: 6px;" onclick="toggleCascade(true)">Применить маршруты</button>
+                            <button class="btn-dark" onclick="toggleCascade(false)">Отключить</button>
+                        </div>
+                    </div>
 
-                    <!-- Карточка 3: Fail2Ban -->
                     <div class="card">
                         <h3>Fail2Ban / Брутфорс (Скоро)</h3>
                         <p style="color: var(--text-muted); font-size: 14px;">Здесь будет список заблокированных IP-адресов злоумышленников и возможность ручного разбана.</p>
@@ -367,152 +363,131 @@
                     <button class="btn-dark" disabled>Функция в разработке</button>
                 </div>
             </div>
-<!-- УСТАНОВКА МОДУЛЕЙ -->
-<div id="tab-install" class="tab-pane">
-    <div class="stats-cards">
-      <!-- AmneziaWG -->
-<div class="card" style="flex: 1; min-width: 320px;">
-    <h3>AmneziaWG (С перезагрузками)</h3>
-    <p style="color: var(--text-muted); font-size: 13px;">Полная установка AWG. Потребует 3 перезагрузки сервера.</p>
 
-<div class="mb-3">
-    <label class="form-label text-info fw-bold">Режим установки</label>
-    <select id="awgMode" class="form-select bg-dark text-white border-secondary" onchange="document.getElementById('cascadeSettings').style.display = this.value === 'cascade' ? 'block' : 'none';">
-        <option value="single">Обычная установка (Текущий сервер)</option>
-        <option value="cascade">Каскад (Раздельный выход: RU + EU)</option>
-    </select>
-</div>
+            <!-- УСТАНОВКА МОДУЛЕЙ -->
+            <div id="tab-install" class="tab-pane">
+                <div class="stats-cards">
+                    <div class="card" style="flex: 1; min-width: 320px;">
+                        <h3>AmneziaWG (С перезагрузками)</h3>
+                        <p style="color: var(--text-muted); font-size: 13px;">Полная установка AWG. Потребует 3 перезагрузки сервера.</p>
 
-<div id="cascadeSettings" class="p-3 mb-3 border border-info rounded" style="display:none; background: rgba(13, 202, 240, 0.05);">
-    <h6 class="text-info border-bottom border-info pb-2 mb-3">Настройки второго сервера</h6>
-    
-    <div class="mb-3">
-        <label class="form-label text-warning small">Где установлена эта панель?</label>
-        <select id="cascadeRole" class="form-select form-select-sm bg-dark text-white border-secondary">
-            <option value="ru">Эта панель в РОССИИ (Вход) -> Подключаем удаленный EU сервер (Выход)</option>
-            <option value="eu">Эта панель в ЕВРОПЕ (Выход) -> Подключаем удаленный RU сервер (Вход)</option>
-        </select>
-    </div>
+                        <div class="mb-3">
+                            <label class="form-label text-info fw-bold">Режим установки</label>
+                            <select id="awgMode" class="form-select bg-dark text-white border-secondary" onchange="document.getElementById('cascadeSettings').style.display = this.value === 'cascade' ? 'block' : 'none';">
+                                <option value="single">Обычная установка (Текущий сервер)</option>
+                                <option value="cascade">Каскад (Раздельный выход: RU + EU)</option>
+                            </select>
+                        </div>
 
-    <div class="row g-2">
-        <div class="col-md-6">
-            <label class="form-label small">IP удаленного сервера</label>
-            <input type="text" id="remoteIp" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="1.2.3.4">
-        </div>
-        <div class="col-md-6">
-            <label class="form-label small">SSH Порт</label>
-            <input type="number" id="remotePort" class="form-control form-control-sm bg-dark text-white border-secondary" value="22">
-        </div>
-        <div class="col-md-12 mt-2">
-            <label class="form-label small">Root Пароль от удаленного сервера</label>
-            <input type="password" id="remotePass" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="P@ssw0rd123">
-            <small class="text-muted" style="font-size: 0.75rem;">Серверы будут автоматически синхронизированы и настроены по SSH (требуется sshpass)</small>
-        </div>
-    </div>
-</div>
-	
-    <div class="controls-row" style="margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-        
-        <!-- Версия -->
-        <div>
-            <label style="font-size: 11px; color: var(--text-muted);">Версия протокола</label>
-            <select id="awgInstallVersion" style="width: 100%; margin-top: 3px;">
-                <option value="3.1">Версия 3.1 (Последняя)</option>
-                <option value="2.0" selected>Версия 2.0 (Стабильная)</option>
-                <option value="1.5">Версия 1.5 (Legacy)</option>
-            </select>
-        </div>
+                        <div id="cascadeSettings" class="p-3 mb-3 border border-info rounded" style="display:none; background: rgba(13, 202, 240, 0.05);">
+                            <h6 class="text-info border-bottom border-info pb-2 mb-3">Настройки второго сервера</h6>
+                            <div class="mb-3">
+                                <label class="form-label text-warning small">Где установлена эта панель?</label>
+                                <select id="cascadeRole" class="form-select form-select-sm bg-dark text-white border-secondary">
+                                    <option value="ru">Эта панель в РОССИИ (Вход) -> Подключаем удаленный EU сервер (Выход)</option>
+                                    <option value="eu">Эта панель в ЕВРОПЕ (Выход) -> Подключаем удаленный RU сервер (Вход)</option>
+                                </select>
+                            </div>
 
-        <!-- Пресет -->
-        <div>
-            <label style="font-size: 11px; color: var(--text-muted);">Профиль обфускации</label>
-            <select id="awgInstallPreset" style="width: 100%; margin-top: 3px;">
-                <option value="default" selected>Стандартный (default)</option>
-                <option value="mobile">Мобильный (mobile)</option>
-            </select>
-        </div>
+                            <div class="row g-2">
+                                <div class="col-md-6">
+                                    <label class="form-label small">IP удаленного сервера</label>
+                                    <input type="text" id="remoteIp" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="1.2.3.4">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small">SSH Порт</label>
+                                    <input type="number" id="remotePort" class="form-control form-control-sm bg-dark text-white border-secondary" value="22">
+                                </div>
+                                <div class="col-md-12 mt-2">
+                                    <label class="form-label small">Root Пароль от удаленного сервера</label>
+                                    <input type="password" id="remotePass" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="P@ssw0rd123">
+                                    <small class="text-muted" style="font-size: 0.75rem;">Серверы будут автоматически синхронизированы и настроены по SSH (требуется sshpass)</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="controls-row" style="margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div>
+                                <label style="font-size: 11px; color: var(--text-muted);">Версия протокола</label>
+                                <select id="awgInstallVersion" style="width: 100%; margin-top: 3px;">
+                                    <option value="3.1">Версия 3.1 (Последняя)</option>
+                                    <option value="2.0" selected>Версия 2.0 (Стабильная)</option>
+                                    <option value="1.5">Версия 1.5 (Legacy)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-size: 11px; color: var(--text-muted);">Профиль обфускации</label>
+                                <select id="awgInstallPreset" style="width: 100%; margin-top: 3px;">
+                                    <option value="default" selected>Стандартный (default)</option>
+                                    <option value="mobile">Мобильный (mobile)</option>
+                                </select>
+                            </div>
+                            <div style="grid-column: span 2;">
+                                <label style="font-size: 11px; color: var(--text-muted);">Режим маршрутизации (IPv4)</label>
+                                <select id="awgInstallRoute" style="width: 100%; margin-top: 3px;" onchange="document.getElementById('awgCustomRouteContainer').style.display = this.value === 'custom' ? 'block' : 'none'">
+                                    <option value="all" selected>Весь трафик (0.0.0.0/0)</option>
+                                    <option value="amnezia">Список Amnezia + DNS</option>
+                                    <option value="custom">Пользовательский список (Split-tunnel)</option>
+                                </select>
+                            </div>
+                            <div id="awgCustomRouteContainer" style="grid-column: span 2; display: none;">
+                                <input type="text" id="awgCustomRoute" placeholder="Пример: 192.168.1.0/24,10.50.0.0/16" style="width: 100%; font-size: 12px; box-sizing: border-box;">
+                            </div>
+                            <div>
+                                <label style="font-size: 11px; color: var(--text-muted);">Настройки IPv6</label>
+                                <select id="awgInstallIpv6" style="width: 100%; margin-top: 3px;">
+                                    <option value="disallow" selected>Отключить (disallow)</option>
+                                    <option value="allow">Оставить включенным (allow)</option>
+                                    <option value="tunnel">Dual-stack в туннеле (ULA)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-size: 11px; color: var(--text-muted);">UDP Порт</label>
+                                <input type="number" id="awgInstallPort" placeholder="39743" style="width: 100%; margin-top: 3px; box-sizing: border-box;" title="Для обхода ТСПУ на моб. сетях рекомендуется 443">
+                            </div>
+                            <div style="grid-column: span 2; font-size: 12px; color: var(--text-main); margin-top: 5px; display: flex; flex-direction: column; gap: 8px;">
+                                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                                    <input type="checkbox" id="awgIsolation" checked> Изолировать клиентов друг от друга (isolation=on)
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                                    <input type="checkbox" id="awgKeepPackages" checked> Сохранить системные пакеты (snapd и др.)
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                                    <input type="checkbox" id="awgNoTweaks"> Без UFW, Fail2Ban и оптимизаций
+                                </label>
+                            </div>
+                        </div>
+                        <button class="btn-primary" style="width: 100%;" onclick="startInstall('awg', '/var/log/awg_install.log')">Начать установку AWG</button>
+                    </div>
+                    
+                    <div class="card" style="flex: 1;">
+                        <h3>MTProto / WEB Proxy (MEKO)</h3>
+                        <p style="color: var(--text-muted); font-size: 13px;">Установка Telemt, MTG с фиксами от MEKO. Рекомендуется ручная установка через терминал для полного контроля.</p>
+                        <div style="background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 11px; margin-bottom: 10px; border: 1px solid var(--border); word-break: break-all; color: #58a6ff;">
+                            curl -fsSL https://raw.githubusercontent.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/main/install.sh | sudo bash
+                        </div>
+                        <button class="btn-dark" onclick="copyMeko()">📋 Скопировать команду</button>
+                    </div>
 
-        <!-- Маршрутизация -->
-        <div style="grid-column: span 2;">
-            <label style="font-size: 11px; color: var(--text-muted);">Режим маршрутизации (IPv4)</label>
-            <select id="awgInstallRoute" style="width: 100%; margin-top: 3px;" onchange="document.getElementById('awgCustomRouteContainer').style.display = this.value === 'custom' ? 'block' : 'none'">
-                <option value="all" selected>Весь трафик (0.0.0.0/0)</option>
-                <option value="amnezia">Список Amnezia + DNS</option>
-                <option value="custom">Пользовательский список (Split-tunnel)</option>
-            </select>
-        </div>
+                    <div class="card" style="flex: 1;">
+                        <h3>AdGuard Home</h3>
+                        <p style="color: var(--text-muted); font-size: 13px;">Установка персонального DNS-блокировщика рекламы.</p>
+                        <button class="btn-primary" onclick="startInstall('adguard', '/var/log/adguard_install.log')">Установить AdGuard</button>
+                    </div>
+                </div>
 
-        <!-- Кастомный маршрут (скрыт по умолчанию) -->
-        <div id="awgCustomRouteContainer" style="grid-column: span 2; display: none;">
-            <input type="text" id="awgCustomRoute" placeholder="Пример: 192.168.1.0/24,10.50.0.0/16" style="width: 100%; font-size: 12px; box-sizing: border-box;">
-        </div>
-
-        <!-- IPv6 -->
-        <div>
-            <label style="font-size: 11px; color: var(--text-muted);">Настройки IPv6</label>
-            <select id="awgInstallIpv6" style="width: 100%; margin-top: 3px;">
-                <option value="disallow" selected>Отключить (disallow)</option>
-                <option value="allow">Оставить включенным (allow)</option>
-                <option value="tunnel">Dual-stack в туннеле (ULA)</option>
-            </select>
-        </div>
-
-        <!-- Порт -->
-        <div>
-            <label style="font-size: 11px; color: var(--text-muted);">UDP Порт</label>
-            <input type="number" id="awgInstallPort" placeholder="39743" style="width: 100%; margin-top: 3px; box-sizing: border-box;" title="Для обхода ТСПУ на моб. сетях рекомендуется 443">
-        </div>
-
-        <!-- Чекбоксы -->
-        <div style="grid-column: span 2; font-size: 12px; color: var(--text-main); margin-top: 5px; display: flex; flex-direction: column; gap: 8px;">
-            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                <input type="checkbox" id="awgIsolation" checked>
-                Изолировать клиентов друг от друга (isolation=on)
-            </label>
-            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                <input type="checkbox" id="awgKeepPackages" checked>
-                Сохранить системные пакеты (snapd и др.)
-            </label>
-            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                <input type="checkbox" id="awgNoTweaks">
-                Без UFW, Fail2Ban и оптимизаций
-            </label>
-        </div>
-    </div>
-    <button class="btn-primary" style="width: 100%;" onclick="startInstall('awg', '/var/log/awg_install.log')">Начать установку AWG</button>
-</div>
-        
-        <!-- MTProto -->
-<div class="card" style="flex: 1;">
-    <h3>MTProto / WEB Proxy (MEKO)</h3>
-    <p style="color: var(--text-muted); font-size: 13px;">Установка Telemt, MTG с фиксами от MEKO. Рекомендуется ручная установка через терминал для полного контроля.</p>
-    <div style="background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 11px; margin-bottom: 10px; border: 1px solid var(--border); word-break: break-all; color: #58a6ff;">
-        curl -fsSL https://raw.githubusercontent.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/main/install.sh | sudo bash
-    </div>
-    <button class="btn-dark" onclick="copyMeko()">📋 Скопировать команду</button>
-</div>
-
-        <!-- AdGuard Home -->
-        <div class="card" style="flex: 1;">
-            <h3>AdGuard Home</h3>
-            <p style="color: var(--text-muted); font-size: 13px;">Установка персонального DNS-блокировщика рекламы.</p>
-            <button class="btn-primary" onclick="startInstall('adguard', '/var/log/adguard_install.log')">Установить AdGuard</button>
-        </div>
-    </div>
-
-    <!-- Окно Live-логов -->
-    <div id="installLogWrapper" class="card" style="display: none; margin-top: 20px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <h3 style="margin:0; color: var(--sys-color);">Терминал установки</h3>
-            <span id="installStatusBadge" class="val-sys">В процессе...</span>
-        </div>
-        <textarea id="installLogText" readonly rows="20" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; background: #000; color: #0f0; border: 1px solid var(--border); border-radius: 6px; padding: 10px; resize: none;"></textarea>
-    </div>
-</div>
+                <div id="installLogWrapper" class="card" style="display: none; margin-top: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h3 style="margin:0; color: var(--sys-color);">Терминал установки</h3>
+                        <span id="installStatusBadge" class="val-sys">В процессе...</span>
+                    </div>
+                    <textarea id="installLogText" readonly rows="20" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; background: #000; color: #0f0; border: 1px solid var(--border); border-radius: 6px; padding: 10px; resize: none;"></textarea>
+                </div>
+            </div>
         </div>
     </main>
 
-    <script>
+<script>
 let logInterval = null;
 let lastStats = {}; let isFetching = false; 
 let pollingInterval = null; let historyInterval = null; let agInterval = null;
