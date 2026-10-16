@@ -666,6 +666,9 @@ app.post('/api/install/module', checkAuth, (req, res) => {
             runScript += `export REMOTE_IP="${data.remoteIp || ''}"\n`;
             runScript += `export REMOTE_PORT="${data.remotePort || '22'}"\n`;
             runScript += `export REMOTE_PASS="${data.remotePass || ''}"\n`;
+            if (data.domain) {
+                runScript += `export SERVER_PUB_IP="${data.domain}"\n`;
+            }
         }
 
         runScript += `curl -fsSL ${installScriptUrl} > /tmp/installer.sh\nbash /tmp/installer.sh > ${logFile} 2>&1\nrm -f /tmp/installer.sh\n`;
