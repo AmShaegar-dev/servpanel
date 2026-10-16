@@ -192,34 +192,55 @@ app.delete('/api/ufw/:id', checkAuth, (req, res) => {
 
 // СЕТЕВЫЕ ИНСТРУМЕНТЫ
 app.get('/api/tools/status', checkAuth, (req, res) => {
-    let ruCount = 0, ruActive = false, ruIface = '';
+    let ruCount = 0, ruActive = false, ruIfaces = [];
     try {
         const count = execSync("sudo ipset list ru_block | grep -c '^[0-9]' || true").toString().trim();
-        ruCount = parseInt(count); ruActive = ruCount > 0;
-        const match = execSync("sudo iptables -S FORWARD || true").toString().match(/-i\s+(\S+)\s+-m set --match-set ru_block/);
-        if (match) ruIface = match[1];
+        ruCount = parseInt(count);
+        ruActive = ruCount > 0;
+        const matchStr = execSync("sudo iptables -S FORWARD || true").toString();
+        const matches = [...matchStr.matchAll(/-i\s+(\S+)\s+-m set --match-set ru_block/g)];
+        ruIfaces = [...new Set(matches.map(m => m[1]))];
     } catch(e) {}
+
+    let cascActive = false, cascIfaces = [];
+    try {
+        const mangleStr = execSync("sudo iptables -t mangle -S PREROUTING || true").toString();
+        const matches = [...mangleStr.matchAll(/-A PREROUTING.*? -i\s+(\S+).*?-j MARK --set-xmark 0x1/g)];
+        cascIfaces = [...new Set(matches.map(m => m[1]))];
+        cascActive = cascIfaces.length > 0;
+    } catch(e) {}
+
     let dnsActive = false, dnsTarget = '', dnsIface = '';
     try {
         const match = execSync("sudo iptables -t nat -S PREROUTING || true").toString().match(/-i\s+(\S+).*?--dport 53 -j DNAT --to-destination\s+(\S+)/);
         if (match) { dnsActive = true; dnsIface = match[1]; dnsTarget = match[2]; }
     } catch(e) {}
-    res.json({ ruDrop: { active: ruActive, count: ruCount, iface: ruIface }, dns: { active: dnsActive, iface: dnsIface, target: dnsTarget } });
+    
+    res.json({
+        ruDrop: { active: ruActive, count: ruCount, ifaces: ruIfaces },
+        cascade: { active: cascActive, ifaces: cascIfaces },
+        dns: { active: dnsActive, iface: dnsIface, target: dnsTarget }
+    });
 });
 
 app.post('/api/tools/rudrop', checkAuth, (req, res) => {
-    const { iface, schedule, enable } = req.body;
+    const { ifaces, schedule, enable } = req.body;
     try { execSync('sudo rm -f /etc/cron.d/ru-drop-refresh /root/awg/ru-drop.sh'); } catch(e){}
     try {
         execSync("sudo iptables -S FORWARD || true").toString().split('\n').forEach(rule => {
             if(rule.includes('ru_block')) execSync(`sudo iptables -D FORWARD ${rule.replace(/^-A FORWARD /, '')} || true`);
         });
     } catch(e){}
+
     if (!enable) {
         try { execSync(`sudo ipset destroy ru_block`); } catch(e){}
         return res.json({success: true});
     }
-    const scriptContent = `#!/bin/bash\nset -euo pipefail\nAWG_IF="${iface}"\nRU_ZONE_URL="https://www.ipdeny.com/ipblocks/data/aggregated/ru-aggregated.zone"\nAWG_DIR="/root/awg"\nRU_ZONE="$AWG_DIR/ru.zone"\nmkdir -p "$AWG_DIR"\nexec 9>"$AWG_DIR/ru-drop.lock"\nflock -n 9 || { echo "Уже запущен"; exit 1; }\ncurl -fsS --retry 2 --connect-timeout 10 -o "$RU_ZONE.tmp" "$RU_ZONE_URL" || exit 1\nvalid=$(grep -cE '^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$' "$RU_ZONE.tmp" || true)\nif [ "$valid" -lt 1000 ]; then exit 1; fi\nmv -f "$RU_ZONE.tmp" "$RU_ZONE"\nipset create ru_block hash:net -exist\nipset create ru_tmp hash:net -exist\nipset flush ru_tmp\nwhile read -r net; do\n    [ -n "$net" ] && ipset add ru_tmp "$net" -exist\ndone < "$RU_ZONE"\nipset swap ru_tmp ru_block\nipset destroy ru_tmp\niptables -D FORWARD -i "$AWG_IF" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true\niptables -D FORWARD -i "$AWG_IF" -m set --match-set ru_block dst -j DROP 2>/dev/null || true\niptables -I FORWARD 1 -i "$AWG_IF" -m set --match-set ru_block dst -j DROP\niptables -I FORWARD 1 -i "$AWG_IF" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\necho "OK"\n`;
+
+    if (!ifaces || ifaces.length === 0) return res.status(400).json({error: "Выберите интерфейсы"});
+
+    const scriptContent = `#!/bin/bash\nset -euo pipefail\nIFACES=(${ifaces.join(' ')})\nRU_ZONE_URL="https://www.ipdeny.com/ipblocks/data/aggregated/ru-aggregated.zone"\nAWG_DIR="/root/awg"\nRU_ZONE="$AWG_DIR/ru.zone"\nmkdir -p "$AWG_DIR"\nexec 9>"$AWG_DIR/ru-drop.lock"\nflock -n 9 || { echo "Уже запущен"; exit 1; }\ncurl -fsS --retry 2 --connect-timeout 10 -o "$RU_ZONE.tmp" "$RU_ZONE_URL" || exit 1\nvalid=$(grep -cE '^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$' "$RU_ZONE.tmp" || true)\nif [ "$valid" -lt 1000 ]; then exit 1; fi\nmv -f "$RU_ZONE.tmp" "$RU_ZONE"\nipset create ru_block hash:net -exist\nipset create ru_tmp hash:net -exist\nipset flush ru_tmp\nwhile read -r net; do\n [ -n "$net" ] && ipset add ru_tmp "$net" -exist\ndone < "$RU_ZONE"\nipset swap ru_tmp ru_block\nipset destroy ru_tmp\nfor AWG_IF in "\${IFACES[@]}"; do\n iptables -D FORWARD -i "$AWG_IF" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true\n iptables -D FORWARD -i "$AWG_IF" -m set --match-set ru_block dst -j DROP 2>/dev/null || true\n iptables -I FORWARD 1 -i "$AWG_IF" -m set --match-set ru_block dst -j DROP\n iptables -I FORWARD 1 -i "$AWG_IF" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\ndone\necho "OK"\n`;
+    
     fs.writeFileSync('/tmp/ru-drop.sh', scriptContent);
     execSync('sudo mv /tmp/ru-drop.sh /root/awg/ru-drop.sh && sudo chmod +x /root/awg/ru-drop.sh');
     let cronLine = schedule === 'daily' ? "0 4 * * *" : "0 4 * * 1";
@@ -229,6 +250,107 @@ app.post('/api/tools/rudrop', checkAuth, (req, res) => {
         if(err) return res.status(500).json({error: "Ошибка загрузки базы"});
         res.json({success: true});
     });
+});
+
+app.post('/api/tools/cascade', checkAuth, (req, res) => {
+    const { ifaces, enable } = req.body;
+    const scriptPath = '/root/awg/awg-routing.sh';
+    
+    if (!fs.existsSync(scriptPath)) {
+        return res.json({error: "Каскад не настроен. Сначала установите каскад во вкладке 'Установка Модулей'."});
+    }
+
+    try {
+        const existingCode = fs.readFileSync(scriptPath, 'utf8');
+        const epMatch = existingCode.match(/AWG1_ENDPOINT="([^"]+)"/);
+        const ifMatch = existingCode.match(/AWG1_IF="([^"]+)"/);
+        if (!epMatch || !ifMatch) return res.json({error: "Файл awg-routing.sh поврежден (нет Endpoint)."});
+        
+        const awg1Endpoint = epMatch[1];
+        const awg1If = ifMatch[1];
+
+        // 1. Сначала полностью зачищаем старые правила каскада для ВСЕХ интерфейсов
+        const mangleOut = execSync("sudo iptables -t mangle -S PREROUTING || true").toString();
+        mangleOut.split('\n').forEach(rule => {
+            if (rule.includes('match-set ru dst -j RETURN') || rule.includes('MARK --set-xmark 0x1')) {
+                execSync(`sudo iptables -t mangle -D PREROUTING ${rule.replace(/^-A PREROUTING /, '')} || true`);
+            }
+        });
+        const natOut = execSync("sudo iptables -t nat -S POSTROUTING || true").toString();
+        natOut.split('\n').forEach(rule => {
+            if (rule.includes(`-o ${awg1If} -j MASQUERADE`)) {
+                execSync(`sudo iptables -t nat -D POSTROUTING ${rule.replace(/^-A POSTROUTING /, '')} || true`);
+            }
+        });
+
+        if (!enable) {
+            execSync('sudo systemctl stop awg-routing.timer awg-routing.service || true');
+            return res.json({success: true});
+        }
+
+        if (!ifaces || ifaces.length === 0) return res.json({error: "Выберите интерфейсы"});
+
+        // 2. Генерируем новый скрипт с поддержкой массива интерфейсов и динамических подсетей
+        const newScript = `#!/bin/bash
+set -euo pipefail
+CASC_IFACES=(${ifaces.join(' ')})
+AWG1_IF="${awg1If}"
+AWG1_ENDPOINT="${awg1Endpoint}"
+TABLE_ID=100
+FWMARK="0x1"
+RULE_PRIO=10000
+RU_ZONE_URL="https://www.ipdeny.com/ipblocks/data/aggregated/ru-aggregated.zone"
+RU_ZONE_FALLBACK_URL="https://raw.githubusercontent.com/bivlked/amneziawg-installer/v6.0.0/cascade/ru.zone"
+AWG_DIR="/root/awg"
+EXTRA_RU_NETS=""
+RU_ZONE="$AWG_DIR/ru.zone"
+mkdir -p "$AWG_DIR"
+exec 9>"$AWG_DIR/awg-routing.lock"
+flock -w 300 9 || exit 1
+trap 'rm -f "$RU_ZONE.tmp"' EXIT
+EP_ROUTE="$(ip -4 route get "$AWG1_ENDPOINT" 2>/dev/null | head -1)"
+WAN_IF="$(printf '%s' "$EP_ROUTE" | grep -oP '\\bdev \\K\\S+' || true)"
+WAN_GW="$(printf '%s' "$EP_ROUTE" | grep -oP '\\bvia \\K\\S+' || true)"
+fetch_ru_zone() {
+    curl -fsS --retry 2 --connect-timeout 10 --max-time 30 -o "$RU_ZONE.tmp" "$1" || return 1
+    local valid=$(grep -cE '^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$' "$RU_ZONE.tmp" || true)
+    if [ "$valid" -lt 1000 ]; then return 1; fi
+}
+if fetch_ru_zone "$RU_ZONE_URL"; then mv -f "$RU_ZONE.tmp" "$RU_ZONE"; elif fetch_ru_zone "$RU_ZONE_FALLBACK_URL"; then mv -f "$RU_ZONE.tmp" "$RU_ZONE"; fi
+ipset create ru hash:net -exist
+ipset create ru_tmp hash:net -exist
+ipset flush ru_tmp
+while read -r net; do [ -n "$net" ] && ipset add ru_tmp "$net" -exist; done < "$RU_ZONE"
+ipset swap ru_tmp ru
+ipset destroy ru_tmp
+ip route replace default dev "$AWG1_IF" table "$TABLE_ID"
+ip rule del fwmark "$FWMARK" table "$TABLE_ID" 2>/dev/null || true
+ip rule add fwmark "$FWMARK" table "$TABLE_ID" priority "$RULE_PRIO"
+if [ -n "$WAN_GW" ]; then
+    ip route replace "$AWG1_ENDPOINT" via "$WAN_GW" dev "$WAN_IF" 2>/dev/null || ip route replace "$AWG1_ENDPOINT" via "$WAN_GW" dev "$WAN_IF" onlink
+else
+    ip route replace "$AWG1_ENDPOINT" dev "$WAN_IF"
+fi
+
+for IFACE in "\${CASC_IFACES[@]}"; do
+    SUBNET=$(ip -o -f inet addr show \$IFACE 2>/dev/null | awk '{print \\$4}' | head -n 1 || true)
+    if [ -n "$SUBNET" ]; then
+        iptables -t mangle -C PREROUTING -i \$IFACE -s "\$SUBNET" -m set --match-set ru dst -j RETURN 2>/dev/null || iptables -t mangle -I PREROUTING 1 -i \$IFACE -s "\$SUBNET" -m set --match-set ru dst -j RETURN
+        iptables -t mangle -C PREROUTING -i \$IFACE -s "\$SUBNET" -j MARK --set-mark "$FWMARK" 2>/dev/null || iptables -t mangle -A PREROUTING -i \$IFACE -s "\$SUBNET" -j MARK --set-mark "$FWMARK"
+        iptables -t nat -C POSTROUTING -s "\$SUBNET" -o "$AWG1_IF" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s "\$SUBNET" -o "$AWG1_IF" -j MASQUERADE
+    fi
+done
+echo "ОК: Каскад применен."
+`;
+        fs.writeFileSync(scriptPath, newScript);
+        execSync(`sudo chmod +x ${scriptPath}`);
+        
+        execSync('sudo systemctl enable --now awg-routing.timer awg-routing.service || true');
+        execSync('sudo systemctl restart awg-routing || true');
+        res.json({success: true});
+    } catch(e) {
+        res.json({error: "Системная ошибка настройки каскада"});
+    }
 });
 
 app.post('/api/tools/dns', checkAuth, (req, res) => {
