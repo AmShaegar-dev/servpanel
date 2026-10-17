@@ -35,7 +35,7 @@
 Подключитесь к чистому серверу по SSH и выполните одну команду. Скрипт запустит интерактивное меню, где вы сможете выбрать нужные модули для установки (сама веб-панель, настройка Nginx + SSL/самоподписанный сертификат, порт панели, AmneziaWG, AdGuard Home и др.):
 
 ```bash
-curl -fsSL [https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install.sh](https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install.sh) | sudo bash
+curl -fsSL https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install.sh | sudo bash
 ```
 
 *(Если на минимальном образе Debian нет `curl`, выполните: `apt update && apt install -y curl`, либо используйте `wget -qO- https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install.sh | sudo bash`)*.
