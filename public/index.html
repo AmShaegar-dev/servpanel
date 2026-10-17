@@ -168,6 +168,13 @@
                     <div style="height: 300px; width: 100%; margin-top: 15px;"><canvas id="trafficChart"></canvas></div>
                 </div>
             </div>
+        <div style="background: #2a2d34; padding: 15px; border-radius: 8px; margin-top: 20px; border: 1px solid #444;">
+    <h3 style="margin-top: 0;">Транзитный туннель (RU ➔ EU)</h3>
+    <p>Статус: <span id="cascadeStatusDash" style="font-weight: bold; color: gray;">Проверка...</span></p>
+    
+    <!-- Кнопка, которая открывает конфиг каскада в редакторе -->
+    <button onclick="editCascadeConfig()" class="btn-primary" style="margin-top: 10px;">⚙️ Настроить awg-eu.conf</button>
+</div>
 
             <!-- КЛИЕНТЫ -->
             <div id="tab-clients" class="tab-pane">
@@ -573,6 +580,50 @@ async function uninstallAwg() {
     } catch (e) {
         alert("Ошибка сети");
         document.getElementById('loaderOverlay').style.display = 'none';
+    }
+}
+
+// Запуск поллинга статуса каскада
+setInterval(async () => {
+    try {
+        const res = await fetch('/api/cascade/status');
+        if (res.ok) {
+            const data = await res.json();
+            const statusEl = document.getElementById('cascadeStatusDash');
+            if (statusEl) {
+                statusEl.innerText = data.text;
+                statusEl.style.color = data.color;
+            }
+        }
+    } catch (e) {}
+}, 5000);
+
+// Функция для загрузки конфига транзитного туннеля в существующий редактор
+async function editCascadeConfig() {
+    try {
+        const res = await fetch('/api/awg/config?file=/etc/amnezia/amneziawg/awg-eu.conf');
+        if (res.ok) {
+            const data = await res.json();
+            
+            // 1. Автоматически переключаем на вкладку "Сеть и Фаервол" (3-й элемент меню)
+            switchTab('tab-network', document.querySelector('.menu li:nth-child(3)'));
+            
+            // 2. Делаем сам редактор видимым и убираем надпись об ошибке
+            document.getElementById('awgConfigWrapper').style.display = 'flex';
+            document.getElementById('awgConfigError').style.display = 'none';
+            
+            // 3. Заполняем данные (Используем правильный ID awgConfigFile)
+            document.getElementById('awgConfigText').value = data.content || '';
+            document.getElementById('awgConfigFile').value = '/etc/amnezia/amneziawg/awg-eu.conf';
+            
+            // 4. Плавно прокручиваем страницу вниз к редактору
+            document.getElementById('awgConfigWrapper').scrollIntoView({behavior: 'smooth'});
+            
+        } else {
+            alert("Файл awg-eu.conf еще не создан на сервере.");
+        }
+    } catch (e) {
+        alert("Ошибка загрузки");
     }
 }
     
