@@ -649,6 +649,21 @@ app.post('/api/awg/config', checkAuth, (req, res) => {
         }
         fs.writeFileSync('/tmp/awg_tmp.conf', content);
         execSync(`sudo cp /tmp/awg_tmp.conf ${file}`);
+        
+        // --- УМНАЯ СИНХРОНИЗАЦИЯ КЛЮЧЕЙ ПРИ СОХРАНЕНИИ ---
+        try {
+            const syncCmd = `#!/bin/bash
+            HPK=$(grep -m1 'HeaderProtectionKey' "${file}" | cut -d '=' -f 2 | tr -d ' \\r\\n')
+            echo "$HPK" > /root/awg/server_hpk.key
+            PRIV=$(grep -m1 'PrivateKey' "${file}" | cut -d '=' -f 2 | tr -d ' \\r\\n')
+            echo "$PRIV" > /root/awg/server_priv.key
+            echo "$PRIV" | awg pubkey > /root/awg/server_pub.key
+            `;
+            fs.writeFileSync('/tmp/sync_keys.sh', syncCmd);
+            execSync('sudo bash /tmp/sync_keys.sh');
+        } catch(e) {}
+        // ------------------------------------------------
+
         const iface = path.basename(file, '.conf');
         try { execSync(`sudo systemctl restart awg-quick@${iface} || sudo docker restart amnezia-awg || sudo systemctl restart amnezia-awg || true`); } catch(e){}
         res.json({success: true});
