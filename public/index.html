@@ -598,30 +598,39 @@ setInterval(async () => {
 
 // Функция для загрузки конфига транзитного туннеля в существующий редактор
 async function editCascadeConfig() {
+    const targetPath = '/etc/amnezia/amneziawg/awg-eu.conf';
     try {
-        const res = await fetch('/api/awg/config?file=/etc/amnezia/amneziawg/awg-eu.conf');
+        const res = await fetch(`/api/awg/config?file=${targetPath}`);
+        let content = '';
+        
         if (res.ok) {
             const data = await res.json();
-            
-            // 1. Автоматически переключаем на вкладку "Сеть и Фаервол" (3-й элемент меню)
-            switchTab('tab-network', document.querySelector('.menu li:nth-child(3)'));
-            
-            // 2. Делаем сам редактор видимым и убираем надпись об ошибке
-            document.getElementById('awgConfigWrapper').style.display = 'flex';
-            document.getElementById('awgConfigError').style.display = 'none';
-            
-            // 3. Заполняем данные (Используем правильный ID awgConfigFile)
-            document.getElementById('awgConfigText').value = data.content || '';
-            document.getElementById('awgConfigFile').value = '/etc/amnezia/amneziawg/awg-eu.conf';
-            
-            // 4. Плавно прокручиваем страницу вниз к редактору
-            document.getElementById('awgConfigWrapper').scrollIntoView({behavior: 'smooth'});
-            
+            // Если бэкенд подсунул чужой конфиг (awg0.conf) вместо запрошенного
+            if (data.file && data.file !== targetPath) {
+                content = '# Вставьте сюда конфигурацию (клиентский файл) от EU-сервера\n';
+            } else {
+                content = data.content || '';
+            }
         } else {
-            alert("Файл awg-eu.conf еще не создан на сервере.");
+            content = '# Вставьте сюда конфигурацию (клиентский файл) от EU-сервера\n';
         }
+
+        // Переключаем на вкладку "Сеть и Фаервол" (3-й элемент меню)
+        switchTab('tab-network', document.querySelector('.menu li:nth-child(3)'));
+        
+        // Делаем редактор видимым
+        document.getElementById('awgConfigWrapper').style.display = 'flex';
+        document.getElementById('awgConfigError').style.display = 'none';
+        
+        // Жестко прописываем путь именно к awg-eu.conf и вставляем контент
+        document.getElementById('awgConfigFile').value = targetPath;
+        document.getElementById('awgConfigText').value = content;
+        
+        // Прокручиваем страницу вниз к редактору
+        document.getElementById('awgConfigWrapper').scrollIntoView({behavior: 'smooth'});
+        
     } catch (e) {
-        alert("Ошибка загрузки");
+        alert("Ошибка при открытии конфигурации");
     }
 }
     
