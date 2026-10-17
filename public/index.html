@@ -228,6 +228,19 @@
                     </div>
                     <div id="awgConfigError" style="color: #f85149; font-size: 13px; display: none;">Загрузка...</div>
                 </div>
+                <!-- НОВЫЙ РЕДАКТОР КАСКАДА (AWG-EU) -->
+                <div class="card" style="margin-bottom: 20px;" id="cascadeEditorCard">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="margin:0; color: #58a6ff;">Редактор транзитного туннеля (awg-eu.conf)</h3>
+                        <button class="btn-dark" style="padding: 4px 8px; font-size: 11px;" onclick="loadCascadeConfig()">Обновить</button>
+                    </div>
+                    <p style="color: var(--text-muted); font-size: 12px; margin-top: 0;">Вставьте сюда конфигурацию (клиентский файл), сгенерированную на EU-сервере.</p>
+                    <div id="cascadeConfigWrapper" style="display:flex; flex-direction: column; gap: 10px;">
+                        <textarea id="cascadeConfigText" rows="12" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 13px; background: rgba(0,0,0,0.3); color: #c9d1d9; border: 1px solid var(--border); border-radius: 6px; padding: 10px; resize: vertical;" placeholder="# Ожидание конфигурации..."></textarea>
+                        <button class="btn-primary" style="align-self: flex-start; background: #2ea043;" onclick="saveCascadeConfig()">💾 Сохранить awg-eu.conf и перезапустить</button>
+                    </div>
+                </div>
+                
                 <div class="card" style="margin-bottom: 20px;">
                     <h3 style="margin-bottom: 15px;">Управление портами (UFW)</h3>
                     <div class="controls-row">
@@ -322,34 +335,58 @@
             <div id="tab-security" class="tab-pane">
                 <div class="stats-cards">
                     
-                    <div class="card">
-                        <h3>Блокировка RU-трафика (GeoIP)</h3>
+                   <div class="card">
+                        <h3 style="margin-bottom: 5px;">Блокировка RU-трафика (GeoIP)</h3>
                         <div style="margin-bottom: 15px;"><span id="ruDropStatus">Ожидание...</span></div>
                         <div id="ruDropIfacesList" style="margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
-                        <div class="controls-row">
-                            <select id="ruDropSchedule" style="width: 100%;">
-                                <option value="weekly">Обновлять раз в неделю</option>
+                        
+                        <div style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid var(--border);">
+                            <label style="font-size: 11px; color: var(--text-muted);">Порты (через запятую, оставьте пустым для блокировки всего)</label>
+                            <input type="text" id="ruDropPorts" placeholder="Например: 80,443" style="width: 100%; margin-top: 3px; margin-bottom: 10px; box-sizing: border-box;">
+                            
+                            <label style="font-size: 11px; color: var(--text-muted);">Источник списка IP-адресов РФ</label>
+                            <select id="ruDropListMode" style="width: 100%; margin-top: 3px; margin-bottom: 5px;" onchange="document.getElementById('ruDropCustomUrl').style.display = this.value === 'custom' ? 'block' : 'none'">
+                                <option value="standard">Стандартный список (Antifilter)</option>
+                                <option value="custom">Свой URL (.txt или .zone)</option>
+                            </select>
+                            <input type="text" id="ruDropCustomUrl" placeholder="https://example.com/my-ru-list.txt" style="width: 100%; display: none; margin-bottom: 10px; box-sizing: border-box;">
+                            
+                            <label style="font-size: 11px; color: var(--text-muted);">Автообновление списка</label>
+                            <select id="ruDropSchedule" style="width: 100%; margin-top: 3px;">
+                                <option value="weekly">Раз в неделю</option>
                                 <option value="daily">Каждый день</option>
                             </select>
                         </div>
+                        
                         <div class="controls-row" style="margin-bottom: 0;">
-                            <button class="btn-danger" onclick="toggleRuDrop(true)">Включить изоляцию</button>
+                            <button class="btn-danger" onclick="toggleRuDrop(true)">Включить блокировку</button>
                             <button class="btn-dark" onclick="toggleRuDrop(false)">Отключить</button>
                         </div>
                     </div>
 
                     <div class="card" id="cascadeRoutingCard">
-                        <h3 style="color: #58a6ff;">Маршрутизация Каскада (RU ➔ EU)</h3>
-                        <p style="color: #ff7b72; font-size: 12px; margin-bottom: 10px; line-height: 1.3;">
-                            ⚠️ <b>Важно:</b> Маршруты каскада настраиваются <b>строго на ВХОДНОМ сервере (RU)</b>. Если эта панель установлена на сервере-выходе (EU), не применяйте здесь эти локальные правила.
-                        </p>
+                        <h3 style="color: #58a6ff; margin-bottom: 5px;">Маршрутизация Каскада (RU ➔ EU)</h3>
+                        <p style="color: #ff7b72; font-size: 12px; margin-bottom: 10px; line-height: 1.3;">⚠️ <b>Важно:</b> Маршруты каскада настраиваются <b>строго на ВХОДНОМ сервере (RU)</b>.</p>
                         <div style="margin-bottom: 15px;"><span id="cascadeStatus">Ожидание...</span></div>
                         <div id="cascadeIfacesList" style="margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
+                        
+                        <div style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid var(--border);">
+                            <label style="font-size: 11px; color: var(--text-muted);">Порты для маршрутизации (оставьте пустым для всего трафика)</label>
+                            <input type="text" id="cascadePorts" placeholder="Например: 80,443" style="width: 100%; margin-top: 3px; margin-bottom: 10px; box-sizing: border-box;">
+                            
+                            <label style="font-size: 11px; color: var(--text-muted);">Список IP для направления в туннель (PBR)</label>
+                            <select id="cascadeListMode" style="width: 100%; margin-top: 3px; margin-bottom: 5px;" onchange="document.getElementById('cascadeCustomUrl').style.display = this.value === 'custom' ? 'block' : 'none'">
+                                <option value="standard">Обход блокировок (Стандартный список)</option>
+                                <option value="custom">Свой URL (.txt или .zone)</option>
+                            </select>
+                            <input type="text" id="cascadeCustomUrl" placeholder="https://example.com/my-routing-list.txt" style="width: 100%; display: none; box-sizing: border-box;">
+                        </div>
+                        
                         <div class="controls-row" style="margin-bottom: 0; margin-top: auto;">
                             <button class="btn-success" style="background-color: #2ea043; color: white; border: none; border-radius: 6px;" onclick="toggleCascade(true)">Применить маршруты</button>
                             <button class="btn-dark" onclick="toggleCascade(false)">Отключить</button>
                         </div>
-                    </div>
+                    </div> 
 
                     <div class="card">
                         <h3>Fail2Ban / Брутфорс (Скоро)</h3>
@@ -357,10 +394,11 @@
                         <button class="btn-dark" style="margin-top: auto;" disabled>Функция в разработке</button>
                     </div>
 
-                </div>
-            </div>
+                </div> 
+            </div> 
 
             <!-- ДИАГНОСТИКА -->
+            <div id="tab-diag" class="tab-pane">
             <div id="tab-diag" class="tab-pane">
                 <div class="card">
                     <h3>Сетевая диагностика и Логи (Скоро)</h3>
@@ -597,41 +635,41 @@ setInterval(async () => {
 }, 5000);
 
 // Функция для загрузки конфига транзитного туннеля в существующий редактор
-async function editCascadeConfig() {
-    const targetPath = '/etc/amnezia/amneziawg/awg-eu.conf';
+// Перенаправляет на вкладку сети и прокручивает к новому редактору каскада
+function editCascadeConfig() {
+    switchTab('tab-network', document.querySelector('.menu li:nth-child(3)'));
+    loadCascadeConfig();
+    document.getElementById('cascadeEditorCard').scrollIntoView({behavior: 'smooth'});
+}
+
+// Загружает awg-eu.conf в отдельное окно
+async function loadCascadeConfig() {
     try {
-        const res = await fetch(`/api/awg/config?file=${targetPath}`);
-        let content = '';
-        
+        const res = await fetch('/api/awg/config?file=/etc/amnezia/amneziawg/awg-eu.conf');
         if (res.ok) {
             const data = await res.json();
-            // Если бэкенд подсунул чужой конфиг (awg0.conf) вместо запрошенного
-            if (data.file && data.file !== targetPath) {
-                content = '# Вставьте сюда конфигурацию (клиентский файл) от EU-сервера\n';
-            } else {
-                content = data.content || '';
-            }
+            document.getElementById('cascadeConfigText').value = data.content || '';
         } else {
-            content = '# Вставьте сюда конфигурацию (клиентский файл) от EU-сервера\n';
+            document.getElementById('cascadeConfigText').value = '';
         }
-
-        // Переключаем на вкладку "Сеть и Фаервол" (3-й элемент меню)
-        switchTab('tab-network', document.querySelector('.menu li:nth-child(3)'));
-        
-        // Делаем редактор видимым
-        document.getElementById('awgConfigWrapper').style.display = 'flex';
-        document.getElementById('awgConfigError').style.display = 'none';
-        
-        // Жестко прописываем путь именно к awg-eu.conf и вставляем контент
-        document.getElementById('awgConfigFile').value = targetPath;
-        document.getElementById('awgConfigText').value = content;
-        
-        // Прокручиваем страницу вниз к редактору
-        document.getElementById('awgConfigWrapper').scrollIntoView({behavior: 'smooth'});
-        
     } catch (e) {
-        alert("Ошибка при открытии конфигурации");
+        alert("Ошибка загрузки awg-eu.conf");
     }
+}
+
+// Сохраняет awg-eu.conf через существующий API
+async function saveCascadeConfig() {
+    if(!confirm("Сохранить транзитную конфигурацию и перезапустить туннель?")) return;
+    const content = document.getElementById('cascadeConfigText').value;
+    try {
+        const res = await fetch('/api/awg/config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ content: content, file: '/etc/amnezia/amneziawg/awg-eu.conf' })
+        });
+        if (res.ok) alert("awg-eu.conf успешно сохранен и интерфейс перезапущен!");
+        else alert("Ошибка при сохранении конфигурации.");
+    } catch(e) { alert("Ошибка сети"); }
 }
     
 async function pollLog(logFile) {
@@ -1033,17 +1071,35 @@ async function loadNetworkTools() {
 async function toggleRuDrop(enable) {
     const checkedIfaces = Array.from(document.querySelectorAll('.ru-check:checked')).map(cb => cb.value);
     if (enable && checkedIfaces.length === 0) return alert('Выберите хотя бы один интерфейс для блокировки!');
-    const schedule = document.getElementById('ruDropSchedule').value;
+    
+    const payload = {
+        enable, 
+        ifaces: checkedIfaces, 
+        schedule: document.getElementById('ruDropSchedule').value,
+        ports: document.getElementById('ruDropPorts').value.trim(),
+        listMode: document.getElementById('ruDropListMode').value,
+        customUrl: document.getElementById('ruDropCustomUrl').value.trim()
+    };
+    
     document.getElementById('ruDropStatus').innerText = "Применение (до 20 сек)...";
-    const res = await fetch('/api/tools/rudrop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({enable, ifaces: checkedIfaces, schedule}) });
+    const res = await fetch('/api/tools/rudrop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     if (res.ok) loadNetworkTools();
 }
 
 async function toggleCascade(enable) {
     const checkedIfaces = Array.from(document.querySelectorAll('.casc-check:checked')).map(cb => cb.value);
     if (enable && checkedIfaces.length === 0) return alert('Выберите хотя бы один интерфейс для каскада!');
+    
+    const payload = {
+        enable, 
+        ifaces: checkedIfaces,
+        ports: document.getElementById('cascadePorts').value.trim(),
+        listMode: document.getElementById('cascadeListMode').value,
+        customUrl: document.getElementById('cascadeCustomUrl').value.trim()
+    };
+
     document.getElementById('cascadeStatus').innerText = "Настройка маршрутов...";
-    const res = await fetch('/api/tools/cascade', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({enable, ifaces: checkedIfaces}) });
+    const res = await fetch('/api/tools/cascade', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     if (res.ok) {
         const data = await res.json();
         if(data.error) alert(data.error);
