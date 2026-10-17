@@ -165,16 +165,14 @@
                         <h3 style="margin:0;">Мониторинг трафика (История 1ч)</h3>
                         <select id="chartSelector" onchange="switchChart()"><option value="global">Общий трафик</option></select>
                     </div>
-                    <div style="height: 300px; width: 100%; margin-top: 15px;"><canvas id="trafficChart"></canvas></div>
-                </div>
-            </div>
+                   <div style="height: 300px; width: 100%; margin-top: 15px;"><canvas id="trafficChart"></canvas></div>
+        </div>
         <div style="background: #2a2d34; padding: 15px; border-radius: 8px; margin-top: 20px; border: 1px solid #444;">
-    <h3 style="margin-top: 0;">Транзитный туннель (RU ➔ EU)</h3>
-    <p>Статус: <span id="cascadeStatusDash" style="font-weight: bold; color: gray;">Проверка...</span></p>
-    
-    <!-- Кнопка, которая открывает конфиг каскада в редакторе -->
-    <button onclick="editCascadeConfig()" class="btn-primary" style="margin-top: 10px;">⚙️ Настроить awg-eu.conf</button>
-</div>
+            <h3 style="margin-top: 0;">Транзитный туннель (RU ➔ EU)</h3>
+            <p>Статус: <span id="cascadeStatusDash" style="font-weight: bold; color: gray;">Проверка...</span></p>
+            <button onclick="editCascadeConfig()" class="btn-primary" style="margin-top: 10px;">⚙️ Настроить awg-eu.conf</button>
+        </div>
+   </div>
 
             <!-- КЛИЕНТЫ -->
             <div id="tab-clients" class="tab-pane">
