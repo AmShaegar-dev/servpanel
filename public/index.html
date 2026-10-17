@@ -165,14 +165,14 @@
                         <h3 style="margin:0;">Мониторинг трафика (История 1ч)</h3>
                         <select id="chartSelector" onchange="switchChart()"><option value="global">Общий трафик</option></select>
                     </div>
-                   <div style="height: 300px; width: 100%; margin-top: 15px;"><canvas id="trafficChart"></canvas></div>
-        </div>
-        <div style="background: #2a2d34; padding: 15px; border-radius: 8px; margin-top: 20px; border: 1px solid #444;">
-            <h3 style="margin-top: 0;">Транзитный туннель (RU ➔ EU)</h3>
-            <p>Статус: <span id="cascadeStatusDash" style="font-weight: bold; color: gray;">Проверка...</span></p>
-            <button onclick="editCascadeConfig()" class="btn-primary" style="margin-top: 10px;">⚙️ Настроить awg-eu.conf</button>
-        </div>
-   </div>
+                    <div style="height: 300px; width: 100%; margin-top: 15px;"><canvas id="trafficChart"></canvas></div>
+                </div>
+                <div style="background: #2a2d34; padding: 15px; border-radius: 8px; margin-top: 20px; border: 1px solid #444;">
+                    <h3 style="margin-top: 0;">Транзитный туннель (RU ➔ EU)</h3>
+                    <p>Статус: <span id="cascadeStatusDash" style="font-weight: bold; color: gray;">Проверка...</span></p>
+                    <button onclick="editCascadeConfig()" class="btn-primary" style="margin-top: 10px;">⚙️ Настроить awg-eu.conf</button>
+                </div>
+            </div>
 
             <!-- КЛИЕНТЫ -->
             <div id="tab-clients" class="tab-pane">
@@ -228,6 +228,7 @@
                     </div>
                     <div id="awgConfigError" style="color: #f85149; font-size: 13px; display: none;">Загрузка...</div>
                 </div>
+
                 <!-- НОВЫЙ РЕДАКТОР КАСКАДА (AWG-EU) -->
                 <div class="card" style="margin-bottom: 20px;" id="cascadeEditorCard">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -386,7 +387,7 @@
                             <button class="btn-success" style="background-color: #2ea043; color: white; border: none; border-radius: 6px;" onclick="toggleCascade(true)">Применить маршруты</button>
                             <button class="btn-dark" onclick="toggleCascade(false)">Отключить</button>
                         </div>
-                    </div> 
+                    </div>
 
                     <div class="card">
                         <h3>Fail2Ban / Брутфорс (Скоро)</h3>
@@ -398,7 +399,6 @@
             </div> 
 
             <!-- ДИАГНОСТИКА -->
-            <div id="tab-diag" class="tab-pane">
             <div id="tab-diag" class="tab-pane">
                 <div class="card">
                     <h3>Сетевая диагностика и Логи (Скоро)</h3>
@@ -534,6 +534,7 @@
                     <textarea id="installLogText" readonly rows="20" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; background: #000; color: #0f0; border: 1px solid var(--border); border-radius: 6px; padding: 10px; resize: none;"></textarea>
                 </div>
             </div>
+
         </div>
     </main>
 
@@ -634,7 +635,6 @@ setInterval(async () => {
     } catch (e) {}
 }, 5000);
 
-// Функция для загрузки конфига транзитного туннеля в существующий редактор
 // Перенаправляет на вкладку сети и прокручивает к новому редактору каскада
 function editCascadeConfig() {
     switchTab('tab-network', document.querySelector('.menu li:nth-child(3)'));
@@ -745,7 +745,7 @@ async function updatePanel() {
             alert("Ошибка при обновлении");
             document.getElementById('loaderOverlay').style.display = 'none';
         }
-    } catch (e) { setTimeout(() => { window.location.reload(); }, 6000); }       
+    } catch (e) { setTimeout(() => { window.location.reload(); }, 6000); }        
 }
 
 function setSort(col) {
