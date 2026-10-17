@@ -148,6 +148,34 @@ app.get('/api/sysinfo', checkAuth, (req, res) => {
     } catch (e) { res.status(500).json({ error: "Ошибка чтения метрик" }); }
 });
 
+// --- МОНИТОРИНГ КАСКАДА (ТРАНЗИТНОГО ТУННЕЛЯ) ---
+app.get('/api/cascade/status', checkAuth, (req, res) => {
+    try {
+        // Проверяем, существует ли вообще файл транзитного туннеля
+        if (!fs.existsSync('/etc/amnezia/amneziawg/awg-eu.conf')) {
+            return res.json({ active: false, text: 'Туннель EU не настроен', color: '#ff4c4c' });
+        }
+        
+        // Запрашиваем время последнего успешного рукопожатия (handshake)
+        const output = execSync('sudo awg show awg-eu latest-handshakes 2>/dev/null || true').toString().trim();
+        if (!output) return res.json({ active: false, text: 'Ожидание пира...', color: '#ffa500' });
+
+        const parts = output.split('\t');
+        if (parts.length >= 2 && parseInt(parts[1]) > 0) {
+            const diff = Math.floor(Date.now() / 1000) - parseInt(parts[1]);
+            
+            // Если обмен ключами был меньше 150 секунд назад — связь отличная
+            if (diff < 150) {
+                return res.json({ active: true, text: `В сети (обмен ${diff} сек. назад)`, color: '#4caf50' });
+            }
+            return res.json({ active: false, text: `Связь потеряна (${diff} сек. назад)`, color: '#ff4c4c' });
+        }
+        res.json({ active: false, text: 'Нет хэндшейка', color: '#ff4c4c' });
+    } catch (e) { 
+        res.json({ active: false, text: 'Ошибка проверки', color: '#ff4c4c' }); 
+    }
+});
+
 app.get('/api/interfaces', checkAuth, (req, res) => {
     res.json(Object.keys(os.networkInterfaces()));
 });
