@@ -650,19 +650,19 @@ app.post('/api/awg/config', checkAuth, (req, res) => {
         fs.writeFileSync('/tmp/awg_tmp.conf', content);
         execSync(`sudo cp /tmp/awg_tmp.conf ${file}`);
         
-        // --- УМНАЯ СИНХРОНИЗАЦИЯ КЛЮЧЕЙ ПРИ СОХРАНЕНИИ ---
+        // --- СИНХРОНИЗАЦИЯ КЛЮЧЕЙ (ПЕРЕПИСАНА НА ЧИСТЫЙ JAVASCRIPT) ---
         try {
-            const syncCmd = `#!/bin/bash
-            HPK=$(grep -m1 'HeaderProtectionKey' "${file}" | cut -d '=' -f 2 | tr -d ' \\r\\n')
-            echo "$HPK" > /root/awg/server_hpk.key
-            PRIV=$(grep -m1 'PrivateKey' "${file}" | cut -d '=' -f 2 | tr -d ' \\r\\n')
-            echo "$PRIV" > /root/awg/server_priv.key
-            echo "$PRIV" | awg pubkey > /root/awg/server_pub.key
-            `;
-            fs.writeFileSync('/tmp/sync_keys.sh', syncCmd);
-            execSync('sudo bash /tmp/sync_keys.sh');
+            const hpk = content.match(/HeaderProtectionKey\s*=\s*([^\r\n]+)/);
+            const priv = content.match(/PrivateKey\s*=\s*([^\r\n]+)/);
+            
+            if (hpk) execSync(`echo "${hpk[1].trim()}" | sudo tee /root/awg/server_hpk.key > /dev/null`);
+            if (priv) {
+                const cleanPriv = priv[1].trim();
+                execSync(`echo "${cleanPriv}" | sudo tee /root/awg/server_priv.key > /dev/null`);
+                execSync(`echo "${cleanPriv}" | sudo awg pubkey | sudo tee /root/awg/server_pub.key > /dev/null`);
+            }
         } catch(e) {}
-        // ------------------------------------------------
+        // -----------------------------------------------------------
 
         const iface = path.basename(file, '.conf');
         try { execSync(`sudo systemctl restart awg-quick@${iface} || sudo docker restart amnezia-awg || sudo systemctl restart amnezia-awg || true`); } catch(e){}
