@@ -437,6 +437,39 @@
                     </div>
                 </div>
 
+                <div class="card" id="warpCard" data-admin-only style="margin-bottom: 20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Cloudflare WARP для AdGuard <span class="badge badge-muted">опционально</span></h3>
+                            <p>Xray принимает TLS на IP туннеля, WARP идёт в SOCKS5. AdGuard подменяет A-записи выбранных доменов на этот IP — трафик остаётся внутри AWG-каскада.</p>
+                        </div>
+                        <span id="warpStatusBadge" class="badge badge-muted">не установлен</span>
+                    </div>
+                    <div id="warpStatusText" class="sub-text" style="margin-bottom: 12px;">Проверка состояния...</div>
+
+                    <div class="controls-row" style="margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+                        <input type="text" id="warpListenIp" value="10.8.1.1" placeholder="IP Xray (10.8.1.1)" style="width: 170px;" title="IP туннеля AWG на этом сервере. 0.0.0.0 — только если понимаете риск публичного доступа.">
+                        <input type="number" id="warpListenPort" value="443" placeholder="443" style="width: 90px;" title="TCP-порт Xray">
+                        <input type="number" id="warpSocksPort" value="40000" placeholder="40000" style="width: 100px;" title="Локальный SOCKS5-порт WARP">
+                        <button class="btn-primary" onclick="installWarp()">Установить WARP + Xray</button>
+                        <button class="btn-soft" onclick="warpPower(true)">Включить</button>
+                        <button class="btn-dark" onclick="warpPower(false)">Остановить</button>
+                        <button class="btn-dark" onclick="warpTest()">Тест WARP</button>
+                    </div>
+                    <div id="warpTestResult" class="sub-text" style="margin-bottom: 14px;"></div>
+
+                    <h4 style="margin: 10px 0 6px;">Правила AdGuard для WARP (WARP может быть на EU-выходе)</h4>
+                    <div class="controls-row" style="flex-wrap: wrap; gap: 8px;">
+                        <input type="text" id="warpAgUrl" placeholder="URL AdGuard API (127.0.0.1:8090)" style="width: 240px;">
+                        <input type="text" id="warpAgUser" placeholder="Логин AdGuard" style="width: 140px;">
+                        <input type="password" id="warpAgPass" placeholder="Пароль AdGuard" style="width: 140px;">
+                        <input type="text" id="warpRewriteIp" value="10.8.1.1" placeholder="IP для dnsrewrite" style="width: 170px;" title="IP туннеля AWG, на который AdGuard перепишет A-записи">
+                        <button class="btn-primary" onclick="syncWarpAdGuard()">Записать правила</button>
+                    </div>
+                    <div id="warpAgResult" class="sub-text" style="margin-top: 8px;"></div>
+                    <div class="sub-text" style="margin-top: 8px;">WARP не устанавливается автоматически. Если он уже работает на EU-выходе, устанавливать его на этом сервере не нужно — только запишите правила AdGuard на IP туннеля EU. Не ставьте компонент, если WARP уже используется здесь как системный VPN: он будет переведён в режим SOCKS5.</div>
+                </div>
+
                 <div class="stats-cards">
                     <div class="card" style="flex: 2;">
                         <h3>Статистика AdGuard Home API</h3>
@@ -592,6 +625,7 @@
                         <select id="diagLogSelect" style="max-width:340px;">
                             <option value="/var/log/awg_install.log">Установка AWG</option>
                             <option value="/var/log/adguard_install.log">Установка AdGuard</option>
+                            <option value="/var/log/warp_install.log">Установка WARP/Xray</option>
                             <option value="/var/log/awg_audit.log">Аудит AWG</option>
                             <option value="/var/log/nginx/error.log">Nginx error</option>
                             <option value="/var/log/nginx/access.log">Nginx access</option>

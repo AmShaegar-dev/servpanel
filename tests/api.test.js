@@ -23,6 +23,7 @@ process.env.SERVEPANEL_AUDIT_LOG = path.join(DATA_DIR, 'audit.log');
 
 const app = require('../server.js');
 const internals = app._internals;
+const updater = require('../lib/updater');
 
 let server;
 let base;
@@ -150,6 +151,41 @@ test('параллельные запросы не теряют сессию', a
         return res.status;
     }));
     assert.deepEqual(statuses.filter(s => s !== 200 && s !== 304), []);
+});
+
+test('sysinfo: CPU и RAM — проценты в допустимых пределах', async () => {
+    const r = await request('/api/sysinfo');
+    assert.equal(r.status, 200);
+    const cpu = Number(r.json.cpu);
+    const ram = Number(r.json.ram);
+    assert.ok(Number.isFinite(cpu) && cpu >= 0 && cpu <= 100, 'CPU должен быть 0–100%');
+    assert.ok(Number.isFinite(ram) && ram >= 0 && ram <= 100, 'RAM должен быть 0–100%');
+    assert.ok(r.json.disk && typeof r.json.disk.percent === 'string');
+});
+
+test('WARP: опциональный статус и список доменов доступны', async () => {
+    const st = await request('/api/warp/status');
+    assert.equal(st.status, 200);
+    assert.equal(st.json.installed, false);
+    assert.equal(st.json.testMode, true);
+    assert.ok(st.json.domains > 0, 'должен быть список доменов для AdGuard');
+
+    const domains = await request('/api/warp/domains');
+    assert.equal(domains.status, 200);
+    assert.ok(Array.isArray(domains.json.domains) && domains.json.domains.length > 0);
+    assert.equal(domains.json.count, domains.json.domains.length);
+
+    const power = await request('/api/warp/power', jsonBody({ enable: true }));
+    assert.equal(power.status, 200);
+    assert.equal(power.json.demo, true);
+
+    const sync = await request('/api/warp/adguard', jsonBody({
+        url: '127.0.0.1:8090', rewriteIp: '10.8.1.1'
+    }));
+    assert.equal(sync.status, 200);
+    assert.equal(sync.json.demo, true);
+    assert.ok(sync.json.count > 0);
+    assert.equal(sync.json.rewriteIp, '10.8.1.1');
 });
 
 test('создание пользователя с ролью viewer', async () => {
@@ -427,6 +463,50 @@ test('Обновление: статус читается и не запущен
     assert.ok(Array.isArray(r.json.backups));
 });
 
+test('Обновление: зависший worker определяется как stale и lock снимается', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'servpanel-updater-test-'));
+    try {
+        fs.writeFileSync(path.join(dir, '.update_status.json'), JSON.stringify({
+            running: true,
+            ok: false,
+            pid: 99999999,
+            startedAt: new Date().toISOString(),
+            step: 'stop',
+            message: 'Останавливаю панель',
+            log: []
+        }));
+        fs.writeFileSync(path.join(dir, '.update.lock'), '1');
+
+        const st = updater.readStatus(dir);
+        assert.equal(st.running, false);
+        assert.equal(st.stale, true);
+        assert.match(st.error, /аварийно/);
+
+        const lock = updater.acquireLock(dir);
+        assert.ok(fs.existsSync(lock));
+        updater.releaseLock(lock);
+
+        // Старый статус 2.4.0: PID ещё не писался, но шаг stop висит > 15 минут.
+        fs.writeFileSync(path.join(dir, '.update_status.json'), JSON.stringify({
+            running: true,
+            ok: false,
+            startedAt: new Date(Date.now() - 16 * 60 * 1000).toISOString(),
+            step: 'stop',
+            message: 'Останавливаю панель',
+            log: []
+        }));
+        fs.writeFileSync(path.join(dir, '.update.lock'), '1');
+        const old = updater.readStatus(dir);
+        assert.equal(old.running, false);
+        assert.equal(old.stale, true);
+        const oldLock = updater.acquireLock(dir);
+        assert.ok(fs.existsSync(oldLock));
+        updater.releaseLock(oldLock);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
 test('Обновление: в интерфейсе есть отдельная вкладка и кнопки', async () => {
     const r = await request('/');
     assert.equal(r.status, 200);
@@ -437,8 +517,16 @@ test('Обновление: в интерфейсе есть отдельная 
 });
 
 test('Обновление: воркер и модуль обновления присутствуют', () => {
-    assert.ok(fs.existsSync(path.join(__dirname, '..', 'lib', 'update-worker.js')));
-    assert.ok(fs.existsSync(path.join(__dirname, '..', 'lib', 'updater.js')));
+    const workerFile = path.join(__dirname, '..', 'lib', 'update-worker.js');
+    const updaterFile = path.join(__dirname, '..', 'lib', 'updater.js');
+    assert.ok(fs.existsSync(workerFile));
+    assert.ok(fs.existsSync(updaterFile));
+    const workerSource = fs.readFileSync(workerFile, 'utf8');
+    const updaterSource = fs.readFileSync(updaterFile, 'utf8');
+    assert.match(updaterSource, /systemd-run/);
+    assert.match(updaterSource, /pidLooksLikeWorker/);
+    // restart не должен сбрасывать env панели на минимальное окружение systemd-run.
+    assert.doesNotMatch(workerSource, /\['restart',\s*PM2_NAME,\s*'--update-env'\]/);
 });
 
 test('выход закрывает доступ', async () => {

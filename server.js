@@ -75,6 +75,14 @@ const CASCADE_CONF_LEGACY = path.join(AWG_CONF_DIR, 'awg-eu.conf'); // стар�
 const RENAME_SCRIPT = path.join(AWG_DIR, '.panel-rename.sh');
 const INSTALL_STATE = path.join(DATA_DIR, '.install_state.json');
 
+// Опциональный WARP + Xray для AdGuard Home. Ничего не ставится автоматически:
+// компонент запускается только по кнопке на вкладке «Службы и DNS».
+const WARP_INSTALLER = path.join(APP_DIR, 'install_warp_xray.sh');
+const WARP_ENV_FILE = '/root/awg/warp.env';
+const WARP_STATE_FILE = '/root/awg/warp-adguard.json';
+const WARP_LOG = '/var/log/warp_install.log';
+const WARP_DOMAINS_FILE = path.join(APP_DIR, 'warp-domains.txt');
+
 function existingCascadeConf() {
     if (fs.existsSync(CASCADE_CONF)) return CASCADE_CONF;
     if (fs.existsSync(CASCADE_CONF_LEGACY)) return CASCADE_CONF_LEGACY;
@@ -222,6 +230,44 @@ function existingIfaces() { return Object.keys(os.networkInterfaces()); }
 function validIfaces(arr) {
     return Array.isArray(arr) && arr.length > 0 &&
         arr.every(i => typeof i === 'string' && IFACE_RE.test(i) && existingIfaces().includes(i));
+}
+
+// --- WARP + Xray: конфигурация и список доменов для AdGuard -----------------
+function readKeyValueFile(file) {
+    const out = {};
+    try {
+        for (const line of fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/)) {
+            const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
+            if (m) out[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
+        }
+    } catch (e) { /* файла ещё нет */ }
+    return out;
+}
+
+function warpConfig() {
+    const env = readKeyValueFile(WARP_ENV_FILE);
+    return {
+        installed: env.WARP_INSTALLED === '1',
+        listenIp: IPV4_RE.test(env.WARP_LISTEN_IP || '') ? env.WARP_LISTEN_IP : '10.8.1.1',
+        listenPort: isPort(env.WARP_LISTEN_PORT) ? String(Number(env.WARP_LISTEN_PORT)) : '443',
+        socksPort: isPort(env.WARP_SOCKS_PORT) ? String(Number(env.WARP_SOCKS_PORT)) : '40000',
+        installedAt: env.WARP_INSTALLED_AT || ''
+    };
+}
+
+function warpDomainList() {
+    try {
+        return [...new Set(fs.readFileSync(WARP_DOMAINS_FILE, 'utf8')
+            .replace(/^\uFEFF/, '')
+            .split(/\r?\n/)
+            .map(s => s.trim())
+            .filter(s => s && !s.startsWith('#') && HOST_RE.test(s)))];
+    } catch (e) { return []; }
+}
+
+function warpAdguardState() {
+    try { return JSON.parse(fs.readFileSync(WARP_STATE_FILE, 'utf8').replace(/^\uFEFF/, '')); }
+    catch (e) { return null; }
 }
 function parseCidrList(str) {
     const out = [];
@@ -837,13 +883,86 @@ app.get('/api/history', checkAuth, (req, res) => res.json(historyData));
 // ---------------------------------------------------------------------------
 // Системные метрики и статус безопасности
 // ---------------------------------------------------------------------------
+// loadavg — это не загрузка CPU, а число задач в очереди (включая D-state и
+// I/O). На VPS с 1–2 ядрами loadavg 2.0 легко даёт «100%», хотя htop показывает
+// 10–20%. Считаем реальную загрузку по дельтам /proc/stat (или os.cpus()).
+function readCpuTimes() {
+    if (process.platform === 'linux') {
+        try {
+            const line = fs.readFileSync('/proc/stat', 'utf8').split('\n')[0].trim();
+            const n = line.split(/\s+/).slice(1).map(Number);
+            if (n.length >= 4 && n.every(v => Number.isFinite(v))) {
+                // user nice system idle iowait irq softirq steal (guest не считаем:
+                // он уже входит в user/nice и дал бы двойной учёт).
+                const idle = n[3] + (n[4] || 0);
+                const total = n.slice(0, 8).reduce((a, b) => a + b, 0);
+                if (total > 0) return { total, idle };
+            }
+        } catch (e) { /* not Linux / no procfs */ }
+    }
+    try {
+        const cpus = os.cpus() || [];
+        let idle = 0, total = 0;
+        for (const c of cpus) {
+            const t = c.times || {};
+            idle += t.idle || 0;
+            total += (t.user || 0) + (t.nice || 0) + (t.sys || 0) + (t.idle || 0) + (t.irq || 0);
+        }
+        if (total > 0) return { total, idle };
+    } catch (e) { /* ignore */ }
+    return null;
+}
+let cpuPrev = readCpuTimes();
+let cpuCached = { usage: null, at: 0 };
+function cpuUsagePercent() {
+    const now = Date.now();
+    // Не пересчитываем на каждый быстрый запрос: слишком малая дельта даёт шум.
+    if (cpuCached.usage !== null && now - cpuCached.at < 900) return cpuCached.usage;
+    const cur = readCpuTimes();
+    if (cur && cpuPrev) {
+        const dTotal = cur.total - cpuPrev.total;
+        const dIdle = cur.idle - cpuPrev.idle;
+        if (dTotal >= 40 && dIdle >= 0) {
+            const usage = Math.max(0, Math.min(100, ((dTotal - dIdle) / dTotal) * 100));
+            cpuPrev = cur;
+            cpuCached = { usage, at: now };
+            return usage;
+        }
+    }
+    if (cur && cur.total > 0) {
+        // Первый запрос после старта: средняя загрузка с момента boot.
+        const usage = Math.max(0, Math.min(100, ((cur.total - cur.idle) / cur.total) * 100));
+        cpuPrev = cur;
+        if (cpuCached.usage === null) cpuCached = { usage, at: now };
+        return cpuCached.usage;
+    }
+    const cores = os.cpus().length || 1;
+    return Math.max(0, Math.min(100, (os.loadavg()[0] / cores) * 100));
+}
+function memoryUsage() {
+    // os.freemem() на Linux — это только MemFree, без кэша. Из-за этого панель
+    // показывала почти 100% RAM. MemAvailable — то же, что учитывает htop.
+    try {
+        const txt = fs.readFileSync('/proc/meminfo', 'utf8');
+        const kb = key => {
+            const m = txt.match(new RegExp('^' + key + ':\\s+(\\d+)\\s+kB', 'm'));
+            return m ? parseInt(m[1], 10) * 1024 : 0;
+        };
+        const total = kb('MemTotal');
+        const available = kb('MemAvailable') || (kb('MemFree') + kb('Buffers') + kb('Cached'));
+        if (total > 0 && available > 0) {
+            return { total, free: available, used: Math.max(0, total - available) };
+        }
+    } catch (e) { /* ignore */ }
+    const total = os.totalmem(), free = os.freemem();
+    return { total, free, used: Math.max(0, total - free) };
+}
+
 app.get('/api/sysinfo', checkAuth, (req, res) => {
     try {
-        const totalRAM = os.totalmem(), freeRAM = os.freemem();
-        const ramPercent = (((totalRAM - freeRAM) / totalRAM) * 100).toFixed(1);
-        const cores = os.cpus().length;
-        let cpuLoad = ((os.loadavg()[0] / cores) * 100).toFixed(1);
-        if (cpuLoad > 100) cpuLoad = 100;
+        const mem = memoryUsage();
+        const ramPercent = mem.total > 0 ? ((mem.used / mem.total) * 100).toFixed(1) : '0.0';
+        const cpu = cpuUsagePercent().toFixed(1);
         const up = os.uptime();
         const d = Math.floor(up / 86400), h = Math.floor((up % 86400) / 3600), m = Math.floor((up % 3600) / 60);
 
@@ -854,7 +973,14 @@ app.get('/api/sysinfo', checkAuth, (req, res) => {
             disk = { total: parseInt(df[0]), used: parseInt(df[1]), free: parseInt(df[2]), percent: df[3] };
         } catch (e) { /* ignore */ }
 
-        res.json({ cpu: cpuLoad, ram: ramPercent, uptime: `${d}д ${h}ч ${m}м`, disk });
+        res.json({
+            cpu,
+            ram: ramPercent,
+            load: Number(os.loadavg()[0] || 0).toFixed(2),
+            cores: os.cpus().length,
+            uptime: `${d}д ${h}ч ${m}м`,
+            disk
+        });
     } catch (e) { res.status(500).json({ error: 'Ошибка чтения метрик' }); }
 });
 
@@ -1489,14 +1615,20 @@ app.delete('/api/ufw/:id', checkAuth, (req, res) => {
 // Сетевые инструменты: статус
 // ---------------------------------------------------------------------------
 app.get('/api/tools/status', checkAuth, (req, res) => {
-    let ruCount = 0, ruActive = false, ruIfaces = [];
+    let ruCount = 0, ruActive = false, ruIfaces = [], ruAllPorts = false;
     try {
         const count = shTry('sudo', ['bash', '-c', "ipset list ru_block 2>/dev/null | grep -c '^[0-9]' || true"]).trim();
         ruCount = parseInt(count, 10) || 0;
-        ruActive = ruCount > 0;
         const forward = shTry('sudo', ['iptables', '-S', 'FORWARD']);
-        const matches = [...forward.matchAll(/-i\s+(\S+)\s+-m set --match-set ru_block/g)];
+        // Ищем ru_block в любом месте правила: в режиме «только порты» перед
+        // --match-set стоит -p tcp/udp, а не -m set сразу после -i.
+        const matches = [...forward.matchAll(/-A FORWARD .*?-i\s+(\S+).*?--match-set ru_block/g)];
         ruIfaces = [...new Set(matches.map(m => m[1]))];
+        // Правило без --dport блокирует все порты; с --dport — только выбранные.
+        ruAllPorts = forward.split('\n').some(l => l.includes('ru_block') && /-i\s+\S+\s+-m set --match-set ru_block\s+dst\s+-j DROP/.test(l));
+        // Без правил в FORWARD один ipset ничего не блокирует — не показываем
+        // «активно» только из-за непустого списка.
+        ruActive = ruCount > 0 && ruIfaces.length > 0;
     } catch (e) { /* ignore */ }
 
     let cascActive = false, cascIfaces = [];
@@ -1510,16 +1642,23 @@ app.get('/api/tools/status', checkAuth, (req, res) => {
     let dnsActive = false, dnsTarget = '', dnsIfaces = [];
     try {
         const nat = shTry('sudo', ['iptables', '-t', 'nat', '-S', 'PREROUTING']);
-        const matches = [...nat.matchAll(/-A PREROUTING -i\s+(\S+).*?--dport 53 -j DNAT --to-destination\s+(\S+)/g)];
-        dnsIfaces = [...new Set(matches.map(m => m[1]))];
-        if (matches.length > 0) dnsTarget = matches[0][2];
+        const dnat = [...nat.matchAll(/-A PREROUTING -i\s+(\S+).*?--dport 53 -j DNAT --to-destination\s+(\S+)/g)];
+        const redirect = [...nat.matchAll(/-A PREROUTING -i\s+(\S+).*?--dport 53 -j REDIRECT --to-ports\s+(\d+)/g)];
+        dnsIfaces = [...new Set([...dnat, ...redirect].map(m => m[1]))];
+        if (dnat.length > 0) dnsTarget = dnat[0][2];
+        else if (redirect.length > 0) dnsTarget = `127.0.0.1:${redirect[0][2]}`;
         dnsActive = dnsIfaces.length > 0;
     } catch (e) { /* ignore */ }
 
+    // Каскад и GeoIP-блокировка на одном интерфейсе противоречат друг другу:
+    // каскад отправляет RU-адреса напрямую, а ru_block их дропает.
+    const conflictIfaces = ruIfaces.filter(i => cascIfaces.includes(i));
+
     res.json({
-        ruDrop: { active: ruActive, count: ruCount, ifaces: ruIfaces },
+        ruDrop: { active: ruActive, count: ruCount, ifaces: ruIfaces, allPorts: ruAllPorts },
         cascade: { active: cascActive, ifaces: cascIfaces },
-        dns: { active: dnsActive, ifaces: dnsIfaces, target: dnsTarget }
+        dns: { active: dnsActive, ifaces: dnsIfaces, target: dnsTarget },
+        conflictIfaces
     });
 });
 
@@ -1529,16 +1668,20 @@ app.get('/api/tools/status', checkAuth, (req, res) => {
 app.post('/api/tools/rudrop', checkAuth, (req, res) => {
     const { ifaces, schedule, enable } = req.body || {};
 
-    // Сначала всегда снимаем старые правила/ipset
-    try {
-        const forward = shTry('sudo', ['iptables', '-S', 'FORWARD']);
-        forward.split('\n').forEach(rule => {
-            if (rule.includes('ru_block')) {
-                const args = rule.replace(/^-A FORWARD /, '').split(/\s+/).filter(Boolean);
-                if (args.length) { try { sh('sudo', ['iptables', '-D', 'FORWARD', ...args]); } catch (e) { /* ignore */ } }
-            }
-        });
-    } catch (e) { /* ignore */ }
+    // Сначала всегда снимаем старые правила/ipset. Важно: удаляем и
+    // портовые правила, иначе при повторном включении они дублируются.
+    const removeRuRules = () => {
+        try {
+            const forward = shTry('sudo', ['iptables', '-S', 'FORWARD']);
+            forward.split('\n').forEach(rule => {
+                if (rule.includes('ru_block')) {
+                    const args = rule.replace(/^-A FORWARD /, '').split(/\s+/).filter(Boolean);
+                    if (args.length) { try { sh('sudo', ['iptables', '-D', 'FORWARD', ...args]); } catch (e) { /* ignore */ } }
+                }
+            });
+        } catch (e) { /* ignore */ }
+    };
+    removeRuRules();
 
     if (!enable) {
         try { sh('sudo', ['rm', '-f', '/etc/cron.d/ru-drop-refresh', '/root/awg/ru-drop.sh']); } catch (e) { /* ignore */ }
@@ -1550,8 +1693,9 @@ app.post('/api/tools/rudrop', checkAuth, (req, res) => {
     if (!validIfaces(ifaces)) return res.status(400).json({ error: 'Выберите существующие интерфейсы' });
     const cronLine = schedule === 'daily' ? '0 4 * * *' : '0 4 * * 1';
     const ports = String((req.body && req.body.ports) || '').trim();
-    const portsArr = ports ? ports.split(',').map(p => p.trim()).filter(Boolean) : [];
+    const portsArr = ports ? [...new Set(ports.split(',').map(p => p.trim()).filter(Boolean))] : [];
     if (!portsArr.every(p => isPort(p))) return res.status(400).json({ error: 'Неверный список портов' });
+    const mode = portsArr.length ? 'ports' : 'all';
     const customUrl = String((req.body && req.body.customUrl) || '').trim();
     let zoneUrl = 'https://www.ipdeny.com/ipblocks/data/aggregated/ru-aggregated.zone';
     if (req.body.listMode === 'custom' && customUrl) {
@@ -1559,16 +1703,15 @@ app.post('/api/tools/rudrop', checkAuth, (req, res) => {
         zoneUrl = customUrl;
     }
 
-    const portDrop = portsArr.length
-        ? portsArr.map(p => ` iptables -I FORWARD 1 -i "$AWG_IF" -p tcp --dport ${p} -m set --match-set ru_block dst -j DROP`).join('\n')
-        : '';
-
     const scriptContent = `#!/bin/bash
 set -euo pipefail
 IFACES=(${ifaces.join(' ')})
+MODE="${mode}"
+PORTS="${portsArr.join(' ')}"
 RU_ZONE_URL="${zoneUrl}"
 AWG_DIR="/root/awg"
-RU_ZONE="$AWG_DIR/ru.zone"
+# Отдельный файл: не перетираем ru.zone, который использует каскад.
+RU_ZONE="$AWG_DIR/ru-drop.zone"
 mkdir -p "$AWG_DIR"
 exec 9>"$AWG_DIR/ru-drop.lock"
 flock -n 9 || { echo "Уже запущен"; exit 1; }
@@ -1584,11 +1727,26 @@ while read -r net; do
 done < "$RU_ZONE"
 ipset swap ru_tmp ru_block
 ipset destroy ru_tmp
+
+# Убираем все прежние правила ru_block (включая портовые), чтобы не плодить дубли.
+while IFS= read -r rule; do
+  [ -n "$rule" ] || continue
+  # shellcheck disable=SC2086
+  iptables -w 5 -D FORWARD \${rule#-A FORWARD } 2>/dev/null || true
+done < <(iptables -S FORWARD | grep 'ru_block' || true)
+
 for AWG_IF in "\${IFACES[@]}"; do
-  iptables -w 5 -D FORWARD -i "$AWG_IF" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
-  iptables -w 5 -D FORWARD -i "$AWG_IF" -m set --match-set ru_block dst -j DROP 2>/dev/null || true
-${portDrop}
-  iptables -w 5 -I FORWARD 1 -i "$AWG_IF" -m set --match-set ru_block dst -j DROP
+  if [ "$MODE" = "ports" ]; then
+    for PORT in $PORTS; do
+      iptables -w 5 -I FORWARD 1 -i "$AWG_IF" -p tcp --dport "$PORT" -m set --match-set ru_block dst -j DROP
+      iptables -w 5 -I FORWARD 1 -i "$AWG_IF" -p udp --dport "$PORT" -m set --match-set ru_block dst -j DROP
+    done
+  else
+    iptables -w 5 -I FORWARD 1 -i "$AWG_IF" -m set --match-set ru_block dst -j DROP
+  fi
+done
+# Разрешаем уже установленные соединения (правило должно быть выше DROP).
+for AWG_IF in "\${IFACES[@]}"; do
   iptables -w 5 -I FORWARD 1 -i "$AWG_IF" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 done
 echo "OK"
@@ -1611,40 +1769,101 @@ echo "OK"
 // ---------------------------------------------------------------------------
 // Перехват DNS
 // ---------------------------------------------------------------------------
+// Удаляем все DNS-правила панели на интерфейсе (DNAT/REDIRECT :53 и DROP :853).
+// Перечисляем правила через iptables -S, а не полагаемся только на oldIfaces:
+// так не остаются дубли, если предыдущее состояние не прочиталось.
+function removeDnsRules(iface, target) {
+    if (!IFACE_RE.test(String(iface))) return;
+    try {
+        const nat = shTry('sudo', ['iptables', '-t', 'nat', '-S', 'PREROUTING']);
+        nat.split('\n').forEach(rule => {
+            if (!rule.startsWith('-A PREROUTING ') || !rule.includes('--dport 53')) return;
+            if (!new RegExp(`-i\\s+${iface.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$)`).test(rule)) return;
+            if (!rule.includes('DNAT') && !rule.includes('REDIRECT')) return;
+            const args = rule.replace(/^-A PREROUTING /, '').split(/\s+/).filter(Boolean);
+            if (args.length) { try { sh('sudo', ['iptables', '-t', 'nat', '-D', 'PREROUTING', ...args]); } catch (e) { /* ignore */ } }
+        });
+    } catch (e) { /* ignore */ }
+    // На случай, если iptables -S недоступен, пробуем удалить точное правило.
+    if (isDnsTarget(target)) {
+        const parts = String(target).split(':');
+        const ip = parts[0], port = parts[1] || '53';
+        for (const proto of ['udp', 'tcp']) {
+            try {
+                if (ip.startsWith('127.')) {
+                    sh('sudo', ['iptables', '-t', 'nat', '-D', 'PREROUTING', '-i', iface, '-p', proto,
+                        '--dport', '53', '-j', 'REDIRECT', '--to-ports', port]);
+                } else {
+                    sh('sudo', ['iptables', '-t', 'nat', '-D', 'PREROUTING', '-i', iface, '-p', proto,
+                        '--dport', '53', '-j', 'DNAT', '--to-destination', target]);
+                }
+            } catch (e) { /* ignore */ }
+        }
+    }
+    try {
+        const forward = shTry('sudo', ['iptables', '-S', 'FORWARD']);
+        forward.split('\n').forEach(rule => {
+            if (!rule.startsWith('-A FORWARD ') || !rule.includes('--dport 853') || !rule.includes('-j DROP')) return;
+            if (!new RegExp(`-i\\s+${iface.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$)`).test(rule)) return;
+            const args = rule.replace(/^-A FORWARD /, '').split(/\s+/).filter(Boolean);
+            if (args.length) { try { sh('sudo', ['iptables', '-D', 'FORWARD', ...args]); } catch (e) { /* ignore */ } }
+        });
+    } catch (e) { /* ignore */ }
+}
+
 app.post('/api/tools/dns', checkAuth, (req, res) => {
     const { ifaces, target, enable, oldIfaces, oldTarget } = req.body || {};
 
-    // Снятие старых правил
-    if (Array.isArray(oldIfaces) && oldIfaces.length > 0 && isDnsTarget(oldTarget)) {
-        oldIfaces.forEach(oldIface => {
-            if (!IFACE_RE.test(String(oldIface))) return;
-            for (const proto of ['udp', 'tcp']) {
-                try {
-                    sh('sudo', ['iptables', '-t', 'nat', '-D', 'PREROUTING', '-i', oldIface, '-p', proto,
-                        '--dport', '53', '-j', 'DNAT', '--to-destination', oldTarget]);
-                } catch (e) { /* ignore */ }
-            }
-            try { sh('sudo', ['iptables', '-D', 'FORWARD', '-i', oldIface, '-p', 'tcp', '--dport', '853', '-j', 'DROP']); } catch (e) { /* ignore */ }
-        });
+    // Снятие старых правил (и на старых интерфейсах, и на выбранных — чтобы
+    // смена цели не оставляла второе правило с прежним IP).
+    if (Array.isArray(oldIfaces) && oldIfaces.length > 0) {
+        oldIfaces.forEach(oldIface => removeDnsRules(oldIface, oldTarget));
     }
 
     if (enable) {
         if (!validIfaces(ifaces)) return res.status(400).json({ error: 'Выберите существующие интерфейсы' });
         if (!isDnsTarget(target)) return res.status(400).json({ error: 'Неверный IP DNS (ожидается IP или IP:порт)' });
+        const parts = String(target).split(':');
+        const ip = parts[0], port = parts[1] || '53';
+        if (ip === '0.0.0.0') return res.status(400).json({ error: 'Укажите конкретный IP AdGuard, а не 0.0.0.0' });
+        const loopback = ip.startsWith('127.');
+
+        try {
+            const fwd = shTry('sudo', ['sysctl', '-n', 'net.ipv4.ip_forward']).trim();
+            if (fwd !== '1') {
+                return res.status(400).json({ error: 'Включите IP-форвардинг: sysctl -w net.ipv4.ip_forward=1 (обычно его включает AWG)' });
+            }
+        } catch (e) { /* ignore */ }
+
         ifaces.forEach(iface => {
+            removeDnsRules(iface, target);
             for (const proto of ['udp', 'tcp']) {
                 try {
-                    sh('sudo', ['iptables', '-t', 'nat', '-I', 'PREROUTING', '1', '-i', iface, '-p', proto,
-                        '--dport', '53', '-j', 'DNAT', '--to-destination', target]);
+                    if (loopback) {
+                        // REDIRECT приводит пакет на локальный порт. AdGuard должен
+                        // слушать 0.0.0.0 (а не только 127.0.0.1), иначе ответа не будет.
+                        sh('sudo', ['iptables', '-t', 'nat', '-I', 'PREROUTING', '1', '-i', iface, '-p', proto,
+                            '--dport', '53', '-j', 'REDIRECT', '--to-ports', port]);
+                    } else {
+                        sh('sudo', ['iptables', '-t', 'nat', '-I', 'PREROUTING', '1', '-i', iface, '-p', proto,
+                            '--dport', '53', '-j', 'DNAT', '--to-destination', `${ip}:${port}`]);
+                    }
                 } catch (e) { /* ignore */ }
             }
-            try { sh('sudo', ['iptables', '-I', 'FORWARD', '1', '-i', iface, '-p', 'tcp', '--dport', '853', '-j', 'DROP']); } catch (e) { /* ignore */ }
+            // DoT (tcp/853) и DoQ (udp/853) — иначе клиент обойдёт перехват.
+            for (const proto of ['tcp', 'udp']) {
+                try {
+                    sh('sudo', ['iptables', '-I', 'FORWARD', '1', '-i', iface, '-p', proto,
+                        '--dport', '853', '-j', 'DROP']);
+                } catch (e) { /* ignore */ }
+            }
         });
-        auditLog(req, `Перехват DNS включён (${ifaces.join(', ')}) -> ${target}`);
+        auditLog(req, `Перехват DNS включён (${ifaces.join(', ')}) -> ${loopback ? '127.0.0.1:' + port : ip + ':' + port}`);
+        res.json({ success: true, target: loopback ? `127.0.0.1:${port}` : `${ip}:${port}`, warning: loopback ? 'AdGuard должен слушать 0.0.0.0, иначе REDIRECT не сработает' : undefined });
     } else {
         auditLog(req, 'Перехват DNS выключен');
+        res.json({ success: true });
     }
-    res.json({ success: true });
 });
 // ---------------------------------------------------------------------------
 // Каскад: генерация скрипта маршрутизации (по CASCADE.md от bivlked)
@@ -1907,6 +2126,15 @@ function serviceList() {
         { name: 'cron', desc: 'Планировщик задач' },
         { name: 'awg-routing.timer', desc: 'Обновление маршрутов каскада' }
     ];
+    // Показываем WARP/Xray только если они действительно установлены.
+    if (fs.existsSync('/usr/local/etc/xray/config.json') || fs.existsSync('/usr/local/bin/xray') ||
+        fs.existsSync('/etc/systemd/system/xray.service') || fs.existsSync('/lib/systemd/system/xray.service')) {
+        base.push({ name: 'xray', desc: 'Xray — WARP для AdGuard' });
+    }
+    if (fs.existsSync('/usr/bin/warp-cli') || fs.existsSync('/usr/local/bin/warp-cli') ||
+        fs.existsSync('/lib/systemd/system/warp-svc.service') || fs.existsSync('/etc/systemd/system/warp-svc.service')) {
+        base.push({ name: 'warp-svc', desc: 'Cloudflare WARP' });
+    }
     for (const iface of ['awg0', 'amn0', 'awg1']) {
         if (fs.existsSync(path.join(AWG_CONF_DIR, iface + '.conf'))) {
             base.push({ name: `awg-quick@${iface}`, desc: `AmneziaWG туннель ${iface}` });
@@ -2067,6 +2295,188 @@ app.get('/api/adguard/autodetect', checkAuth, async (req, res) => {
     const found = results.find(Boolean);
     if (!found) return res.json({ found: false, tried: candidates });
     res.json({ found: true, ...found });
+});
+
+// ---------------------------------------------------------------------------
+// WARP + Xray для AdGuard (опционально)
+// ---------------------------------------------------------------------------
+app.get('/api/warp/status', checkAuth, (req, res) => {
+    const cfg = warpConfig();
+    const domains = warpDomainList();
+    const adguard = warpAdguardState();
+
+    if (TEST_MODE || DEMO_MODE) {
+        return res.json({
+            ...cfg,
+            installed: false,
+            warpActive: false,
+            xrayActive: false,
+            connected: false,
+            warpStatus: 'demo',
+            domains: domains.length,
+            adguard,
+            testMode: true
+        });
+    }
+
+    let warpActive = false, xrayActive = false, connected = false, warpStatus = '';
+    try { warpActive = isActive('warp-svc') === 'active'; } catch (e) { /* ignore */ }
+    try { xrayActive = isActive('xray') === 'active'; } catch (e) { /* ignore */ }
+    try {
+        warpStatus = String(shTry('bash', ['-c', 'warp-cli status 2>&1'], { timeout: 8000 }) || '').trim();
+        connected = /(^|\s)Connected(\s|$)/i.test(warpStatus) && !/Disconnected/i.test(warpStatus);
+    } catch (e) { /* ignore */ }
+
+    res.json({
+        ...cfg,
+        warpActive,
+        xrayActive,
+        connected,
+        warpStatus: warpStatus.slice(0, 2000),
+        domains: domains.length,
+        adguard
+    });
+});
+
+app.get('/api/warp/domains', checkAuth, (req, res) => {
+    const domains = warpDomainList();
+    res.json({ count: domains.length, domains });
+});
+
+// Включение/выключение WARP и Xray. Пакеты при выключении не удаляются:
+// компонент остаётся установленным, но перестаёт принимать трафик.
+app.post('/api/warp/power', checkAuth, requireAdmin, (req, res) => {
+    const enable = !!(req.body && req.body.enable);
+    if (TEST_MODE || DEMO_MODE) return res.json({ success: true, enabled: enable, demo: true });
+    try {
+        if (enable) {
+            sh('sudo', ['systemctl', 'enable', '--now', 'xray'], { timeout: 30000 });
+            sh('sudo', ['warp-cli', '--accept-tos', 'connect'], { timeout: 30000 });
+        } else {
+            try { sh('sudo', ['warp-cli', '--accept-tos', 'disconnect'], { timeout: 30000 }); } catch (e) { /* ignore */ }
+            sh('sudo', ['systemctl', 'disable', '--now', 'xray'], { timeout: 30000 });
+        }
+        auditLog(req, enable ? 'WARP/Xray включены' : 'WARP/Xray выключены');
+        res.json({ success: true, enabled: enable });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось переключить WARP/Xray: ' + (e.stderr || e.message || 'ошибка') });
+    }
+});
+
+app.post('/api/warp/test', checkAuth, requireAdmin, (req, res) => {
+    const cfg = warpConfig();
+    if (TEST_MODE || DEMO_MODE) {
+        return res.json({ ok: true, demo: true, ip: '203.0.113.10', org: 'Cloudflare, Inc.', country: 'NL' });
+    }
+    execFile('curl', [
+        '-fsS', '--max-time', '15',
+        '-x', `socks5h://127.0.0.1:${cfg.socksPort}`,
+        'https://ipinfo.io/json'
+    ], { timeout: 25000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err) {
+            return res.json({ ok: false, error: String(stderr || err.message || 'WARP не ответил').slice(0, 1000) });
+        }
+        try {
+            const data = JSON.parse(stdout);
+            res.json({
+                ok: true,
+                ip: data.ip || '',
+                org: data.org || '',
+                country: data.country || '',
+                city: data.city || ''
+            });
+        } catch (e) {
+            res.json({ ok: false, error: 'WARP вернул не JSON', raw: String(stdout).slice(0, 1000) });
+        }
+    });
+});
+
+// Записывает правила dnsrewrite в пользовательские правила AdGuard.
+// Старый блок панели удаляется по маркерам, остальные правила не затрагиваются.
+app.post('/api/warp/adguard', checkAuth, requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const base = normalizeAgUrl(body.url);
+    if (!base) return res.status(400).json({ error: 'Укажите корректный URL AdGuard API' });
+
+    const cfg = warpConfig();
+    let rewriteIp = String(body.rewriteIp || cfg.listenIp || '').trim();
+    if (rewriteIp === '0.0.0.0') rewriteIp = '';
+    if (!IPV4_RE.test(rewriteIp) || rewriteIp.startsWith('127.')) {
+        return res.status(400).json({ error: 'Укажите IP туннеля для dnsrewrite (например, 10.8.1.1)' });
+    }
+
+    let domains;
+    if (Array.isArray(body.domains)) domains = body.domains;
+    else if (typeof body.domains === 'string' && body.domains.trim()) {
+        domains = body.domains.split(/[\s,;]+/);
+    } else {
+        domains = warpDomainList();
+    }
+    domains = [...new Set(domains
+        .map(d => String(d).trim().toLowerCase())
+        .filter(d => d && !d.startsWith('#') && HOST_RE.test(d)))];
+    if (!domains.length) return res.status(400).json({ error: 'Список доменов пуст' });
+    if (TEST_MODE || DEMO_MODE) {
+        return res.json({
+            success: true, demo: true, count: domains.length,
+            totalRules: domains.length, rewriteIp, syncedAt: new Date().toISOString()
+        });
+    }
+
+    const headers = { 'Accept': 'application/json' };
+    if (body.user) {
+        headers['Authorization'] = 'Basic ' + Buffer.from(String(body.user) + ':' + String(body.pass || '')).toString('base64');
+    }
+
+    const BEGIN = '# BEGIN SERVEPANEL WARP';
+    const END = '# END SERVEPANEL WARP';
+    try {
+        const cur = await fetchWithTimeout(base + '/control/filtering/status', { headers }, 10000);
+        if (!cur.ok) throw new Error('AdGuard HTTP ' + cur.status);
+        const data = await cur.json();
+        const current = Array.isArray(data.user_rules) ? data.user_rules : [];
+
+        const kept = [];
+        const hasBegin = current.some(rule => String(rule).trim() === BEGIN);
+        const hasEnd = current.some(rule => String(rule).trim() === END);
+        if (hasBegin && hasEnd) {
+            let inBlock = false;
+            for (const rule of current) {
+                const t = String(rule).trim();
+                if (t === BEGIN) { inBlock = true; continue; }
+                if (t === END) { inBlock = false; continue; }
+                if (!inBlock) kept.push(rule);
+            }
+        } else {
+            kept.push(...current);
+        }
+
+        const block = [
+            BEGIN,
+            ...domains.map(d => `||${d}^$dnsrewrite=NOERROR;A;${rewriteIp}`),
+            END
+        ];
+        const next = [...kept, ...block];
+        const set = await fetchWithTimeout(base + '/control/filtering/set_rules', {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rules: next })
+        }, 10000);
+        if (!set.ok) throw new Error('AdGuard set_rules HTTP ' + set.status);
+
+        const syncedAt = new Date().toISOString();
+        if (!TEST_MODE) {
+            try {
+                writeRootFile(WARP_STATE_FILE, JSON.stringify({
+                    syncedAt, count: domains.length, rewriteIp, totalRules: next.length
+                }, null, 2), '0600');
+            } catch (e) { /* статус не критичен */ }
+        }
+        auditLog(req, `WARP: правила AdGuard обновлены (${domains.length} доменов -> ${rewriteIp})`);
+        res.json({ success: true, count: domains.length, totalRules: next.length, rewriteIp, syncedAt });
+    } catch (e) {
+        res.status(502).json({ error: 'Не удалось обновить AdGuard: ' + e.message });
+    }
 });
 
 // ---------------------------------------------------------------------------
@@ -3550,12 +3960,17 @@ function startUpdateWorker(res, req, opts, auditText) {
         return false;
     }
     try {
-        const pid = updater.startWorker({
+        const worker = updater.startWorker({
             ...updateConfig(),
             ...opts
         });
         auditLog(req, auditText || 'Запущено обновление панели');
-        res.json({ success: true, pid });
+        res.json({
+            success: true,
+            pid: worker && worker.pid ? worker.pid : null,
+            unit: worker && worker.unit ? worker.unit : '',
+            runner: worker && worker.runner ? worker.runner : ''
+        });
         return true;
     } catch (e) {
         safeUpdateError(res, e);
@@ -3677,11 +4092,17 @@ const MODULES = {
         url: 'https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install_adguard_silent.sh',
         log: '/var/log/adguard_install.log',
         title: 'AdGuard Home'
+    },
+    warp: {
+        local: WARP_INSTALLER,
+        log: WARP_LOG,
+        title: 'Cloudflare WARP + Xray'
     }
 };
 const LOG_WHITELIST = [
     '/var/log/awg_install.log', '/var/log/mtproto_install.log', '/var/log/adguard_install.log',
     '/var/log/awg_uninstall.log', '/var/log/ru-drop.log', '/var/log/awg_audit.log',
+    WARP_LOG,
     '/var/log/nginx/error.log', '/var/log/nginx/access.log', '/var/log/auth.log', '/var/log/syslog'
 ];
 
@@ -3705,6 +4126,14 @@ function installEnv(data) {
     if (data.remoteIp && isIpOrHost(String(data.remoteIp))) env.REMOTE_IP = String(data.remoteIp);
     env.REMOTE_PORT = isPort(data.remotePort) ? String(data.remotePort) : '22';
     if (data.remotePass) env.REMOTE_PASS = String(data.remotePass);
+    // Опциональный WARP + Xray. Значения проверяются и здесь, и в скрипте.
+    env.WARP_LISTEN_IP = IPV4_RE.test(String(data.listenIp || '')) ? String(data.listenIp) : '10.8.1.1';
+    const warpListenPort = Number(data.listenPort);
+    const warpSocksPort = Number(data.socksPort);
+    env.WARP_LISTEN_PORT = Number.isInteger(warpListenPort) && warpListenPort >= 1 && warpListenPort <= 65535
+        ? String(warpListenPort) : '443';
+    env.WARP_SOCKS_PORT = Number.isInteger(warpSocksPort) && warpSocksPort >= 1 && warpSocksPort <= 65535
+        ? String(warpSocksPort) : '40000';
     return env;
 }
 
@@ -3721,21 +4150,36 @@ app.post('/api/install/module', checkAuth, (req, res) => {
     try {
         sh('sudo', ['bash', '-c', `rm -f ${mod.log} && touch ${mod.log} && chmod 666 ${mod.log}`]);
 
-        if (data.domain && HOST_RE.test(String(data.domain))) {
-            try { fs.writeFileSync('/root/awg_domain.txt', String(data.domain)); } catch (e) { /* ignore */ }
-        } else {
-            try { fs.unlinkSync('/root/awg_domain.txt'); } catch (e) { /* ignore */ }
+        if (module !== 'warp') {
+            if (data.domain && HOST_RE.test(String(data.domain))) {
+                try { fs.writeFileSync('/root/awg_domain.txt', String(data.domain)); } catch (e) { /* ignore */ }
+            } else {
+                try { fs.unlinkSync('/root/awg_domain.txt'); } catch (e) { /* ignore */ }
+            }
         }
 
         const env = installEnv(data);
         const fd = fs.openSync(mod.log, 'a');
-        const child = spawn('bash', ['-c',
-            `curl -fsSL ${mod.url} -o /tmp/panel-installer-${module}.sh && bash /tmp/panel-installer-${module}.sh`
-        ], {
-            env,
-            detached: true,
-            stdio: ['ignore', fd, fd]
-        });
+        let child;
+        if (mod.local) {
+            if (!fs.existsSync(mod.local)) {
+                fs.closeSync(fd);
+                return res.status(500).json({ error: 'Локальный установщик не найден: ' + path.basename(mod.local) });
+            }
+            child = spawn('bash', [mod.local], {
+                env,
+                detached: true,
+                stdio: ['ignore', fd, fd]
+            });
+        } else {
+            child = spawn('bash', ['-c',
+                `curl -fsSL ${mod.url} -o /tmp/panel-installer-${module}.sh && bash /tmp/panel-installer-${module}.sh`
+            ], {
+                env,
+                detached: true,
+                stdio: ['ignore', fd, fd]
+            });
+        }
         child.unref();
         fs.closeSync(fd);
 

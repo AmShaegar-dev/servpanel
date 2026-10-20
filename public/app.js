@@ -274,7 +274,7 @@ function switchTab(tabId, el) {
     const pageEl = document.getElementById('pageTitle');
     if (pageEl) pageEl.innerText = cleanTitle === 'Дашборд' ? 'Обзор' : cleanTitle;
     if (window.innerWidth <= 860) document.getElementById('sidebar').classList.remove('open');
-    if (tabId === 'tab-services') { loadServices(); connectAdGuard(false); loadAdGuardFull(); }
+    if (tabId === 'tab-services') { loadServices(); connectAdGuard(false); loadAdGuardFull(); loadWarpStatus(); }
     else if (agInterval) { clearInterval(agInterval); agInterval = null; }
     if (tabId === 'tab-cascade') { loadCascadeSetup(); loadCascadeStatus(true); loadCascadeHealth(); }
     if (tabId === 'tab-obf') { loadObfCurrent(); loadObfProfiles(); }
@@ -506,6 +506,7 @@ async function loadNetworkTools() {
         // Безопасное чтение массивов на случай старой версии backend'а
         const ruIfaces = (st.ruDrop && st.ruDrop.ifaces) ? st.ruDrop.ifaces : [];
         const cascIfaces = (st.cascade && st.cascade.ifaces) ? st.cascade.ifaces : [];
+        window.currentConflictIfaces = Array.isArray(st.conflictIfaces) ? st.conflictIfaces : [];
         window.currentDnsIfaces = (st.dns && st.dns.ifaces) ? st.dns.ifaces : [];
         window.currentDnsTarget = (st.dns && st.dns.target) ? st.dns.target : '';
 
@@ -522,9 +523,13 @@ async function loadNetworkTools() {
         const ruEl = document.getElementById('ruDropStatus');
         if (ruEl) {
             if (st.ruDrop && st.ruDrop.active) {
-                ruEl.innerHTML = `<span class="val-rx">Активно на: ${ruIfaces.join(', ')}</span> <span class="sub-text">(Правил: ${st.ruDrop.count || 0})</span>`;
+                const scope = st.ruDrop.allPorts ? 'все порты' : 'только выбранные порты';
+                ruEl.innerHTML = `<span class="val-rx">Активно на: ${ruIfaces.join(', ')}</span> <span class="sub-text">(${scope}, IP: ${st.ruDrop.count || 0})</span>`;
             } else {
                 ruEl.innerHTML = `<span class="val-tx">Выключено</span>`;
+            }
+            if (window.currentConflictIfaces.length) {
+                ruEl.innerHTML += `<div class="text-warning small mt-1">Конфликт: на ${window.currentConflictIfaces.join(', ')} одновременно работают каскад и GeoIP-блокировка. Каскад отправляет RU-трафик напрямую, а GeoIP его дропает — выберите что-то одно.</div>`;
             }
         }
 
@@ -582,6 +587,10 @@ async function loadNetworkTools() {
 async function toggleRuDrop(enable) {
     const checkedIfaces = Array.from(document.querySelectorAll('.ru-check:checked')).map(cb => cb.value);
     if (enable && checkedIfaces.length === 0) return alert('Выберите хотя бы один интерфейс для блокировки!');
+    if (enable) {
+        const conflicts = checkedIfaces.filter(i => (window.currentConflictIfaces || []).includes(i));
+        if (conflicts.length && !confirm(`На интерфейсе ${conflicts.join(', ')} уже работает каскад. GeoIP-блокировка и каскад конфликтуют: RU-трафик будет дропаться вместо отправки напрямую. Продолжить?`)) return;
+    }
     
     const payload = {
         enable, 
@@ -594,7 +603,9 @@ async function toggleRuDrop(enable) {
     
     document.getElementById('ruDropStatus').innerText = "Применение (до 20 сек)...";
     const res = await fetch('/api/tools/rudrop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-    if (res.ok) loadNetworkTools();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return alert(data.error || 'Ошибка настройки GeoIP-блокировки');
+    loadNetworkTools();
 }
 
 async function toggleCascade(enable) {
@@ -634,7 +645,166 @@ async function toggleDns(enable) {
             oldTarget: window.currentDnsTarget
         }) 
     });
-    if (res.ok) loadNetworkTools();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return alert(data.error || 'Ошибка применения перехвата DNS');
+    if (data.warning) alert(data.warning);
+    loadNetworkTools();
+}
+
+async function loadWarpStatus() {
+    if (currentRole !== 'admin') return;
+    try {
+        const res = await fetch('/api/warp/status');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const st = await res.json();
+        window.warpStatus = st;
+
+        const badge = document.getElementById('warpStatusBadge');
+        if (badge) {
+            if (!st.installed) {
+                badge.innerText = 'не установлен';
+                badge.className = 'badge badge-muted';
+            } else if (st.connected && st.xrayActive) {
+                badge.innerText = 'активен';
+                badge.className = 'badge badge-good';
+            } else {
+                badge.innerText = 'установлен, не активен';
+                badge.className = 'badge badge-warn';
+            }
+        }
+
+        const txt = document.getElementById('warpStatusText');
+        if (txt) {
+            if (!st.installed) {
+                txt.innerText = 'WARP на этом сервере не установлен. AdGuard работает как обычно. Если WARP уже стоит на EU-выходе, устанавливать его здесь не нужно — ниже можно записать правила AdGuard на IP туннеля EU.';
+            } else {
+                const parts = [
+                    `Xray: ${st.xrayActive ? 'активен' : 'остановлен'} (${st.listenIp}:${st.listenPort})`,
+                    `WARP: ${st.connected ? 'Connected' : (st.warpActive ? 'не подключён' : 'служба остановлена')}`,
+                    `SOCKS: 127.0.0.1:${st.socksPort}`,
+                    `доменов: ${st.domains}`
+                ];
+                txt.innerText = parts.join(' · ');
+            }
+            if (st.adguard && st.adguard.syncedAt) {
+                txt.innerText += ` · AdGuard: ${st.adguard.count} доменов, ${new Date(st.adguard.syncedAt).toLocaleString()}`;
+            }
+        }
+
+        if (!window.warpFieldsLoaded) {
+            const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+            set('warpListenIp', st.listenIp || '10.8.1.1');
+            set('warpListenPort', st.listenPort || '443');
+            set('warpSocksPort', st.socksPort || '40000');
+            set('warpRewriteIp', (st.listenIp && st.listenIp !== '0.0.0.0') ? st.listenIp : '10.8.1.1');
+            window.warpFieldsLoaded = true;
+        }
+
+        // Подставляем данные AdGuard из соседней формы, если пользователь их уже ввёл.
+        const agUrl = document.getElementById('agUrl');
+        const wUrl = document.getElementById('warpAgUrl');
+        if (wUrl && !wUrl.value && agUrl) wUrl.value = agUrl.value || '';
+        const agUser = document.getElementById('agUser');
+        const wUser = document.getElementById('warpAgUser');
+        if (wUser && !wUser.value && agUser) wUser.value = agUser.value || '';
+        const agPass = document.getElementById('agPass');
+        const wPass = document.getElementById('warpAgPass');
+        if (wPass && !wPass.value && agPass) wPass.value = agPass.value || '';
+    } catch (e) {
+        const txt = document.getElementById('warpStatusText');
+        if (txt) txt.innerText = 'Не удалось получить статус WARP: ' + e.message;
+    }
+}
+
+async function installWarp() {
+    const listenIp = (document.getElementById('warpListenIp') || {}).value || '10.8.1.1';
+    const listenPort = (document.getElementById('warpListenPort') || {}).value || '443';
+    const socksPort = (document.getElementById('warpSocksPort') || {}).value || '40000';
+    if (!/^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(listenIp.trim())) {
+        return alert('Укажите корректный IP для Xray (например, 10.8.1.1)');
+    }
+    if (!confirm('Установить Cloudflare WARP + Xray?\n\nБудут установлены пакеты cloudflare-warp и Xray, WARP переключится в SOCKS5-режим. AdGuard не изменится до нажатия «Записать правила».')) return;
+    switchTab('tab-install', document.getElementById('navInstall'));
+    await startInstall('warp', '/var/log/warp_install.log', {
+        listenIp: listenIp.trim(),
+        listenPort: String(listenPort).trim(),
+        socksPort: String(socksPort).trim()
+    });
+}
+
+async function warpPower(enable) {
+    if (!confirm(enable ? 'Включить Xray и подключить WARP?' : 'Остановить Xray и отключить WARP? Правила AdGuard останутся, но перестанут работать.')) return;
+    try {
+        const res = await fetch('/api/warp/power', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enable: !!enable })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return alert(data.error || 'Ошибка переключения WARP');
+        loadWarpStatus();
+    } catch (e) { alert('Сетевая ошибка: ' + e.message); }
+}
+
+async function warpTest() {
+    const el = document.getElementById('warpTestResult');
+    if (el) { el.style.color = 'var(--text-muted)'; el.innerText = 'Проверка WARP через SOCKS5...'; }
+    try {
+        const res = await fetch('/api/warp/test', { method: 'POST' });
+        const d = await res.json().catch(() => ({}));
+        if (!el) return;
+        if (d.ok) {
+            el.style.color = 'var(--rx-color)';
+            el.innerText = `WARP работает: IP ${d.ip || '-'}, ${d.org || '-'}, ${d.country || '-'}${d.city ? ', ' + d.city : ''}`;
+        } else {
+            el.style.color = 'var(--danger)';
+            el.innerText = 'WARP не ответил: ' + (d.error || 'неизвестная ошибка');
+        }
+    } catch (e) {
+        if (el) { el.style.color = 'var(--danger)'; el.innerText = 'Сетевая ошибка: ' + e.message; }
+    }
+}
+
+async function syncWarpAdGuard() {
+    const val = id => (document.getElementById(id) || {}).value || '';
+    const url = val('warpAgUrl') || val('agUrl');
+    const user = val('warpAgUser') || val('agUser');
+    const pass = val('warpAgPass') || val('agPass');
+    let rewriteIp = val('warpRewriteIp').trim();
+    if (!rewriteIp || rewriteIp === '0.0.0.0') rewriteIp = val('warpListenIp').trim();
+    if (!rewriteIp || rewriteIp === '0.0.0.0') return alert('Укажите IP туннеля для dnsrewrite (например, 10.8.1.1)');
+    if (!url) return alert('Укажите URL API AdGuard Home');
+    const count = (window.warpStatus && window.warpStatus.domains) || 0;
+    if (window.warpStatus) {
+        if (window.warpStatus.installed && !window.warpStatus.connected) {
+            if (!confirm('WARP на этом сервере не подключён. Если записать правила, эти домены могут перестать открываться. Продолжить?')) return;
+        } else if (!window.warpStatus.installed) {
+            if (!confirm('WARP на этом сервере не установлен. Если он уже работает на EU-выходе, правила можно записать на IP его туннеля. Продолжить?')) return;
+        }
+    }
+    if (!confirm(`Записать ${count} правил dnsrewrite в AdGuard?\n\nСтарый блок SERVEPANEL WARP будет заменён, остальные пользовательские правила сохранятся.`)) return;
+
+    const el = document.getElementById('warpAgResult');
+    if (el) { el.style.color = 'var(--text-muted)'; el.innerText = 'Запись правил в AdGuard...'; }
+    try {
+        const res = await fetch('/api/warp/adguard', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, user, pass, rewriteIp })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            if (el) { el.style.color = 'var(--danger)'; el.innerText = d.error || 'Ошибка AdGuard'; }
+            return;
+        }
+        if (el) {
+            el.style.color = 'var(--rx-color)';
+            el.innerText = `Готово: ${d.count} доменов -> ${d.rewriteIp}. Всего правил в AdGuard: ${d.totalRules}.`;
+        }
+        loadWarpStatus();
+    } catch (e) {
+        if (el) { el.style.color = 'var(--danger)'; el.innerText = 'Сетевая ошибка: ' + e.message; }
+    }
 }
 
 function applyRoleUI() {
@@ -3633,6 +3803,22 @@ async function updPoll() {
     }
 }
 
+function updIsNetworkError(e) {
+    const msg = String(e && e.message || '');
+    return (e && e.name === 'TypeError') ||
+        /Failed to fetch|NetworkError|Load failed|fetch failed/i.test(msg);
+}
+
+// POST может оборваться, если панель уже остановилась на pm2 stop.
+// Это не повод показывать фатальную ошибку: worker мог продолжить
+// работу, поэтому начинаем polling и ждём возвращения панели.
+function updHandleStartError(e) {
+    if (!updIsNetworkError(e)) return false;
+    updSetStatus('Панель перезапускается, ожидаю ответа…', 'running');
+    updStartPolling();
+    return true;
+}
+
 function updUpload() {
     const input = document.getElementById('updFile');
     const f = input && input.files && input.files[0];
@@ -3657,6 +3843,7 @@ function updUpload() {
             updSetStatus('Релиз принят, начинаю проверку и установку…', 'running');
             updStartPolling();
         } catch (e) {
+            if (updHandleStartError(e)) return;
             updSetStatus('Ошибка: ' + e.message, 'err');
             updSetBusy(false);
             toast('Не удалось запустить обновление', 'error', e.message);
@@ -3679,6 +3866,7 @@ async function updFromUrl() {
         updSetStatus('Релиз скачан, начинаю установку…', 'running');
         updStartPolling();
     } catch (e) {
+        if (updHandleStartError(e)) return;
         updSetStatus('Ошибка: ' + e.message, 'err');
         updSetBusy(false);
         toast('Не удалось скачать релиз', 'error', e.message);
@@ -3717,6 +3905,7 @@ async function updGitRun() {
         await updPost('/api/update/git', {});
         updStartPolling();
     } catch (e) {
+        if (updHandleStartError(e)) return;
         updSetStatus('Ошибка: ' + e.message, 'err');
         updSetBusy(false);
         toast('GitHub-обновление не запущено', 'error', e.message);
@@ -3733,6 +3922,7 @@ async function updRollback(backup) {
         await updPost('/api/update/rollback', { backup });
         updStartPolling();
     } catch (e) {
+        if (updHandleStartError(e)) return;
         updSetStatus('Ошибка: ' + e.message, 'err');
         updSetBusy(false);
         toast('Откат не запущен', 'error', e.message);

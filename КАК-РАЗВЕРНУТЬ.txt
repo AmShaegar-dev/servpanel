@@ -1,28 +1,28 @@
-SERVEPANEL 2.4.1 — БЫСТРЫЙ ПЕРЕХОД С 1.0.0
+SERVEPANEL 2.4.2 — БЫСТРЫЙ ПЕРЕХОД С 1.0.0
 ================================================
 
 ВАЖНО: в старой панели 1.0.0 НЕ НАЖИМАЙТЕ «Обновить с GitHub».
 Она делает git reset --hard и может стереть новую версию.
 Первый переход выполняется один раз по SSH скриптом upgrade.sh.
 
-Архив:  servpanel-2.4.1.tar.gz
-SHA256: см. файл servpanel-2.4.1.tar.gz.sha256
+Архив:  servpanel-2.4.2.tar.gz
+SHA256: см. файл servpanel-2.4.2.tar.gz.sha256
 
 1. Скопировать архив на сервер (PowerShell на Windows):
 
-   scp C:\Users\Adm\Desktop\servpanel-fixed\servpanel-2.4.1.tar.gz root@IP:/root/
+   scp C:\Users\Adm\Desktop\servpanel-fixed\servpanel-2.4.2.tar.gz root@IP:/root/
 
 2. Зайти по SSH и проверить архив:
 
    ssh root@IP
    cd /root
-   sha256sum servpanel-2.4.1.tar.gz
+   sha256sum servpanel-2.4.2.tar.gz
    # должно совпасть с SHA256 выше
 
 3. Распаковать и запустить:
 
-   tar -xzf /root/servpanel-2.4.1.tar.gz -C /root
-   bash /root/servpanel-2.4.1/upgrade.sh
+   tar -xzf /root/servpanel-2.4.2.tar.gz -C /root
+   bash /root/servpanel-2.4.2/upgrade.sh
 
    Скрипт сам:
    - проверит новую версию на копии данных и отдельном порту;
@@ -36,9 +36,17 @@ SHA256: см. файл servpanel-2.4.1.tar.gz.sha256
    Проверить: клиенты, каскад, диагностику и вкладку «Обновление».
    Пароль лежит в /root/servpanel/admin_pass.txt.
 
+   WARP для AdGuard — ОПЦИОНАЛЬНО. Он не ставится автоматически.
+   Если нужен: «Службы и DNS» → «Cloudflare WARP для AdGuard» →
+   указать IP туннеля (обычно 10.8.1.1) и нажать «Установить WARP + Xray».
+   Затем заполнить URL/логин/пароль AdGuard и нажать «Записать правила».
+   Если WARP блокируется в РФ, ставьте его на EU-выходе и указывайте
+   его туннельный IP. Правила AdGuard можно записать из панели RU-входа:
+   WARP на RU при этом не нужен.
+
 Откат вручную:
 
-   bash /root/servpanel-2.4.1/upgrade.sh --rollback \
+   bash /root/servpanel-2.4.2/upgrade.sh --rollback \
      /root/backups/servpanel-pre-update-YYYYMMDD-HHMMSS.tar.gz
 
 Журнал:
