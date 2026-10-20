@@ -2,7 +2,7 @@
 #
 # CLI-обновление Servpanel из архива.
 #
-#   sudo bash update.sh /root/servpanel-2.4.0.tar.gz
+#   sudo bash update.sh /root/servpanel-2.4.1.tar.gz
 #
 # Это безопасная обёртка: она распаковывает релиз во временный каталог и
 # запускает его upgrade.sh (проверка на копии данных, бэкап, откат при ошибке).

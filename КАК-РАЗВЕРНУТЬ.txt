@@ -1,0 +1,54 @@
+SERVEPANEL 2.4.1 — БЫСТРЫЙ ПЕРЕХОД С 1.0.0
+================================================
+
+ВАЖНО: в старой панели 1.0.0 НЕ НАЖИМАЙТЕ «Обновить с GitHub».
+Она делает git reset --hard и может стереть новую версию.
+Первый переход выполняется один раз по SSH скриптом upgrade.sh.
+
+Архив:  servpanel-2.4.1.tar.gz
+SHA256: см. файл servpanel-2.4.1.tar.gz.sha256
+
+1. Скопировать архив на сервер (PowerShell на Windows):
+
+   scp C:\Users\Adm\Desktop\servpanel-fixed\servpanel-2.4.1.tar.gz root@IP:/root/
+
+2. Зайти по SSH и проверить архив:
+
+   ssh root@IP
+   cd /root
+   sha256sum servpanel-2.4.1.tar.gz
+   # должно совпасть с SHA256 выше
+
+3. Распаковать и запустить:
+
+   tar -xzf /root/servpanel-2.4.1.tar.gz -C /root
+   bash /root/servpanel-2.4.1/upgrade.sh
+
+   Скрипт сам:
+   - проверит новую версию на копии данных и отдельном порту;
+   - сделает бэкап панели и снимок конфигов;
+   - заменит только код, не трогая данные, .git, AWG, каскад, nginx,
+     fail2ban и AdGuard;
+   - перезапустит pm2 и проверит HTTP;
+   - откатится автоматически при ошибке.
+
+4. Открыть панель, войти как admin с прежним паролем.
+   Проверить: клиенты, каскад, диагностику и вкладку «Обновление».
+   Пароль лежит в /root/servpanel/admin_pass.txt.
+
+Откат вручную:
+
+   bash /root/servpanel-2.4.1/upgrade.sh --rollback \
+     /root/backups/servpanel-pre-update-YYYYMMDD-HHMMSS.tar.gz
+
+Журнал:
+
+   tail -n 100 /var/log/servpanel_update.log
+
+Дальше обновления можно ставить из панели:
+«Обновление» → файл servpanel-*.tar.gz (или URL/GitHub).
+После первого перехода GitHub-режим может отказаться работать, если файлы
+панели отличаются от origin/main — это нормально, используйте файл.
+
+Подробная инструкция: ОБНОВЛЕНИЕ-2.4.md
+Демо: DEMO.md (SERVPANEL_DEMO=1 node server.js, логин admin/demo).

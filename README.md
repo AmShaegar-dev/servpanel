@@ -349,10 +349,10 @@ pm2 save && pm2 startup
 «Обновить с GitHub» **не нажимайте**. Первый переход выполняется один раз:
 
 ```bash
-scp servpanel-2.4.0.tar.gz root@<IP>:/root/
+scp servpanel-2.4.1.tar.gz root@<IP>:/root/
 ssh root@<IP>
-cd /root && tar -xzf servpanel-2.4.0.tar.gz
-bash /root/servpanel-2.4.0/upgrade.sh
+cd /root && tar -xzf servpanel-2.4.1.tar.gz
+bash /root/servpanel-2.4.1/upgrade.sh
 ```
 
 Скрипт проверит новую версию на копии данных и отдельном порту, сделает

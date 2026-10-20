@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 #
-# Servpanel 2.4.0 — безопасное обновление существующей панели.
+# Servpanel 2.4.1 — безопасное обновление существующей панели.
 #
 # Что делает:
 #   1. проверяет релиз и запускает его на КОПИИ данных и отдельном порту;
 #   2. останавливает панель и делает два бэкапа: панель целиком и системные
 #      конфиги каскада (только для ручного восстановления);
 #   3. заменяет файлы кода, НЕ трогая данные, .git, конфиги AWG, iptables,
-#      ipset, systemd, nginx, fail2ban и AdGuard;
+#      ipset, systemd, fail2ban и AdGuard; у сайта панели в Nginx исправляет
+#      только Host на $http_host (иначе нестандартный порт ломает CSRF-проверку);
 #   4. запускает pm2 и проверяет HTTP;
 #   5. при ошибке автоматически откатывается из бэкапа.
 #
@@ -65,6 +66,43 @@ PM2="$(command -v pm2 2>/dev/null || true)"
 PORT="$(cat "$APP_DIR/.panel_port" 2>/dev/null | tr -dc '0-9' || true)"
 [ -n "$PORT" ] || PORT="${PANEL_PORT:-3000}"
 case "$PORT" in ''|*[!0-9]*) die "некорректный порт панели: $PORT" ;; esac
+NGINX_PANEL_CONF="${NGINX_PANEL_CONF:-/etc/nginx/sites-available/awg-admin}"
+
+# ---------------------------------------------------------------------------
+# Nginx: панель за прокси на нестандартном порту.
+# $host в Nginx не содержит порт, а браузер присылает Origin с :4444.
+# Панель отклоняет такой POST как CSRF. Меняем только одну строку в сайте
+# панели, с бэкапом и проверкой nginx -t; остальные сайты не трогаем.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016  # $host/$http_host должны остаться для Nginx
+fix_panel_nginx_host() {
+    local conf="$NGINX_PANEL_CONF"
+    local backup="$BACKUP_DIR/nginx-awg-admin-$STAMP.conf"
+    [ -f "$conf" ] || return 0
+    grep -Fq "proxy_pass http://127.0.0.1:${PORT};" "$conf" 2>/dev/null || return 0
+    grep -Fq 'proxy_set_header Host $host;' "$conf" 2>/dev/null || return 0
+    command -v nginx >/dev/null 2>&1 || return 0
+
+    cp -a "$conf" "$backup" || {
+        log "Nginx: не удалось сделать бэкап $conf; строку Host не меняю."
+        return 1
+    }
+    sed -i -E 's#^([[:space:]]*)proxy_set_header[[:space:]]+Host[[:space:]]+\$host;[[:space:]]*$#\1proxy_set_header Host $http_host;#' "$conf"
+
+    if ! nginx -t >>"$LOG" 2>&1; then
+        cp -a "$backup" "$conf" 2>/dev/null || true
+        log "Nginx: nginx -t не прошёл; конфиг восстановлен из $backup."
+        return 1
+    fi
+    if ! systemctl reload nginx >>"$LOG" 2>&1; then
+        cp -a "$backup" "$conf" 2>/dev/null || true
+        systemctl reload nginx >>"$LOG" 2>&1 || true
+        log "Nginx: reload не удался; конфиг восстановлен из $backup."
+        return 1
+    fi
+    log "Nginx: Host для сайта панели теперь \$http_host (порт сохраняется). Бэкап: $backup"
+    return 0
+}
 
 health_generic() {
     for _ in $(seq 1 30); do
@@ -226,7 +264,8 @@ CONFIG_BACKUP="$BACKUP_DIR/system-config-$STAMP.tar.gz"
         root/awg \
         etc/systemd/system/awg-routing.service \
         etc/systemd/system/awg-routing.timer \
-        etc/nginx/sites-enabled 2>/dev/null
+        etc/nginx/sites-enabled \
+        etc/nginx/sites-available/awg-admin 2>/dev/null
 } || true
 if [ -s "$CONFIG_BACKUP" ]; then
     log "Снимок конфигов: $CONFIG_BACKUP"
@@ -294,6 +333,17 @@ if ! apply_files; then
     log "Ошибка при замене файлов — возвращаю старую версию"
     restore_backup
     die "обновление отменено: не удалось заменить файлы"
+fi
+
+# ---------------------------------------------------------------------------
+# Nginx: исправляем Host только у сайта панели (нестандартный порт).
+# ---------------------------------------------------------------------------
+log "Проверяю Host в Nginx для сайта панели…"
+if fix_panel_nginx_host; then
+    :
+else
+    log "Nginx не изменён. Если панель на порту не 443 и вход даёт «чужой Origin»,"
+    log "замените в $NGINX_PANEL_CONF строку Host \$host на Host \$http_host."
 fi
 
 # ---------------------------------------------------------------------------
