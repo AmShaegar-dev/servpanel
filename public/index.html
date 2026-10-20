@@ -3,181 +3,286 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FileManager 4.0</title>
+    <meta name="theme-color" content="#070b12">
+    <meta name="panel-version" content="2.4.0">
+    <title>Servpanel — AmneziaWG Control</title>
+    <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        :root {
-            --bg-main: #0d1117; --bg-panel: #161b22; --border: #30363d;
-            --text-main: #c9d1d9; --text-muted: #8b949e;
-            --rx-color: #2ea043; --tx-color: #58a6ff; --sys-color: #d29922; 
-            --accent: #2f81f7;
-        }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg-main); margin: 0; color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
-        
-        .login-wrapper { display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; position: absolute; z-index: 1000; background: var(--bg-main); }
-        .login-card { background: var(--bg-panel); padding: 40px; border-radius: 8px; border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,0.5); width: 100%; max-width: 320px; text-align: center; box-sizing: border-box;}
-        .login-card h2 { margin-top: 0; color: #fff; margin-bottom: 25px; }
-        .error-msg { color: #f85149; font-size: 14px; margin-top: 10px; display: none; }
-
-        #loaderOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(13, 17, 23, 0.9); z-index: 9999; justify-content: center; align-items: center; flex-direction: column; }
-        .spinner { width: 50px; height: 50px; border: 5px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;}
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        .sidebar { width: 250px; background: var(--bg-panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; transition: 0.3s; z-index: 100; }
-        .sidebar-header { padding: 20px; font-size: 18px; font-weight: bold; color: #fff; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;}
-        .menu { list-style: none; padding: 10px 0; margin: 0; flex: 1; overflow-y: auto; }
-        .menu li { padding: 12px 20px; cursor: pointer; color: var(--text-muted); transition: 0.2s; border-left: 3px solid transparent; display: flex; align-items: center; gap: 10px;}
-        .menu li:hover { background: rgba(255,255,255,0.05); color: #fff; }
-        .menu li.active { background: rgba(47, 129, 247, 0.1); color: var(--accent); border-left-color: var(--accent); }
-        .menu-icon { font-size: 16px; width: 20px; text-align: center; }
-
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-main); }
-        .topbar { background: var(--bg-panel); padding: 15px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;}
-        .mobile-toggle { display: none; background: none; border: none; color: #fff; font-size: 24px; cursor: pointer; }
-        .topbar-actions { display: flex; gap: 5px; flex-wrap: wrap; }
-        .topbar-actions button { font-size: 13px; padding: 6px 10px; }
-        
-        .content-area { flex: 1; overflow-y: auto; padding: 20px; box-sizing: border-box; }
-        .tab-pane { display: none; animation: fadeIn 0.3s; }
-        .tab-pane.active { display: block; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-
-        .stats-cards { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
-        .card { flex: 1; background: var(--bg-panel); padding: 20px; border-radius: 8px; border: 1px solid var(--border); min-width: 220px; box-sizing: border-box;}
-        .card h3 { margin: 0 0 10px 0; color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .card .value { font-size: 18px; font-weight: bold; font-family: monospace; }
-        
-        input, select { background: var(--bg-main); color: #fff; padding: 9px 12px; border: 1px solid var(--border); border-radius: 6px; outline: none; }
-        input:focus, select:focus { border-color: var(--accent); }
-        button { padding: 9px 15px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; color: #fff; transition: 0.2s; white-space: nowrap; }
-        button:hover { filter: brightness(1.2); }
-        .btn-primary { background: var(--accent); }
-        .btn-success { background: var(--rx-color); }
-        .btn-danger { background: #f85149; }
-        .btn-dark { background: #21262d; border: 1px solid var(--border); }
-        
-        .table-wrapper { width: 100%; overflow-x: auto; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 20px; background: var(--bg-panel); }
-        table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 1000px; }
-        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
-        th { background: #0d1117; font-weight: 600; color: var(--text-muted); font-size: 13px; text-transform: uppercase; user-select: none; }
-        th.sortable:hover { color: #fff; }
-        .sort-arrow { font-size: 10px; margin-left: 5px; color: var(--accent); }
-
-        .status-active { color: var(--rx-color); font-weight: bold; }
-        .status-recent { color: var(--sys-color); font-weight: bold; }
-        .status-inactive { color: #f85149; }
-        .val-rx { color: var(--rx-color); } .val-tx { color: var(--tx-color); } .val-sys { color: var(--sys-color); }
-        .speed-cell { font-family: monospace; font-size: 13px; background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 4px; display: inline-block; width: 100%; text-align: center;}
-        .sub-text { font-size: 11px; color: var(--text-muted); display: block; margin-top: 3px; }
-
-        .controls-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
-
-        @media (max-width: 768px) {
-            .sidebar { position: fixed; left: -250px; height: 100%; box-shadow: 5px 0 15px rgba(0,0,0,0.5); }
-            .sidebar.open { left: 0; }
-            .mobile-toggle { display: block; }
-            .stats-cards { flex-direction: column; }
-            .controls-row { flex-direction: column; align-items: stretch; }
-            .controls-row > * { width: 100%; }
-            .topbar-actions { width: 100%; justify-content: space-between; margin-top: 10px;}
-        }
-    </style>
 </head>
 <body>
-    
-    <div id="loaderOverlay">
+    <div id="loaderOverlay" class="loader-overlay">
         <div class="spinner"></div>
-        <h3 style="color: #fff; margin:0;" id="loaderText">Восстановление системы...</h3>
-        <p style="color: var(--text-muted); font-size: 14px;">Пожалуйста, не закрывайте вкладку.</p>
+        <h3 id="loaderText">Восстановление системы...</h3>
+        <p>Пожалуйста, не закрывайте вкладку.</p>
     </div>
 
-    <div id="loginScreen" class="login-wrapper">
+    <div id="toastHost" class="toast-host"></div>
+
+    <!-- LOGIN -->
+    <div id="loginScreen" class="login-screen">
+        <div class="login-orb login-orb-a"></div>
+        <div class="login-orb login-orb-b"></div>
         <div class="login-card">
-            <h2>FileManager 4.0</h2>
-            <input type="password" id="authPassword" placeholder="Пароль доступа" style="width:100%; margin-bottom:15px;" onkeypress="if(event.key === 'Enter') login()">
-            <button class="btn-primary" style="width:100%;" onclick="login()">Войти</button>
+            <div class="brand brand-lg">
+                <span class="brand-mark">SP</span>
+                <span class="brand-text"><strong>Servpanel</strong><small>AmneziaWG control</small></span>
+            </div>
+            <div class="login-copy">
+                <h1>Вход в панель</h1>
+                <p>VPN, каскад, обфускация и защита — в одном окне.</p>
+            </div>
+            <label class="field">
+                <span>Логин</span>
+                <input type="text" id="authUsername" placeholder="admin" autocomplete="username"
+                       onkeypress="if(event.key === 'Enter') document.getElementById('authPassword').focus()">
+            </label>
+            <label class="field">
+                <span>Пароль</span>
+                <input type="password" id="authPassword" placeholder="Пароль доступа" autocomplete="current-password"
+                       onkeypress="if(event.key === 'Enter') login()">
+            </label>
+            <label class="field" id="authCodeField" style="display:none">
+                <span>Код двухфакторной аутентификации</span>
+                <input type="text" id="authCode" placeholder="000000" inputmode="numeric" autocomplete="one-time-code"
+                       onkeypress="if(event.key === 'Enter') login()">
+            </label>
+            <button class="btn btn-primary btn-lg" style="width:100%;" onclick="login()">Войти</button>
             <div id="loginError" class="error-msg">Неверный пароль</div>
+            <div class="login-foot">
+                <span>Безопасное соединение</span>
+                <button class="link-btn" onclick="toggleLang()" id="loginLangBtn">🌐 English</button>
+            </div>
         </div>
     </div>
 
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <span>FM 4.0</span>
-            <button class="mobile-toggle" onclick="toggleMenu()" style="font-size: 16px;">✕</button>
-        </div>
-        <ul class="menu">
-            <li class="active" onclick="switchTab('tab-dashboard', this)"><span class="menu-icon">📊</span> Дашборд</li>
-            <li onclick="switchTab('tab-clients', this)"><span class="menu-icon">👥</span> Клиенты VPN</li>
-            <li onclick="switchTab('tab-network', this)"><span class="menu-icon">🌐</span> Сеть и Фаервол</li>
-            <li onclick="switchTab('tab-services', this)"><span class="menu-icon">⚙️</span> Службы & DNS</li>
-            <li onclick="switchTab('tab-security', this)"><span class="menu-icon">🛡️</span> Защита и Cron</li>
-            <li onclick="switchTab('tab-diag', this)"><span class="menu-icon">📡</span> Диагностика</li>
-            <li onclick="switchTab('tab-install', this)"><span class="menu-icon">📥</span> Установка Модулей</li>
-        </ul>
-    </aside>
-
-    <main class="main-content" id="dashboardScreen" style="display: none;">
-        <header class="topbar">
-            <div style="display: flex; align-items: center; gap: 15px;">
-                <button class="mobile-toggle" onclick="toggleMenu()">☰</button>
-                <h3 id="currentTabTitle" style="margin: 0;">Дашборд</h3>
+    <!-- APP -->
+    <div id="dashboardScreen" class="app-shell" style="display:none;">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-head">
+                <div class="brand">
+                    <span class="brand-mark">SP</span>
+                    <span class="brand-text"><strong>Servpanel</strong><small>AmneziaWG</small></span>
+                </div>
+                <button class="icon-btn mobile-only" onclick="toggleMenu()" title="Закрыть меню">✕</button>
             </div>
-            <div class="topbar-actions">
-                <button class="btn-dark" onclick="updatePanel()" style="color: var(--rx-color);">🔄 Обновить с GitHub</button>
-                <button class="btn-dark" onclick="window.location.href='/api/backup'" title="Скачать">💾 Скачать бэкап</button>
-                <button class="btn-dark" onclick="document.getElementById('backupUpload').click()" title="Восстановить" style="color: var(--sys-color);">📥 Загрузить архив</button>
-                <input type="file" id="backupUpload" accept=".tar.gz" style="display:none" onchange="restoreBackup(event)">
-                <button class="btn-dark" onclick="changePassword()" style="color: #58a6ff;">🔑 Сменить пароль</button>
-                <button class="btn-dark" onclick="logout()" style="color: #f85149;">✕ Выход</button>
-            </div>
-        </header>
 
-        <div class="content-area">
-            
-            <!-- ДАШБОРД -->
-            <div id="tab-dashboard" class="tab-pane active">
-                <div class="stats-cards">
-                    <div class="card">
-                        <h3>Общий Трафик</h3>
-                        <div class="value" id="globalTraffic"><span class="val-rx">0 B</span> / <span class="val-tx">0 B</span></div>
+            <nav class="nav">
+                <div class="nav-group">
+                    <div class="nav-label">Обзор</div>
+                    <button class="nav-item active" data-tab="tab-dashboard" data-title="Дашборд" onclick="switchTab('tab-dashboard', this)">
+                        <span class="nav-ico">◉</span><span>Дашборд</span>
+                    </button>
+                    <button class="nav-item" data-tab="tab-clients" data-title="Клиенты VPN" onclick="switchTab('tab-clients', this)" id="navClients">
+                        <span class="nav-ico">◍</span><span>Клиенты</span><span class="nav-badge" id="navClientsBadge">0</span>
+                    </button>
+                </div>
+                <div class="nav-group">
+                    <div class="nav-label">Подключение</div>
+                    <button class="nav-item" data-tab="tab-network" data-title="Сеть и фаервол" onclick="switchTab('tab-network', this)" id="navNetwork">
+                        <span class="nav-ico">⌁</span><span>Сеть и порты</span>
+                    </button>
+                    <button class="nav-item" data-tab="tab-cascade" data-title="Каскад" onclick="switchTab('tab-cascade', this)" id="navCascade">
+                        <span class="nav-ico">⇄</span><span>Каскад RU → EU</span>
+                    </button>
+                    <button class="nav-item" data-tab="tab-obf" data-title="Обфускация" onclick="switchTab('tab-obf', this)" id="navObf">
+                        <span class="nav-ico">✦</span><span>Обфускация</span><span class="nav-dot" id="navObfDot"></span>
+                    </button>
+                </div>
+                <div class="nav-group">
+                    <div class="nav-label">Инфраструктура</div>
+                    <button class="nav-item" data-tab="tab-services" data-title="Службы и DNS" onclick="switchTab('tab-services', this)" id="navServices">
+                        <span class="nav-ico">◎</span><span>Службы и DNS</span>
+                    </button>
+                    <button class="nav-item" data-tab="tab-install" data-title="Установка" onclick="switchTab('tab-install', this)" id="navInstall">
+                        <span class="nav-ico">↓</span><span>Установка</span>
+                    </button>
+                </div>
+                <div class="nav-group">
+                    <div class="nav-label">Безопасность</div>
+                    <button class="nav-item" data-tab="tab-security" data-title="Защита" onclick="switchTab('tab-security', this)" id="navSecurity">
+                        <span class="nav-ico">◈</span><span>Защита и GeoIP</span>
+                    </button>
+                    <button class="nav-item" data-tab="tab-diag" data-title="Диагностика" onclick="switchTab('tab-diag', this)" id="navDiag">
+                        <span class="nav-ico">⌁</span><span>Диагностика</span>
+                    </button>
+                    <button class="nav-item" data-tab="tab-update" data-title="Обновление" onclick="switchTab('tab-update', this)" id="navUpdate">
+                        <span class="nav-ico">⇧</span><span>Обновление</span>
+                    </button>
+                    <button class="nav-item" data-tab="tab-admin" data-title="Администрирование" onclick="switchTab('tab-admin', this)" id="navAdmin">
+                        <span class="nav-ico">⚿</span><span>Администрирование</span>
+                    </button>
+                </div>
+            </nav>
+
+            <div class="sidebar-foot">
+                <div class="user-chip">
+                    <span class="avatar" id="userAvatar">A</span>
+                    <span class="user-meta"><strong id="whoami">admin</strong><small id="userRole">администратор</small></span>
+                </div>
+                <button class="nav-item nav-item-quiet" onclick="changePassword()"><span class="nav-ico">⚿</span><span>Сменить пароль</span></button>
+                <button class="nav-item nav-item-quiet" onclick="logout()"><span class="nav-ico">⏻</span><span>Выйти</span></button>
+            </div>
+        </aside>
+
+        <div class="main">
+            <header class="topbar">
+                <div class="topbar-left">
+                    <button class="icon-btn mobile-only" onclick="toggleMenu()" title="Меню">☰</button>
+                    <div>
+                        <div class="crumb">Servpanel <span>/</span> <span id="currentTabTitle">Дашборд</span></div>
+                        <h2 class="topbar-title" id="pageTitle">Обзор</h2>
                     </div>
-                    <div class="card">
-                        <h3>Общая Скорость</h3>
-                        <div class="value" id="globalSpeed"><span class="val-rx">0 B/s</span> / <span class="val-tx">0 B/s</span></div>
-                    </div>
-                    <div class="card">
-                        <h3>Сервер (CPU / RAM)</h3>
-                        <div class="value">
-                            <span id="sysCpu" class="val-sys">0%</span> / <span id="sysRam" class="val-sys">0%</span>
-                            <span class="sub-text">UPTIME: <span id="sysUptime">0д 0ч 0м</span></span>
+                </div>
+                <div class="topbar-right">
+                    <button class="search-trigger" onclick="openPalette()" title="Поиск и действия">
+                        <span>⌕</span><span class="search-label">Поиск и действия</span><kbd>Ctrl K</kbd>
+                    </button>
+                    <button class="icon-btn" id="expertToggle" onclick="toggleExpert()" title="Показать расширенные настройки">⚙</button>
+                    <button class="btn btn-primary" onclick="openWizard()"><span>✦</span> Мастер</button>
+                    <button class="icon-btn" id="langBtn" onclick="toggleLang()" title="Language / Язык">EN</button>
+                    <button class="icon-btn" onclick="logout()" title="Выход">⏻</button>
+                    <input type="file" id="backupUpload" accept=".tar.gz" style="display:none" onchange="restoreBackup(event)">
+                </div>
+            </header>
+
+            <div class="content-area">
+                <div id="secWarn" class="alert alert-danger" style="display:none;">
+                    <strong>⚠ Небезопасно:</strong> панель использует пароль по умолчанию. Смените его кнопкой «Сменить пароль», иначе любой, кто знает адрес панели, получит полный доступ к серверу.
+                </div>
+
+                <!-- DASHBOARD -->
+                <div id="tab-dashboard" class="tab-pane active">
+                    <section class="hero">
+                        <div class="hero-copy">
+                            <div class="eyebrow"><span class="status-dot" id="heroDot"></span><span id="heroEyebrow">СОСТОЯНИЕ СЕРВЕРА</span></div>
+                            <h1 id="heroTitle">Проверяем сервер…</h1>
+                            <p id="heroSub">Собираем данные о VPN, каскаде, AdGuard и защите от DPI.</p>
+                            <div class="hero-pills">
+                                <span class="pill" id="heroIp">IP: —</span>
+                                <span class="pill" id="heroCountry">Страна: —</span>
+                                <span class="pill" id="heroUptime">Uptime: —</span>
+                                <span class="pill" id="heroClients">Клиентов: 0</span>
+                            </div>
+                            <div class="hero-actions">
+                                <button class="btn btn-primary" onclick="openWizard()"><span>✦</span> Что настроить?</button>
+                                <button class="btn btn-soft" onclick="openWizard('client')">＋ Добавить клиента</button>
+                                <button class="btn btn-ghost" onclick="runHealthCheck()">Проверить всё</button>
+                            </div>
+                            <div class="hero-traffic">
+                                <span>Трафик <b id="globalTraffic">—</b></span>
+                                <span>Скорость <b id="globalSpeed">—</b></span>
+                                <span>CPU <b id="sysCpu">—</b></span>
+                                <span>RAM <b id="sysRam">—</b></span>
+                            </div>
                         </div>
-                    </div>
-                    <div class="card">
-                        <h3>Диск (Занято / Свободно)</h3>
-                        <div class="value">
-                            <span id="diskUsed" class="val-tx">0 B</span> / <span id="diskFree" class="val-rx">0 B</span>
-                            <span class="sub-text">ВСЕГО: <span id="diskTotal">0 B</span></span>
+                        <div class="hero-side">
+                            <div class="score-ring" id="heroObfRing" style="--score:0">
+                                <div><strong id="heroObfScore">—</strong><small>из 100</small></div>
+                            </div>
+                            <div class="score-caption">
+                                <strong>Защита от DPI</strong>
+                                <span id="heroObfLabel">проверяем…</span>
+                                <button class="link-btn" onclick="switchTab('tab-obf', document.getElementById('navObf'))">Подробнее →</button>
+                            </div>
+                            <div class="hero-kpis">
+                                <span><b id="heroOnline">0</b> онлайн</span>
+                                <span><b id="heroTotal">0</b> всего</span>
+                            </div>
                         </div>
-                    </div>
-                </div>
-                <div class="card" style="margin-bottom: 20px;">
-                    <div class="controls-row" style="justify-content: space-between; margin-bottom: 0;">
-                        <h3 style="margin:0;">Мониторинг трафика (История 1ч)</h3>
-                        <select id="chartSelector" onchange="switchChart()"><option value="global">Общий трафик</option></select>
-                    </div>
-                    <div style="height: 300px; width: 100%; margin-top: 15px;"><canvas id="trafficChart"></canvas></div>
-                </div>
-                <div style="background: #2a2d34; padding: 15px; border-radius: 8px; margin-top: 20px; border: 1px solid #444;">
-                    <h3 style="margin-top: 0;">Транзитный туннель (RU ➔ EU)</h3>
-                    <p>Статус: <span id="cascadeStatusDash" style="font-weight: bold; color: gray;">Проверка...</span></p>
-                    <button onclick="editCascadeConfig()" class="btn-primary" style="margin-top: 10px;">⚙️ Настроить awg-eu.conf</button>
-                </div>
-            </div>
+                    </section>
 
-            <!-- КЛИЕНТЫ -->
+                    <div class="grid health-grid">
+                        <article class="health-card" id="healthVpn"></article>
+                        <article class="health-card" id="healthCascade"></article>
+                        <article class="health-card" id="healthAdguard"></article>
+                        <article class="health-card" id="healthObf"></article>
+                        <article class="health-card" id="healthBackup"></article>
+                        <article class="health-card" id="healthSecurity"></article>
+                    </div>
+
+                    <div class="grid main-grid">
+                        <section class="card chart-card">
+                            <header class="card-head">
+                                <div>
+                                    <h3>Мониторинг трафика</h3>
+                                    <p>История за последний час</p>
+                                </div>
+                                <select id="chartSelector" class="select-compact" onchange="switchChart()">
+                                    <option value="global">Общий трафик</option>
+                                </select>
+                            </header>
+                            <div class="chart-wrap"><canvas id="trafficChart"></canvas></div>
+                        </section>
+                        <section class="card rec-card">
+                            <header class="card-head">
+                                <div>
+                                    <h3>Что улучшить</h3>
+                                    <p>Панель подскажет следующий шаг</p>
+                                </div>
+                                <span class="badge badge-muted" id="recCount">0</span>
+                            </header>
+                            <div id="recommendations" class="rec-list">
+                                <div class="skeleton-line"></div>
+                                <div class="skeleton-line short"></div>
+                            </div>
+                        </section>
+                    </div>
+
+                    <section class="card">
+                        <header class="card-head">
+                            <div>
+                                <h3>Клиенты</h3>
+                                <p>Быстрый обзор подключённых устройств</p>
+                            </div>
+                            <button class="btn btn-ghost btn-sm" onclick="switchTab('tab-clients', document.getElementById('navClients'))">Все клиенты →</button>
+                        </header>
+                        <div id="quickClients" class="quick-clients">
+                            <div class="empty-state">Загрузка клиентов…</div>
+                        </div>
+                    </section>
+
+                    <section class="card">
+                        <header class="card-head">
+                            <div>
+                                <h3>Быстрые действия</h3>
+                                <p>Один клик — панель сделает остальное</p>
+                            </div>
+                        </header>
+                        <div class="quick-grid">
+                            <button class="quick-action" onclick="openWizard('client')"><span class="qa-ico">＋</span><strong>Новый клиент</strong><small>Ключ и QR сразу</small></button>
+                            <button class="quick-action" onclick="openWizard('obf')"><span class="qa-ico">✦</span><strong>Усилить обфускацию</strong><small>Готовый профиль</small></button>
+                            <button class="quick-action" onclick="openWizard('cascade')"><span class="qa-ico">⇄</span><strong>Настроить каскад</strong><small>RU → EU за шаги</small></button>
+                            <button class="quick-action" onclick="openWizard('adguard')"><span class="qa-ico">◎</span><strong>Подключить AdGuard</strong><small>Автопоиск адреса</small></button>
+                            <button class="quick-action" data-admin-only onclick="openWizard('backup')"><span class="qa-ico">↓</span><strong>Сделать бэкап</strong><small>Мастер</small></button>
+                            <button class="quick-action" onclick="runHealthCheck()"><span class="qa-ico">⌁</span><strong>Проверить всё</strong><small>Диагностика</small></button>
+                        </div>
+                    </section>
+                    <span id="cascadeStatusDash" style="display:none"></span>
+                    <span id="diskUsed" style="display:none"></span>
+                    <span id="diskFree" style="display:none"></span>
+                    <span id="diskTotal" style="display:none"></span>
+                </div>
+
+                <!-- КЛИЕНТЫ -->
             <div id="tab-clients" class="tab-pane">
                 <div class="card" style="margin-bottom: 20px;">
-                    <h3 style="margin-bottom: 15px;">Создание клиентов (Одиночно / Массово)</h3>
+                    <div class="card-head">
+                        <div>
+                            <h3>Клиенты в один клик</h3>
+                            <p>Мастер сам выберет имя, IP и срок, а затем покажет QR и ссылку vpn://.</p>
+                        </div>
+                        <span class="badge badge-good">автоматически</span>
+                    </div>
+                    <div class="hero-actions" style="margin-top:0;">
+                        <button class="btn btn-primary" onclick="openWizard('client')">＋ Добавить клиента</button>
+                        <button class="btn btn-soft" onclick="openWizard('client')">Создать несколько</button>
+                        <button class="btn btn-ghost" onclick="openClientsRename()">Переименовать</button>
+                        <button class="btn btn-ghost" onclick="loadStats()">↻ Обновить</button>
+                    </div>
+                </div>
+
+                <div class="card advanced-only" style="margin-bottom: 20px;">
+                    <h3 style="margin-bottom: 15px;">Создание клиентов (ручной режим)</h3>
                     <div class="controls-row" style="margin-bottom:0;">
                         <input type="text" id="clientName" placeholder="Имя / Префикс (en)" style="width: 200px;">
                         <input type="number" id="clientCount" placeholder="Кол-во (шт)" style="width: 120px;" title="Если указано >1, скачается ZIP архив">
@@ -185,6 +290,19 @@
                             <option value="">Навсегда</option><option value="1d">1 день</option><option value="7d">7 дней</option><option value="30d">30 дней</option>
                         </select>
                         <button class="btn-primary" onclick="createConfig()">Сгенерировать конфигурации</button>
+                    </div>
+                </div>
+
+                <div class="card advanced-only" style="margin-bottom: 20px;">
+                    <h3 style="margin-bottom: 10px;">Массовое переименование клиентов</h3>
+                    <p style="color:var(--text-muted); font-size:12px; margin-top:0;">
+                        Заменяет часть имени у всех клиентов. Чтобы просто убрать лишний текст (например <code>paris</code>), оставьте поле «Заменить на» пустым.
+                        Ключи и IP при переименовании не меняются — устройствам не нужно переподключаться.
+                    </p>
+                    <div class="controls-row" style="margin-bottom:0;">
+                        <input type="text" id="renameSearch" placeholder="Найти в имени (paris)" style="width:220px;">
+                        <input type="text" id="renameReplace" placeholder="Заменить на (пусто = удалить)" style="width:220px;">
+                        <button class="btn-primary" onclick="bulkRename()">Переименовать</button>
                     </div>
                 </div>
 
@@ -216,6 +334,21 @@
             <!-- СЕТЬ И ФАЕРВОЛ -->
             <div id="tab-network" class="tab-pane">
                 <div class="card" style="margin-bottom: 20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Сеть под контролем</h3>
+                            <p>Порты, UFW и туннели проверяются автоматически. Ручные редакторы спрятаны в экспертном режиме.</p>
+                        </div>
+                        <span class="badge badge-muted">сеть</span>
+                    </div>
+                    <div class="quick-grid">
+                        <button class="quick-action" onclick="loadUfwData(); loadNetworkTools(); toast('Сеть обновлена', 'success')"><span class="qa-ico">↻</span><strong>Проверить порты</strong><small>UFW и listen</small></button>
+                        <button class="quick-action" onclick="openWizard('cascade')"><span class="qa-ico">⇄</span><strong>Настроить каскад</strong><small>Мастер RU → EU</small></button>
+                        <button class="quick-action" onclick="openCascadeTab()"><span class="qa-ico">◉</span><strong>Статус каскада</strong><small>Туннель и маршруты</small></button>
+                    </div>
+                </div>
+
+                <div class="card advanced-only" style="margin-bottom: 20px;" data-admin-only>
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h3 style="margin:0;">Редактор конфигурации AmneziaWG</h3>
                         <button class="btn-dark" style="padding: 4px 8px; font-size: 11px;" onclick="loadAwgConfig()">Обновить</button>
@@ -230,7 +363,7 @@
                 </div>
 
                 <!-- НОВЫЙ РЕДАКТОР КАСКАДА (AWG-EU) -->
-                <div class="card" style="margin-bottom: 20px;" id="cascadeEditorCard">
+                <div class="card advanced-only" style="margin-bottom: 20px;" id="cascadeEditorCard" data-admin-only>
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h3 style="margin:0; color: #58a6ff;">Редактор транзитного туннеля (awg-eu.conf)</h3>
                         <button class="btn-dark" style="padding: 4px 8px; font-size: 11px;" onclick="loadCascadeConfig()">Обновить</button>
@@ -272,12 +405,26 @@
             <!-- СЛУЖБЫ & DNS -->
             <div id="tab-services" class="tab-pane">
                 <div class="card" style="margin-bottom: 20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>AdGuard в один клик</h3>
+                            <p>Панель сама найдёт API, включит защиту и обновит фильтры.</p>
+                        </div>
+                        <span class="badge badge-good">автопоиск</span>
+                    </div>
+                    <div class="hero-actions" style="margin-top:0;">
+                        <button class="btn btn-primary" onclick="openWizard('adguard')">Найти и подключить</button>
+                        <button class="btn btn-ghost" onclick="loadServices(); loadAdGuardFull()">↻ Обновить</button>
+                    </div>
+                </div>
+
+                <div class="card advanced-only" style="margin-bottom: 20px;">
                     <h3>Данные для подключения устройств к AdGuard DNS</h3>
                     <div id="dnsAddressesList" style="margin-top: 10px; font-family: monospace; color: var(--text-main); font-size: 14px; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 6px; border: 1px solid var(--border);">
                         Загрузка данных...
                     </div>
                 </div>
-                <div class="card">
+                <div class="card advanced-only">
                     <h3>Перехват DNS (Iptables)</h3>
                     <div style="margin-bottom: 15px;"><span id="dnsStatus">Ожидание...</span></div>
                     
@@ -293,7 +440,7 @@
                 <div class="stats-cards">
                     <div class="card" style="flex: 2;">
                         <h3>Статистика AdGuard Home API</h3>
-                        <div class="controls-row">
+                        <div class="controls-row advanced-only">
                             <input type="text" id="agUrl" placeholder="URL (172.17.0.1:4443 или 127.0.0.1:8090)" style="width: 240px;">
                             <input type="text" id="agUser" placeholder="Логин (опционально)" style="width: 140px;">
                             <input type="password" id="agPass" placeholder="Пароль" style="width: 140px;">
@@ -330,6 +477,18 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="card" style="margin-top: 20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                        <h3 style="margin:0;">AdGuard Home — управление</h3>
+                        <div class="controls-row" style="margin:0;">
+                            <button class="btn-dark" style="padding:6px 12px; font-size:12px;" onclick="loadAdGuardFull()">🔄 Обновить</button>
+                            <button class="btn-dark" style="padding:6px 12px; font-size:12px;" onclick="agToggleProtection()">🛡 Защита вкл/выкл</button>
+                            <button class="btn-dark" style="padding:6px 12px; font-size:12px;" onclick="agRefreshFilters()">♻️ Обновить фильтры</button>
+                        </div>
+                    </div>
+                    <div id="agFull" style="margin-top:15px; color:var(--text-muted); font-size:13px;">Подключитесь к AdGuard выше — здесь появятся клиенты, журнал и фильтры.</div>
+                </div>
             </div>
 
             <!-- ЗАЩИТА И CRON -->
@@ -341,7 +500,7 @@
                         <div style="margin-bottom: 15px;"><span id="ruDropStatus">Ожидание...</span></div>
                         <div id="ruDropIfacesList" style="margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
                         
-                        <div style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid var(--border);">
+                        <div class="advanced-only" style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid var(--border);">
                             <label style="font-size: 11px; color: var(--text-muted);">Порты (через запятую, оставьте пустым для блокировки всего)</label>
                             <input type="text" id="ruDropPorts" placeholder="Например: 80,443" style="width: 100%; margin-top: 3px; margin-bottom: 10px; box-sizing: border-box;">
                             
@@ -365,34 +524,28 @@
                         </div>
                     </div>
 
-                    <div class="card" id="cascadeRoutingCard">
+                    <div class="card advanced-only" id="cascadeRoutingCard">
                         <h3 style="color: #58a6ff; margin-bottom: 5px;">Маршрутизация Каскада (RU ➔ EU)</h3>
                         <p style="color: #ff7b72; font-size: 12px; margin-bottom: 10px; line-height: 1.3;">⚠️ <b>Важно:</b> Маршруты каскада настраиваются <b>строго на ВХОДНОМ сервере (RU)</b>.</p>
                         <div style="margin-bottom: 15px;"><span id="cascadeStatus">Ожидание...</span></div>
                         <div id="cascadeIfacesList" style="margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
                         
-                        <div style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid var(--border);">
-                            <label style="font-size: 11px; color: var(--text-muted);">Порты для маршрутизации (оставьте пустым для всего трафика)</label>
-                            <input type="text" id="cascadePorts" placeholder="Например: 80,443" style="width: 100%; margin-top: 3px; margin-bottom: 10px; box-sizing: border-box;">
-                            
-                            <label style="font-size: 11px; color: var(--text-muted);">Список IP для направления в туннель (PBR)</label>
-                            <select id="cascadeListMode" style="width: 100%; margin-top: 3px; margin-bottom: 5px;" onchange="document.getElementById('cascadeCustomUrl').style.display = this.value === 'custom' ? 'block' : 'none'">
-                                <option value="standard">Обход блокировок (Стандартный список)</option>
-                                <option value="custom">Свой URL (.txt или .zone)</option>
-                            </select>
-                            <input type="text" id="cascadeCustomUrl" placeholder="https://example.com/my-routing-list.txt" style="width: 100%; display: none; box-sizing: border-box;">
+                        <div style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px; margin-bottom: 15px; border: 1px solid var(--border); font-size: 12px; color: var(--text-muted); line-height: 1.45;">
+                            Полная настройка каскада (конфиг EU-сервера, <code>awg1.conf</code>, <code>ipset</code>, <code>ip rule</code>, таймер обновления)
+                            вынесена на отдельную вкладку <b>«Каскад»</b>. Здесь остаются только быстрое включение/выключение маршрутов для уже настроенного туннеля.
                         </div>
                         
                         <div class="controls-row" style="margin-bottom: 0; margin-top: auto;">
+                            <button class="btn-primary" onclick="openCascadeTab()">🔀 Открыть «Каскад»</button>
                             <button class="btn-success" style="background-color: #2ea043; color: white; border: none; border-radius: 6px;" onclick="toggleCascade(true)">Применить маршруты</button>
                             <button class="btn-dark" onclick="toggleCascade(false)">Отключить</button>
                         </div>
                     </div>
 
                     <div class="card">
-                        <h3>Fail2Ban / Брутфорс (Скоро)</h3>
-                        <p style="color: var(--text-muted); font-size: 14px;">Здесь будет список заблокированных IP-адресов злоумышленников и возможность ручного разбана.</p>
-                        <button class="btn-dark" style="margin-top: auto;" disabled>Функция в разработке</button>
+                        <h3>Fail2Ban / Брутфорс</h3>
+                        <div id="f2bMini" style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">Проверка...</div>
+                        <button class="btn-dark" style="margin-top:auto;" onclick="switchTab('tab-admin', document.getElementById('navAdmin'))">🔐 Открыть администрирование</button>
                     </div>
 
                 </div> 
@@ -400,17 +553,75 @@
 
             <!-- ДИАГНОСТИКА -->
             <div id="tab-diag" class="tab-pane">
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Диагностика в один клик</h3>
+                            <p>Полная проверка VPN, каскада, обфускации, AdGuard и безопасности.</p>
+                        </div>
+                        <button class="btn btn-primary" onclick="runHealthCheck()">Проверить всё</button>
+                    </div>
+                    <div class="wizard-note info">Результат откроется в окне: статусы, подсказки и быстрые действия. Ping и traceroute можно запустить отдельно ниже.</div>
+                </div>
+
+                <div class="grid main-grid">
+                    <div class="card" style="margin-bottom:0;">
+                        <h3>Ping</h3>
+                        <div class="controls-row">
+                            <input id="diagPingHost" value="1.1.1.1" placeholder="IP или домен" style="max-width:220px;">
+                            <button class="btn btn-primary" onclick="runDiagPing()">Пинговать</button>
+                        </div>
+                        <div id="diagPingOut" class="wizard-log" style="display:none;"></div>
+                    </div>
+                    <div class="card" style="margin-bottom:0;">
+                        <h3>Traceroute</h3>
+                        <div class="controls-row">
+                            <input id="diagTraceHost" value="1.1.1.1" placeholder="IP или домен" style="max-width:220px;">
+                            <button class="btn btn-soft" onclick="runDiagTraceroute()">Трассировать</button>
+                        </div>
+                        <div id="diagTraceOut" class="wizard-log" style="display:none;"></div>
+                    </div>
+                </div>
+
                 <div class="card">
-                    <h3>Сетевая диагностика и Логи (Скоро)</h3>
-                    <p style="color: var(--text-muted); font-size: 14px;">Встроенный Ping, Traceroute до внешних узлов, Speedtest серверов и Live Log Viewer для Nginx и SSH.</p>
-                    <button class="btn-dark" disabled>Функция в разработке</button>
+                    <div class="card-head">
+                        <div><h3>Логи</h3><p>Последние 300 строк из разрешённых файлов.</p></div>
+                        <button class="btn btn-ghost btn-sm" onclick="loadDiagLog()">↻ Обновить</button>
+                    </div>
+                    <div class="controls-row">
+                        <select id="diagLogSelect" style="max-width:340px;">
+                            <option value="/var/log/awg_install.log">Установка AWG</option>
+                            <option value="/var/log/adguard_install.log">Установка AdGuard</option>
+                            <option value="/var/log/awg_audit.log">Аудит AWG</option>
+                            <option value="/var/log/nginx/error.log">Nginx error</option>
+                            <option value="/var/log/nginx/access.log">Nginx access</option>
+                            <option value="/var/log/auth.log">Auth</option>
+                            <option value="/var/log/syslog">Syslog</option>
+                        </select>
+                    </div>
+                    <div id="diagLogOut" class="wizard-log" style="display:none; max-height:300px;">Выберите лог и нажмите «Обновить».</div>
                 </div>
             </div>
 
             <!-- УСТАНОВКА МОДУЛЕЙ -->
             <div id="tab-install" class="tab-pane">
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Установка в один клик</h3>
+                            <p>Мастер подберёт версию, порт и профиль. Ручные параметры — в экспертном режиме.</p>
+                        </div>
+                        <span class="badge badge-good">рекомендуется</span>
+                    </div>
+                    <div class="quick-grid">
+                        <button class="quick-action" onclick="openWizard('install')"><span class="qa-ico">↓</span><strong>Установить AWG</strong><small>Один сервер</small></button>
+                        <button class="quick-action" onclick="openWizard('cascade')"><span class="qa-ico">⇄</span><strong>Установить каскад</strong><small>RU + EU</small></button>
+                        <button class="quick-action" onclick="openWizard('adguard')"><span class="qa-ico">◎</span><strong>Установить AdGuard</strong><small>DNS-защита</small></button>
+                    </div>
+                </div>
+
                 <div class="stats-cards">
-                    <div class="card" style="flex: 1; min-width: 320px;">
+                    <div class="card advanced-only" style="flex: 1; min-width: 320px;">
                         <h3>AmneziaWG (С перезагрузками)</h3>
                         <p style="color: var(--text-muted); font-size: 13px;">Полная установка AWG. Потребует 3 перезагрузки сервера.</p>
 
@@ -510,7 +721,7 @@
                     </div>
                 </div>
                     
-                    <div class="card" style="flex: 1;">
+                    <div class="card advanced-only" style="flex: 1;">
                         <h3>MTProto / WEB Proxy (MEKO)</h3>
                         <p style="color: var(--text-muted); font-size: 13px;">Установка Telemt, MTG с фиксами от MEKO. Рекомендуется ручная установка через терминал для полного контроля.</p>
                         <div style="background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 11px; margin-bottom: 10px; border: 1px solid var(--border); word-break: break-all; color: #58a6ff;">
@@ -522,7 +733,7 @@
                     <div class="card" style="flex: 1;">
                         <h3>AdGuard Home</h3>
                         <p style="color: var(--text-muted); font-size: 13px;">Установка персонального DNS-блокировщика рекламы.</p>
-                        <button class="btn-primary" onclick="startInstall('adguard', '/var/log/adguard_install.log')">Установить AdGuard</button>
+                        <button class="btn-primary" onclick="openWizard('adguard')">Установить AdGuard</button>
                     </div>
                 </div>
 
@@ -531,806 +742,423 @@
                         <h3 style="margin:0; color: var(--sys-color);">Терминал установки</h3>
                         <span id="installStatusBadge" class="val-sys">В процессе...</span>
                     </div>
+                    <div id="installSteps" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;"></div>
+                    <div style="height:8px; background:rgba(0,0,0,.4); border-radius:4px; overflow:hidden; margin-bottom:12px;">
+                        <div id="installProgressBar" style="height:100%; width:0%; background:#2ea043; transition:width .4s;"></div>
+                    </div>
                     <textarea id="installLogText" readonly rows="20" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; background: #000; color: #0f0; border: 1px solid var(--border); border-radius: 6px; padding: 10px; resize: none;"></textarea>
                 </div>
             </div>
 
-        </div>
-    </main>
-
-<script>
-let logInterval = null;
-let lastStats = {}; let isFetching = false; 
-let pollingInterval = null; let historyInterval = null; let agInterval = null;
-let chartData = { global: { labels: [], rx: [], tx: [] } };
-let currentChartView = 'global'; let trafficChart = null;
-let sortCol = 'name'; let sortDesc = false;
-
-async function startInstall(module, expectedLogFile) {
-    let options = {};
-    if (module === 'awg') {
-        const check = prompt("ВНИМАНИЕ! Установка AWG перезагрузит сервер 3 раза.\n\nДля подтверждения введите слово INSTALL (большими буквами):");
-        if (check !== 'INSTALL') { alert("Установка отменена."); return; }
-        
-        options = {
-            version: document.getElementById('awgInstallVersion') ? document.getElementById('awgInstallVersion').value : document.getElementById('awgVersion').value,
-            preset: document.getElementById('awgInstallPreset') ? document.getElementById('awgInstallPreset').value : document.getElementById('awgPreset').value,
-            route: document.getElementById('awgInstallRoute') ? document.getElementById('awgInstallRoute').value : document.getElementById('awgRoute').value,
-            customRoute: document.getElementById('awgCustomRoute') ? document.getElementById('awgCustomRoute').value : '',
-            ipv6: document.getElementById('awgInstallIpv6') ? document.getElementById('awgInstallIpv6').value : document.getElementById('awgIpv6').value,
-            port: document.getElementById('awgInstallPort') ? document.getElementById('awgInstallPort').value : document.getElementById('awgPort').value,
-            isolation: document.getElementById('awgIsolation').checked,
-            keepPackages: document.getElementById('awgKeepPackages').checked,
-            noTweaks: document.getElementById('awgNoTweaks').checked,
-            awgMode: document.getElementById('awgMode') ? document.getElementById('awgMode').value : 'single',
-            cascadeRole: document.getElementById('cascadeRole') ? document.getElementById('cascadeRole').value : 'ru',
-            remoteIp: document.getElementById('remoteIp') ? document.getElementById('remoteIp').value : '',
-            remotePort: document.getElementById('remotePort') ? document.getElementById('remotePort').value : '22',
-            remotePass: document.getElementById('remotePass') ? document.getElementById('remotePass').value : '',
-            domain: document.getElementById('awgInstallDomain') ? document.getElementById('awgInstallDomain').value.trim() : ''
-        };
-
-        if (options.awgMode === 'cascade' && (!options.remoteIp || !options.remotePass)) {
-            alert('Для каскадной установки необходимо указать IP и пароль удаленного сервера!');
-            return;
-        }
-    } else {
-        if(!confirm(`Запустить процесс установки модуля ${module}? Следите за логами в окне ниже.`)) return;
-    }
-    
-    document.getElementById('installLogWrapper').style.display = 'block';
-    document.getElementById('installLogText').value = "Инициализация...\n";
-    document.getElementById('installStatusBadge').innerText = "Подготовка...";
-    
-    try {
-        const res = await fetch('/api/install/module', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ module, ...options })
-        });
-        if (res.ok) {
-            if (logInterval) clearInterval(logInterval);
-            logInterval = setInterval(() => pollLog(expectedLogFile), 2000);
-        } else {
-            alert("Ошибка запуска установки");
-        }
-    } catch(e) { alert("Сетевая ошибка"); }
-}
-async function uninstallAwg() {
-    const check = prompt("ВНИМАНИЕ! Это полностью удалит ядро AmneziaWG, все настройки и ВСЕХ клиентов!\n\nДля подтверждения введите слово DELETE (большими буквами):");
-    if (check !== 'DELETE') return;
-    
-    document.getElementById('loaderOverlay').style.display = 'flex';
-    document.getElementById('loaderText').innerText = "Удаление AmneziaWG (около 15 сек)...";
-    
-    try {
-        const res = await fetch('/api/uninstall/awg', { method: 'POST' });
-        if (res.ok) {
-            setTimeout(() => {
-                alert("AmneziaWG успешно удален вместе с конфигами!");
-                window.location.reload();
-            }, 15000); // Ждем 15 секунд, пока скрипт в фоне очистит ядро и файлы
-        } else {
-            alert("Ошибка при запуске удаления");
-            document.getElementById('loaderOverlay').style.display = 'none';
-        }
-    } catch (e) {
-        alert("Ошибка сети");
-        document.getElementById('loaderOverlay').style.display = 'none';
-    }
-}
-
-// Запуск поллинга статуса каскада
-setInterval(async () => {
-    try {
-        const res = await fetch('/api/cascade/status');
-        if (res.ok) {
-            const data = await res.json();
-            const statusEl = document.getElementById('cascadeStatusDash');
-            if (statusEl) {
-                statusEl.innerText = data.text;
-                statusEl.style.color = data.color;
-            }
-        }
-    } catch (e) {}
-}, 5000);
-
-// Перенаправляет на вкладку сети и прокручивает к новому редактору каскада
-function editCascadeConfig() {
-    switchTab('tab-network', document.querySelector('.menu li:nth-child(3)'));
-    loadCascadeConfig();
-    document.getElementById('cascadeEditorCard').scrollIntoView({behavior: 'smooth'});
-}
-
-// Загружает awg-eu.conf в отдельное окно
-async function loadCascadeConfig() {
-    try {
-        const res = await fetch('/api/awg/config?file=/etc/amnezia/amneziawg/awg-eu.conf');
-        if (res.ok) {
-            const data = await res.json();
-            document.getElementById('cascadeConfigText').value = data.content || '';
-        } else {
-            document.getElementById('cascadeConfigText').value = '';
-        }
-    } catch (e) {
-        alert("Ошибка загрузки awg-eu.conf");
-    }
-}
-
-// Сохраняет awg-eu.conf через существующий API
-async function saveCascadeConfig() {
-    if(!confirm("Сохранить транзитную конфигурацию и перезапустить туннель?")) return;
-    const content = document.getElementById('cascadeConfigText').value;
-    try {
-        const res = await fetch('/api/awg/config', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ content: content, file: '/etc/amnezia/amneziawg/awg-eu.conf' })
-        });
-        if (res.ok) alert("awg-eu.conf успешно сохранен и интерфейс перезапущен!");
-        else alert("Ошибка при сохранении конфигурации.");
-    } catch(e) { alert("Ошибка сети"); }
-}
-    
-async function pollLog(logFile) {
-    try {
-        const res = await fetch(`/api/install/log?file=${logFile}`);
-        if (res.ok) {
-            const text = await res.text();
-            const textArea = document.getElementById('installLogText');
-            if (textArea.value !== text) {
-                textArea.value = text;
-                textArea.scrollTop = textArea.scrollHeight;
-            }
-            document.getElementById('installStatusBadge').innerText = "Установка идет...";
-            document.getElementById('installStatusBadge').className = "val-sys";
-
-            if (text.includes('=== INSTALLATION DONE ===')) {
-                clearInterval(logInterval);
-                document.getElementById('installStatusBadge').innerText = "Успешно завершено!";
-                document.getElementById('installStatusBadge').className = "val-rx";
-            }
-        }
-    } catch(e) {
-        document.getElementById('installStatusBadge').innerText = "Сервер перезагружается... Ожидание (до 30 сек)";
-        document.getElementById('installStatusBadge').className = "val-tx";
-    }
-}
-
-async function loadAwgConfig() {
-    try {
-        const res = await fetch('/api/awg/config');
-        if (res.ok) {
-            const data = await res.json();
-            document.getElementById('awgConfigText').value = data.content;
-            document.getElementById('awgConfigFile').value = data.file;
-            document.getElementById('awgConfigWrapper').style.display = 'flex';
-            document.getElementById('awgConfigError').style.display = 'none';
-        } else {
-            document.getElementById('awgConfigError').innerText = "Конфигурация AWG не найдена на сервере.";
-            document.getElementById('awgConfigError').style.display = 'block';
-            document.getElementById('awgConfigWrapper').style.display = 'none';
-        }
-    } catch(e) {
-        document.getElementById('awgConfigError').innerText = "Ошибка загрузки конфигурации.";
-        document.getElementById('awgConfigError').style.display = 'block';
-    }
-}
-
-async function saveAwgConfig() {
-    if(!confirm("Сохранить изменения и перезапустить AmneziaWG? VPN-соединения будут кратковременно разорваны.")) return;
-    const content = document.getElementById('awgConfigText').value;
-    const file = document.getElementById('awgConfigFile').value;
-    try {
-        const res = await fetch('/api/awg/config', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ content, file })
-        });
-        if (res.ok) alert("Настройки успешно сохранены, интерфейс перезапущен!");
-        else alert("Ошибка при сохранении конфигурации.");
-    } catch(e) { alert("Ошибка сети"); }
-}
-
-async function updatePanel() {
-    if (!confirm("Загрузить последнюю версию панели с GitHub? Интерфейс будет перезагружен.")) return;
-    document.getElementById('loaderOverlay').style.display = 'flex';
-    document.getElementById('loaderText').innerText = "Обновление файлов...";
-    try {
-        const res = await fetch('/api/update', { method: 'POST' });
-        if (res.ok) {
-            document.getElementById('loaderText').innerText = "Перезапуск сервера...";
-            setTimeout(() => { window.location.reload(); }, 6000);
-        } else {
-            alert("Ошибка при обновлении");
-            document.getElementById('loaderOverlay').style.display = 'none';
-        }
-    } catch (e) { setTimeout(() => { window.location.reload(); }, 6000); }        
-}
-
-function setSort(col) {
-    if (sortCol === col) sortDesc = !sortDesc;
-    else { sortCol = col; sortDesc = false; }
-    ['name', 'status', 'traffic', 'speed'].forEach(c => {
-        const el = document.getElementById('sort-' + c);
-        if (el) el.innerText = '';
-    });
-    const currentEl = document.getElementById('sort-' + col);
-    if (currentEl) currentEl.innerText = sortDesc ? '▼' : '▲';
-    if (!isFetching) loadStats();
-}
-
-function toggleMenu() { document.getElementById('sidebar').classList.toggle('open'); }
-function switchTab(tabId, el) {
-    document.querySelectorAll('.tab-pane').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.menu li').forEach(l => l.classList.remove('active'));
-    document.getElementById(tabId).classList.add('active');
-    if (el) { el.classList.add('active'); document.getElementById('currentTabTitle').innerText = el.innerText.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|\s+/g, ' ').trim(); }
-    if (window.innerWidth <= 768) toggleMenu();
-    if (tabId === 'tab-services') { loadServices(); connectAdGuard(false); }
-    else if (agInterval) { clearInterval(agInterval); agInterval = null; }
-}
-
-function copyMeko() {
-    const cmd = "curl -fsSL https://raw.githubusercontent.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/main/install.sh | sudo bash";
-    navigator.clipboard.writeText(cmd).then(() => {
-        alert("Команда скопирована! Теперь просто вставьте её в ваш SSH-терминал.");
-    }).catch(() => { alert("Не удалось скопировать."); });
-}
-
-function formatBytes(bytes) {
-    if (!bytes || isNaN(bytes)) return '0 B'; if (bytes === 0) return '0 B';
-    const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'], i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-function formatSpeed(bytesPerSec) { return formatBytes(bytesPerSec) + '/s'; }
-
-async function loadServices() {
-    try {
-        const res = await fetch('/api/services');
-        if (res.ok) {
-            const services = await res.json();
-            const tbody = document.getElementById('servicesTable');
-            if (services.length === 0) { tbody.innerHTML = '<tr><td>Службы не найдены</td></tr>'; return; }
-            tbody.innerHTML = services.map(s => {
-                const statusColor = s.status === 'running' ? 'var(--rx-color)' : '#f85149';
-                const statusText = s.status === 'running' ? 'Активен' : 'Остановлен';
-                return `<tr>
-                    <td><strong>${s.name}</strong><br><span style="color:${statusColor}; font-size:12px;">${statusText}</span></td>
-                    <td style="text-align:right; width:60px;"><button class="btn-dark" style="padding: 4px 8px; font-size:11px;" onclick="restartService('${s.name}')">Restart</button></td>
-                </tr>`;
-            }).join('');
-        }
-    } catch(e) { document.getElementById('servicesTable').innerHTML = '<tr><td>Ошибка загрузки служб</td></tr>'; }
-}
-
-async function restartService(name) {
-    if (!confirm(`Перезапустить службу ${name}?`)) return;
-    try {
-        const res = await fetch('/api/services/restart', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name}) });
-        if (res.ok) { alert(`Служба ${name} успешно перезапущена`); loadServices(); }
-        else alert("Ошибка при перезапуске");
-    } catch (e) { alert("Ошибка соединения"); }
-}
-
-async function connectAdGuard(isManualClick = true) {
-    let url = document.getElementById('agUrl').value;
-    let user = document.getElementById('agUser').value;
-    let pass = document.getElementById('agPass').value;
-    const errEl = document.getElementById('agError');
-
-    if (!isManualClick && !url && localStorage.getItem('agUrl')) {
-        url = localStorage.getItem('agUrl'); user = localStorage.getItem('agUser') || ''; pass = localStorage.getItem('agPass') || '';
-        document.getElementById('agUrl').value = url; document.getElementById('agUser').value = user; document.getElementById('agPass').value = pass;
-    }
-    if (!url) return;
-    if (isManualClick) { localStorage.setItem('agUrl', url); localStorage.setItem('agUser', user); localStorage.setItem('agPass', pass); }
-
-    try {
-        const res = await fetch('/api/adguard/stats', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({url, user, pass}) });
-        if (res.ok) {
-            errEl.style.display = 'none';
-            const data = await res.json();
-            document.getElementById('agTotal').innerText = data.num_dns_queries.toLocaleString('ru-RU');
-            document.getElementById('agBlocked').innerText = data.num_blocked_filtering.toLocaleString('ru-RU');
-            let percent = 0;
-            if (data.num_dns_queries > 0) percent = ((data.num_blocked_filtering / data.num_dns_queries) * 100).toFixed(1);
-            document.getElementById('agBlockedPercent').innerText = `(${percent}%)`;
-            document.getElementById('agMalware').innerText = data.num_replaced_safebrowsing.toLocaleString('ru-RU');
-            if (!agInterval) agInterval = setInterval(() => connectAdGuard(false), 5000);
-        } else {
-            const errData = await res.json();
-            errEl.innerText = errData.error; errEl.style.display = 'block';
-            if (agInterval) { clearInterval(agInterval); agInterval = null; }
-        }
-    } catch(e) { errEl.innerText = "Ошибка запроса API."; errEl.style.display = 'block'; if (agInterval) { clearInterval(agInterval); agInterval = null; } }
-}
-
-async function changePassword() {
-    const newPassword = prompt("Введите новый пароль для панели (минимум 4 символа):");
-    if (!newPassword) return;
-    if (newPassword.length < 4) return alert("Пароль слишком короткий!");
-    try {
-        const res = await fetch('/api/change-password', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ newPassword })
-        });
-        if (res.ok) alert("Пароль успешно изменен! Вы можете использовать его при следующем входе.");
-        else alert("Ошибка изменения пароля");
-    } catch (e) { alert("Ошибка сети"); }
-}
-
-async function loadServerInfo() {
-    try {
-        const res = await fetch('/api/server-info');
-        if (res.ok) {
-            const data = await res.json();
-            let html = `<div style="margin-bottom: 8px;"><span class="val-sys">Обычный DNS (IPv4):</span> ${data.ip} <span class="sub-text">(${data.country})</span></div>`;
-            if (data.domain) {
-                html += `<div style="margin-bottom: 8px;"><span class="val-rx">DNS-over-TLS (DoT):</span> tls://${data.domain}</div>`;
-                html += `<div><span class="val-tx">DNS-over-HTTPS (DoH):</span> https://${data.domain}/dns-query</div>`;
-            } else {
-                html += `<div style="color: var(--text-muted); font-size: 12px; margin-top: 5px;">* Для настройки DoT и DoH (Private DNS) привяжите домен к серверу.</div>`;
-            }
-            document.getElementById('dnsAddressesList').innerHTML = html;
-
-            const cascadeCard = document.getElementById('cascadeRoutingCard');
-            if (cascadeCard && data.country !== 'RU' && data.country !== 'UNKNOWN') {
-                cascadeCard.innerHTML = `
-                    <h3 style="color: #58a6ff;">Маршрутизация Каскада</h3>
-                    <div style="padding: 20px 0; text-align: center;">
-                        <span style="font-size: 30px;">🌍</span>
-                        <p style="color: var(--text-muted); margin-top: 10px; font-size: 14px;">
-                            Панель обнаружена в регионе <b>${data.country}</b>.<br>
-                            Управление маршрутами доступно только на сервере-входе (RU).
-                        </p>
+            <!-- КАСКАД -->
+            <div id="tab-cascade" class="tab-pane">
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Каскад в один клик</h3>
+                            <p>Мастер установит AWG на двух серверах или поможет вставить готовый конфиг EU.</p>
+                        </div>
+                        <span class="badge badge-good">мастер</span>
                     </div>
-                `;
-            }
-        }
-    } catch(e) { document.getElementById('dnsAddressesList').innerHTML = "Не удалось загрузить данные сервера"; }
-}
-
-function initChart() {
-    const ctx = document.getElementById('trafficChart').getContext('2d');
-    const gradRx = ctx.createLinearGradient(0, 0, 0, 300); gradRx.addColorStop(0, 'rgba(46, 160, 67, 0.5)'); gradRx.addColorStop(1, 'rgba(46, 160, 67, 0)');
-    const gradTx = ctx.createLinearGradient(0, 0, 0, 300); gradTx.addColorStop(0, 'rgba(88, 166, 255, 0.5)'); gradTx.addColorStop(1, 'rgba(88, 166, 255, 0)');
-    Chart.defaults.color = '#8b949e';
-    trafficChart = new Chart(ctx, {
-        type: 'line',
-        data: { labels: [], datasets: [ { label: 'Прием (Rx)', data: [], borderColor: '#2ea043', backgroundColor: gradRx, fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 }, { label: 'Отдача (Tx)', data: [], borderColor: '#58a6ff', backgroundColor: gradTx, fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 } ]},
-        options: { responsive: true, maintainAspectRatio: false, animation: { duration: 0 }, interaction: { mode: 'index', intersect: false }, scales: { x: { grid: { color: '#30363d' }, ticks: { maxTicksLimit: 10 } }, y: { grid: { color: '#30363d' }, ticks: { callback: function(v) { return formatSpeed(v); } } } }, plugins: { legend: { labels: { color: '#c9d1d9' } }, tooltip: { callbacks: { label: function(ctx) { return ctx.dataset.label + ': ' + formatSpeed(ctx.parsed.y); } } } } }
-    });
-}
-
-function switchChart() {
-    currentChartView = document.getElementById('chartSelector').value;
-    if (chartData[currentChartView] && trafficChart) { 
-        trafficChart.data.labels = chartData[currentChartView].labels; 
-        trafficChart.data.datasets[0].data = chartData[currentChartView].rx; 
-        trafficChart.data.datasets[1].data = chartData[currentChartView].tx; 
-        trafficChart.update(); 
-    }
-}
-
-async function loadHistory() {
-    try {
-        const res = await fetch('/api/history');
-        if (res.ok) {
-            chartData = await res.json();
-            const selector = document.getElementById('chartSelector');
-            const currentClients = Array.from(selector.options).map(o => o.value);
-            Object.keys(chartData).forEach(k => {
-                if (k !== 'global' && !currentClients.includes(k)) {
-                    const opt = document.createElement('option'); opt.value = k; opt.text = 'Клиент: ' + k; selector.appendChild(opt);
-                }
-            });
-            switchChart();
-        }
-    } catch (e) {}
-}
-
-function getPortDesc(pStr) {
-    if (!pStr) return 'Системная служба';
-    if (pStr.includes('5553')) return 'AdGuard (DNS фильтр)';
-    if (pStr.includes('853')) return 'AdGuard (DoT)';
-    if (pStr.includes('53')) return 'Системный DNS';
-    if (pStr.includes('4444')) return 'Панель FM4.0';
-    if (pStr.includes('4443')) return 'AdGuard Панель';
-    if (pStr.includes('443')) return 'HTTPS (Веб)';
-    if (pStr.includes('80')) return 'HTTP (Веб)';
-    if (pStr.includes('37246')) return 'AmneziaWG (VPN)';
-    if (pStr.includes('2233') || pStr.includes('22')) return 'SSH Терминал';
-    if (pStr.includes('9090') || pStr.includes('9091')) return 'MTProto Прокси';
-    return 'Процесс / Служба';
-}
-
-async function loadUfwData() {
-    const res = await fetch('/api/ufw');
-    if (res.ok) {
-        const data = await res.json();
-        const tbodyRules = document.getElementById('ufwTable');
-        if (data.rules.length === 0) tbodyRules.innerHTML = '<tr><td colspan="4">Нет правил</td></tr>';
-        else {
-            tbodyRules.innerHTML = data.rules.map(r => {
-                const portMatch = r.to.match(/\d+/);
-                const desc = portMatch ? getPortDesc(portMatch[0]) : 'Маршрут / PBR';
-                const statusHtml = r.action.includes('ALLOW') ? '<span class="val-rx">Открыт</span>' : '<span class="val-sys">Закрыт</span>';
-                return `<tr><td style="white-space:normal; word-wrap:break-word;"><strong>[${r.id}]</strong> <span class="val-tx">${r.to}</span> <span class="val-sys">←</span> ${r.from}</td><td>${statusHtml}</td><td><span class="sub-text" style="font-size:13px">${desc}</span></td><td><button class="btn-dark" onclick="delUfwRule('${r.id}')">✕</button></td></tr>`;
-            }).join('');
-        }
-
-        const tbodyPorts = document.getElementById('portsTable');
-        if (data.ports.length === 0) tbodyPorts.innerHTML = '<tr><td colspan="4">Нет открытых портов</td></tr>';
-        else {
-            tbodyPorts.innerHTML = data.ports.map(p => {
-                const portNum = p.addr.split(':').pop();
-                return `<tr><td><strong class="val-sys">${p.proto}</strong><br><span style="font-size:12px;color:var(--text-muted)">${portNum}</span></td><td><span class="val-rx">${p.addr}</span></td><td>${p.proc}</td><td><span class="sub-text" style="font-size:13px">${getPortDesc(portNum)}</span></td></tr>`;
-            }).join('');
-        }
-    }
-}
-
-async function addUfwRule() {
-    const port = document.getElementById('ufwPort').value;
-    const proto = document.getElementById('ufwProto').value;
-    const iface = document.getElementById('ufwIface').value;
-    if(!port) return alert("Введите порт");
-    const res = await fetch('/api/ufw', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({port, proto, iface}) });
-    if(res.ok) { document.getElementById('ufwPort').value = ''; loadUfwData(); }
-}
-
-async function delUfwRule(id) {
-    if(!confirm(`Удалить правило №${id}?`)) return;
-    const res = await fetch(`/api/ufw/${id}`, { method: 'DELETE' });
-    if(res.ok) loadUfwData();
-}
-
-async function loadNetworkTools() {
-    try {
-        const ifaces = await (await fetch('/api/interfaces')).json();
-        const st = await (await fetch('/api/tools/status')).json();
-
-        // Безопасное чтение массивов на случай старой версии backend'а
-        const ruIfaces = (st.ruDrop && st.ruDrop.ifaces) ? st.ruDrop.ifaces : [];
-        const cascIfaces = (st.cascade && st.cascade.ifaces) ? st.cascade.ifaces : [];
-        window.currentDnsIfaces = (st.dns && st.dns.ifaces) ? st.dns.ifaces : [];
-        window.currentDnsTarget = (st.dns && st.dns.target) ? st.dns.target : '';
-
-        // 1. Отрисовка чекбоксов для GeoIP
-        const ruList = document.getElementById('ruDropIfacesList');
-        if (ruList) {
-            ruList.innerHTML = ifaces.map(i => `
-                <div class="form-check form-check-inline" style="margin-right: 10px;">
-                    <input class="form-check-input ru-check" type="checkbox" value="${i}" id="ru_${i}" ${ruIfaces.includes(i) ? 'checked' : ''}>
-                    <label class="form-check-label text-white small" for="ru_${i}">${i}</label>
+                    <div class="hero-actions" style="margin-top:0;">
+                        <button class="btn btn-primary" onclick="openWizard('cascade')">Настроить каскад</button>
+                        <button class="btn btn-soft" onclick="loadCascadeStatus(true); loadCascadeHealth()">Проверить сейчас</button>
+                        <button class="btn btn-ghost" onclick="openCascadeEditorForPaste()">Вставить конфиг EU</button>
+                    </div>
                 </div>
-            `).join('');
-        }
-        const ruEl = document.getElementById('ruDropStatus');
-        if (ruEl) {
-            if (st.ruDrop && st.ruDrop.active) {
-                ruEl.innerHTML = `<span class="val-rx">Активно на: ${ruIfaces.join(', ')}</span> <span class="sub-text">(Правил: ${st.ruDrop.count || 0})</span>`;
-            } else {
-                ruEl.innerHTML = `<span class="val-tx">Выключено</span>`;
-            }
-        }
 
-        // 2. Отрисовка чекбоксов для Каскада
-        const cascList = document.getElementById('cascadeIfacesList');
-        if (cascList) {
-            cascList.innerHTML = ifaces.map(i => `
-                <div class="form-check form-check-inline" style="margin-right: 10px;">
-                    <input class="form-check-input casc-check" type="checkbox" value="${i}" id="casc_${i}" ${cascIfaces.includes(i) ? 'checked' : ''}>
-                    <label class="form-check-label text-white small" for="casc_${i}">${i}</label>
+                <div class="card" style="margin-bottom: 20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                        <h3 style="margin:0;">Состояние каскада RU → EU</h3>
+                        <button class="btn-dark" style="padding:6px 12px; font-size:12px;" onclick="loadCascadeStatus(true)">🔄 Обновить</button>
+                    </div>
+                    <div id="cascadeStatusBox" style="margin-top:15px; color:var(--text-muted);">Загрузка...</div>
                 </div>
-            `).join('');
-        }
-        const cascEl = document.getElementById('cascadeStatus');
-        if (cascEl) {
-            if (st.cascade && st.cascade.active) {
-                cascEl.innerHTML = `<span class="val-rx">Каскад работает для: ${cascIfaces.join(', ')}</span>`;
-            } else {
-                cascEl.innerHTML = `<span class="val-tx">Маршруты каскада отключены</span>`;
-            }
-        }
 
-        // 3. Отрисовка чекбоксов для DNS
-        const dnsList = document.getElementById('dnsIfacesList');
-        if (dnsList) {
-            dnsList.innerHTML = ifaces.map(i => `
-                <div class="form-check form-check-inline" style="margin-right: 10px;">
-                    <input class="form-check-input dns-check" type="checkbox" value="${i}" id="dns_${i}" ${window.currentDnsIfaces.includes(i) ? 'checked' : ''}>
-                    <label class="form-check-label text-white small" for="dns_${i}">${i}</label>
+                <div class="card" style="margin-bottom: 20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                        <h3 style="margin:0;">Проверка здоровья каскада</h3>
+                        <button class="btn-dark" style="padding:6px 12px; font-size:12px;" onclick="loadCascadeHealth()">🩺 Проверить сейчас</button>
+                    </div>
+                    <p style="color:var(--text-muted); font-size:12px; margin:8px 0 0;">
+                        Комплексная проверка: конфиг, туннель, рукопожатие с EU, правило <code>fwmark</code>, таблица 100 и ipset.
+                        Если настроен Telegram, панель сама пришлёт уведомление при падении каскада.
+                    </p>
+                    <div id="cascadeHealthBox" style="margin-top:14px; font-size:13px; color:var(--text-muted);">Нажмите «Проверить сейчас».</div>
                 </div>
-            `).join('');
-        }
-        const dnsEl = document.getElementById('dnsStatus');
-        if (dnsEl) {
-            if (st.dns && st.dns.active) { 
-                dnsEl.innerHTML = `<span class="val-rx">Активен на: ${window.currentDnsIfaces.join(', ')}</span> <span class="sub-text">Цель: ${window.currentDnsTarget}</span>`; 
-                const targetInput = document.getElementById('dnsTarget');
-                if (targetInput) targetInput.value = window.currentDnsTarget; 
-            } else {
-                dnsEl.innerHTML = `<span class="val-tx">Не активно</span>`;
-            }
-        }
 
-        // 4. UFW остается выпадающим списком
-        const ufwSel = document.getElementById('ufwIface');
-        if (ufwSel) {
-            ufwSel.innerHTML = '<option value="any">Все</option>';
-            ifaces.forEach(i => { ufwSel.appendChild(new Option(i, i)); });
-        }
-    } catch (e) {
-        console.error("Ошибка загрузки сетевых инструментов:", e);
-    }
-}
+                <div class="card advanced-only" style="margin-bottom: 20px;">
+                    <h3 style="margin-top:0;">Шаг 1. Конфиг EU-сервера</h3>
+                    <p style="color:var(--text-muted); font-size:13px; margin-top:0;">
+                        На <b>выходном (EU)</b> сервере создайте клиента командой
+                        <code style="background:rgba(0,0,0,.35); padding:2px 6px; border-radius:4px;">manage_amneziawg.sh add ru_host</code>
+                        и вставьте сюда содержимое <code>ru_host.conf</code>. Панель сама добавит <code>Table = off</code> и уберёт DNS —
+                        это требование <a href="https://github.com/bivlked/amneziawg-installer/blob/main/CASCADE.md" target="_blank" rel="noopener" style="color:#58a6ff;">CASCADE.md</a>.
+                    </p>
+                    <textarea id="cascadeSetupConf" rows="10" spellcheck="false" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = EU_IP:PORT&#10;AllowedIPs = 0.0.0.0/0, ::/0" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:13px; background:rgba(0,0,0,.3); color:#c9d1d9; border:1px solid var(--border); border-radius:6px; padding:10px; resize:vertical;"></textarea>
+                </div>
 
-async function toggleRuDrop(enable) {
-    const checkedIfaces = Array.from(document.querySelectorAll('.ru-check:checked')).map(cb => cb.value);
-    if (enable && checkedIfaces.length === 0) return alert('Выберите хотя бы один интерфейс для блокировки!');
-    
-    const payload = {
-        enable, 
-        ifaces: checkedIfaces, 
-        schedule: document.getElementById('ruDropSchedule').value,
-        ports: document.getElementById('ruDropPorts').value.trim(),
-        listMode: document.getElementById('ruDropListMode').value,
-        customUrl: document.getElementById('ruDropCustomUrl').value.trim()
-    };
-    
-    document.getElementById('ruDropStatus').innerText = "Применение (до 20 сек)...";
-    const res = await fetch('/api/tools/rudrop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-    if (res.ok) loadNetworkTools();
-}
+                <div class="card advanced-only" style="margin-bottom: 20px;">
+                    <h3 style="margin-top:0;">Шаг 2. Клиентские интерфейсы и сети РФ</h3>
+                    <p style="color:var(--text-muted); font-size:13px; margin-top:0;">Выберите интерфейсы, трафик которых пойдёт в каскад (обычно <code>awg0</code>).</p>
+                    <div id="cascadeSetupIfaces" style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:14px; color:var(--text-muted);">Загрузка интерфейсов...</div>
+                    <label style="font-size:12px; color:var(--text-muted);">Дополнительные сети РФ (по одной в строке, CIDR) — их трафик пойдёт напрямую, а не через EU</label>
+                    <textarea id="cascadeExtraNets" rows="3" spellcheck="false" placeholder="203.0.113.0/24" style="width:100%; margin-top:6px; box-sizing:border-box; font-family:monospace; font-size:12px; background:rgba(0,0,0,.3); color:#c9d1d9; border:1px solid var(--border); border-radius:6px; padding:8px;"></textarea>
+                    <div class="controls-row" style="margin-top:14px; margin-bottom:0;">
+                        <button class="btn-success" style="background:#2ea043; color:#fff; border:none; border-radius:6px; padding:10px 16px;" onclick="setupCascade(this)">✅ Настроить каскад</button>
+                        <button class="btn-dark" onclick="refreshCascade()">♻️ Обновить маршруты</button>
+                        <button class="btn-danger" onclick="removeCascade()">⛔ Отключить каскад</button>
+                    </div>
+                </div>
 
-async function toggleCascade(enable) {
-    const checkedIfaces = Array.from(document.querySelectorAll('.casc-check:checked')).map(cb => cb.value);
-    if (enable && checkedIfaces.length === 0) return alert('Выберите хотя бы один интерфейс для каскада!');
-    
-    const payload = {
-        enable, 
-        ifaces: checkedIfaces,
-        ports: document.getElementById('cascadePorts').value.trim(),
-        listMode: document.getElementById('cascadeListMode').value,
-        customUrl: document.getElementById('cascadeCustomUrl').value.trim()
-    };
+                <div class="card advanced-only">
+                    <h3 style="margin-top:0;">awg1.conf на этом сервере</h3>
+                    <p style="color:var(--text-muted); font-size:12px; margin-top:0;">Только для тонкой настройки. Обычно менять здесь ничего не нужно.</p>
+                    <textarea id="cascadeConfText" rows="10" spellcheck="false" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:13px; background:rgba(0,0,0,.3); color:#c9d1d9; border:1px solid var(--border); border-radius:6px; padding:10px; resize:vertical;"></textarea>
+                    <button class="btn-primary" style="margin-top:10px;" onclick="saveCascadeConf()">💾 Сохранить awg1.conf</button>
+                </div>
+            </div>
 
-    document.getElementById('cascadeStatus').innerText = "Настройка маршрутов...";
-    const res = await fetch('/api/tools/cascade', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-    if (res.ok) {
-        const data = await res.json();
-        if(data.error) alert(data.error);
-        loadNetworkTools();
-    } else {
-        alert("Ошибка настройки каскада. Проверьте логи.");
-    }
-}
+            <!-- ОБФУСКАЦИЯ -->
+            <div id="tab-obf" class="tab-pane">
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Защита от DPI в один клик</h3>
+                            <p>Панель сгенерирует уникальные H1–H4, S, HPK, таймеры и CPS-цепочки I1–I5.</p>
+                        </div>
+                        <span class="badge badge-good">AWG 3.1</span>
+                    </div>
+                    <div class="hero-actions" style="margin-top:0;">
+                        <button class="btn btn-primary" onclick="openWizard('obf')">✦ Усилить обфускацию</button>
+                        <button class="btn btn-soft" onclick="openObfTab(); loadObfCurrent()">Перепроверить</button>
+                        <button class="btn btn-ghost" onclick="setExpert(true); setTimeout(()=>document.getElementById('obfImportText')?.scrollIntoView({behavior:'smooth',block:'center'}),150)">Импорт из Архитектора</button>
+                    </div>
+                </div>
 
-async function toggleDns(enable) {
-    const checkedIfaces = Array.from(document.querySelectorAll('.dns-check:checked')).map(cb => cb.value);
-    const target = document.getElementById('dnsTarget').value;
-    if (enable && checkedIfaces.length === 0) return alert("Выберите хотя бы один интерфейс для перехвата DNS");
-    if (enable && !target) return alert("Укажите IP-адрес DNS сервера");
-    document.getElementById('dnsStatus').innerText = "Применение...";
-    const res = await fetch('/api/tools/dns', { 
-        method: 'POST', 
-        headers: {'Content-Type':'application/json'}, 
-        body: JSON.stringify({
-            enable, 
-            ifaces: checkedIfaces, 
-            target, 
-            oldIfaces: window.currentDnsIfaces, 
-            oldTarget: window.currentDnsTarget
-        }) 
-    });
-    if (res.ok) loadNetworkTools();
-}
+                <div class="card" style="margin-bottom:20px;">
+                    <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
+                        <div id="obfScoreRing" style="width:104px; height:104px; border-radius:50%; background:conic-gradient(#30363d 0deg, #30363d 360deg); display:flex; align-items:center; justify-content:center; flex:0 0 auto;">
+                            <div style="width:82px; height:82px; border-radius:50%; background:#0d1117; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                                <span id="obfScoreValue" style="font-size:26px; font-weight:bold; line-height:1;">—</span>
+                                <span style="font-size:9px; color:var(--text-muted); margin-top:3px;">/ 100</span>
+                            </div>
+                        </div>
+                        <div style="flex:1; min-width:260px;">
+                            <h3 style="margin:0 0 6px;">Устойчивость к ТСПУ / DPI</h3>
+                            <div id="obfVerdict" style="font-size:15px; font-weight:bold; color:var(--text-muted);">Проверка текущих параметров...</div>
+                            <div id="obfMeta" style="font-size:12px; color:var(--text-muted); margin-top:6px;"></div>
+                        </div>
+                        <button class="btn-dark" onclick="loadObfCurrent()">🔄 Перепроверить</button>
+                    </div>
+                    <div id="obfFindings" style="margin-top:16px; display:grid; gap:8px;"></div>
+                    <details style="margin-top:14px;">
+                        <summary style="cursor:pointer; color:#79c0ff; font-size:13px;">Почему стандартная обфускация распознаётся и что меняет Архитектор</summary>
+                        <div style="margin-top:10px; font-size:13px; color:var(--text-muted); line-height:1.55;">
+                            <p style="margin:0 0 8px;">Обычный WireGuard имеет фиксированный первый байт типа сообщения и предсказуемые размеры: 148 байт на handshake initiation, 92 на response. DPI определяет протокол по первому пакету. Стандартные <code>H1=1, H2=2, H3=3, H4=4</code> — это те же типы сообщений, только переименованные, поэтому они не защищают.</p>
+                            <p style="margin:0 0 8px;">AmneziaWG 2.0+ умеет выбирать <b>H1–H4 из диапазонов</b> (заголовок меняется от пакета к пакету), 3.0 добавляет <b>шифрование заголовков</b> (HeaderProtectionKey), случайный паддинг и таймеры, 3.1 — случайные хвосты и отказ от cookie. <b>I1–I5</b> имитируют QUIC/TLS/STUN до рукопожатия — это и есть CPS-мимикрия.</p>
+                            <p style="margin:0;">Архитектор генерирует именно такой набор. Панель импортирует его и применяет к серверу, а клиентов перегенерирует. Если провайдер блокирует сам IP (а не протокол), обфускация не поможет — нужен другой адрес или хостинг.</p>
+                        </div>
+                    </details>
+                </div>
 
-function showDashboard() {
-    document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('dashboardScreen').style.display = 'flex';
-    if(!trafficChart) initChart();
-    loadNetworkTools(); loadUfwData(); loadHistory(); loadStats(); loadServerInfo(); loadAwgConfig();
-    if (!pollingInterval) pollingInterval = setInterval(loadStats, 2000);
-    if (!historyInterval) historyInterval = setInterval(loadHistory, 10000);
-}
+                <div class="card advanced-only" style="margin-bottom:20px;">
+                    <h3 style="margin-top:0;">Профили обфускации</h3>
+                    <p style="color:var(--text-muted); font-size:13px; margin-top:0;">
+                        Встроенные наборы и сохранённые вручную. Для обхода ТСПУ используйте импорт из Архитектора:
+                        встроенные профили оставлены для совместимости и быстрой проверки.
+                    </p>
+                    <div class="controls-row" style="margin-bottom:0;">
+                        <select id="obfProfileSelect" style="min-width:340px;"><option value="">Загрузка профилей...</option></select>
+                        <button class="btn-success" style="background:#2ea043;" onclick="applyObfProfile()">✅ Применить</button>
+                        <button class="btn-dark" onclick="saveObfProfile()">💾 Сохранить текущие как профиль</button>
+                        <button class="btn-danger" onclick="deleteObfProfile()">🗑 Удалить</button>
+                    </div>
+                    <div id="obfProfileHint" style="margin-top:10px; font-size:12px; color:var(--text-muted);"></div>
+                    <div id="obfProfileResult" style="margin-top:12px; font-size:13px;"></div>
+                </div>
 
-function showLogin() {
-    document.getElementById('loginScreen').style.display = 'flex';
-    document.getElementById('dashboardScreen').style.display = 'none';
-    if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
-    if (historyInterval) { clearInterval(historyInterval); historyInterval = null; }
-    if (agInterval) { clearInterval(agInterval); agInterval = null; }
-}
+                <div class="card advanced-only" style="margin-bottom:20px;">
+                    <h3 style="margin-top:0;">Интеграция с Архитектором</h3>
+                    <p style="color:var(--text-muted); font-size:13px; margin-top:0;">
+                        Сайт генерирует конфигурацию полностью в браузере. Панель не отправляет ему ключи и параметры —
+                        вы просто переносите готовый текст. Импортируются только параметры обфускации, ключи и адреса остаются вашими.
+                    </p>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; margin:16px 0;">
+                        <div style="background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:8px; padding:12px;">
+                            <div style="font-size:12px; color:#79c0ff; font-weight:bold; margin-bottom:6px;">1. Сгенерировать</div>
+                            <div style="font-size:12px; color:var(--text-muted); line-height:1.5;">Откройте Архитектор, выберите <b>AWG 3.1</b>, профиль <b>QUIC Initial</b> (или TLS 1.3), интенсивность <b>medium/high</b>. Клиент — <b>AmneziaWG Android</b>, чтобы в конфиг попал HeaderProtectionKey.</div>
+                            <a class="btn-dark" href="https://architect.vai-rice.space/amneziawg/" target="_blank" rel="noopener" style="text-decoration:none; padding:7px 12px; display:inline-block; margin-top:10px;">🧩 Открыть Архитектор</a>
+                        </div>
+                        <div style="background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:8px; padding:12px;">
+                            <div style="font-size:12px; color:#79c0ff; font-weight:bold; margin-bottom:6px;">2. Скопировать</div>
+                            <div style="font-size:12px; color:var(--text-muted); line-height:1.5;">Нажмите <b>Copy .conf</b> (не YAML) или скачайте <b>JSON</b>. Если конфигов несколько (batch), панель возьмёт первый, остальные покажет как альтернативы.</div>
+                            <button class="btn-dark" style="margin-top:10px;" onclick="copyObfCurrentConf()">📋 Скопировать текущий .conf</button>
+                        </div>
+                        <div style="background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:8px; padding:12px;">
+                            <div style="font-size:12px; color:#79c0ff; font-weight:bold; margin-bottom:6px;">3. Проверить и применить</div>
+                            <div style="font-size:12px; color:var(--text-muted); line-height:1.5;">Вставьте текст ниже. Панель покажет версию AWG, оценку устойчивости и различия, затем сделает резервную копию и перегенерирует клиентов.</div>
+                        </div>
+                    </div>
 
-async function login() {
-    const pass = document.getElementById('authPassword').value;
-    const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pass }) });
-    if (res.ok) { document.getElementById('loginError').style.display = 'none'; document.getElementById('authPassword').value = ''; showDashboard(); }
-    else document.getElementById('loginError').style.display = 'block';
-}
+                    <textarea id="obfImportText" rows="11" spellcheck="false" placeholder="# AmneziaWG 3.1&#10;[Interface]&#10;H1 = 511866868-511879290&#10;...&#10;&#10;или JSON из кнопки Download JSON, или vpn://" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:12px; background:rgba(0,0,0,.3); color:#c9d1d9; border:1px solid var(--border); border-radius:6px; padding:10px; resize:vertical;"></textarea>
+                    <div class="controls-row" style="margin-top:12px;">
+                        <button class="btn-dark" onclick="pasteObfFromClipboard()">📋 Вставить из буфера</button>
+                        <button class="btn-primary" onclick="analyzeObf()">🔍 Проверить</button>
+                        <button class="btn-dark" onclick="document.getElementById('obfImportText').value=''; document.getElementById('obfPreview').innerHTML=''; obfLastAnalysis=null;">Очистить</button>
+                        <button class="btn-dark" id="obfSaveImportBtn" style="display:none;" onclick="saveObfImportAsProfile()">💾 Сохранить как профиль</button>
+                    </div>
+                    <div id="obfPreview" style="margin-top:14px; font-size:13px;"></div>
+                </div>
 
-async function logout() { await fetch('/api/logout', { method: 'POST' }); showLogin(); }
+                <div class="card advanced-only">
+                    <h3 style="margin-top:0;">Применение</h3>
+                    <label style="display:flex; align-items:center; gap:8px; margin-top:4px; font-size:13px; cursor:pointer;">
+                        <input type="checkbox" id="obfRegenClients" checked> Перегенерировать конфиги всех клиентов (обязательно, иначе они потеряют связь)
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; margin-top:8px; font-size:13px; cursor:pointer;">
+                        <input type="checkbox" id="obfRemoveMissing" checked> Удалить параметры, которых нет в импорте (нужно при смене версии AWG)
+                    </label>
+                    <div style="margin-top:14px; background:rgba(255,127,80,.08); border:1px solid #ff7b72; border-radius:6px; padding:10px; font-size:12px; color:#ffb3ad;">
+                        ⚠️ После смены H1–H4, S1–S4 или HeaderProtectionKey все клиенты должны заново импортировать свои конфиги. Панель пересоберёт файлы, но старые копии на устройствах перестанут работать. Jc/Jmin/Jmax и I1–I5 — клиентские: их можно менять без перевыпуска ключей, но панель всё равно перегенерирует файлы для единообразия.
+                    </div>
+                    <div class="controls-row" style="margin-top:14px; margin-bottom:0;">
+                        <button class="btn-primary" onclick="applyObf()">🚀 Применить и перегенерировать</button>
+                        <a class="btn-dark" href="/api/obf/export?format=conf" style="text-decoration:none; padding:8px 14px;">⬇️ Текущий .conf</a>
+                        <a class="btn-dark" href="/api/obf/export?format=json" style="text-decoration:none; padding:8px 14px;">⬇️ JSON</a>
+                    </div>
+                    <div id="obfResult" style="margin-top:12px; font-size:13px;"></div>
+                </div>
 
-async function restoreBackup(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    if (!confirm(`Вы уверены, что хотите восстановить панель из файла "${file.name}"?`)) { event.target.value = ''; return; }
-    document.getElementById('loaderOverlay').style.display = 'flex';
-    const reader = new FileReader();
-    reader.onload = async function(e) {
-        const base64data = e.target.result.split(',')[1];
-        try {
-            const res = await fetch('/api/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileData: base64data }) });
-            if (res.ok) { document.getElementById('loaderText').innerText = "Успешно! Перезапуск..."; setTimeout(() => { window.location.reload(); }, 3500); } 
-            else { const err = await res.json(); alert("Ошибка восстановления: " + err.error); document.getElementById('loaderOverlay').style.display = 'none'; }
-        } catch(err) { alert("Сетевая ошибка при загрузке бэкапа"); document.getElementById('loaderOverlay').style.display = 'none'; }
-        event.target.value = '';
-    };
-    reader.readAsDataURL(file);
-}
+                <div class="card advanced-only" style="margin-top:20px;">
+                    <h3 style="margin-top:0;">Параметры обфускации сервера</h3>
+                    <p style="color:var(--text-muted); font-size:13px; margin-top:0;">Текущие значения из <code>[Interface]</code> серверного конфига. Общие параметры должны совпадать у сервера и клиентов.</p>
+                    <div id="obfCurrent" style="display:flex; flex-wrap:wrap; gap:8px;">Загрузка...</div>
+                </div>
+            </div>
 
-async function loadStats() {
-    if (isFetching) return;
-    isFetching = true;
-    try {
-        const [resStats, resSys] = await Promise.all([ fetch('/api/stats'), fetch('/api/sysinfo') ]);
-        if (resStats.status === 401 || resSys.status === 401) { showLogin(); isFetching = false; return; }
-        
-        if (resSys.ok) {
-            const sys = await resSys.json();
-            document.getElementById('sysCpu').innerText = sys.cpu + '%'; document.getElementById('sysRam').innerText = sys.ram + '%'; document.getElementById('sysUptime').innerText = sys.uptime;
-            if (sys.disk && sys.disk.total > 0) { 
-                document.getElementById('diskUsed').innerText = formatBytes(sys.disk.used); 
-                document.getElementById('diskFree').innerText = formatBytes(sys.disk.free); 
-                document.getElementById('diskTotal').innerText = formatBytes(sys.disk.total); 
-            }
-        }
+            <!-- ОБНОВЛЕНИЕ -->
+            <div id="tab-update" class="tab-pane">
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Обновление панели</h3>
+                            <p>Безопасная замена кода с резервной копией и автоматическим откатом.</p>
+                        </div>
+                        <button class="btn btn-ghost" onclick="loadUpdatePanel(true)">↻ Проверить</button>
+                    </div>
+                    <div id="updInfo" class="update-grid">Загрузка...</div>
+                    <div class="update-safe">
+                        🛡 Обновление не изменяет <b>/etc/amnezia/amneziawg/*.conf</b>,
+                        <b>/root/awg/awg-routing.sh</b>, iptables/ipset/ip rule, systemd-юниты каскада,
+                        nginx, fail2ban и AdGuard. Пароль, клиенты, 2FA, профили обфускации,
+                        бэкапы и сессии сохраняются.
+                    </div>
+                </div>
 
-        const data = await resStats.json();
-        const tbody = document.getElementById('clientsTable'); const now = Date.now();
-        let totalRx = 0, totalTx = 0, totalRxSpeed = 0, totalTxSpeed = 0; let activeCount = 0;
+                <div class="card" style="margin-bottom:20px;">
+                    <h3 style="margin-top:0;">Установить новую версию</h3>
+                    <p style="color:var(--text-muted); font-size:13px; margin-top:0;">
+                        Скачайте релиз <code>servpanel-*.tar.gz</code> и загрузите его сюда.
+                        Перед заменой панель проверит архив, поставит зависимости во временный каталог
+                        и запустит новую версию на копии данных и отдельном порту.
+                    </p>
+                    <div class="controls-row" style="align-items:center;">
+                        <input type="file" id="updFile" accept=".tar.gz,.tgz,application/gzip" style="max-width:360px;">
+                        <button class="btn btn-primary" id="updUploadBtn" onclick="updUpload()">⬆ Установить из файла</button>
+                    </div>
+                    <div class="update-source">
+                        <span>Или ссылка на релиз:</span>
+                        <input type="text" id="updUrl" placeholder="https://example.com/servpanel-2.4.0.tar.gz" style="flex:1; min-width:240px;">
+                        <button class="btn btn-dark" id="updUrlBtn" onclick="updFromUrl()">Установить по URL</button>
+                    </div>
+                    <div class="update-source">
+                        <span>GitHub:</span>
+                        <button class="btn btn-dark" id="updGitCheckBtn" onclick="updGitCheck()">Проверить обновления</button>
+                        <button class="btn btn-primary" id="updGitBtn" onclick="updGitRun()">Обновить с GitHub</button>
+                    </div>
+                    <div id="updGitResult" class="update-note" style="display:none;"></div>
+                    <p style="color:var(--text-dim); font-size:11.5px; line-height:1.5; margin:10px 0 0;">
+                        GitHub-режим работает, только если файлы панели совпадают с репозиторием
+                        (нет локальных изменений). После установки релиза из файла используйте файл —
+                        это надёжнее и не требует push-доступа.
+                    </p>
+                    <div id="updStatus" class="update-status">Готово к обновлению.</div>
+                    <pre id="updLog" class="update-log" style="display:none;"></pre>
+                </div>
 
-        let enrichedData = data.map(client => {
-            let rxSpeed = 0, txSpeed = 0;
-            if (lastStats[client.name]) {
-                const prev = lastStats[client.name]; const timeDiffSec = (now - prev.time) / 1000;
-                if (timeDiffSec > 0 && client.rx >= prev.rx) { rxSpeed = (client.rx - prev.rx) / timeDiffSec; txSpeed = (client.tx - prev.tx) / timeDiffSec; }
-            }
-            lastStats[client.name] = { rx: client.rx, tx: client.tx, time: now };
-            totalRx += client.rx; totalTx += client.tx; totalRxSpeed += rxSpeed; totalTxSpeed += txSpeed;
-            
-            if (client.status_code === 'active' || client.status_code === 'recent') activeCount++;
-            return { ...client, rxSpeed, txSpeed, totalTraffic: (client.rx || 0) + (client.tx || 0), totalSpeed: rxSpeed + txSpeed };
-        });
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Резервные копии панели</h3>
+                            <p>Создаются автоматически перед каждым обновлением.</p>
+                        </div>
+                    </div>
+                    <div id="updBackups" class="update-backups">Загрузка...</div>
+                </div>
+            </div>
 
-        enrichedData.sort((a, b) => {
-            let valA, valB;
-            if (sortCol === 'name') {
-                valA = a.name.toLowerCase(); valB = b.name.toLowerCase();
-            } else if (sortCol === 'status') {
-                const score = s => s === 'active' ? 2 : (s === 'recent' ? 1 : 0);
-                valA = score(a.status_code); valB = score(b.status_code);
-            } else if (sortCol === 'traffic') {
-                valA = a.totalTraffic; valB = b.totalTraffic;
-            } else if (sortCol === 'speed') {
-                valA = a.totalSpeed; valB = b.totalSpeed;
-            }
-            if (valA < valB) return sortDesc ? 1 : -1;
-            if (valA > valB) return sortDesc ? -1 : 1;
-            return 0;
-        });
+            <!-- АДМИНИСТРИРОВАНИЕ -->
+            <div id="tab-admin" class="tab-pane">
+                <div class="card" style="margin-bottom:20px;">
+                    <h3 style="margin-top:0;">Двухфакторная аутентификация (TOTP)</h3>
+                    <div id="twoFaStatus" style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">Проверка...</div>
+                    <div id="twoFaSetup" style="display:none; background:rgba(0,0,0,.2); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:12px;">
+                        <p style="margin-top:0; font-size:13px; color:var(--text-muted);">
+                            Отсканируйте QR в Google Authenticator / Aegis / 1Password и введите код.
+                        </p>
+                        <img id="twoFaQr" alt="QR 2FA" style="width:200px; height:200px; background:#fff; padding:8px; border-radius:8px; display:none; margin:0 auto 12px;">
+                        <div style="font-family:monospace; font-size:12px; word-break:break-all; margin-bottom:10px;">Секрет: <span id="twoFaSecret">—</span></div>
+                        <div class="controls-row" style="margin-bottom:0;">
+                            <input type="text" id="twoFaCode" inputmode="numeric" placeholder="6 цифр" style="width:140px; letter-spacing:3px; text-align:center;">
+                            <button class="btn-success" style="background:#2ea043;" onclick="enable2fa()">Включить 2FA</button>
+                            <button class="btn-dark" onclick="cancel2faSetup()">Отмена</button>
+                        </div>
+                    </div>
+                    <div id="twoFaRecovery" style="display:none; background:rgba(210,153,34,.1); border:1px solid var(--sys-color); border-radius:8px; padding:12px; margin-bottom:12px; font-size:13px;">
+                        <b>Резервные коды</b> — сохраните их в надёжном месте. Каждый код одноразовый.
+                        <pre id="twoFaRecoveryList" style="margin:8px 0 0; white-space:pre-wrap; font-size:12px;"></pre>
+                    </div>
+                    <div class="controls-row" style="margin-bottom:0;">
+                        <button class="btn-primary" onclick="start2faSetup()">🔐 Настроить 2FA</button>
+                        <input type="password" id="twoFaDisablePass" placeholder="Пароль для отключения" style="width:220px;">
+                        <button class="btn-danger" onclick="disable2fa()">Отключить 2FA</button>
+                    </div>
+                </div>
 
-        enrichedData.forEach((client, idx) => {
-            const statusClass = client.status_code === 'active' ? 'status-active' : (client.status_code === 'recent' ? 'status-recent' : 'status-inactive');
-            const safeIpId = client.ip.replace(/\./g, '-');
-            
-            let tr = document.getElementById('row-' + client.name);
-            if (!tr) {
-                tr = document.createElement('tr'); tr.id = 'row-' + client.name;
-                tr.innerHTML = `
-                    <td class="idx-cell" style="text-align: center; color: var(--text-muted);"></td>
-                    <td><strong style="font-size:14px;">${client.name}</strong><br><span class="sub-text">${client.ip}</span></td> 
-                    <td><span class="st-cell ${statusClass}">${client.status}</span></td> 
-                    <td class="tr-cell"></td> 
-                    <td class="sp-cell"></td>
-                    <td><input type="number" id="limit-${safeIpId}" style="width:60px; padding:6px; margin-bottom:5px;" placeholder="Мб/с"><br><button class="btn-dark" style="padding:4px 10px; font-size:11px;" onclick="setLimit('${client.ip}')">Применить</button></td>
-                    <td><button class="btn-success" style="margin-bottom:5px; font-size:12px; padding:6px 10px; width:100%" onclick="window.location.href='/api/download/${client.name}'">Скачать Conf</button><br><button class="btn-danger" style="font-size:12px; padding:6px 10px; width:100%" onclick="deleteClient('${client.name}')">Удалить</button></td>
-                `;
-                tbody.appendChild(tr);
-            }
-            tr.querySelector('.idx-cell').innerText = idx + 1;
-            tr.querySelector('.st-cell').className = `st-cell ${statusClass}`;
-            tr.querySelector('.st-cell').innerText = client.status;
-            tr.querySelector('.tr-cell').innerHTML = `<span class="val-rx">↓ ${formatBytes(client.rx)}</span><br><span class="val-tx">↑ ${formatBytes(client.tx)}</span>`;
-            tr.querySelector('.sp-cell').innerHTML = `<div class="speed-cell"><span class="val-rx">↓ ${formatSpeed(client.rxSpeed)}</span> &nbsp;|&nbsp; <span class="val-tx">↑ ${formatSpeed(client.txSpeed)}</span></div>`;
-        });
+                <div class="card" style="margin-bottom:20px;">
+                    <h3 style="margin-top:0;">Пользователи и роли</h3>
+                    <p style="color:var(--text-muted); font-size:13px; margin-top:0;">
+                        <b>Администратор</b> может всё. <b>Только просмотр</b> видит статистику и статусы, но не может менять настройки,
+                        скачивать ключи/конфиги/бэкапы и смотреть журнал.
+                    </p>
+                    <div class="table-wrapper" style="margin-bottom:12px;">
+                        <table style="min-width:520px;">
+                            <thead><tr><th>Пользователь</th><th>Роль</th><th>2FA</th><th>Создан</th><th style="width:90px;">Удалить</th></tr></thead>
+                            <tbody id="usersTable"><tr><td colspan="5">Загрузка...</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div class="controls-row" style="margin-bottom:0;">
+                        <input type="text" id="newUserName" placeholder="Логин" style="width:140px;">
+                        <input type="password" id="newUserPass" placeholder="Пароль (10+ символов)" style="width:200px;">
+                        <select id="newUserRole" style="width:170px;">
+                            <option value="viewer">Только просмотр</option>
+                            <option value="admin">Администратор</option>
+                        </select>
+                        <button class="btn-primary" onclick="createUser()">Добавить</button>
+                    </div>
+                </div>
 
-        enrichedData.forEach(client => { const tr = document.getElementById('row-' + client.name); if(tr) tbody.appendChild(tr); });
+                <div class="card" style="margin-bottom:20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                        <h3 style="margin:0;">Журнал действий (аудит)</h3>
+                        <div class="controls-row" style="margin:0;">
+                            <button class="btn-dark" style="padding:6px 12px; font-size:12px;" onclick="loadAudit()">🔄 Обновить</button>
+                            <a class="btn-dark" href="/api/audit?format=csv" style="text-decoration:none; padding:6px 12px; font-size:12px;">⬇️ CSV</a>
+                        </div>
+                    </div>
+                    <div class="table-wrapper" style="margin-top:12px; max-height:400px; overflow:auto;">
+                        <table style="min-width:720px;">
+                            <thead><tr><th style="width:170px;">Время</th><th style="width:140px;">IP</th><th style="width:120px;">Пользователь</th><th>Действие</th></tr></thead>
+                            <tbody id="auditTable"><tr><td colspan="4">Загрузка...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
 
-        document.getElementById('totalClientsCount').innerText = enrichedData.length; 
-        document.getElementById('activeClientsCount').innerText = activeCount;
-        document.getElementById('globalTraffic').innerHTML = `<span class="val-rx">↓ ${formatBytes(totalRx)}</span> <span style="color:var(--text-muted)">|</span> <span class="val-tx">↑ ${formatBytes(totalTx)}</span>`;
-        document.getElementById('globalSpeed').innerHTML = `<span class="val-rx">↓ ${formatSpeed(totalRxSpeed)}</span> <span style="color:var(--text-muted)">|</span> <span class="val-tx">↑ ${formatSpeed(totalTxSpeed)}</span>`;
-    } catch (e) {}
-    isFetching = false;
-}
+                <div class="card" style="margin-bottom:20px;">
+                    <h3 style="margin-top:0;">Fail2ban</h3>
+                    <div id="f2bBox" style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">Проверка...</div>
+                    <div class="controls-row" style="margin-bottom:0;">
+                        <input type="text" id="f2bIp" placeholder="IP для разбана" style="width:180px;">
+                        <button class="btn-dark" onclick="unbanIp()">Разбанить</button>
+                    </div>
+                </div>
 
-async function createConfig() {
-    const name = document.getElementById('clientName').value; 
-    const count = document.getElementById('clientCount').value; 
-    const expires = document.getElementById('clientExpires').value;
-    
-    if(!name) return alert("Введите имя (префикс)");
-    
-    if (!count || parseInt(count) <= 1) {
-        // Одиночное создание (остается как было)
-        const res = await fetch('/api/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, expires }) });
-        if (res.ok) { 
-            const a = document.createElement('a'); 
-            a.href = window.URL.createObjectURL(await res.blob()); 
-            a.download = `Serv_${name}.conf`; 
-            a.click(); 
-            document.getElementById('clientName').value = ''; 
-            loadStats(); 
-        }
-    } else {
-        // Массовое создание (Прямое скачивание файлов вместо ZIP)
-        document.getElementById('loaderOverlay').style.display = 'flex'; 
-        document.getElementById('loaderText').innerText = "Генерация конфигов (около 1-2 сек на каждый)...";
-        
-        try {
-            const res = await fetch('/api/create-bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prefix: name, count: parseInt(count), expires }) });
-            if (res.ok) { 
-                const data = await res.json();
-                if (data.configs && data.configs.length > 0) {
-                    // Запускаем поочередное скачивание всех файлов
-                    data.configs.forEach((conf, index) => {
-                        // Задержка 300мс между скачиваниями, чтобы браузер (Chrome/Safari) не заблокировал их как спам-попапы
-                        setTimeout(() => {
-                            const blob = new Blob([conf.content], { type: 'text/plain' });
-                            const a = document.createElement('a');
-                            a.href = window.URL.createObjectURL(blob);
-                            a.download = `Serv_${conf.name}.conf`;
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                        }, index * 300);
-                    });
-                } else {
-                    alert("Конфиги не сгенерировались. Проверьте логи.");
-                }
-                
-                document.getElementById('clientName').value = ''; 
-                document.getElementById('clientCount').value = ''; 
-                loadStats(); 
-            } else {
-                alert('Ошибка массовой генерации на сервере');
-            }
-        } catch (e) {
-            alert('Сетевая ошибка');
-        }
-        document.getElementById('loaderOverlay').style.display = 'none';
-    }
-}
+                <div class="card" style="margin-bottom:20px;">
+                    <h3 style="margin-top:0;">Автоматические резервные копии</h3>
+                    <div id="backupBox" style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">Загрузка...</div>
+                    <div class="controls-row">
+                        <label style="display:flex; align-items:center; gap:6px; font-size:13px;"><input type="checkbox" id="bkEnabled"> Включить</label>
+                        <select id="bkSchedule" style="width:150px;"><option value="daily">Каждый день</option><option value="weekly">Раз в неделю</option></select>
+                        <input type="time" id="bkTime" style="width:110px;">
+                        <input type="number" id="bkKeep" min="1" max="60" placeholder="Хранить, шт" style="width:120px;">
+                        <label style="display:flex; align-items:center; gap:6px; font-size:13px;"><input type="checkbox" id="bkEncrypt"> Шифровать (AES-256)</label>
+                        <button class="btn-primary" onclick="saveBackupConfig()">Сохранить</button>
+                        <button class="btn-dark" onclick="runBackupNow()">▶️ Запустить сейчас</button>
+                    </div>
+                    <div class="controls-row" style="margin-top:10px;">
+                        <button class="btn-dark" onclick="showBackupPassword()">👁 Пароль шифрования</button>
+                        <a class="btn-dark" href="/api/backup/encrypted" style="text-decoration:none; padding:8px 14px;">⬇️ Скачать зашифрованный</a>
+                    </div>
+                    <div id="backupList" style="margin-top:12px; font-size:13px;"></div>
+                </div>
 
-async function deleteClient(name) {
-    if (!confirm(`Точно удалить клиента ${name}?`)) return;
-    const res = await fetch(`/api/delete/${name}`, { method: 'DELETE' });
-    if (res.ok) { delete lastStats[name]; document.getElementById('row-' + name).remove(); }
-}
+                <div class="card">
+                    <h3 style="margin-top:0;">Telegram-уведомления</h3>
+                    <div id="tgStatus" style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">Проверка...</div>
+                    <div class="controls-row" style="margin-bottom:0;">
+                        <input type="text" id="tgToken" placeholder="Токен бота (123456:ABC...)" style="width:320px;">
+                        <input type="text" id="tgChat" placeholder="chat_id (123456789)" style="width:170px;">
+                        <label style="display:flex; align-items:center; gap:6px; font-size:13px;"><input type="checkbox" id="tgEnabled"> Включить</label>
+                        <button class="btn-primary" onclick="saveTelegram()">Сохранить</button>
+                        <button class="btn-dark" onclick="testTelegram()">✉️ Тест</button>
+                    </div>
+                    <p style="color:var(--text-muted); font-size:12px; margin-bottom:0;">
+                        Панель пришлёт сообщение, когда каскад RU→EU упадёт, и когда восстановится. Повторные алерты — не чаще раза в 30 минут.
+                    </p>
+                </div>
+            </div>
 
-async function setLimit(ip) {
-    const rate = document.getElementById('limit-' + ip.replace(/\./g, '-')).value;
-    if (!rate) return alert("Введите скорость в Мбит/с");
-    const res = await fetch('/api/limit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip, rate: parseInt(rate) }) });
-    if (res.ok) alert(`Лимит для ${ip} установлен: ${rate} Mbit/s`);
-}
 
-loadStats();
-</script>
+            </div>
+        </div>
+    </div>
+
+    <!-- KEY / INFO MODAL -->
+    <div id="modalOverlay" class="modal-overlay" style="display:none;">
+        <div class="modal-card">
+            <header class="modal-head">
+                <h3 id="modalTitle">Заголовок</h3>
+                <button class="icon-btn" onclick="closeModal()" title="Закрыть">✕</button>
+            </header>
+            <div id="modalBody" class="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- WIZARD -->
+    <div id="wizardOverlay" class="modal-overlay" style="display:none;">
+        <div class="wizard">
+            <header class="wizard-head">
+                <div>
+                    <div class="eyebrow">МАСТЕР НАСТРОЙКИ</div>
+                    <h2 id="wizardTitle">Что настроить?</h2>
+                </div>
+                <button class="icon-btn" onclick="closeWizard()" title="Закрыть">✕</button>
+            </header>
+            <div class="wizard-progress"><div id="wizardProgressBar"></div></div>
+            <div class="wizard-body" id="wizardBody"></div>
+            <footer class="wizard-foot">
+                <button class="btn btn-ghost" id="wizardBack" onclick="wizardBack()">Назад</button>
+                <div class="wizard-foot-right">
+                    <span id="wizardHint" class="wizard-hint"></span>
+                    <button class="btn btn-primary" id="wizardNext" onclick="wizardNext()">Далее</button>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <!-- COMMAND PALETTE -->
+    <div id="paletteOverlay" class="modal-overlay" style="display:none;" onclick="if(event.target === this) closePalette()">
+        <div class="palette">
+            <div class="palette-input-row">
+                <span>⌕</span>
+                <input id="paletteInput" placeholder="Найти действие или раздел…" autocomplete="off" oninput="renderPalette()" onkeydown="paletteKey(event)">
+                <kbd>Esc</kbd>
+            </div>
+            <div id="paletteResults" class="palette-results"></div>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
 </body>
 </html>

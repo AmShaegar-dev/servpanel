@@ -1,0 +1,19 @@
+# Секреты и данные, которые не должны попадать в git
+admin_pass.txt
+.secrets.json
+.panel_port
+.panel_public_port
+.install_state.json
+.users.json
+.obf_profiles.json
+.notify.json
+.backup.json
+.backup_pass
+.sessions/
+servpanel_auth.log
+node_modules/
+npm-debug.log*
+*.log
+*.bak
+*.bak_*
+.DS_Store

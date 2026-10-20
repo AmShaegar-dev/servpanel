@@ -78,9 +78,9 @@ read -p "Установить AdGuard Home? [Y/n]: " INSTALL_ADGUARD < /dev/tty
 read -p "Установить MTProto FIX (by MEKO)? [Y/n]: " INSTALL_MTPROTO < /dev/tty
 
 echo -e "\n${CYAN}Настройка доступа к панели${NC}"
-ADMIN_PASS="admin123"
-echo "Для входа будет установлен пароль по умолчанию: $ADMIN_PASS"
-echo "Вы сможете изменить его позже прямо в веб-интерфейсе."
+ADMIN_PASS="${ADMIN_PASS:-$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)}"
+echo "Пароль администратора будет сохранён в /root/servpanel/admin_pass.txt (права 600)."
+echo "Его можно будет сменить позже прямо в веб-интерфейсе."
 
 echo -e "\nКак будем заходить в панель управления?"
 echo "1) По IP-адресу"
@@ -98,7 +98,7 @@ fi
 
 echo -e "\n${CYAN}[2/5] Обновление системы и установка пакетов...${NC}"
 apt-get update && apt-get upgrade -y
-apt-get install -y curl wget git ufw zip tar nginx certbot python3-certbot-nginx
+apt-get install -y curl wget git ufw zip tar nginx certbot python3-certbot-nginx sshpass ipset fail2ban openssl
 
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get install -y nodejs
@@ -135,17 +135,68 @@ git clone $GITHUB_REPO servpanel
 cd servpanel
 
 
-if [ "$ACCESS_TYPE" != "2" ]; then
-    echo "Применение кастомного порта $PANEL_PORT..."
-    sed -i "s/app.listen(3000/app.listen($PANEL_PORT/g" server.js
+if [ "$ACCESS_TYPE" == "2" ]; then
+    PANEL_INTERNAL_PORT=3000
+    PANEL_PUBLIC_PORT=$PANEL_PORT
+    PANEL_BIND_HOST=127.0.0.1
+else
+    PANEL_INTERNAL_PORT=$PANEL_PORT
+    PANEL_PUBLIC_PORT=$PANEL_PORT
+    PANEL_BIND_HOST=0.0.0.0
 fi
 
+# Порты хранятся в файлах: обновление панели больше не сбрасывает кастомный порт
+echo "$PANEL_INTERNAL_PORT" > .panel_port
+echo "$PANEL_PUBLIC_PORT" > .panel_public_port
+
+# Пароль администратора (генерируется при установке, больше не admin123)
+printf '%s\n' "$ADMIN_PASS" > admin_pass.txt
+chmod 600 admin_pass.txt
+
 echo "Установка Node.js зависимостей..."
-npm install
+npm install --omit=dev
 npm install -g pm2
 
+# --- Fail2ban: журнал входов панели и готовый jail -------------------------
+mkdir -p /var/log /root/backups
+touch /var/log/servpanel_auth.log
+chmod 640 /var/log/servpanel_auth.log
+chmod 700 /root/backups
+if command -v fail2ban-client >/dev/null 2>&1; then
+    cat > /etc/fail2ban/filter.d/servpanel.conf << 'EOF'
+[Definition]
+failregex = FAILED LOGIN from <HOST>
+ignoreregex =
+EOF
+    cat > /etc/fail2ban/jail.d/servpanel.local << 'EOF'
+[servpanel]
+enabled = true
+port = http,https
+filter = servpanel
+logpath = /var/log/servpanel_auth.log
+maxretry = 5
+findtime = 10m
+bantime = 1h
+EOF
+    systemctl enable fail2ban >/dev/null 2>&1 || true
+    systemctl restart fail2ban || true
+    echo "Fail2ban: jail servpanel включён (5 попыток -> бан на 1 час)"
+fi
+# Ротация журналов панели
+cat > /etc/logrotate.d/servpanel << 'EOF'
+/var/log/servpanel_auth.log /var/log/awg_audit.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+
 echo "Запуск бекенда панели..."
-pm2 start server.js --name awg-admin
+PANEL_HOST=$PANEL_BIND_HOST PANEL_PORT=$PANEL_INTERNAL_PORT PANEL_PUBLIC_PORT=$PANEL_PUBLIC_PORT pm2 start server.js --name awg-admin --update-env
 pm2 save
 pm2 startup
 
@@ -171,6 +222,9 @@ server {
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_cache_bypass \$http_upgrade;
     }
 }
@@ -200,4 +254,5 @@ else
     echo -e "Доступ по ссылке: http://$SERVER_IP:$PANEL_PORT"
 fi
 
-echo -e "Ваш пароль для входа: $ADMIN_PASS"
+echo -e "\n${GREEN}Пароль для входа в панель: ${CYAN}${ADMIN_PASS}${NC}"
+echo -e "Он сохранён в файле: /root/servpanel/admin_pass.txt"

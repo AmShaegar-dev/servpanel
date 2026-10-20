@@ -1,16 +1,30 @@
 {
-  "name": "awg-admin",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "servpanel",
+  "version": "2.4.0",
+  "description": "Servpanel — web panel for AmneziaWG, RU->EU cascade, AdGuard Home, clients, security and backups",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "test": "npm run check && node --test tests/api.test.js",
+    "check": "node --check server.js && node --check public/app.js && node --check lib/updater.js && node --check lib/update-worker.js"
   },
-  "keywords": [],
+  "keywords": [
+    "amneziawg",
+    "vpn",
+    "adguard",
+    "cascade",
+    "panel",
+    "2fa",
+    "totp"
+  ],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "express": "^5.3.0",
-    "express-session": "^1.19.0"
+    "express-session": "^1.19.0",
+    "qrcode": "^1.5.4"
   }
 }
