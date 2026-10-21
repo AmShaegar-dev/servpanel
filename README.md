@@ -224,7 +224,7 @@ pm2 save && pm2 startup
   * `/root/awg/<имя>.png` и `<имя>.vpnuri` — QR-код и текстовая ссылка `vpn://` для быстрого импорта в AmneziaVPN.
 
 ### 3. Сетевые утилиты и Службы
-* `/root/awg/ru-drop.sh` и `/etc/cron.d/ru-drop-refresh` — Скрипт и cron-задача блокировки исходящего трафика на российские IP-диапазоны через `ipset` (`ru_block`) для защиты сервера от жалоб и сканирования. Источник можно выбрать: OpenCCK Russia (CIDR), Antifilter/ipdeny, свой URL или загруженный файл. Из файла любого текстового формата (TXT, CSV, JSON, ipset) автоматически извлекаются IPv4/CIDR.
+* `/root/awg/ru-drop.sh` и `/etc/cron.d/ru-drop-refresh` — Скрипт и cron-задача блокировки исходящего трафика на российские IP-диапазоны через `ipset` (`ru_block`) для защиты сервера от жалоб и сканирования. Источник можно выбрать: OpenCCK Russia (CIDR российских сервисов: Сбер, VK, Яндекс, Ozon и др.), Antifilter/ipdeny (полная зона РФ), свой URL или загруженный файл. Длинные OpenCCK-ссылки с `site=...` поддерживаются (до 8192 символов). Из файла любого текстового формата (TXT, CSV, JSON, ipset) автоматически извлекаются IPv4/CIDR.
 * `/root/awg-limit.sh` — Скрипт шейпера трафика (`tc`) для ограничения скорости конкретным IP-адресам клиентов.
 * `/etc/sysctl.d/99-amneziawg-security.conf` — Тюнинг ядра Linux (IP forwarding, TCP BBR, сетевые буферы).
 * `/opt/AdGuardHome/AdGuardHome.yaml` — Конфигурационный файл DNS-сервера AdGuard Home.
@@ -376,10 +376,10 @@ WARP не устанавливается автоматически. На вкл
 «Обновить с GitHub» **не нажимайте**. Первый переход выполняется один раз:
 
 ```bash
-scp servpanel-2.4.3.tar.gz root@<IP>:/root/
+scp servpanel-2.4.4.tar.gz root@<IP>:/root/
 ssh root@<IP>
-cd /root && tar -xzf servpanel-2.4.3.tar.gz
-bash /root/servpanel-2.4.3/upgrade.sh
+cd /root && tar -xzf servpanel-2.4.4.tar.gz
+bash /root/servpanel-2.4.4/upgrade.sh
 ```
 
 Скрипт проверит новую версию на копии данных и отдельном порту, сделает

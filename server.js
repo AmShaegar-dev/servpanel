@@ -176,6 +176,19 @@ function shTry(cmd, args = [], opts = {}) {
     try { return sh(cmd, args, opts); }
     catch (e) { return String(e.stdout || ''); }
 }
+// Панель обычно работает от root через pm2. Если sudo не установлен или
+// настроен с паролем, вызовы через sudo ломают даже простые операции.
+const IS_ROOT = typeof process.getuid === 'function' && process.getuid() === 0;
+function rootSh(cmd, args = [], opts = {}) {
+    return IS_ROOT ? sh(cmd, args, opts) : sh('sudo', [cmd, ...args], opts);
+}
+function rootShTry(cmd, args = [], opts = {}) {
+    try { return rootSh(cmd, args, opts); }
+    catch (e) { return String(e.stdout || ''); }
+}
+function rootExecFile(cmd, args = [], opts = {}, cb) {
+    return IS_ROOT ? execFile(cmd, args, opts, cb) : execFile('sudo', [cmd, ...args], opts, cb);
+}
 function isActive(unit) {
     try { return sh('systemctl', ['is-active', unit]).trim(); }
     catch (e) { return String(e.stdout || 'inactive').trim() || 'inactive'; }
@@ -195,7 +208,10 @@ function writeRootFile(target, content, mode = '0644') {
     const tmp = path.join(os.tmpdir(), 'panel-' + crypto.randomBytes(8).toString('hex') + '.tmp');
     fs.writeFileSync(tmp, content, { mode: 0o600 });
     try {
-        sh('sudo', ['install', '-m', mode, '-o', 'root', '-g', 'root', tmp, target]);
+        // На минимальных VPS каталога /root/awg может не быть: создаём его
+        // заранее, иначе install падает и GeoIP показывает «Ошибка установки».
+        rootSh('mkdir', ['-p', path.dirname(target)], { timeout: 15000 });
+        rootSh('install', ['-m', mode, '-o', 'root', '-g', 'root', tmp, target]);
     } finally {
         try { fs.unlinkSync(tmp); } catch (e) { /* ignore */ }
     }
@@ -254,6 +270,22 @@ function parseIpList(text) {
         if (seen.size > 2000000) break;
     }
     return [...seen];
+}
+
+// URL списка GeoIP. OpenCCK умеет длинные ссылки с десятками site=...,
+// поэтому старый лимит в 300 символов здесь не подходит.
+function validGeoUrl(value) {
+    const s = String(value == null ? '' : value).trim();
+    if (s.length < 10 || s.length > 8192) return false;
+    if (/\s/.test(s)) return false;
+    // URL подставляется в bash-массив в двойных кавычках; $, `, \, " запрещены.
+    if (!/^https:\/\/[A-Za-z0-9._~:/?#\[\]@!&'()*+,;=%-]+$/.test(s)) return false;
+    try {
+        const u = new URL(s);
+        return u.protocol === 'https:' && !!u.hostname && !u.username && !u.password;
+    } catch (e) {
+        return false;
+    }
 }
 
 // --- WARP + Xray: конфигурация и список доменов для AdGuard -----------------
@@ -1551,7 +1583,7 @@ function cascadeDetails() {
     } catch (e) { /* ignore */ }
     // Маршрутизация: интерфейсы, ipset, ip rule, таблица
     try {
-        const mangle = shTry('sudo', ['iptables', '-t', 'mangle', '-S', 'PREROUTING']);
+        const mangle = rootShTry('iptables', ['-t', 'mangle', '-S', 'PREROUTING']);
         const matches = [...mangle.matchAll(/-A PREROUTING.*?-i\s+(\S+).*?(?:--set-xmark|--set-mark)\s+0x1/g)];
         out.ifaces = [...new Set(matches.map(m => m[1]))];
     } catch (e) { /* ignore */ }
@@ -1641,9 +1673,9 @@ app.delete('/api/ufw/:id', checkAuth, (req, res) => {
 app.get('/api/tools/status', checkAuth, (req, res) => {
     let ruCount = 0, ruActive = false, ruIfaces = [], ruAllPorts = false;
     try {
-        const count = shTry('sudo', ['bash', '-c', "ipset list ru_block 2>/dev/null | grep -c '^[0-9]' || true"]).trim();
+        const count = rootShTry('bash', ['-c', "ipset list ru_block 2>/dev/null | grep -c '^[0-9]' || true"]).trim();
         ruCount = parseInt(count, 10) || 0;
-        const forward = shTry('sudo', ['iptables', '-S', 'FORWARD']);
+        const forward = rootShTry('iptables', ['-S', 'FORWARD']);
         // Ищем ru_block в любом месте правила: в режиме «только порты» перед
         // --match-set стоит -p tcp/udp, а не -m set сразу после -i.
         const matches = [...forward.matchAll(/-A FORWARD .*?-i\s+(\S+).*?--match-set ru_block/g)];
@@ -1657,7 +1689,7 @@ app.get('/api/tools/status', checkAuth, (req, res) => {
 
     let cascActive = false, cascIfaces = [];
     try {
-        const mangle = shTry('sudo', ['iptables', '-t', 'mangle', '-S', 'PREROUTING']);
+        const mangle = rootShTry('iptables', ['-t', 'mangle', '-S', 'PREROUTING']);
         const matches = [...mangle.matchAll(/-A PREROUTING.*?-i\s+(\S+).*?(?:--set-xmark|--set-mark)\s+0x1/g)];
         cascIfaces = [...new Set(matches.map(m => m[1]))];
         cascActive = cascIfaces.length > 0;
@@ -1665,7 +1697,7 @@ app.get('/api/tools/status', checkAuth, (req, res) => {
 
     let dnsActive = false, dnsTarget = '', dnsIfaces = [];
     try {
-        const nat = shTry('sudo', ['iptables', '-t', 'nat', '-S', 'PREROUTING']);
+        const nat = rootShTry('iptables', ['-t', 'nat', '-S', 'PREROUTING']);
         const dnat = [...nat.matchAll(/-A PREROUTING -i\s+(\S+).*?--dport 53 -j DNAT --to-destination\s+(\S+)/g)];
         const redirect = [...nat.matchAll(/-A PREROUTING -i\s+(\S+).*?--dport 53 -j REDIRECT --to-ports\s+(\d+)/g)];
         dnsIfaces = [...new Set([...dnat, ...redirect].map(m => m[1]))];
@@ -1696,11 +1728,11 @@ app.post('/api/tools/rudrop', checkAuth, (req, res) => {
     // портовые правила, иначе при повторном включении они дублируются.
     const removeRuRules = () => {
         try {
-            const forward = shTry('sudo', ['iptables', '-S', 'FORWARD']);
+            const forward = rootShTry('iptables', ['-S', 'FORWARD']);
             forward.split('\n').forEach(rule => {
                 if (rule.includes('ru_block')) {
                     const args = rule.replace(/^-A FORWARD /, '').split(/\s+/).filter(Boolean);
-                    if (args.length) { try { sh('sudo', ['iptables', '-D', 'FORWARD', ...args]); } catch (e) { /* ignore */ } }
+                    if (args.length) { try { rootSh('iptables', ['-D', 'FORWARD', ...args]); } catch (e) { /* ignore */ } }
                 }
             });
         } catch (e) { /* ignore */ }
@@ -1708,8 +1740,8 @@ app.post('/api/tools/rudrop', checkAuth, (req, res) => {
     removeRuRules();
 
     if (!enable) {
-        try { sh('sudo', ['rm', '-f', '/etc/cron.d/ru-drop-refresh', '/root/awg/ru-drop.sh']); } catch (e) { /* ignore */ }
-        try { sh('sudo', ['ipset', 'destroy', 'ru_block']); } catch (e) { /* ignore */ }
+        try { rootSh('rm', ['-f', '/etc/cron.d/ru-drop-refresh', '/root/awg/ru-drop.sh']); } catch (e) { /* ignore */ }
+        try { rootSh('ipset', ['destroy', 'ru_block']); } catch (e) { /* ignore */ }
         auditLog(req, 'GeoIP-блокировка выключена');
         return res.json({ success: true });
     }
@@ -1732,7 +1764,12 @@ app.post('/api/tools/rudrop', checkAuth, (req, res) => {
         fallbackUrls = [RU_GEOIP_SOURCES.opencck];
     } else if (listMode === 'custom') {
         if (!customUrl) return res.status(400).json({ error: 'Укажите URL списка' });
-        if (!/^https:\/\/[A-Za-z0-9./_%:?&=+-]{4,300}$/.test(customUrl)) return res.status(400).json({ error: 'Неверный URL списка' });
+        if (!validGeoUrl(customUrl)) {
+            return res.status(400).json({
+                error: 'Неверный URL списка',
+                detail: 'Нужен https:// URL без пробелов и кавычек, длиной до 8192 символов.'
+            });
+        }
         zoneUrl = customUrl;
         fallbackUrls = [];
         minValid = 1;
@@ -1825,8 +1862,16 @@ echo "OK"
 `;
     try {
         writeRootFile('/root/awg/ru-drop.sh', scriptContent, '0755');
-        writeRootFile('/etc/cron.d/ru-drop-refresh', cronContent, '0644');
-        execFile('sudo', ['/root/awg/ru-drop.sh'], { timeout: 180000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+        // Cron — только автообновление. Если /etc/cron.d недоступен, сама
+        // блокировка всё равно должна включиться, поэтому не валим запрос.
+        let cronWarning = '';
+        try {
+            writeRootFile('/etc/cron.d/ru-drop-refresh', cronContent, '0644');
+        } catch (e) {
+            cronWarning = String(e.stderr || e.message || '').trim().slice(-800) ||
+                'не удалось записать /etc/cron.d/ru-drop-refresh';
+        }
+        rootExecFile('/root/awg/ru-drop.sh', [], { timeout: 180000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
             if (err) {
                 let detail = String(stderr || stdout || err.message || '').trim();
                 if (!detail) {
@@ -1839,10 +1884,17 @@ echo "OK"
                 return res.status(500).json({ error: 'Ошибка загрузки базы GeoIP', detail });
             }
             auditLog(req, `GeoIP-блокировка включена для: ${ifaces.join(', ')}`);
-            res.json({ success: true });
+            const payload = { success: true };
+            if (cronWarning) {
+                payload.warning = 'Блокировка включена, но автообновление не настроено: ' + cronWarning;
+            }
+            res.json(payload);
         });
     } catch (e) {
-        res.status(500).json({ error: 'Ошибка установки скрипта' });
+        let detail = String(e.stderr || e.stdout || e.message || '').trim().slice(-1200);
+        if (!detail) detail = 'Не удалось записать /root/awg/ru-drop.sh.';
+        auditLog(req, `GeoIP-блокировка: ошибка установки скрипта ${detail}`.slice(0, 900));
+        res.status(500).json({ error: 'Ошибка установки скрипта', detail });
     }
 });
 
@@ -1886,7 +1938,7 @@ app.post('/api/tools/rudrop/upload', checkAuth, requireAdmin, (req, res) => {
 function removeDnsRules(iface, target) {
     if (!IFACE_RE.test(String(iface))) return;
     try {
-        const nat = shTry('sudo', ['iptables', '-t', 'nat', '-S', 'PREROUTING']);
+        const nat = rootShTry('iptables', ['-t', 'nat', '-S', 'PREROUTING']);
         nat.split('\n').forEach(rule => {
             if (!rule.startsWith('-A PREROUTING ') || !rule.includes('--dport 53')) return;
             if (!new RegExp(`-i\\s+${iface.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$)`).test(rule)) return;
@@ -1912,7 +1964,7 @@ function removeDnsRules(iface, target) {
         }
     }
     try {
-        const forward = shTry('sudo', ['iptables', '-S', 'FORWARD']);
+        const forward = rootShTry('iptables', ['-S', 'FORWARD']);
         forward.split('\n').forEach(rule => {
             if (!rule.startsWith('-A FORWARD ') || !rule.includes('--dport 853') || !rule.includes('-j DROP')) return;
             if (!new RegExp(`-i\\s+${iface.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$)`).test(rule)) return;
@@ -2114,7 +2166,7 @@ function teardownRouting() {
     try { sh('sudo', ['systemctl', 'stop', 'awg-routing.timer', 'awg-routing.service']); } catch (e) { /* ignore */ }
     try { sh('sudo', ['systemctl', 'disable', 'awg-routing.timer']); } catch (e) { /* ignore */ }
     try {
-        const mangle = shTry('sudo', ['iptables', '-t', 'mangle', '-S', 'PREROUTING']);
+        const mangle = rootShTry('iptables', ['-t', 'mangle', '-S', 'PREROUTING']);
         mangle.split('\n').forEach(rule => {
             if (rule.startsWith('-A PREROUTING') && (rule.includes('--set-xmark 0x1') || rule.includes('--set-mark 0x1') || rule.includes('match-set ru dst -j RETURN'))) {
                 const args = rule.replace(/^-A PREROUTING /, '').split(/\s+/).filter(Boolean);
@@ -4615,7 +4667,7 @@ module.exports._internals = {
     splitObfBatch, OBF_ALL_KEYS, OBF_SHARED_KEYS, generateObfProfile,
     totpAt, verifyTotp, base32Encode, base32Decode,
     newTotpSecret, otpauthUri, hashCode, makeUser, verifyUserPassword, safeEqual,
-    FileSessionStore, cascadeHealth, backupConfig, normalizeAgUrl, parseIpList
+    FileSessionStore, cascadeHealth, backupConfig, normalizeAgUrl, parseIpList, validGeoUrl
 };
 
 

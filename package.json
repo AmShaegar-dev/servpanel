@@ -1,6 +1,6 @@
 {
   "name": "servpanel",
-  "version": "2.4.3",
+  "version": "2.4.4",
   "description": "Servpanel — web panel for AmneziaWG, RU->EU cascade, AdGuard Home, clients, security and backups",
   "main": "server.js",
   "scripts": {

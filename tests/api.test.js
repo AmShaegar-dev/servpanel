@@ -527,6 +527,18 @@ test('GeoIP: файл любого формата разбирается в IPv4
     assert.deepEqual(list, ['5.8.75.0/24', '1.2.3.4', '10.0.0.0/8', '192.168.1.1', '192.168.1.5']);
 });
 
+test('GeoIP: длинный URL OpenCCK с site=... проходит валидацию', () => {
+    const base = 'https://russia.iplist.opencck.org/?format=text&data=cidr4';
+    const longUrl = base + Array.from({ length: 90 }, (_, i) => `&site=site${i}.ru`).join('') +
+        '&site=mailru%40cloud.mail.ru&site=vk%40vkvideo.ru';
+    assert.ok(longUrl.length > 300);
+    assert.equal(internals.validGeoUrl(longUrl), true);
+    assert.equal(internals.validGeoUrl('http://example.com/list.txt'), false);
+    assert.equal(internals.validGeoUrl('https://example.com/list.txt?x="bad"'), false);
+    assert.equal(internals.validGeoUrl('https://example.com/list.txt?x=$HOME'), false);
+    assert.equal(internals.validGeoUrl('https://example.com/list.txt?x=bad value'), false);
+});
+
 test('GeoIP: загрузка файла возвращает количество найденных адресов', async () => {
     const data = Buffer.from('1.2.3.4\n5.6.7.0/24\n999.1.1.1\n', 'utf8').toString('base64');
     const r = await request('/api/tools/rudrop/upload', jsonBody({ name: 'list.json', data }));

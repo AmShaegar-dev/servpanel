@@ -656,6 +656,7 @@ async function toggleRuDrop(enable) {
     const res = await fetch('/api/tools/rudrop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return alert((data.error || 'Ошибка настройки GeoIP-блокировки') + (data.detail ? '\n\n' + data.detail : ''));
+    if (data.warning) alert(data.warning);
     loadNetworkTools();
 }
 

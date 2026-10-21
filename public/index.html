@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="2.4.3">
+    <meta name="panel-version" content="2.4.4">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -534,11 +534,15 @@
                             
                             <label style="font-size: 11px; color: var(--text-muted);">Источник списка IP-адресов РФ</label>
                             <select id="ruDropListMode" style="width: 100%; margin-top: 3px; margin-bottom: 5px;" onchange="ruDropModeChanged()">
-                                <option value="opencck" selected>OpenCCK Russia — CIDR (рекомендуется)</option>
-                                <option value="standard">Antifilter / ipdeny (резервный)</option>
+                                <option value="opencck" selected>OpenCCK Russia — IP российских сервисов</option>
+                                <option value="standard">Antifilter / ipdeny — вся зона РФ (резервный)</option>
                                 <option value="custom">Свой URL</option>
                                 <option value="upload">Загрузить файл с IP-адресами</option>
                             </select>
+                            <div style="font-size:11px; line-height:1.45; color:var(--text-dim); margin:0 0 8px;">
+                                OpenCCK блокирует CIDR-зоны российских сервисов (Сбер, VK, Яндекс, Ozon и др.), а не все IP России.
+                                Для полной зоны страны выберите Antifilter / ipdeny.
+                            </div>
                             <input type="text" id="ruDropCustomUrl" placeholder="https://example.com/my-ru-list.txt" style="width: 100%; display: none; margin-bottom: 10px; box-sizing: border-box;">
                             <div id="ruDropFileBox" style="display:none; margin-bottom: 10px;">
                                 <input type="file" id="ruDropFile" onchange="uploadRuDropFile()"
@@ -1006,7 +1010,7 @@
                     </div>
                     <div class="update-source">
                         <span>Или ссылка на релиз:</span>
-                        <input type="text" id="updUrl" placeholder="https://example.com/servpanel-2.4.3.tar.gz" style="flex:1; min-width:240px;">
+                        <input type="text" id="updUrl" placeholder="https://example.com/servpanel-2.4.4.tar.gz" style="flex:1; min-width:240px;">
                         <button class="btn btn-dark" id="updUrlBtn" onclick="updFromUrl()">Установить по URL</button>
                     </div>
                     <div class="update-source">
