@@ -1894,6 +1894,27 @@ RU_ZONE="$AWG_DIR/ru-drop.zone"
 mkdir -p "$AWG_DIR"
 exec 9>"$AWG_DIR/ru-drop.lock"
 flock -n 9 || { echo "Уже запущен" >&2; exit 1; }
+
+# На минимальных образах ipset не установлен — ставим его сами.
+ensure_ipset() {
+  command -v ipset >/dev/null 2>&1 && return 0
+  echo "ipset не найден, устанавливаю..." >&2
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ipset || true
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y ipset || true
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y ipset || true
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache ipset || true
+  elif command -v pacman >/dev/null 2>&1; then
+    pacman -Sy --noconfirm ipset || true
+  fi
+  command -v ipset >/dev/null 2>&1
+}
+ensure_ipset || { echo "Не удалось установить ipset. Установите вручную: apt install ipset (или dnf install ipset)" >&2; exit 3; }
+
 if [ "$SOURCE_TYPE" = "file" ]; then
   [ -s "$RU_ZONE" ] || { echo "Файл списка не найден. Загрузите его заново." >&2; exit 2; }
   valid=$(grep -cE '^[0-9]{1,3}(\\.[0-9]{1,3}){3}(/[0-9]{1,2})?$' "$RU_ZONE" || true)
@@ -1963,7 +1984,8 @@ echo "OK"
             cronWarning = String(e.stderr || e.message || '').trim().slice(-800) ||
                 'не удалось записать /etc/cron.d/ru-drop-refresh';
         }
-        rootExecFile('/root/awg/ru-drop.sh', [], { timeout: 180000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+        // 5 минут: на минимальных образах первый запуск может доустанавливать ipset.
+        rootExecFile('/root/awg/ru-drop.sh', [], { timeout: 300000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
             if (err) {
                 let detail = String(stderr || stdout || err.message || '').trim();
                 if (!detail) {
