@@ -873,19 +873,72 @@ app.use('/api', (req, res, next) => {
 // ---------------------------------------------------------------------------
 // Сбор истории трафика
 // ---------------------------------------------------------------------------
-let historyData = { global: { labels: [], rx: [], tx: [] } };
+// Храним скорость (байт/с), а не метки времени с «плавающей» длиной массива.
+// Это даёт стабильное окно по времени и позволяет выбирать период.
+//
+// Две серии на каждый источник:
+//   short — шаг 10 секунд, глубина 24 часа;
+//   long  — шаг 5 минут, глубина 7 суток (строится сворачиванием старых short).
+// Отдаём в график не более 360 точек, усредняя по «корзинам», поэтому кривая
+// ровная, а число точек и подписи оси X не скачут от обновления к обновлению.
+const HISTORY_STEP_MS = 10000;                 // шаг сбора — 10 секунд
+const HISTORY_SHORT_POINTS = 8640;             // 24 часа по 10 секунд
+const HISTORY_LONG_BUCKET = 30;                // 30 сэмплов = 5 минут
+const HISTORY_LONG_POINTS = 2016;              // 7 суток по 5 минут
+const HISTORY_RANGES = { '5m': 300, '1h': 3600, '3h': 10800, '24h': 86400, '7d': 604800 };
+const HISTORY_RENDER_POINTS = 360;             // столько точек максимум рисует график
+const HISTORY_FILE = path.join(DATA_DIR, '.traffic_history.json');
+const HISTORY_SAVE_EVERY = 6;                  // сохранять файл раз в минуту
+
+let historyData = {};                          // { global: {short, long}, <client>: {short, long} }
 let lastHistoryStats = {};
-const MAX_HISTORY_POINTS = 360;
 let collectingHistory = false;
+let historySaveTick = 0;
+
+function historyEnsure(view) {
+    if (!historyData[view]) historyData[view] = { short: [], long: [] };
+    return historyData[view];
+}
+
+function historyPush(view, t, rx, tx) {
+    const h = historyEnsure(view);
+    h.short.push({ t, rx, tx });
+    if (h.short.length > HISTORY_SHORT_POINTS) {
+        // Самую старую пятёрку минут сворачиваем в одну точку длинной серии.
+        const chunk = h.short.splice(0, HISTORY_LONG_BUCKET);
+        const sum = chunk.reduce((a, s) => ({ rx: a.rx + s.rx, tx: a.tx + s.tx }), { rx: 0, tx: 0 });
+        h.long.push({ t: chunk[Math.floor(chunk.length / 2)].t, rx: sum.rx / chunk.length, tx: sum.tx / chunk.length });
+        if (h.long.length > HISTORY_LONG_POINTS) h.long.splice(0, h.long.length - HISTORY_LONG_POINTS);
+    }
+}
+
+function saveTrafficHistory() {
+    try {
+        const out = {};
+        for (const [k, v] of Object.entries(historyData)) out[k] = { short: v.short, long: v.long };
+        fs.writeFile(HISTORY_FILE, JSON.stringify(out), () => { /* ignore */ });
+    } catch (e) { /* ignore */ }
+}
+
+function loadTrafficHistory() {
+    try {
+        const parsed = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
+        const cutoff = Date.now() - HISTORY_RANGES['7d'] * 1000;
+        for (const [k, v] of Object.entries(parsed || {})) {
+            historyData[k] = {
+                short: (v.short || []).filter(s => s && s.t >= cutoff),
+                long: (v.long || []).filter(s => s && s.t >= cutoff)
+            };
+        }
+    } catch (e) { /* файла нет или он битый — начинаем с чистого листа */ }
+}
+
 if (DEMO_MODE) {
-    const t = Date.now();
-    for (let i = 29; i >= 0; i--) {
-        const d = new Date(t - i * 2 * 60 * 1000);
-        const label = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-        const wave = Math.sin((29 - i) / 4) * 0.35 + 0.75;
-        historyData.global.labels.push(label);
-        historyData.global.rx.push(Math.round(42 * 1024 * 1024 * wave));
-        historyData.global.tx.push(Math.round(12 * 1024 * 1024 * (1.1 - wave / 2)));
+    const now = Date.now();
+    const g = historyEnsure('global');
+    for (let i = 359; i >= 0; i--) {
+        const wave = Math.sin((359 - i) / 20) * 0.4 + 0.7;
+        g.short.push({ t: now - i * HISTORY_STEP_MS, rx: 3.5 * 1024 * 1024 * wave, tx: 900 * 1024 * (1.2 - wave / 2) });
     }
 }
 
@@ -898,43 +951,82 @@ function collectHistory() {
             const jsonStart = String(stdout || '').indexOf('[');
             if (jsonStart === -1) return;
             const data = JSON.parse(String(stdout).substring(jsonStart));
-            const now = new Date();
-            const timeLabel = String(now.getHours()).padStart(2, '0') + ':' +
-                String(now.getMinutes()).padStart(2, '0') + ':' + String(now.getSeconds()).padStart(2, '0');
-            let totalRxSpeed = 0, totalTxSpeed = 0;
+            const t = Date.now();
+            let totalRxSpeed = 0, totalTxSpeed = 0, counted = 0;
 
             data.forEach(client => {
-                let rxSpeed = 0, txSpeed = 0;
-                if (lastHistoryStats[client.name]) {
-                    const prev = lastHistoryStats[client.name];
-                    const dt = (now.getTime() - prev.time) / 1000;
-                    if (dt > 0 && client.rx >= prev.rx) {
-                        rxSpeed = (client.rx - prev.rx) / dt;
-                        txSpeed = (client.tx - prev.tx) / dt;
-                    }
-                }
-                lastHistoryStats[client.name] = { rx: client.rx, tx: client.tx, time: now.getTime() };
-                totalRxSpeed += rxSpeed;
-                totalTxSpeed += txSpeed;
-
-                if (!historyData[client.name]) historyData[client.name] = { labels: [], rx: [], tx: [] };
-                const h = historyData[client.name];
-                h.labels.push(timeLabel); h.rx.push(rxSpeed); h.tx.push(txSpeed);
-                if (h.labels.length > MAX_HISTORY_POINTS) { h.labels.shift(); h.rx.shift(); h.tx.shift(); }
+                const prev = lastHistoryStats[client.name];
+                lastHistoryStats[client.name] = { rx: client.rx, tx: client.tx, t };
+                // Первый замер клиента пропускаем: иначе рисуется ложный ноль.
+                if (!prev) return;
+                const dt = (t - prev.t) / 1000;
+                if (dt <= 0 || client.rx < prev.rx || client.tx < prev.tx) return;
+                const rxSpeed = (client.rx - prev.rx) / dt;
+                const txSpeed = (client.tx - prev.tx) / dt;
+                totalRxSpeed += rxSpeed; totalTxSpeed += txSpeed; counted++;
+                historyPush(client.name, t, rxSpeed, txSpeed);
             });
 
-            const g = historyData.global;
-            g.labels.push(timeLabel); g.rx.push(totalRxSpeed); g.tx.push(totalTxSpeed);
-            if (g.labels.length > MAX_HISTORY_POINTS) { g.labels.shift(); g.rx.shift(); g.tx.shift(); }
+            if (counted > 0) historyPush('global', t, totalRxSpeed, totalTxSpeed);
+            historySaveTick++;
+            if (historySaveTick % HISTORY_SAVE_EVERY === 0) saveTrafficHistory();
         } catch (e) { /* ignore */ }
     });
 }
 if (!TEST_MODE) {
+    loadTrafficHistory();
     collectHistory();
-    setInterval(collectHistory, 10000);
+    setInterval(collectHistory, HISTORY_STEP_MS);
 }
 
-app.get('/api/history', checkAuth, (req, res) => res.json(historyData));
+function historyFormatLabel(ms, rangeSec) {
+    const d = new Date(ms);
+    const p = n => String(n).padStart(2, '0');
+    if (rangeSec <= 300) return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    if (rangeSec <= 86400) return `${p(d.getHours())}:${p(d.getMinutes())}`;
+    return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// Усредняет точки по равным корзинам, чтобы на график ушло не больше maxPoints.
+function historyDownsample(samples, fromMs, toMs, maxPoints) {
+    const list = samples.filter(s => s && s.t >= fromMs && s.t <= toMs);
+    if (list.length <= maxPoints) return list;
+    const bucketMs = (toMs - fromMs) / maxPoints;
+    const out = [];
+    let curIdx = -1, sumRx = 0, sumTx = 0, cnt = 0, curT = 0;
+    for (const s of list) {
+        const idx = Math.max(0, Math.min(maxPoints - 1, Math.floor((s.t - fromMs) / bucketMs)));
+        if (idx !== curIdx) {
+            if (cnt) out.push({ t: curT, rx: sumRx / cnt, tx: sumTx / cnt });
+            curIdx = idx; sumRx = 0; sumTx = 0; cnt = 0;
+        }
+        sumRx += s.rx; sumTx += s.tx; cnt++; curT = s.t;
+    }
+    if (cnt) out.push({ t: curT, rx: sumRx / cnt, tx: sumTx / cnt });
+    return out;
+}
+
+app.get('/api/history', checkAuth, (req, res) => {
+    try {
+        const rangeKey = String(req.query.range || '1h');
+        const rangeSec = HISTORY_RANGES[rangeKey] || HISTORY_RANGES['1h'];
+        const view = String(req.query.view || 'global');
+        const h = historyData[view] || { short: [], long: [] };
+        // Выравниваем окно по сетке сбора, чтобы «корзины» не съезжали между
+        // обновлениями и подписи оси X не дёргались.
+        const toMs = Math.floor(Date.now() / HISTORY_STEP_MS) * HISTORY_STEP_MS;
+        const fromMs = toMs - rangeSec * 1000;
+        const points = historyDownsample(h.long.concat(h.short), fromMs, toMs, HISTORY_RENDER_POINTS);
+        res.json({
+            range: rangeKey,
+            view,
+            labels: points.map(p => historyFormatLabel(p.t, rangeSec)),
+            rx: points.map(p => Math.round(p.rx)),
+            tx: points.map(p => Math.round(p.tx)),
+            views: ['global', ...Object.keys(historyData).filter(k => k !== 'global')]
+        });
+    } catch (e) { res.status(500).json({ error: 'Ошибка истории трафика' }); }
+});
 
 // ---------------------------------------------------------------------------
 // Системные метрики и статус безопасности
