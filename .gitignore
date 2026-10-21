@@ -9,6 +9,7 @@ admin_pass.txt
 .notify.json
 .backup.json
 .backup_pass
+.traffic_history.json
 .sessions/
 servpanel_auth.log
 node_modules/
