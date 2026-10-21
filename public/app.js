@@ -584,6 +584,57 @@ async function loadNetworkTools() {
     }
 }
 
+function ruDropModeChanged() {
+    const mode = document.getElementById('ruDropListMode').value;
+    const custom = document.getElementById('ruDropCustomUrl');
+    const fileBox = document.getElementById('ruDropFileBox');
+    const schedule = document.getElementById('ruDropSchedule');
+    if (custom) custom.style.display = mode === 'custom' ? 'block' : 'none';
+    if (fileBox) fileBox.style.display = mode === 'upload' ? 'block' : 'none';
+    if (schedule) {
+        schedule.disabled = mode === 'upload';
+        if (mode === 'upload') schedule.value = 'none';
+        else if (schedule.value === 'none') schedule.value = 'weekly';
+    }
+}
+
+function readFileBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const result = String(reader.result || '');
+            resolve(result.includes(',') ? result.slice(result.indexOf(',') + 1) : '');
+        };
+        reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
+        reader.readAsDataURL(file);
+    });
+}
+
+async function uploadRuDropFile() {
+    const input = document.getElementById('ruDropFile');
+    const status = document.getElementById('ruDropFileStatus');
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+        if (status) status.textContent = 'Ошибка: файл больше 10 МБ';
+        return;
+    }
+    if (status) status.textContent = 'Загружаю и разбираю файл…';
+    try {
+        const data = await readFileBase64(file);
+        const res = await fetch('/api/tools/rudrop/upload', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: file.name, data})
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(result.error || 'Ошибка загрузки файла');
+        if (status) status.textContent = `Готово: найдено ${result.count} IPv4/CIDR. Теперь нажмите «Включить блокировку».`;
+    } catch (e) {
+        if (status) status.textContent = 'Ошибка: ' + e.message;
+    }
+}
+
 async function toggleRuDrop(enable) {
     const checkedIfaces = Array.from(document.querySelectorAll('.ru-check:checked')).map(cb => cb.value);
     if (enable && checkedIfaces.length === 0) return alert('Выберите хотя бы один интерфейс для блокировки!');
@@ -601,10 +652,10 @@ async function toggleRuDrop(enable) {
         customUrl: document.getElementById('ruDropCustomUrl').value.trim()
     };
     
-    document.getElementById('ruDropStatus').innerText = "Применение (до 20 сек)...";
+    document.getElementById('ruDropStatus').innerText = "Применение (до 30 сек)...";
     const res = await fetch('/api/tools/rudrop', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) return alert(data.error || 'Ошибка настройки GeoIP-блокировки');
+    if (!res.ok) return alert((data.error || 'Ошибка настройки GeoIP-блокировки') + (data.detail ? '\n\n' + data.detail : ''));
     loadNetworkTools();
 }
 
@@ -3640,7 +3691,7 @@ function updFmtSize(n) {
 }
 
 function updSetBusy(busy) {
-    ['updUploadBtn', 'updUrlBtn', 'updGitCheckBtn', 'updGitBtn'].forEach(id => {
+    ['updUploadBtn', 'updUrlBtn', 'updGitCheckBtn', 'updGitBtn', 'updGitForceBtn'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.disabled = !!busy;
     });
@@ -3688,6 +3739,10 @@ function updRenderInfo(d) {
         ['Данные', `<code>${esc(d.dataDir || '—')}</code>`]
     ];
     el.innerHTML = items.map(([k, v]) => `<div class="update-item"><small>${k}</small>${v}</div>`).join('');
+    const forceBtn = document.getElementById('updGitForceBtn');
+    if (forceBtn) {
+        forceBtn.style.display = (g.available && Array.isArray(g.dirty) && g.dirty.length) ? 'inline-flex' : 'none';
+    }
     updRenderStatus(d.status || {});
     updRenderBackups(d.backups || []);
 }
@@ -3885,7 +3940,8 @@ async function updGitCheck() {
             text = 'Установлена последняя версия из GitHub.\nКоммит: ' + (d.commit || d.current || '—');
         } else if (d.dirty && d.dirty.length) {
             text = 'Доступно обновление (' + d.behind + ' коммит(ов)), но в панели есть локальные изменения файлов.\n' +
-                'GitHub-обновление отменено, чтобы ничего не потерять. Используйте установку из файла.';
+                'Можно нажать «Сбросить локальные изменения и обновить»: сначала будет создан бэкап, ' +
+                'затем код панели приведётся к GitHub. Данные и конфиги AWG не затрагиваются.';
         } else {
             text = 'Доступно обновление: ' + d.behind + ' коммит(ов).\nПоследний: ' + (d.commit || '—');
         }
@@ -3909,6 +3965,24 @@ async function updGitRun() {
         updSetStatus('Ошибка: ' + e.message, 'err');
         updSetBusy(false);
         toast('GitHub-обновление не запущено', 'error', e.message);
+    }
+}
+
+async function updGitForceRun() {
+    if (!confirm('Сбросить локальные изменения кода и обновить панель с GitHub?\n\n' +
+        'Перед изменением будет создан бэкап. Клиенты, пароль, 2FA, сессии, профили обфускации, ' +
+        'конфиги AmneziaWG и настройки каскада не затрагиваются.\n\nПродолжить?')) return;
+    updSetBusy(true);
+    updSawRunning = true;
+    updSetStatus('Создаю бэкап и сбрасываю локальные изменения кода…', 'running');
+    try {
+        await updPost('/api/update/git-force', {});
+        updStartPolling();
+    } catch (e) {
+        if (updHandleStartError(e)) return;
+        updSetStatus('Ошибка: ' + e.message, 'err');
+        updSetBusy(false);
+        toast('Принудительное обновление не запущено', 'error', e.message);
     }
 }
 

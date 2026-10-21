@@ -232,6 +232,30 @@ function validIfaces(arr) {
         arr.every(i => typeof i === 'string' && IFACE_RE.test(i) && existingIfaces().includes(i));
 }
 
+// Источники списка RU-адресов для GeoIP-блокировки.
+// OpenCCK отдаёт обычный text/cidr4 — его можно парсить тем же скриптом.
+const RU_GEOIP_SOURCES = {
+    opencck: 'https://russia.iplist.opencck.org/?format=text&data=cidr4',
+    antifilter: 'https://www.ipdeny.com/ipblocks/data/aggregated/ru-aggregated.zone'
+};
+
+// Достаём IPv4/CIDR из произвольного текста: txt, csv, json, html,
+// списков вида "1.2.3.0/24, 5.6.7.8" или ipset "ipset=/1.2.3.0/24/name".
+// JSON-формат OpenCCK экранирует слэш как \/, поэтому сначала нормализуем.
+function parseIpList(text) {
+    const raw = String(text == null ? '' : text).replace(/\\\//g, '/');
+    const re = /(?<![\d.])(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}(?:\/(?:3[0-2]|[12]?\d))?(?![\d.]|\/\d)/g;
+    const seen = new Set();
+    let m;
+    while ((m = re.exec(raw)) !== null) {
+        const value = m[0];
+        if (!IPV4_RE.test(value) && !CIDR_RE.test(value)) continue;
+        seen.add(value);
+        if (seen.size > 2000000) break;
+    }
+    return [...seen];
+}
+
 // --- WARP + Xray: конфигурация и список доменов для AdGuard -----------------
 function readKeyValueFile(file) {
     const out = {};
@@ -1691,34 +1715,82 @@ app.post('/api/tools/rudrop', checkAuth, (req, res) => {
     }
 
     if (!validIfaces(ifaces)) return res.status(400).json({ error: 'Выберите существующие интерфейсы' });
-    const cronLine = schedule === 'daily' ? '0 4 * * *' : '0 4 * * 1';
+    const scheduleVal = String(schedule || 'weekly');
+    const cronLine = scheduleVal === 'daily' ? '0 4 * * *' : (scheduleVal === 'weekly' ? '0 4 * * 1' : '');
     const ports = String((req.body && req.body.ports) || '').trim();
     const portsArr = ports ? [...new Set(ports.split(',').map(p => p.trim()).filter(Boolean))] : [];
     if (!portsArr.every(p => isPort(p))) return res.status(400).json({ error: 'Неверный список портов' });
     const mode = portsArr.length ? 'ports' : 'all';
     const customUrl = String((req.body && req.body.customUrl) || '').trim();
-    let zoneUrl = 'https://www.ipdeny.com/ipblocks/data/aggregated/ru-aggregated.zone';
-    if (req.body.listMode === 'custom' && customUrl) {
+    const listMode = String((req.body && req.body.listMode) || 'opencck');
+    let sourceType = 'url';
+    let zoneUrl = RU_GEOIP_SOURCES.opencck;
+    let fallbackUrls = [RU_GEOIP_SOURCES.antifilter];
+    let minValid = 1000;
+    if (listMode === 'standard' || listMode === 'antifilter') {
+        zoneUrl = RU_GEOIP_SOURCES.antifilter;
+        fallbackUrls = [RU_GEOIP_SOURCES.opencck];
+    } else if (listMode === 'custom') {
+        if (!customUrl) return res.status(400).json({ error: 'Укажите URL списка' });
         if (!/^https:\/\/[A-Za-z0-9./_%:?&=+-]{4,300}$/.test(customUrl)) return res.status(400).json({ error: 'Неверный URL списка' });
         zoneUrl = customUrl;
+        fallbackUrls = [];
+        minValid = 1;
+    } else if (listMode === 'upload' || listMode === 'file') {
+        sourceType = 'file';
+        zoneUrl = '';
+        fallbackUrls = [];
+        minValid = 1;
+    } else if (listMode !== 'opencck') {
+        return res.status(400).json({ error: 'Неизвестный источник списка' });
     }
+
+    // URL уже прошли проверку; подставляем в bash-массив в кавычках.
+    const urlsLiteral = [zoneUrl, ...fallbackUrls].filter(Boolean).map(u => `"${u}"`).join(' ');
+    const cronContent =
+        `@reboot root sleep 30 && /bin/bash /root/awg/ru-drop.sh >/var/log/ru-drop.log 2>&1\n` +
+        (cronLine ? `${cronLine} root /bin/bash /root/awg/ru-drop.sh >/var/log/ru-drop.log 2>&1\n` : '');
 
     const scriptContent = `#!/bin/bash
 set -euo pipefail
 IFACES=(${ifaces.join(' ')})
 MODE="${mode}"
 PORTS="${portsArr.join(' ')}"
-RU_ZONE_URL="${zoneUrl}"
+SOURCE_TYPE="${sourceType}"
+MIN_VALID="${minValid}"
+URLS=(${urlsLiteral})
 AWG_DIR="/root/awg"
 # Отдельный файл: не перетираем ru.zone, который использует каскад.
 RU_ZONE="$AWG_DIR/ru-drop.zone"
 mkdir -p "$AWG_DIR"
 exec 9>"$AWG_DIR/ru-drop.lock"
-flock -n 9 || { echo "Уже запущен"; exit 1; }
-curl -fsS --retry 2 --connect-timeout 10 --max-time 60 -o "$RU_ZONE.tmp" "$RU_ZONE_URL" || exit 1
-valid=$(grep -cE '^[0-9]{1,3}(\\.[0-9]{1,3}){3}(/[0-9]{1,2})?$' "$RU_ZONE.tmp" || true)
-if [ "$valid" -lt 1000 ]; then rm -f "$RU_ZONE.tmp"; exit 1; fi
-mv -f "$RU_ZONE.tmp" "$RU_ZONE"
+flock -n 9 || { echo "Уже запущен" >&2; exit 1; }
+if [ "$SOURCE_TYPE" = "file" ]; then
+  [ -s "$RU_ZONE" ] || { echo "Файл списка не найден. Загрузите его заново." >&2; exit 2; }
+  valid=$(grep -cE '^[0-9]{1,3}(\\.[0-9]{1,3}){3}(/[0-9]{1,2})?$' "$RU_ZONE" || true)
+  [ "$valid" -ge "$MIN_VALID" ] || { echo "В файле нет IPv4/CIDR." >&2; exit 2; }
+else
+  ok=0
+  last_err=""
+  for url in "\${URLS[@]}"; do
+    if curl -fsS --retry 2 --connect-timeout 10 --max-time 60 -o "$RU_ZONE.tmp" "$url"; then
+      valid=$(grep -cE '^[0-9]{1,3}(\\.[0-9]{1,3}){3}(/[0-9]{1,2})?$' "$RU_ZONE.tmp" || true)
+      if [ "$valid" -ge "$MIN_VALID" ]; then
+        mv -f "$RU_ZONE.tmp" "$RU_ZONE"
+        ok=1
+        break
+      fi
+      last_err="Источник $url: найдено $valid адресов, нужно минимум $MIN_VALID"
+    else
+      last_err="Не удалось скачать источник: $url"
+    fi
+  done
+  if [ "$ok" -ne 1 ]; then
+    rm -f "$RU_ZONE.tmp"
+    echo "\${last_err:-Не удалось загрузить список}" >&2
+    exit 1
+  fi
+fi
 ipset create ru_block hash:net -exist
 ipset create ru_tmp hash:net -exist
 ipset flush ru_tmp
@@ -1753,16 +1825,55 @@ echo "OK"
 `;
     try {
         writeRootFile('/root/awg/ru-drop.sh', scriptContent, '0755');
-        writeRootFile('/etc/cron.d/ru-drop-refresh',
-            `@reboot root sleep 30 && /bin/bash /root/awg/ru-drop.sh >/var/log/ru-drop.log 2>&1\n` +
-            `${cronLine} root /bin/bash /root/awg/ru-drop.sh >/var/log/ru-drop.log 2>&1\n`, '0644');
-        execFile('sudo', ['/root/awg/ru-drop.sh'], { timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err) => {
-            if (err) return res.status(500).json({ error: 'Ошибка загрузки базы GeoIP' });
+        writeRootFile('/etc/cron.d/ru-drop-refresh', cronContent, '0644');
+        execFile('sudo', ['/root/awg/ru-drop.sh'], { timeout: 180000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+            if (err) {
+                let detail = String(stderr || stdout || err.message || '').trim();
+                if (!detail) {
+                    try {
+                        detail = fs.readFileSync('/var/log/ru-drop.log', 'utf8').trim().split(/\r?\n/).slice(-8).join('\n');
+                    } catch (e) { /* ignore */ }
+                }
+                detail = detail.slice(-1200);
+                auditLog(req, `GeoIP-блокировка: ошибка загрузки списка ${detail}`.slice(0, 900));
+                return res.status(500).json({ error: 'Ошибка загрузки базы GeoIP', detail });
+            }
             auditLog(req, `GeoIP-блокировка включена для: ${ifaces.join(', ')}`);
             res.json({ success: true });
         });
     } catch (e) {
         res.status(500).json({ error: 'Ошибка установки скрипта' });
+    }
+});
+
+// Загрузка своего списка IP/CIDR. Принимаем любой текстовый формат:
+// из файла извлекаются все IPv4 и подсети, остальное игнорируется.
+app.post('/api/tools/rudrop/upload', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    const name = String(body.name || 'list.txt').replace(/[\r\n]/g, ' ').slice(0, 120);
+    const data = String(body.data || '');
+    if (!data) return res.status(400).json({ error: 'Файл не передан' });
+    if (data.length > 14 * 1024 * 1024) return res.status(413).json({ error: 'Файл слишком большой (максимум 10 МБ)' });
+
+    let text;
+    try {
+        text = Buffer.from(data, 'base64').toString('utf8');
+    } catch (e) {
+        return res.status(400).json({ error: 'Не удалось прочитать файл' });
+    }
+    const list = parseIpList(text);
+    if (!list.length) return res.status(400).json({ error: 'В файле не найдено IPv4-адресов или подсетей' });
+    if (list.length > 2000000) return res.status(413).json({ error: 'Слишком много адресов (максимум 2 000 000)' });
+
+    if (TEST_MODE || DEMO_MODE) {
+        return res.json({ success: true, count: list.length, name, demo: true });
+    }
+    try {
+        writeRootFile('/root/awg/ru-drop.zone', list.join('\n') + '\n', '0644');
+        auditLog(req, `GeoIP: загружен свой список «${name}» (${list.length} адресов)`);
+        res.json({ success: true, count: list.length, name });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось сохранить список на сервере' });
     }
 });
 
@@ -4048,6 +4159,13 @@ app.post('/api/update/git', checkAuth, requireAdmin, (req, res) => {
         'Запущено обновление панели с GitHub');
 });
 
+// Принудительное GitHub-обновление: сбрасывает только отслеживаемые файлы кода
+// к origin/main. Данные панели и конфиги AWG не входят в git и не затрагиваются.
+app.post('/api/update/git-force', checkAuth, requireAdmin, (req, res) => {
+    startUpdateWorker(res, req, { mode: 'git-force', branch: 'main', remote: 'origin' },
+        'Запущено принудительное обновление панели с GitHub (сброс локальных изменений кода)');
+});
+
 // Старый вызов оставлен совместимым, но теперь он тоже безопасный.
 app.post('/api/update', checkAuth, requireAdmin, (req, res) => {
     startUpdateWorker(res, req, { mode: 'git', branch: 'main', remote: 'origin' },
@@ -4497,7 +4615,7 @@ module.exports._internals = {
     splitObfBatch, OBF_ALL_KEYS, OBF_SHARED_KEYS, generateObfProfile,
     totpAt, verifyTotp, base32Encode, base32Decode,
     newTotpSecret, otpauthUri, hashCode, makeUser, verifyUserPassword, safeEqual,
-    FileSessionStore, cascadeHealth, backupConfig, normalizeAgUrl
+    FileSessionStore, cascadeHealth, backupConfig, normalizeAgUrl, parseIpList
 };
 
 

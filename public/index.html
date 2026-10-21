@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="2.4.1">
-    <title>Servpanel — AmneziaWG Control</title>
+    <meta name="panel-version" content="2.4.3">
+    <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -25,11 +25,7 @@
         <div class="login-card">
             <div class="brand brand-lg">
                 <span class="brand-mark">SP</span>
-                <span class="brand-text"><strong>Servpanel</strong><small>AmneziaWG control</small></span>
-            </div>
-            <div class="login-copy">
-                <h1>Вход в панель</h1>
-                <p>VPN, каскад, обфускация и защита — в одном окне.</p>
+                <span class="brand-text"><strong>Servpanel</strong></span>
             </div>
             <label class="field">
                 <span>Логин</span>
@@ -48,8 +44,7 @@
             </label>
             <button class="btn btn-primary btn-lg" style="width:100%;" onclick="login()">Войти</button>
             <div id="loginError" class="error-msg">Неверный пароль</div>
-            <div class="login-foot">
-                <span>Безопасное соединение</span>
+            <div class="login-foot" style="justify-content:flex-end;">
                 <button class="link-btn" onclick="toggleLang()" id="loginLangBtn">🌐 English</button>
             </div>
         </div>
@@ -120,7 +115,7 @@
                     <span class="user-meta"><strong id="whoami">admin</strong><small id="userRole">администратор</small></span>
                 </div>
                 <button class="nav-item nav-item-quiet" onclick="changePassword()"><span class="nav-ico">⚿</span><span>Сменить пароль</span></button>
-                <button class="nav-item nav-item-quiet" onclick="logout()"><span class="nav-ico">⏻</span><span>Выйти</span></button>
+                <button class="nav-item nav-item-quiet" onclick="logout()"><span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3v9"/><path d="M6.4 6.4a8 8 0 1 0 11.2 0"/></svg></span><span>Выйти</span></button>
             </div>
         </aside>
 
@@ -135,12 +130,12 @@
                 </div>
                 <div class="topbar-right">
                     <button class="search-trigger" onclick="openPalette()" title="Поиск и действия">
-                        <span>⌕</span><span class="search-label">Поиск и действия</span><kbd>Ctrl K</kbd>
+                        <span class="search-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span><span class="search-label">Поиск и действия</span><kbd>Ctrl K</kbd>
                     </button>
                     <button class="icon-btn" id="expertToggle" onclick="toggleExpert()" title="Показать расширенные настройки">⚙</button>
                     <button class="btn btn-primary" onclick="openWizard()"><span>✦</span> Мастер</button>
                     <button class="icon-btn" id="langBtn" onclick="toggleLang()" title="Language / Язык">EN</button>
-                    <button class="icon-btn" onclick="logout()" title="Выход">⏻</button>
+                    <button class="icon-btn" onclick="logout()" title="Выход"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3v9"/><path d="M6.4 6.4a8 8 0 1 0 11.2 0"/></svg></button>
                     <input type="file" id="backupUpload" accept=".tar.gz" style="display:none" onchange="restoreBackup(event)">
                 </div>
             </header>
@@ -538,16 +533,24 @@
                             <input type="text" id="ruDropPorts" placeholder="Например: 80,443" style="width: 100%; margin-top: 3px; margin-bottom: 10px; box-sizing: border-box;">
                             
                             <label style="font-size: 11px; color: var(--text-muted);">Источник списка IP-адресов РФ</label>
-                            <select id="ruDropListMode" style="width: 100%; margin-top: 3px; margin-bottom: 5px;" onchange="document.getElementById('ruDropCustomUrl').style.display = this.value === 'custom' ? 'block' : 'none'">
-                                <option value="standard">Стандартный список (Antifilter)</option>
-                                <option value="custom">Свой URL (.txt или .zone)</option>
+                            <select id="ruDropListMode" style="width: 100%; margin-top: 3px; margin-bottom: 5px;" onchange="ruDropModeChanged()">
+                                <option value="opencck" selected>OpenCCK Russia — CIDR (рекомендуется)</option>
+                                <option value="standard">Antifilter / ipdeny (резервный)</option>
+                                <option value="custom">Свой URL</option>
+                                <option value="upload">Загрузить файл с IP-адресами</option>
                             </select>
                             <input type="text" id="ruDropCustomUrl" placeholder="https://example.com/my-ru-list.txt" style="width: 100%; display: none; margin-bottom: 10px; box-sizing: border-box;">
+                            <div id="ruDropFileBox" style="display:none; margin-bottom: 10px;">
+                                <input type="file" id="ruDropFile" onchange="uploadRuDropFile()"
+                                       style="width:100%; box-sizing:border-box; font-size:12px; color:var(--text-muted);">
+                                <div id="ruDropFileStatus" style="font-size:11px; color:var(--text-muted); margin-top:4px;">Любой текстовый формат: IP, CIDR, CSV, JSON, список ipset. Адреса будут извлечены автоматически.</div>
+                            </div>
                             
                             <label style="font-size: 11px; color: var(--text-muted);">Автообновление списка</label>
                             <select id="ruDropSchedule" style="width: 100%; margin-top: 3px;">
                                 <option value="weekly">Раз в неделю</option>
                                 <option value="daily">Каждый день</option>
+                                <option value="none">Не обновлять (для загруженного файла)</option>
                             </select>
                         </div>
                         
@@ -1003,19 +1006,20 @@
                     </div>
                     <div class="update-source">
                         <span>Или ссылка на релиз:</span>
-                        <input type="text" id="updUrl" placeholder="https://example.com/servpanel-2.4.1.tar.gz" style="flex:1; min-width:240px;">
+                        <input type="text" id="updUrl" placeholder="https://example.com/servpanel-2.4.3.tar.gz" style="flex:1; min-width:240px;">
                         <button class="btn btn-dark" id="updUrlBtn" onclick="updFromUrl()">Установить по URL</button>
                     </div>
                     <div class="update-source">
                         <span>GitHub:</span>
                         <button class="btn btn-dark" id="updGitCheckBtn" onclick="updGitCheck()">Проверить обновления</button>
                         <button class="btn btn-primary" id="updGitBtn" onclick="updGitRun()">Обновить с GitHub</button>
+                        <button class="btn btn-danger" id="updGitForceBtn" onclick="updGitForceRun()" style="display:none;">Сбросить локальные изменения и обновить</button>
                     </div>
                     <div id="updGitResult" class="update-note" style="display:none;"></div>
                     <p style="color:var(--text-dim); font-size:11.5px; line-height:1.5; margin:10px 0 0;">
-                        GitHub-режим работает, только если файлы панели совпадают с репозиторием
-                        (нет локальных изменений). После установки релиза из файла используйте файл —
-                        это надёжнее и не требует push-доступа.
+                        GitHub-режим обновляет только код панели. Если после установки релиза появились
+                        локальные изменения файлов, используйте кнопку сброса: она сначала создаст бэкап,
+                        затем приведёт код к GitHub. Клиенты, пароль, 2FA, сессии и конфиги AWG не затрагиваются.
                     </p>
                     <div id="updStatus" class="update-status">Готово к обновлению.</div>
                     <pre id="updLog" class="update-log" style="display:none;"></pre>

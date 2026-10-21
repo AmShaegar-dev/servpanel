@@ -385,6 +385,10 @@ kbd {
 }
 .icon-btn:hover { color: #fff; border-color: #3a5078; background: rgba(255, 255, 255, .07); }
 .icon-btn.active { color: #fff; border-color: rgba(91, 140, 255, .6); background: rgba(91, 140, 255, .14); }
+.icon-btn svg { width: 18px; height: 18px; display: block; }
+.nav-item .nav-ico svg { width: 15px; height: 15px; display: block; }
+.search-ico { display: inline-grid; place-items: center; flex: 0 0 auto; }
+.search-ico svg { width: 15px; height: 15px; display: block; }
 .mobile-only { display: none !important; }
 
 .content-area {
@@ -1039,6 +1043,25 @@ body.expert .expert-badge { display: inline-flex; }
     .wizard-grid, .wizard-grid-3 { grid-template-columns: 1fr; }
     .topbar-right .btn-primary { padding: 9px 11px; }
     .topbar-right .btn-primary span { display: none; }
+}
+@media (max-width: 720px) {
+    /* На телефоне шапка в две строки: заголовок не наезжает на кнопки. */
+    .topbar {
+        height: auto;
+        flex: 0 0 auto;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 10px 12px;
+    }
+    .topbar-left { flex: 1 1 100%; gap: 8px; }
+    .topbar-left > div { min-width: 0; }
+    .crumb { display: none; }
+    .topbar-title { font-size: 18px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+    .topbar-right { flex: 1 1 100%; justify-content: flex-end; gap: 6px; }
+    .topbar-right #expertToggle { display: none; }
+    .topbar-right .search-trigger { width: 38px; min-width: 38px; height: 38px; padding: 0; justify-content: center; }
+    .topbar-right .search-label, .topbar-right .search-trigger kbd { display: none; }
+    .topbar-right .btn-primary { padding: 9px 11px; font-size: 12px; }
 }
 @media (max-width: 600px) {
     .hero { padding: 20px; border-radius: 18px; }

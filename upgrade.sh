@@ -368,6 +368,36 @@ else
     log "Проверка конфигов: /etc/amnezia/amneziawg/*.conf и awg-routing.sh не изменены."
 fi
 
+# Если файлы кода после установки полностью совпадают с origin/main, приводим
+# индекс .git к этому коммиту. Тогда встроенное GitHub-обновление снова видит
+# чистое дерево. Если есть отличия (например, релиз ещё не опубликован или
+# остались ручные правки), ничего не сбрасываем.
+sync_git_if_clean() {
+    command -v git >/dev/null 2>&1 || return 0
+    [ -d "$APP_DIR/.git" ] || return 0
+    local origin_url branch
+    origin_url="$(git -C "$APP_DIR" remote get-url origin 2>/dev/null || true)"
+    case "$origin_url" in
+        *makar19977v-glitch/servpanel*) ;;
+        *) return 0 ;;
+    esac
+    branch="$(git -C "$APP_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    [ "$branch" = "main" ] || return 0
+    if ! git -C "$APP_DIR" fetch --prune origin main >>"$LOG" 2>&1; then
+        log "Git: не удалось проверить origin/main, .git оставлен без изменений."
+        return 0
+    fi
+    if git -C "$APP_DIR" diff --quiet origin/main -- 2>/dev/null; then
+        if git -C "$APP_DIR" reset --hard origin/main >>"$LOG" 2>&1; then
+            log "Git: рабочее дерево синхронизировано с origin/main."
+        fi
+    else
+        log "Git: код отличается от origin/main — автосинхронизация пропущена."
+        log "     Обновление из панели доступно кнопкой сброса локальных изменений."
+    fi
+}
+sync_git_if_clean || true
+
 log "ГОТОВО. Версия: $NEW_VER"
 log "Бэкап панели: $BACKUP"
 log "Откат: sudo bash $SRC_DIR/upgrade.sh --rollback $BACKUP"

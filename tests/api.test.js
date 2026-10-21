@@ -513,7 +513,26 @@ test('Обновление: в интерфейсе есть отдельная 
     assert.match(r.text, /id="tab-update"/);
     assert.match(r.text, /updUploadBtn/);
     assert.match(r.text, /updGitBtn/);
+    assert.match(r.text, /updGitForceBtn/);
     assert.match(r.text, /updBackups/);
+});
+
+test('GeoIP: файл любого формата разбирается в IPv4/CIDR', () => {
+    const list = internals.parseIpList(
+        '{"site":["5.8.75.0\\/24","1.2.3.4"]}\n' +
+        'ipset=/10.0.0.0/8/vpn\n' +
+        'bad 999.1.1.1, 8.8.8.8/33\n' +
+        'range 192.168.1.1-192.168.1.5'
+    );
+    assert.deepEqual(list, ['5.8.75.0/24', '1.2.3.4', '10.0.0.0/8', '192.168.1.1', '192.168.1.5']);
+});
+
+test('GeoIP: загрузка файла возвращает количество найденных адресов', async () => {
+    const data = Buffer.from('1.2.3.4\n5.6.7.0/24\n999.1.1.1\n', 'utf8').toString('base64');
+    const r = await request('/api/tools/rudrop/upload', jsonBody({ name: 'list.json', data }));
+    assert.equal(r.status, 200);
+    assert.equal(r.json.count, 2);
+    assert.equal(r.json.demo, true);
 });
 
 test('Обновление: воркер и модуль обновления присутствуют', () => {
