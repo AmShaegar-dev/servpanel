@@ -200,11 +200,20 @@
                             <header class="card-head">
                                 <div>
                                     <h3>Мониторинг трафика</h3>
-                                    <p>История за последний час</p>
+                                    <p id="chartSubtitle">История: последний час</p>
                                 </div>
-                                <select id="chartSelector" class="select-compact" onchange="switchChart()">
-                                    <option value="global">Общий трафик</option>
-                                </select>
+                                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                                    <select id="chartRange" class="select-compact" onchange="switchRange()">
+                                        <option value="5m">5 минут</option>
+                                        <option value="1h" selected>1 час</option>
+                                        <option value="3h">3 часа</option>
+                                        <option value="24h">24 часа</option>
+                                        <option value="7d">7 суток</option>
+                                    </select>
+                                    <select id="chartSelector" class="select-compact" onchange="switchChart()">
+                                        <option value="global">Общий трафик</option>
+                                    </select>
+                                </div>
                             </header>
                             <div class="chart-wrap"><canvas id="trafficChart"></canvas></div>
                         </section>
