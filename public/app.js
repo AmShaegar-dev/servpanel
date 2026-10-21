@@ -2,8 +2,8 @@
 let logInterval = null;
 let lastStats = {}; let isFetching = false; 
 let pollingInterval = null; let historyInterval = null; let agInterval = null;
-let chartData = { global: { labels: [], rx: [], tx: [] } };
-let currentChartView = 'global'; let trafficChart = null;
+let currentChartView = 'global'; let currentChartRange = '1h'; let trafficChart = null;
+let historyLoading = false;
 let sortCol = 'name'; let sortDesc = false;
 let currentUser = 'admin';
 let currentRole = 'admin';
@@ -410,36 +410,71 @@ function initChart() {
     Chart.defaults.color = '#8b949e';
     trafficChart = new Chart(ctx, {
         type: 'line',
-        data: { labels: [], datasets: [ { label: 'Прием (Rx)', data: [], borderColor: '#2ea043', backgroundColor: gradRx, fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 }, { label: 'Отдача (Tx)', data: [], borderColor: '#58a6ff', backgroundColor: gradTx, fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 } ]},
-        options: { responsive: true, maintainAspectRatio: false, animation: { duration: 0 }, interaction: { mode: 'index', intersect: false }, scales: { x: { grid: { color: '#30363d' }, ticks: { maxTicksLimit: 10 } }, y: { grid: { color: '#30363d' }, ticks: { callback: function(v) { return formatSpeed(v); } } } }, plugins: { legend: { labels: { color: '#c9d1d9' } }, tooltip: { callbacks: { label: function(ctx) { return ctx.dataset.label + ': ' + formatSpeed(ctx.parsed.y); } } } } }
+        data: { labels: [], datasets: [
+            { label: 'Прием (Rx)', data: [], borderColor: '#2ea043', backgroundColor: gradRx, fill: true, tension: 0.25, cubicInterpolationMode: 'monotone', spanGaps: true, pointRadius: 0, borderWidth: 2 },
+            { label: 'Отдача (Tx)', data: [], borderColor: '#58a6ff', backgroundColor: gradTx, fill: true, tension: 0.25, cubicInterpolationMode: 'monotone', spanGaps: true, pointRadius: 0, borderWidth: 2 }
+        ]},
+        options: {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: { grid: { color: '#30363d' }, ticks: { maxTicksLimit: 8, maxRotation: 0, autoSkip: true } },
+                y: { beginAtZero: true, grid: { color: '#30363d' }, ticks: { maxTicksLimit: 6, callback: function(v) { return formatSpeed(v); } } }
+            },
+            plugins: { legend: { labels: { color: '#c9d1d9' } }, tooltip: { callbacks: { label: function(ctx) { return ctx.dataset.label + ': ' + formatSpeed(ctx.parsed.y); } } } }
+        }
     });
 }
 
+function chartRangeLabel(range) {
+    return { '5m': 'последние 5 минут', '1h': 'последний час', '3h': 'последние 3 часа', '24h': 'последние 24 часа', '7d': 'последние 7 суток' }[range] || 'последний час';
+}
+
 function switchChart() {
-    currentChartView = document.getElementById('chartSelector').value;
-    if (chartData[currentChartView] && trafficChart) { 
-        trafficChart.data.labels = chartData[currentChartView].labels; 
-        trafficChart.data.datasets[0].data = chartData[currentChartView].rx; 
-        trafficChart.data.datasets[1].data = chartData[currentChartView].tx; 
-        trafficChart.update(); 
-    }
+    const sel = document.getElementById('chartSelector');
+    if (sel) currentChartView = sel.value;
+    loadHistory();
+}
+
+function switchRange() {
+    const sel = document.getElementById('chartRange');
+    if (sel) currentChartRange = sel.value;
+    const sub = document.getElementById('chartSubtitle');
+    if (sub) sub.textContent = 'История: ' + chartRangeLabel(currentChartRange);
+    loadHistory();
 }
 
 async function loadHistory() {
+    if (historyLoading) return;
+    historyLoading = true;
     try {
-        const res = await fetch('/api/history');
+        const res = await fetch('/api/history?range=' + encodeURIComponent(currentChartRange) + '&view=' + encodeURIComponent(currentChartView));
         if (res.ok) {
-            chartData = await res.json();
+            const d = await res.json();
             const selector = document.getElementById('chartSelector');
-            const currentClients = Array.from(selector.options).map(o => o.value);
-            Object.keys(chartData).forEach(k => {
-                if (k !== 'global' && !currentClients.includes(k)) {
-                    const opt = document.createElement('option'); opt.value = k; opt.text = 'Клиент: ' + k; selector.appendChild(opt);
-                }
-            });
-            switchChart();
+            if (selector) {
+                const have = new Set(Array.from(selector.options).map(o => o.value));
+                (d.views || []).forEach(k => {
+                    if (!have.has(k)) {
+                        const opt = document.createElement('option');
+                        opt.value = k;
+                        opt.text = k === 'global' ? 'Общий трафик' : 'Клиент: ' + k;
+                        selector.appendChild(opt);
+                        have.add(k);
+                    }
+                });
+                // Выбранный клиент пропал из статистики — вернёмся к общему графику.
+                if (!have.has(currentChartView)) { currentChartView = 'global'; selector.value = 'global'; }
+            }
+            if (trafficChart) {
+                trafficChart.data.labels = d.labels || [];
+                trafficChart.data.datasets[0].data = d.rx || [];
+                trafficChart.data.datasets[1].data = d.tx || [];
+                trafficChart.update('none');
+            }
         }
-    } catch (e) {}
+    } catch (e) { /* ignore */ }
+    finally { historyLoading = false; }
 }
 
 function getPortDesc(pStr) {
