@@ -300,10 +300,24 @@ function readKeyValueFile(file) {
     return out;
 }
 
+// WARP могли поставить вручную (пакетом Cloudflare или из snap) — тогда
+// /root/awg/warp.env отсутствует. Поэтому наличие компонента определяем не
+// только по флагу установщика, но и по бинарнику/юниту systemd.
+function warpBinaryPresent() {
+    const bins = ['/usr/bin/warp-cli', '/usr/local/bin/warp-cli', '/bin/warp-cli', '/snap/bin/warp-cli'];
+    const units = [
+        '/lib/systemd/system/warp-svc.service',
+        '/usr/lib/systemd/system/warp-svc.service',
+        '/etc/systemd/system/warp-svc.service'
+    ];
+    const exists = p => { try { return fs.existsSync(p); } catch (e) { return false; } };
+    return bins.some(exists) || units.some(exists);
+}
+
 function warpConfig() {
     const env = readKeyValueFile(WARP_ENV_FILE);
     return {
-        installed: env.WARP_INSTALLED === '1',
+        installed: env.WARP_INSTALLED === '1' || warpBinaryPresent(),
         listenIp: IPV4_RE.test(env.WARP_LISTEN_IP || '') ? env.WARP_LISTEN_IP : '10.8.1.1',
         listenPort: isPort(env.WARP_LISTEN_PORT) ? String(Number(env.WARP_LISTEN_PORT)) : '443',
         socksPort: isPort(env.WARP_SOCKS_PORT) ? String(Number(env.WARP_SOCKS_PORT)) : '40000',
@@ -2606,6 +2620,7 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
 
     res.json({
         ...cfg,
+        installed: cfg.installed || warpActive,
         warpActive,
         xrayActive,
         connected,
@@ -2676,8 +2691,9 @@ app.post('/api/warp/adguard', checkAuth, requireAdmin, async (req, res) => {
     if (!base) return res.status(400).json({ error: 'Укажите корректный URL AdGuard API' });
 
     const cfg = warpConfig();
-    let rewriteIp = String(body.rewriteIp || cfg.listenIp || '').trim();
-    if (rewriteIp === '0.0.0.0') rewriteIp = '';
+    let rewriteIp = String(body.rewriteIp || '').trim();
+    if (!rewriteIp || rewriteIp === '0.0.0.0') rewriteIp = String(cfg.listenIp || '10.8.1.1').trim();
+    if (rewriteIp === '0.0.0.0') rewriteIp = '10.8.1.1';
     if (!IPV4_RE.test(rewriteIp) || rewriteIp.startsWith('127.')) {
         return res.status(400).json({ error: 'Укажите IP туннеля для dnsrewrite (например, 10.8.1.1)' });
     }
