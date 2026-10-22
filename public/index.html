@@ -452,9 +452,9 @@
                     <div id="warpStatusText" class="sub-text" style="margin-bottom: 12px;">Проверка состояния...</div>
 
                     <div class="controls-row" style="margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
-                        <input type="text" id="warpListenIp" value="10.8.1.1" placeholder="IP Xray (10.8.1.1)" style="width: 170px;" title="IP туннеля AWG на этом сервере. 0.0.0.0 — только если понимаете риск публичного доступа.">
-                        <input type="number" id="warpListenPort" value="443" placeholder="443" style="width: 90px;" title="TCP-порт Xray">
-                        <input type="number" id="warpSocksPort" value="40000" placeholder="40000" style="width: 100px;" title="Локальный SOCKS5-порт WARP">
+                        <input type="text" id="warpListenIp" value="10.8.1.1" placeholder="IP Xray (10.8.1.1)" aria-label="IP Xray" style="width: 170px;" title="IP туннеля AWG на этом сервере. 0.0.0.0 — только если понимаете риск публичного доступа." onblur="if(!this.value.trim())this.value='10.8.1.1'">
+                        <input type="number" id="warpListenPort" value="443" placeholder="443" aria-label="Порт Xray" style="width: 90px;" title="TCP-порт Xray" onblur="if(!this.value)this.value='443'">
+                        <input type="number" id="warpSocksPort" value="40000" placeholder="40000" aria-label="SOCKS5-порт WARP" style="width: 100px;" title="Локальный SOCKS5-порт WARP" onblur="if(!this.value)this.value='40000'">
                         <button class="btn-primary" onclick="installWarp()">Установить WARP + Xray</button>
                         <button class="btn-soft" onclick="warpPower(true)">Включить</button>
                         <button class="btn-dark" onclick="warpPower(false)">Остановить</button>
@@ -467,7 +467,7 @@
                         <input type="text" id="warpAgUrl" placeholder="URL AdGuard API (127.0.0.1:8090)" style="width: 240px;">
                         <input type="text" id="warpAgUser" placeholder="Логин AdGuard" style="width: 140px;">
                         <input type="password" id="warpAgPass" placeholder="Пароль AdGuard" style="width: 140px;">
-                        <input type="text" id="warpRewriteIp" value="10.8.1.1" placeholder="IP для dnsrewrite" style="width: 170px;" title="IP туннеля AWG, на который AdGuard перепишет A-записи">
+                        <input type="text" id="warpRewriteIp" value="10.8.1.1" placeholder="IP для dnsrewrite" aria-label="IP для dnsrewrite" style="width: 170px;" title="IP туннеля AWG, на который AdGuard перепишет A-записи" onblur="if(!this.value.trim())this.value='10.8.1.1'">
                         <button class="btn-primary" onclick="syncWarpAdGuard()">Записать правила</button>
                     </div>
                     <div id="warpAgResult" class="sub-text" style="margin-top: 8px;"></div>
