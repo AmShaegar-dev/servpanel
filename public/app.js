@@ -738,6 +738,22 @@ async function toggleDns(enable) {
     loadNetworkTools();
 }
 
+const WARP_DEFAULTS = {
+    listenIp: '10.8.1.1',
+    listenPort: '443',
+    socksPort: '40000',
+    rewriteIp: '10.8.1.1'
+};
+
+// Возвращает значение поля, а если оно пустое — подставляет значение по умолчанию.
+function warpField(id, fallback) {
+    const el = document.getElementById(id);
+    const v = el ? String(el.value || '').trim() : '';
+    if (v) return v;
+    if (el) el.value = fallback;
+    return fallback;
+}
+
 async function loadWarpStatus() {
     if (currentRole !== 'admin') return;
     try {
@@ -778,14 +794,17 @@ async function loadWarpStatus() {
             }
         }
 
-        if (!window.warpFieldsLoaded) {
-            const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
-            set('warpListenIp', st.listenIp || '10.8.1.1');
-            set('warpListenPort', st.listenPort || '443');
-            set('warpSocksPort', st.socksPort || '40000');
-            set('warpRewriteIp', (st.listenIp && st.listenIp !== '0.0.0.0') ? st.listenIp : '10.8.1.1');
-            window.warpFieldsLoaded = true;
-        }
+        // Не затираем введённые значения, но пустые поля заполняем дефолтами.
+        const setIfEmpty = (id, val) => {
+            const el = document.getElementById(id);
+            if (el && !String(el.value || '').trim()) el.value = val;
+        };
+        setIfEmpty('warpListenIp', st.listenIp || WARP_DEFAULTS.listenIp);
+        setIfEmpty('warpListenPort', st.listenPort || WARP_DEFAULTS.listenPort);
+        setIfEmpty('warpSocksPort', st.socksPort || WARP_DEFAULTS.socksPort);
+        setIfEmpty('warpRewriteIp',
+            (st.listenIp && st.listenIp !== '0.0.0.0') ? st.listenIp : WARP_DEFAULTS.rewriteIp);
+        window.warpFieldsLoaded = true;
 
         // Подставляем данные AdGuard из соседней формы, если пользователь их уже ввёл.
         const agUrl = document.getElementById('agUrl');
@@ -804,9 +823,9 @@ async function loadWarpStatus() {
 }
 
 async function installWarp() {
-    const listenIp = (document.getElementById('warpListenIp') || {}).value || '10.8.1.1';
-    const listenPort = (document.getElementById('warpListenPort') || {}).value || '443';
-    const socksPort = (document.getElementById('warpSocksPort') || {}).value || '40000';
+    const listenIp = warpField('warpListenIp', WARP_DEFAULTS.listenIp);
+    const listenPort = warpField('warpListenPort', WARP_DEFAULTS.listenPort);
+    const socksPort = warpField('warpSocksPort', WARP_DEFAULTS.socksPort);
     if (!/^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(listenIp.trim())) {
         return alert('Укажите корректный IP для Xray (например, 10.8.1.1)');
     }
@@ -858,8 +877,8 @@ async function syncWarpAdGuard() {
     const user = val('warpAgUser') || val('agUser');
     const pass = val('warpAgPass') || val('agPass');
     let rewriteIp = val('warpRewriteIp').trim();
-    if (!rewriteIp || rewriteIp === '0.0.0.0') rewriteIp = val('warpListenIp').trim();
-    if (!rewriteIp || rewriteIp === '0.0.0.0') return alert('Укажите IP туннеля для dnsrewrite (например, 10.8.1.1)');
+    if (!rewriteIp || rewriteIp === '0.0.0.0') rewriteIp = warpField('warpListenIp', WARP_DEFAULTS.listenIp);
+    if (!rewriteIp || rewriteIp === '0.0.0.0') rewriteIp = WARP_DEFAULTS.rewriteIp;
     if (!url) return alert('Укажите URL API AdGuard Home');
     const count = (window.warpStatus && window.warpStatus.domains) || 0;
     if (window.warpStatus) {
