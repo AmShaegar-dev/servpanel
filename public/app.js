@@ -854,9 +854,14 @@ async function warpPower(enable) {
 
 async function warpTest() {
     const el = document.getElementById('warpTestResult');
-    if (el) { el.style.color = 'var(--text-muted)'; el.innerText = 'Проверка WARP через SOCKS5...'; }
+    const socksPort = warpField('warpSocksPort', WARP_DEFAULTS.socksPort);
+    if (el) { el.style.color = 'var(--text-muted)'; el.innerText = `Проверка WARP через SOCKS5 127.0.0.1:${socksPort}...`; }
     try {
-        const res = await fetch('/api/warp/test', { method: 'POST' });
+        const res = await fetch('/api/warp/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ socksPort })
+        });
         const d = await res.json().catch(() => ({}));
         if (!el) return;
         if (d.ok) {
