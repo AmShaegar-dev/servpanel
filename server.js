@@ -2657,12 +2657,14 @@ app.post('/api/warp/power', checkAuth, requireAdmin, (req, res) => {
 
 app.post('/api/warp/test', checkAuth, requireAdmin, (req, res) => {
     const cfg = warpConfig();
+    const body = req.body || {};
+    const socksPort = isPort(body.socksPort) ? String(Number(body.socksPort)) : cfg.socksPort;
     if (TEST_MODE || DEMO_MODE) {
         return res.json({ ok: true, demo: true, ip: '203.0.113.10', org: 'Cloudflare, Inc.', country: 'NL' });
     }
     execFile('curl', [
         '-fsS', '--max-time', '15',
-        '-x', `socks5h://127.0.0.1:${cfg.socksPort}`,
+        '-x', `socks5h://127.0.0.1:${socksPort}`,
         'https://ipinfo.io/json'
     ], { timeout: 25000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) {
