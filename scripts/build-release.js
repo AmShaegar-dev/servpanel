@@ -29,7 +29,8 @@ const WITH_NM = !args.includes('--no-node-modules');
 const ITEMS = [
     'server.js', 'package.json', 'package-lock.json',
     'public', 'lib', 'tests', 'demo',
-    'README.md', 'DEMO.md', 'ИЗМЕНЕНИЯ.md', 'ОБНОВЛЕНИЕ-2.4.md',
+    'README.md', 'DEMO.md', 'MANUAL-UPDATE.md', 'КАК-РАЗВЕРНУТЬ.txt',
+    'ИЗМЕНЕНИЯ.md', 'ОБНОВЛЕНИЕ-2.4.md',
     'install.sh', 'install_adguard_silent.sh', 'install_awg_stateful.sh',
     'install_warp_xray.sh', 'warp-domains.txt',
     'update.sh', 'upgrade.sh', 'LICENSE', '.gitignore'
