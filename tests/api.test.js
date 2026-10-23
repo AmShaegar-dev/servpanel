@@ -560,6 +560,124 @@ test('Обновление: воркер и модуль обновления п
     assert.doesNotMatch(workerSource, /\['restart',\s*PM2_NAME,\s*'--update-env'\]/);
 });
 
+test('SSL: домены и email валидируются', () => {
+    assert.equal(internals.normalizeDomain('Panel.Example.COM.'), 'panel.example.com');
+    assert.equal(internals.normalizeDomain('  vpn.example.com '), 'vpn.example.com');
+    assert.equal(internals.normalizeDomain('localhost'), '');
+    assert.equal(internals.normalizeDomain('bad domain.com'), '');
+    assert.equal(internals.normalizeDomain('https://example.com'), '');
+    assert.equal(internals.normalizeDomain('-bad.example.com'), '');
+    assert.equal(internals.normalizeDomain('a..b.example.com'), '');
+    assert.equal(internals.normalizeEmail('admin@example.com'), 'admin@example.com');
+    assert.equal(internals.normalizeEmail('not-an-email'), '');
+});
+
+test('SSL: конфиг Nginx содержит прокси, сертификат и ключ', () => {
+    const panel = internals.buildSiteConfig({
+        domain: 'panel.example.com',
+        mode: 'panel',
+        httpsPort: 8443,
+        certPath: '/etc/letsencrypt/live/panel.example.com/fullchain.pem',
+        keyPath: '/etc/letsencrypt/live/panel.example.com/privkey.pem'
+    });
+    assert.match(panel, /server_name panel\.example\.com;/);
+    assert.match(panel, /listen 8443 ssl;/);
+    assert.match(panel, /ssl_certificate \/etc\/letsencrypt\/live\/panel\.example\.com\/fullchain\.pem;/);
+    assert.match(panel, /ssl_certificate_key \/etc\/letsencrypt\/live\/panel\.example\.com\/privkey\.pem;/);
+    assert.match(panel, /proxy_pass http:\/\/127\.0\.0\.1:\d+;/);
+    assert.match(panel, /return 301 https:\/\/\$host:8443\$request_uri;/);
+
+    const site = internals.buildSiteConfig({ domain: 'site.example.com', mode: 'site', www: true, httpsPort: 443 });
+    assert.match(site, /server_name site\.example\.com www\.site\.example\.com;/);
+    assert.match(site, /root \/var\/www\/site\.example\.com;/);
+    assert.doesNotMatch(site, /ssl_certificate /);
+});
+
+test('SSL: порты из конфига Nginx распознаются', () => {
+    const conf = 'server { listen 80; listen 8443 ssl; listen [::]:443 ssl http2; }';
+    assert.deepEqual(internals.existingListenPorts(conf), [80, 8443, 443]);
+    assert.equal(internals.existingSslPort(conf), 8443);
+    assert.deepEqual(internals.parseServerNames('server_name site.example.com www.site.example.com;'),
+        ['site.example.com', 'www.site.example.com']);
+});
+
+test('SSL: статус показывает пути к сертификатам и ключам', async () => {
+    const r = await request('/api/ssl/status');
+    assert.equal(r.status, 200);
+    assert.equal(typeof r.json.paths.live, 'string');
+    assert.match(r.json.paths.live, /letsencrypt/);
+    assert.match(r.json.paths.renewal, /renewal/);
+    assert.match(r.json.paths.panelConfig, /nginx/);
+    assert.ok(Array.isArray(r.json.certificates));
+    assert.ok(Array.isArray(r.json.sites));
+    assert.ok(r.json.panel && typeof r.json.panel.internalPort === 'number');
+});
+
+test('SSL: домен панели привязывается, сертификат и пути видны в статусе', async () => {
+    const r = await request('/api/ssl/site', jsonBody({
+        domain: 'panel.example.com', email: 'admin@example.com', mode: 'panel'
+    }));
+    assert.equal(r.status, 200);
+    assert.equal(r.json.success, true);
+    assert.equal(r.json.domain, 'panel.example.com');
+    assert.match(r.json.url, /^https:\/\/panel\.example\.com/);
+    assert.equal(r.json.certificates.fullchain, '/etc/letsencrypt/live/panel.example.com/fullchain.pem');
+    assert.equal(r.json.certificates.privkey, '/etc/letsencrypt/live/panel.example.com/privkey.pem');
+
+    const st = await request('/api/ssl/status');
+    assert.equal(st.json.panel.domain, 'panel.example.com');
+    assert.equal(st.json.panel.scheme, 'https');
+    const cert = st.json.certificates.find(c => c.name === 'panel.example.com');
+    assert.ok(cert);
+    assert.equal(cert.privkey, '/etc/letsencrypt/live/panel.example.com/privkey.pem');
+    assert.ok(st.json.sites.some(s => (s.domains || []).includes('panel.example.com')));
+});
+
+test('SSL: сертификат виден на дашборде в данных сервера', async () => {
+    const r = await request('/api/server-info');
+    assert.equal(r.status, 200);
+    assert.equal(r.json.domain, 'panel.example.com');
+    assert.ok(r.json.cert);
+    assert.equal(r.json.cert.fullchain, '/etc/letsencrypt/live/panel.example.com/fullchain.pem');
+});
+
+test('SSL: дополнительный сайт создаётся, чужой сайт удалить нельзя, свой удаляется', async () => {
+    const bad = await request('/api/ssl/site', jsonBody({ domain: 'localhost', mode: 'site' }));
+    assert.equal(bad.status, 400);
+
+    const ok = await request('/api/ssl/site', jsonBody({ domain: 'site.example.com', mode: 'site', www: true }));
+    assert.equal(ok.status, 200);
+    assert.match(ok.json.url, /^https:\/\/site\.example\.com/);
+
+    const st = await request('/api/ssl/status');
+    assert.ok(st.json.sites.some(s => s.name === 'site.example.com'));
+
+    const delPanel = await request('/api/ssl/site/awg-admin', { method: 'DELETE' });
+    assert.equal(delPanel.status, 403);
+
+    const del = await request('/api/ssl/site/site.example.com', { method: 'DELETE' });
+    assert.equal(del.status, 200);
+    const st2 = await request('/api/ssl/status');
+    assert.ok(!st2.json.sites.some(s => s.name === 'site.example.com'));
+});
+
+test('SSL: продление проверяет имя сертификата', async () => {
+    const ok = await request('/api/ssl/renew', jsonBody({ name: 'panel.example.com' }));
+    assert.equal(ok.status, 200);
+    assert.equal(ok.json.success, true);
+    const bad = await request('/api/ssl/renew', jsonBody({ name: '../bad' }));
+    assert.equal(bad.status, 400);
+});
+
+test('SSL: привязка домена требует авторизации', async () => {
+    const res = await fetch(base + '/api/ssl/site', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: 'evil.example.com', mode: 'site' })
+    });
+    assert.equal(res.status, 401);
+});
+
 test('выход закрывает доступ', async () => {
     await request('/api/logout', { method: 'POST' });
     const r = await request('/api/stats');

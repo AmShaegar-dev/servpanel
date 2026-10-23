@@ -387,6 +387,8 @@ kbd {
 .icon-btn.active { color: #fff; border-color: rgba(91, 140, 255, .6); background: rgba(91, 140, 255, .14); }
 .icon-btn svg { width: 18px; height: 18px; display: block; }
 .nav-item .nav-ico svg { width: 15px; height: 15px; display: block; }
+.quick-action .qa-ico svg { width: 15px; height: 15px; display: block; }
+.palette-item .pi-ico svg { width: 14px; height: 14px; display: block; }
 .search-ico { display: inline-grid; place-items: center; flex: 0 0 auto; }
 .search-ico svg { width: 15px; height: 15px; display: block; }
 .mobile-only { display: none !important; }
@@ -713,6 +715,7 @@ button { font-family: inherit; }
 .btn:active, .btn-primary:active, .btn-dark:active, .btn-success:active, .btn-danger:active { transform: none; }
 .btn:disabled, .btn-primary:disabled, .btn-dark:disabled, .btn-success:disabled, .btn-danger:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 .btn-primary { background: var(--accent-grad); color: #fff; box-shadow: 0 8px 22px rgba(91, 140, 255, .22); }
+.btn svg, .btn-primary svg, .btn-dark svg, .btn-success svg, .btn-danger svg, .btn-soft svg, .btn-ghost svg { width: 14px; height: 14px; flex: 0 0 14px; display: block; }
 .btn-dark { background: rgba(255, 255, 255, .045); border-color: var(--border); color: #d7e2f8; }
 .btn-soft { background: rgba(91, 140, 255, .13); border-color: rgba(91, 140, 255, .25); color: #cfe0ff; }
 .btn-ghost { background: transparent; border-color: var(--border); color: var(--text-muted); }
@@ -993,6 +996,17 @@ td strong { color: #eaf1ff; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .muted { color: var(--text-muted); }
 .hidden { display: none !important; }
+
+/* Домены и SSL: пути к сертификатам и ключам */
+.ssl-path {
+    color: #79c0ff;
+    background: rgba(56, 139, 253, .08);
+    border: 1px solid rgba(56, 139, 253, .18);
+    border-radius: 6px;
+    padding: 2px 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.ssl-path:hover { background: rgba(56, 139, 253, .2); }
 
 /* Advanced mode: всё, что помечено advanced-only, видно только эксперту. */
 .advanced-only { display: none !important; }

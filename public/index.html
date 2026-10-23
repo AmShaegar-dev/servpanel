@@ -91,6 +91,9 @@
                     <button class="nav-item" data-tab="tab-install" data-title="Установка" onclick="switchTab('tab-install', this)" id="navInstall">
                         <span class="nav-ico">↓</span><span>Установка</span>
                     </button>
+                    <button class="nav-item" data-tab="tab-ssl" data-title="Домены и SSL" onclick="switchTab('tab-ssl', this)" id="navSsl">
+                        <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg></span><span>Домены и SSL</span>
+                    </button>
                 </div>
                 <div class="nav-group">
                     <div class="nav-label">Безопасность</div>
@@ -257,6 +260,7 @@
                             <button class="quick-action" onclick="openWizard('obf')"><span class="qa-ico">✦</span><strong>Усилить обфускацию</strong><small>Готовый профиль</small></button>
                             <button class="quick-action" onclick="openWizard('cascade')"><span class="qa-ico">⇄</span><strong>Настроить каскад</strong><small>RU → EU за шаги</small></button>
                             <button class="quick-action" onclick="openWizard('adguard')"><span class="qa-ico">◎</span><strong>Подключить AdGuard</strong><small>Автопоиск адреса</small></button>
+                            <button class="quick-action" data-admin-only onclick="switchTab('tab-ssl', document.getElementById('navSsl'))"><span class="qa-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg></span><strong>Домен и HTTPS</strong><small>Сертификат Let's Encrypt</small></button>
                             <button class="quick-action" data-admin-only onclick="openWizard('backup')"><span class="qa-ico">↓</span><strong>Сделать бэкап</strong><small>Мастер</small></button>
                             <button class="quick-action" onclick="runHealthCheck()"><span class="qa-ico">⌁</span><strong>Проверить всё</strong><small>Диагностика</small></button>
                         </div>
@@ -401,6 +405,121 @@
                         <table style="min-width: 600px;">
                             <thead><tr><th>Протокол / Порт</th><th>Локальный адрес</th><th>Процесс (PID)</th><th>Служба</th></tr></thead>
                             <tbody id="portsTable"><tr><td colspan="4">Загрузка...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ДОМЕНЫ И SSL -->
+            <div id="tab-ssl" class="tab-pane">
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Домены и HTTPS-сертификаты</h3>
+                            <p>Привяжите домен к панели или создайте сайт: панель сама настроит Nginx, выпустит сертификат Let's Encrypt и покажет пути к файлам.</p>
+                        </div>
+                        <span class="badge badge-muted" id="sslStateBadge">проверка</span>
+                    </div>
+                    <div id="sslBanner"></div>
+                    <div id="sslSummary" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:16px;"></div>
+                    <div class="controls-row" style="margin-bottom:0;">
+                        <button class="btn btn-ghost" onclick="loadSslPanel()">↻ Обновить</button>
+                        <button class="btn btn-soft" id="sslDepsBtn" style="display:none;" onclick="installSslDeps()">⬇ Установить nginx и certbot</button>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-bottom:20px;" data-admin-only>
+                    <div class="card-head">
+                        <div>
+                            <h3>Привязать домен к панели</h3>
+                            <p>A-запись домена должна указывать на IP этого сервера, а порт 80 — быть доступен из интернета.</p>
+                        </div>
+                        <span class="badge badge-muted">HTTPS</span>
+                    </div>
+                    <div class="controls-row" style="margin-bottom:10px;">
+                        <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:220px;">
+                            <label style="font-size:11px; color:var(--text-muted);">Домен панели</label>
+                            <input type="text" id="sslPanelDomainInput" placeholder="panel.example.com" autocomplete="off" spellcheck="false">
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:220px;">
+                            <label style="font-size:11px; color:var(--text-muted);">Email для Let's Encrypt</label>
+                            <input type="email" id="sslPanelEmail" placeholder="admin@example.com" autocomplete="off">
+                        </div>
+                    </div>
+                    <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-muted); margin-bottom:12px;">
+                        <input type="checkbox" id="sslPanelVpn" checked style="width:auto;">
+                        Использовать домен как адрес в новых конфигах VPN-клиентов (Endpoint)
+                    </label>
+                    <div class="controls-row" style="margin-bottom:0;">
+                        <button class="btn btn-primary" id="sslBindBtn" onclick="bindPanelDomain()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg>Привязать и выпустить сертификат</button>
+                        <button class="btn btn-dark" id="sslRenewBtn" style="display:none;" onclick="renewPanelCert()">↻ Продлить сертификат</button>
+                        <span id="sslBindHint" style="font-size:11.5px; color:var(--text-dim);">Панель сделает резервную копию конфига Nginx и откатится при ошибке.</span>
+                    </div>
+                    <div id="sslBindResult" class="update-note" style="display:none; margin-top:12px;"></div>
+                </div>
+
+                <div class="card" style="margin-bottom:20px;" data-admin-only>
+                    <div class="card-head">
+                        <div>
+                            <h3>Дополнительный сайт</h3>
+                            <p>Создаст Nginx-сайт в <code>/var/www/&lt;домен&gt;</code>, выпустит сертификат и включит редирект с HTTP на HTTPS.</p>
+                        </div>
+                        <span class="badge badge-muted">site</span>
+                    </div>
+                    <div class="controls-row" style="margin-bottom:10px;">
+                        <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:220px;">
+                            <label style="font-size:11px; color:var(--text-muted);">Домен</label>
+                            <input type="text" id="sslSiteDomain" placeholder="site.example.com" autocomplete="off" spellcheck="false">
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:220px;">
+                            <label style="font-size:11px; color:var(--text-muted);">Email для Let's Encrypt (необязательно)</label>
+                            <input type="email" id="sslSiteEmail" placeholder="admin@example.com" autocomplete="off">
+                        </div>
+                    </div>
+                    <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-muted); margin-bottom:12px;">
+                        <input type="checkbox" id="sslSiteWww" style="width:auto;">
+                        Добавить <code>www.&lt;домен&gt;</code> в сертификат (нужна отдельная A-запись)
+                    </label>
+                    <div class="controls-row" style="margin-bottom:0;">
+                        <button class="btn btn-primary" onclick="createSslSite()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c3.4 3.7 3.4 14.3 0 18"/><path d="M12 3c-3.4 3.7-3.4 14.3 0 18"/></svg>Создать сайт и выпустить сертификат</button>
+                    </div>
+                    <div id="sslSiteResult" class="update-note" style="display:none; margin-top:12px;"></div>
+                </div>
+
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Сертификаты и ключи</h3>
+                            <p>Точные пути на сервере. Нажмите на путь, чтобы скопировать его.</p>
+                        </div>
+                        <span class="badge badge-muted" id="sslCertCount">0</span>
+                    </div>
+                    <div class="table-wrapper" style="margin-bottom:0;">
+                        <table style="min-width:900px;">
+                            <thead><tr>
+                                <th>Домен(ы)</th>
+                                <th>Сертификат (fullchain.pem)</th>
+                                <th>Приватный ключ (privkey.pem)</th>
+                                <th>Действует до</th>
+                                <th style="width:120px;">Продлить</th>
+                            </tr></thead>
+                            <tbody id="sslCertsTable"><tr><td colspan="5">Загрузка…</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div id="sslPaths" style="margin-top:14px; font-size:12px; color:var(--text-muted); line-height:1.7;"></div>
+                </div>
+
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Сайты Nginx</h3>
+                            <p>Созданные из панели сайты можно удалить здесь. Сертификат при удалении остаётся на диске.</p>
+                        </div>
+                    </div>
+                    <div class="table-wrapper" style="margin-bottom:0;">
+                        <table style="min-width:780px;">
+                            <thead><tr><th>Сайт</th><th>Домены</th><th>HTTPS</th><th>Конфиг</th><th style="width:110px;">Действие</th></tr></thead>
+                            <tbody id="sslSitesTable"><tr><td colspan="5">Загрузка…</td></tr></tbody>
                         </table>
                     </div>
                 </div>

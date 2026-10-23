@@ -260,6 +260,7 @@ function switchTab(tabId, el) {
     if (tabId === 'tab-install' && currentRole !== 'admin') return;
     if (tabId === 'tab-diag' && currentRole !== 'admin') return;
     if (tabId === 'tab-update' && currentRole !== 'admin') return;
+    if (tabId === 'tab-ssl' && currentRole !== 'admin') return;
     const pane = document.getElementById(tabId);
     if (!pane) return;
     document.querySelectorAll('.tab-pane').forEach(t => t.classList.remove('active'));
@@ -280,6 +281,7 @@ function switchTab(tabId, el) {
     if (tabId === 'tab-obf') { loadObfCurrent(); loadObfProfiles(); }
     if (tabId === 'tab-update') loadUpdatePanel();
     if (tabId === 'tab-admin') loadAdminPanel();
+    if (tabId === 'tab-ssl') loadSslPanel();
 }
 
 function copyMeko() {
@@ -383,6 +385,15 @@ async function loadServerInfo() {
                 html += `<div><span class="val-tx">DNS-over-HTTPS (DoH):</span> https://${data.domain}/dns-query</div>`;
             } else {
                 html += `<div style="color: var(--text-muted); font-size: 12px; margin-top: 5px;">* Для настройки DoT и DoH (Private DNS) привяжите домен к серверу.</div>`;
+            }
+            if (data.cert) {
+                html += `<div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--border-soft); font-size:12px; line-height:1.6;">` +
+                    `<div><span class="val-sys">HTTPS:</span> https://${data.domain}${data.cert.daysLeft != null ? ` · истекает через ${data.cert.daysLeft} дн.` : ''}</div>` +
+                    `<div>Сертификат: <code style="word-break:break-all;">${data.cert.fullchain}</code></div>` +
+                    `<div>Ключ: <code style="word-break:break-all;">${data.cert.privkey}</code></div>` +
+                    `<div style="color:var(--text-dim);">Управление — во вкладке «Домены и SSL».</div></div>`;
+            } else if (data.domain) {
+                html += `<div style="margin-top:10px; font-size:12px; color:var(--sys-color);">Сертификат не найден — выпустите его во вкладке «Домены и SSL».</div>`;
             }
             document.getElementById('dnsAddressesList').innerHTML = html;
 
@@ -928,6 +939,8 @@ function applyRoleUI() {
     if (navDiag) navDiag.style.display = isAdmin ? '' : 'none';
     const navUpdate = document.getElementById('navUpdate');
     if (navUpdate) navUpdate.style.display = isAdmin ? '' : 'none';
+    const navSsl = document.getElementById('navSsl');
+    if (navSsl) navSsl.style.display = isAdmin ? '' : 'none';
     const who = document.getElementById('whoami');
     if (who) who.innerText = currentUser;
     const roleEl = document.getElementById('userRole');
@@ -2328,7 +2341,13 @@ const I18N_EN = {
     'Загрузка...': 'Loading...',
     'Загрузка': 'Loading',
     'Ошибка': 'Error',
-    'Ошибка загрузки': 'Loading error'
+    'Ошибка загрузки': 'Loading error',
+    'Домены и SSL': 'Domains & SSL',
+    'Домены и HTTPS-сертификаты': 'Domains and HTTPS certificates',
+    'Привязать домен к панели': 'Bind a domain to the panel',
+    'Дополнительный сайт': 'Additional site',
+    'Сертификаты и ключи': 'Certificates and keys',
+    'Сайты Nginx': 'Nginx sites'
 };
 
 function applyLanguage(lang) {
@@ -3640,6 +3659,348 @@ async function pingFromHealth(host) {
 }
 
 /* --------------------------------------------------------------------------
+   Домены и SSL: привязка домена, выпуск сертификата и показ путей
+   -------------------------------------------------------------------------- */
+let sslState = null;
+
+function sslDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function sslCopy(value) {
+    const text = String(value || '');
+    if (!text) return;
+    const done = () => toast('Скопировано', 'success', text);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(() => sslCopyFallback(text, done));
+    } else {
+        sslCopyFallback(text, done);
+    }
+}
+
+function sslCopyFallback(text, done) {
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        done();
+    } catch (e) {
+        toast('Не удалось скопировать', 'error', text);
+    }
+}
+
+function sslPathCell(pathValue) {
+    if (!pathValue) return '<span class="muted">—</span>';
+    // <wbr> после слэшей: длинный путь переносится по границам каталогов,
+    // а не посреди имени домена.
+    const label = esc(pathValue).replace(/\//g, '/<wbr>');
+    return `<code class="ssl-path" data-path="${esc(pathValue)}" title="Нажмите, чтобы скопировать" ` +
+        `style="cursor:pointer; word-break:normal; overflow-wrap:anywhere; font-size:11.5px;" onclick="sslCopy(this.dataset.path)">${label}</code>`;
+}
+
+function sslTile(label, value, sub, color) {
+    return `<div style="background:rgba(0,0,0,.18); border:1px solid var(--border); border-radius:10px; padding:12px 14px;">
+        <div style="font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--text-dim); margin-bottom:6px;">${esc(label)}</div>
+        <div style="font-size:15px; font-weight:600; color:${color || 'var(--text)'}; word-break:break-word;">${esc(value)}</div>
+        ${sub ? `<div style="font-size:11.5px; color:var(--text-muted); margin-top:4px; word-break:break-word;">${esc(sub)}</div>` : ''}
+    </div>`;
+}
+
+function sslResult(el, type, html) {
+    if (!el) return;
+    el.style.display = 'block';
+    el.style.whiteSpace = 'normal';
+    el.style.borderColor = type === 'error' ? 'rgba(248,81,73,.45)' : type === 'success' ? 'rgba(46,160,67,.45)' : 'var(--border)';
+    el.style.color = type === 'error' ? '#ffa198' : type === 'success' ? '#7ee787' : 'var(--text-muted)';
+    el.innerHTML = html;
+}
+
+function sslBusy(btn, busy, busyText) {
+    if (!btn) return;
+    btn.disabled = !!busy;
+    if (busy) {
+        if (!btn.dataset.idleHtml) btn.dataset.idleHtml = btn.innerHTML;
+        btn.textContent = busyText || 'Подождите…';
+    } else {
+        btn.innerHTML = btn.dataset.idleHtml || btn.innerHTML;
+    }
+}
+
+async function loadSslPanel() {
+    try {
+        const data = await apiJson('/api/ssl/status');
+        sslState = data;
+        const domainInput = document.getElementById('sslPanelDomainInput');
+        if (domainInput && !domainInput.value) domainInput.value = (data.panel && data.panel.domain) || '';
+        const emailInput = document.getElementById('sslPanelEmail');
+        if (emailInput && !emailInput.value) emailInput.value = data.email || '';
+        const siteEmail = document.getElementById('sslSiteEmail');
+        if (siteEmail && !siteEmail.value) siteEmail.value = data.email || '';
+        renderSslSummary(data);
+        renderSslCertificates(data);
+        renderSslSites(data);
+        const renewBtn = document.getElementById('sslRenewBtn');
+        const panelCert = (data.certificates || []).find(c => (c.domains || []).includes(data.panel && data.panel.domain));
+        if (renewBtn) renewBtn.style.display = panelCert ? '' : 'none';
+    } catch (e) {
+        const banner = document.getElementById('sslBanner');
+        if (banner) banner.innerHTML = `<div class="alert alert-danger">Не удалось загрузить состояние SSL: ${esc(e.message)}</div>`;
+        const tbody = document.getElementById('sslCertsTable');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="5">Ошибка загрузки</td></tr>';
+    }
+}
+
+function renderSslSummary(data) {
+    const box = document.getElementById('sslSummary');
+    if (!box) return;
+    const panel = data.panel || {};
+    const tools = data.tools || {};
+    const cert = (data.certificates || []).find(c => (c.domains || []).includes(panel.domain)) || null;
+    const days = cert && cert.daysLeft != null ? cert.daysLeft : null;
+    const nginxOk = !!(tools.nginx && tools.nginx.installed);
+    const certbotOk = !!(tools.certbot && tools.certbot.installed);
+    box.innerHTML =
+        sslTile('Домен панели', panel.domain || 'не привязан', panel.domain ? (panel.url || '') : 'панель открыта по IP') +
+        sslTile('HTTPS', panel.scheme === 'https' ? 'включён' : 'не включён',
+            `порт ${panel.httpsPort || panel.publicPort || '—'}`,
+            panel.scheme === 'https' ? 'var(--rx-color)' : 'var(--sys-color)') +
+        sslTile('Сертификат', cert ? sslDate(cert.validTo) : 'не найден',
+            days == null ? '' : (days < 0 ? 'срок истёк' : `осталось ${days} дн.`),
+            days != null && days <= 14 ? 'var(--danger)' : undefined) +
+        sslTile('Инструменты', `nginx ${nginxOk ? '✓' : '✗'} · certbot ${certbotOk ? '✓' : '✗'}`,
+            data.timer ? (data.timer.active ? 'автопродление активно' : 'автопродление неактивно') : '');
+
+    const badge = document.getElementById('sslStateBadge');
+    if (badge) {
+        badge.className = 'badge ' + (panel.scheme === 'https' ? 'badge-good' : panel.domain ? 'badge-warn' : 'badge-muted');
+        badge.innerText = panel.scheme === 'https' ? 'HTTPS активен' : panel.domain ? 'без сертификата' : 'по IP';
+    }
+
+    const depsBtn = document.getElementById('sslDepsBtn');
+    if (depsBtn) depsBtn.style.display = (!nginxOk || !certbotOk) ? '' : 'none';
+    const banner = document.getElementById('sslBanner');
+    if (banner) {
+        const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+        banner.innerHTML = warnings.length
+            ? `<div class="alert ${!nginxOk || !certbotOk ? 'alert-danger' : 'alert-warn'}">` +
+              warnings.map(w => `<div>• ${esc(w)}</div>`).join('') + '</div>'
+            : '';
+    }
+}
+
+function renderSslCertificates(data) {
+    const tbody = document.getElementById('sslCertsTable');
+    const count = document.getElementById('sslCertCount');
+    const certs = Array.isArray(data.certificates) ? data.certificates : [];
+    if (count) count.innerText = String(certs.length);
+    if (tbody) {
+        if (!certs.length) {
+            tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state">Сертификатов не найдено. Привяжите домен выше — панель выпустит его автоматически.</div></td></tr>';
+        } else {
+            tbody.innerHTML = certs.map(c => {
+                const days = c.daysLeft;
+                const color = days == null ? 'var(--text-muted)' : days <= 14 ? 'var(--danger)' : days <= 30 ? 'var(--sys-color)' : 'var(--rx-color)';
+                const daysText = days == null ? '' : days < 0 ? 'срок истёк' : `осталось ${days} дн.`;
+                return `<tr>
+                    <td><strong>${esc((c.domains || []).join(', ') || c.name)}</strong><br>
+                        <span style="font-size:11px; color:var(--text-dim);">имя: ${esc(c.name)}${c.virtual ? ' · демо' : ''}</span></td>
+                    <td>${sslPathCell(c.fullchain)}</td>
+                    <td>${sslPathCell(c.privkey)}${c.keyBytes ? `<br><span style="font-size:11px; color:var(--text-dim);">${c.keyBytes} байт · root:root 600</span>` : ''}</td>
+                    <td>${esc(sslDate(c.validTo))}<br><span style="color:${color}; font-size:11.5px;">${esc(daysText)}</span></td>
+                    <td><button class="btn-dark" style="padding:4px 9px; font-size:11px;" data-name="${esc(c.name)}" onclick="renewSslCert(this.dataset.name)">↻ Продлить</button></td>
+                </tr>`;
+            }).join('');
+        }
+    }
+    renderSslPaths(data);
+}
+
+function renderSslPaths(data) {
+    const box = document.getElementById('sslPaths');
+    if (!box) return;
+    const paths = data.paths || {};
+    const panel = data.panel || {};
+    const certs = Array.isArray(data.certificates) ? data.certificates : [];
+    // Для блока путей берём сертификат панели, а не первый в списке.
+    const cert = certs.find(c => (c.domains || []).includes(panel.domain)) || certs[0] || null;
+    const sample = (cert && cert.name) || panel.domain || 'example.com';
+    const items = [
+        ['Каталог домена', paths.live ? `${paths.live}/${sample}/` : ''],
+        ['Сертификат + цепочка', paths.live ? `${paths.live}/${sample}/fullchain.pem` : ''],
+        ['Приватный ключ', paths.live ? `${paths.live}/${sample}/privkey.pem` : ''],
+        ['Только цепочка', paths.live ? `${paths.live}/${sample}/chain.pem` : ''],
+        ['Архив (реальные файлы)', paths.archive ? `${paths.archive}/${sample}/` : ''],
+        ['Настройки автопродления', paths.renewal ? `${paths.renewal}/${sample}.conf` : ''],
+        ['Конфиг Nginx панели', paths.panelConfig || '']
+    ].filter(item => item[1]);
+    box.innerHTML =
+        '<div style="margin-bottom:6px; color:var(--text-dim); font-size:10.5px; text-transform:uppercase; letter-spacing:.05em;">Пути на сервере — нажмите, чтобы скопировать</div>' +
+        items.map(([label, value]) =>
+            `<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:3px;">
+                <span style="min-width:200px; color:var(--text-dim);">${esc(label)}</span>${sslPathCell(value)}
+            </div>`).join('') +
+        '<div style="margin-top:8px; color:var(--text-dim);">Приватный ключ читается только от root. Certbot продлевает сертификаты автоматически (certbot.timer), вручную — кнопкой «Продлить».</div>';
+}
+
+function renderSslSites(data) {
+    const tbody = document.getElementById('sslSitesTable');
+    if (!tbody) return;
+    const sites = Array.isArray(data.sites) ? data.sites : [];
+    if (!sites.length) {
+        tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state">Сайтов пока нет.</div></td></tr>';
+        return;
+    }
+    tbody.innerHTML = sites.map(s => {
+        const canDelete = s.managedByPanel && s.name !== 'awg-admin';
+        return `<tr>
+            <td><strong>${esc(s.name)}</strong>${s.managedByPanel ? ' <span class="badge badge-muted">из панели</span>' : ''}</td>
+            <td>${esc((s.domains || []).join(', ') || '—')}</td>
+            <td>${s.ssl ? '<span class="badge badge-good">HTTPS</span>' : '<span class="badge badge-warn">HTTP</span>'}</td>
+            <td>${sslPathCell(s.available)}</td>
+            <td>${canDelete
+                ? `<button class="btn-danger" style="padding:4px 9px; font-size:11px;" data-name="${esc(s.name)}" onclick="deleteSslSite(this.dataset.name)">Удалить</button>`
+                : '<span class="muted">—</span>'}</td>
+        </tr>`;
+    }).join('');
+}
+
+async function bindPanelDomain() {
+    const domain = (document.getElementById('sslPanelDomainInput').value || '').trim();
+    const email = (document.getElementById('sslPanelEmail').value || '').trim();
+    const vpnEl = document.getElementById('sslPanelVpn');
+    const useForVpn = vpnEl ? vpnEl.checked : true;
+    const out = document.getElementById('sslBindResult');
+    if (!domain) { toast('Укажите домен', 'error', 'Например: panel.example.com'); return; }
+    if (!confirm(`Привязать домен ${domain} к панели и выпустить сертификат Let's Encrypt?`)) return;
+    const btn = document.getElementById('sslBindBtn');
+    sslBusy(btn, true, 'Выпускаю сертификат…');
+    sslResult(out, 'info', `Настраиваю Nginx и запрашиваю сертификат для ${esc(domain)}. Это может занять до 1–2 минут…`);
+    try {
+        const d = await apiJson('/api/ssl/site', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain, email, mode: 'panel', useForVpn })
+        });
+        let html = `Готово. Панель доступна по адресу <a href="${esc(d.url)}" target="_blank" rel="noopener"><b>${esc(d.url)}</b></a>.`;
+        if (d.certificates) {
+            html += `<br>Сертификат: <code>${esc(d.certificates.fullchain)}</code>`;
+            html += `<br>Ключ: <code>${esc(d.certificates.privkey)}</code>`;
+        }
+        if (Array.isArray(d.warnings) && d.warnings.length) {
+            html += '<br>' + d.warnings.map(w => '• ' + esc(w)).join('<br>');
+        }
+        sslResult(out, 'success', html);
+        toast('Сертификат выпущен', 'success', d.url);
+        await loadSslPanel();
+    } catch (e) {
+        let html = esc(e.message || 'Ошибка');
+        if (e.data && e.data.needDeps) html += '<br>Установите nginx и certbot кнопкой «Установить nginx и certbot» наверху.';
+        if (e.data && e.data.output) {
+            html += `<br><pre style="white-space:pre-wrap; font-size:11px; max-height:220px; overflow:auto; margin:8px 0 0;">${esc(e.data.output)}</pre>`;
+        }
+        sslResult(out, 'error', html);
+        toast('Не удалось выпустить сертификат', 'error', e.message);
+    } finally {
+        sslBusy(btn, false);
+    }
+}
+
+async function createSslSite() {
+    const domain = (document.getElementById('sslSiteDomain').value || '').trim();
+    const email = (document.getElementById('sslSiteEmail').value || '').trim();
+    const wwwEl = document.getElementById('sslSiteWww');
+    const www = wwwEl ? wwwEl.checked : false;
+    const out = document.getElementById('sslSiteResult');
+    if (!domain) { toast('Укажите домен', 'error', 'Например: site.example.com'); return; }
+    if (!confirm(`Создать сайт ${domain} и выпустить сертификат Let's Encrypt?`)) return;
+    sslResult(out, 'info', `Создаю сайт и запрашиваю сертификат для ${esc(domain)}…`);
+    try {
+        const d = await apiJson('/api/ssl/site', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain, email, mode: 'site', www })
+        });
+        let html = `Сайт создан: <a href="${esc(d.url)}" target="_blank" rel="noopener"><b>${esc(d.url)}</b></a><br>Файлы сайта: <code>/var/www/${esc(domain)}/</code>`;
+        if (d.certificates) {
+            html += `<br>Сертификат: <code>${esc(d.certificates.fullchain)}</code>`;
+            html += `<br>Ключ: <code>${esc(d.certificates.privkey)}</code>`;
+        }
+        if (Array.isArray(d.warnings) && d.warnings.length) {
+            html += '<br>' + d.warnings.map(w => '• ' + esc(w)).join('<br>');
+        }
+        sslResult(out, 'success', html);
+        toast('Сайт создан', 'success', d.url);
+        await loadSslPanel();
+    } catch (e) {
+        let html = esc(e.message || 'Ошибка');
+        if (e.data && e.data.needDeps) html += '<br>Установите nginx и certbot кнопкой наверху.';
+        if (e.data && e.data.output) {
+            html += `<br><pre style="white-space:pre-wrap; font-size:11px; max-height:220px; overflow:auto; margin:8px 0 0;">${esc(e.data.output)}</pre>`;
+        }
+        sslResult(out, 'error', html);
+        toast('Не удалось создать сайт', 'error', e.message);
+    }
+}
+
+async function renewSslCert(name) {
+    if (!name || !confirm(`Продлить сертификат ${name}?`)) return;
+    toast('Обновляю сертификат', 'info', name);
+    try {
+        const d = await apiJson('/api/ssl/renew', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        const days = d.certificate && d.certificate.daysLeft;
+        toast('Сертификат обновлён', 'success', days != null ? `осталось ${days} дн.` : name);
+        await loadSslPanel();
+    } catch (e) {
+        toast('Ошибка обновления', 'error', e.message);
+    }
+}
+
+function renewPanelCert() {
+    const panel = (sslState && sslState.panel) || {};
+    const cert = ((sslState && sslState.certificates) || []).find(c => (c.domains || []).includes(panel.domain));
+    if (!cert) { toast('Сертификат не найден', 'error', 'Сначала привяжите домен'); return; }
+    renewSslCert(cert.name);
+}
+
+async function deleteSslSite(name) {
+    if (!name || !confirm(`Удалить сайт ${name}? Сертификат останется на диске.`)) return;
+    try {
+        await apiJson('/api/ssl/site/' + encodeURIComponent(name), { method: 'DELETE' });
+        toast('Сайт удалён', 'success', name);
+        await loadSslPanel();
+    } catch (e) {
+        toast('Не удалось удалить сайт', 'error', e.message);
+    }
+}
+
+async function installSslDeps() {
+    if (!confirm('Установить nginx, certbot и python3-certbot-nginx через apt?')) return;
+    const btn = document.getElementById('sslDepsBtn');
+    sslBusy(btn, true, 'Установка…');
+    try {
+        await apiJson('/api/ssl/install-deps', { method: 'POST' });
+        toast('Компоненты установлены', 'success', 'nginx и certbot готовы');
+        await loadSslPanel();
+    } catch (e) {
+        toast('Не удалось установить', 'error', e.message);
+    } finally {
+        sslBusy(btn, false);
+    }
+}
+
+/* --------------------------------------------------------------------------
    Command palette (Ctrl+K)
    -------------------------------------------------------------------------- */
 const PALETTE_ACTIONS = [
@@ -3652,6 +4013,7 @@ const PALETTE_ACTIONS = [
     { id: 'cascade-wizard', icon: '⇄', title: 'Настроить каскад', hint: 'Пошаговый мастер', run: () => openWizard('cascade') },
     { id: 'adguard', icon: '◎', title: 'AdGuard', hint: 'DNS и фильтры', run: () => openWizard('adguard') },
     { id: 'services', icon: '◎', title: 'Службы и DNS', hint: 'Статусы сервисов', run: () => openServicesTab() },
+    { id: 'ssl', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg>', title: 'Домены и SSL', hint: 'Сертификат, ключ и пути', run: () => switchTab('tab-ssl', document.getElementById('navSsl')) },
     { id: 'install', icon: '↓', title: 'Установка', hint: 'AWG и AdGuard', run: () => openInstallTab() },
     { id: 'backup', icon: '⤓', title: 'Резервная копия', hint: 'Создать сейчас', run: () => openWizard('backup') },
     { id: 'health', icon: '⌁', title: 'Проверить всё', hint: 'Диагностика', run: () => runHealthCheck() },

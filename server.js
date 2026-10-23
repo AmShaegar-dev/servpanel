@@ -18,11 +18,12 @@
 const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
-const { exec, execFile, execFileSync, spawn } = require('child_process');
+const { exec, execFile, execFileSync, spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const zlib = require('zlib');
+const dns = require('dns');
 const updater = require('./lib/updater');
 
 const app = express();
@@ -2785,7 +2786,10 @@ function guessDomain() {
         }
         const nginx = shTry('cat', ['/etc/nginx/sites-available/awg-admin']);
         const m = nginx.match(/server_name\s+([^;]+);/);
-        if (m && m[1] && m[1].trim() !== '_' && HOST_RE.test(m[1].trim())) return m[1].trim();
+        // server_name может содержать несколько имён («домен www.домен») —
+        // берём первое, иначе проверка HOST_RE не проходит из-за пробела.
+        const first = m && m[1] ? m[1].trim().split(/\s+/).find(n => n && n !== '_') : '';
+        if (first && HOST_RE.test(first)) return first;
     } catch (e) { /* ignore */ }
     return '';
 }
@@ -4137,9 +4141,15 @@ app.post('/api/change-password', checkAuth, (req, res) => {
 });
 
 app.get('/api/server-info', checkAuth, (req, res) => {
-    if (DEMO_MODE) return res.json({ ip: '203.0.113.10', domain: 'vpn.example.com', country: 'NL' });
+    if (DEMO_MODE) {
+        const demo = demoCertificate();
+        return res.json({
+            ip: '203.0.113.10', domain: 'vpn.example.com', country: 'NL',
+            cert: { name: demo.name, fullchain: demo.fullchain, privkey: demo.privkey, chain: demo.chain, daysLeft: demo.daysLeft, validTo: demo.validTo }
+        });
+    }
     try {
-        const domain = guessDomain();
+        const domain = panelDomain();
         let ip = 'Неизвестно';
         let country = 'UNKNOWN';
         try {
@@ -4151,9 +4161,928 @@ app.get('/api/server-info', checkAuth, (req, res) => {
         if (ip === 'Неизвестно') {
             try { ip = sh('curl', ['-4s', '--max-time', '8', 'https://ifconfig.me']).trim(); } catch (e) { /* ignore */ }
         }
-        res.json({ ip, domain, country });
+        res.json({ ip, domain, country, cert: panelCertificateInfo(domain) });
     } catch (e) {
-        res.json({ ip: 'Неизвестно', domain: '', country: 'UNKNOWN' });
+        res.json({ ip: 'Неизвестно', domain: '', country: 'UNKNOWN', cert: null });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// Домены и SSL (Let's Encrypt)
+//
+// Возможности вкладки «Домены и SSL»:
+//   • привязать домен к самой панели (Nginx-прокси на локальный порт Node);
+//   • создать отдельный сайт-заглушку в /var/www/<домен>;
+//   • выпустить/продлить сертификат Let's Encrypt через certbot;
+//   • показать точные пути к сертификату (fullchain.pem) и ключу (privkey.pem).
+//
+// Безопасность: домен проходит строгую проверку FQDN и только затем
+// подставляется в конфиг Nginx; внешние команды вызываются через execFile
+// с массивом аргументов (без shell). Перед изменением конфигурации создаётся
+// резервная копия, при ошибке `nginx -t` конфиг автоматически откатывается.
+// ---------------------------------------------------------------------------
+const LE_ROOT = '/etc/letsencrypt';
+const LE_LIVE = posixJoin(LE_ROOT, 'live');
+const LE_ARCHIVE = posixJoin(LE_ROOT, 'archive');
+const LE_RENEWAL = posixJoin(LE_ROOT, 'renewal');
+const NGX_AVAILABLE = '/etc/nginx/sites-available';
+const NGX_ENABLED = '/etc/nginx/sites-enabled';
+const ACME_WEBROOT = '/var/www/html';
+const SITES_ROOT = '/var/www';
+const PANEL_SITE_NAME = 'awg-admin';
+const PANEL_SITE_CONF = posixJoin(NGX_AVAILABLE, PANEL_SITE_NAME);
+const SSL_STATE_FILE = path.join(DATA_DIR, '.ssl_sites.json');
+// В тестовом и демо-режиме система не трогается: сайты и сертификаты
+// хранятся только в памяти процесса.
+const NO_SYSTEM = () => TEST_MODE || DEMO_MODE || process.platform === 'win32';
+const sslVirtual = { sites: [], certs: [] };
+
+// Пути Linux всегда собираем через «/», чтобы конфиги и подписи были
+// одинаковыми и на сервере, и при тестах на Windows.
+function posixJoin(...parts) {
+    return parts.filter(p => p !== '' && p != null).join('/').replace(/\/{2,}/g, '/');
+}
+
+function sslTail(text, size = 900) {
+    const s = String(text == null ? '' : text).trim();
+    return s.length > size ? '…' + s.slice(-size) : s;
+}
+
+function normalizeDomain(value) {
+    const d = String(value == null ? '' : value).trim().toLowerCase().replace(/\.$/, '');
+    if (!d || d.length > 253) return '';
+    // Только FQDN из букв/цифр/дефиса, минимум две метки, каждая до 63 символов.
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(d)) return '';
+    return d;
+}
+
+function normalizeEmail(value) {
+    const e = String(value == null ? '' : value).trim();
+    if (e.length < 5 || e.length > 254) return '';
+    if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(e)) return '';
+    return e;
+}
+
+function findCommand(name) {
+    if (NO_SYSTEM()) return '';
+    const dirs = ['/usr/local/sbin', '/usr/local/bin', '/usr/sbin', '/usr/bin', '/sbin', '/bin'];
+    for (const dir of String(process.env.PATH || '').split(path.delimiter)) if (dir) dirs.push(dir);
+    for (const dir of dirs) {
+        const full = path.join(dir, name);
+        try {
+            fs.accessSync(full, fs.constants.X_OK);
+            return full;
+        } catch (e) { /* ищем дальше */ }
+    }
+    return '';
+}
+
+function sslTool(name, versionArgs = ['--version']) {
+    const bin = findCommand(name);
+    if (!bin) return { installed: false, path: '', version: '' };
+    let version = '';
+    try {
+        // nginx -v пишет версию в stderr, certbot — в stdout: читаем оба потока.
+        const run = spawnSync(bin, versionArgs, { encoding: 'utf8', timeout: 10000 });
+        version = String((run.stdout || '') + '\n' + (run.stderr || ''))
+            .split(/\r?\n/).map(s => s.trim()).filter(Boolean)[0] || '';
+    } catch (e) { /* версия не критична */ }
+    return { installed: true, path: bin, version };
+}
+
+function rootRun(cmd, args = [], opts = {}) {
+    return new Promise(resolve => {
+        const bin = IS_ROOT ? cmd : 'sudo';
+        const argv = IS_ROOT ? args : [cmd, ...args];
+        execFile(bin, argv, {
+            encoding: 'utf8',
+            timeout: opts.timeout || 120000,
+            maxBuffer: 8 * 1024 * 1024,
+            ...opts
+        }, (err, stdout, stderr) => {
+            resolve({
+                ok: !err,
+                stdout: String(stdout || ''),
+                stderr: String(stderr || ''),
+                error: err ? String(err.message || err) : ''
+            });
+        });
+    });
+}
+
+function certPathsFor(name) {
+    const dir = posixJoin(LE_LIVE, name);
+    return {
+        dir,
+        cert: posixJoin(dir, 'cert.pem'),
+        chain: posixJoin(dir, 'chain.pem'),
+        fullchain: posixJoin(dir, 'fullchain.pem'),
+        privkey: posixJoin(dir, 'privkey.pem'),
+        renewal: posixJoin(LE_RENEWAL, name + '.conf')
+    };
+}
+
+function readTextMaybeRoot(file) {
+    try {
+        return fs.readFileSync(file, 'utf8');
+    } catch (e) {
+        if (NO_SYSTEM() || (e.code !== 'EACCES' && e.code !== 'EPERM')) return '';
+    }
+    try { return String(rootSh('cat', [file], { timeout: 8000 }) || ''); }
+    catch (e) { return ''; }
+}
+
+function parseCertificate(pem) {
+    try {
+        const x = new crypto.X509Certificate(pem);
+        const validTo = new Date(x.validTo);
+        const validFrom = new Date(x.validFrom);
+        const daysLeft = Number.isFinite(validTo.getTime())
+            ? Math.floor((validTo.getTime() - Date.now()) / 86400000) : null;
+        let domains = [];
+        try {
+            domains = String(x.subjectAltName || '')
+                .split(',')
+                .map(s => s.trim().replace(/^DNS:/i, '').replace(/^IP Address:/i, ''))
+                .filter(Boolean);
+        } catch (e) { /* SAN может отсутствовать */ }
+        return {
+            parsed: true,
+            subject: x.subject,
+            issuer: x.issuer,
+            validFrom: Number.isFinite(validFrom.getTime()) ? validFrom.toISOString() : '',
+            validTo: Number.isFinite(validTo.getTime()) ? validTo.toISOString() : '',
+            daysLeft,
+            serial: x.serialNumber,
+            fingerprint: x.fingerprint256,
+            domains
+        };
+    } catch (e) {
+        return { parsed: false };
+    }
+}
+
+function listCertificates() {
+    const result = [];
+    let names = [];
+    try { names = fs.readdirSync(LE_LIVE); } catch (e) { names = []; }
+    for (const name of names.sort()) {
+        const p = certPathsFor(name);
+        try { if (!fs.statSync(p.dir).isDirectory()) continue; } catch (e) { continue; }
+        const pem = readTextMaybeRoot(p.fullchain) || readTextMaybeRoot(p.cert);
+        const meta = pem ? parseCertificate(pem) : { parsed: false };
+        const renewalText = readTextMaybeRoot(p.renewal);
+        const domainsLine = /^domains\s*=\s*(.+)$/m.exec(renewalText || '');
+        const renewLine = /^renew_before_expiry\s*=\s*(.+)$/m.exec(renewalText || '');
+        const fromRenewal = domainsLine
+            ? domainsLine[1].split(',').map(s => s.trim()).filter(Boolean).map(s => s.toLowerCase())
+            : [];
+        const domains = (meta.domains && meta.domains.length ? meta.domains : fromRenewal.length ? fromRenewal : [name]);
+        let keyBytes = null;
+        try { keyBytes = fs.statSync(p.privkey).size; } catch (e) { keyBytes = null; }
+        result.push({
+            name,
+            domains: [...new Set(domains.map(d => String(d).toLowerCase()))],
+            ...p,
+            exists: {
+                cert: fs.existsSync(p.cert),
+                chain: fs.existsSync(p.chain),
+                fullchain: fs.existsSync(p.fullchain),
+                privkey: fs.existsSync(p.privkey),
+                renewal: fs.existsSync(p.renewal)
+            },
+            ...meta,
+            keyBytes,
+            renewBeforeExpiry: renewLine ? renewLine[1].trim() : ''
+        });
+    }
+    return result;
+}
+
+function demoCertificate(domain = 'vpn.example.com', altNames = []) {
+    const p = certPathsFor(domain);
+    const days = 61;
+    return {
+        name: domain,
+        domains: [domain, ...altNames].filter(Boolean),
+        ...p,
+        exists: { cert: true, chain: true, fullchain: true, privkey: true, renewal: true },
+        parsed: true,
+        subject: 'CN=' + domain,
+        issuer: "C=US, O=Let's Encrypt, CN=R11",
+        validFrom: new Date(Date.now() - 29 * 86400000).toISOString(),
+        validTo: new Date(Date.now() + days * 86400000).toISOString(),
+        daysLeft: days,
+        serial: '03A1B2C3D4E5F60718293A4B5C6D7E8F90A1',
+        fingerprint: 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99',
+        keyBytes: 2412,
+        renewBeforeExpiry: '30 days',
+        virtual: true
+    };
+}
+
+function currentCertificates() {
+    if (DEMO_MODE) return sslVirtual.certs.length ? sslVirtual.certs : [demoCertificate()];
+    if (TEST_MODE) return sslVirtual.certs;
+    return listCertificates();
+}
+
+function parseServerNames(text) {
+    const names = [];
+    const re = /(^|\n)\s*server_name\s+([^;]+);/g;
+    let m;
+    while ((m = re.exec(String(text || ''))) !== null) {
+        for (const part of m[2].trim().split(/\s+/)) {
+            const d = normalizeDomain(part);
+            if (d) names.push(d);
+        }
+    }
+    return [...new Set(names)];
+}
+
+function listNginxSites() {
+    const names = new Set();
+    for (const dir of [NGX_AVAILABLE, NGX_ENABLED]) {
+        try { for (const n of fs.readdirSync(dir)) if (n && !n.startsWith('.')) names.add(n); }
+        catch (e) { /* каталога нет */ }
+    }
+    const state = readSslState();
+    const result = [];
+    for (const name of [...names].sort()) {
+        const file = posixJoin(NGX_AVAILABLE, name);
+        const link = posixJoin(NGX_ENABLED, name);
+        const enabled = fs.existsSync(link);
+        const text = readTextMaybeRoot(file) || (enabled ? readTextMaybeRoot(link) : '');
+        if (!text) continue;
+        const sslLine = /ssl_certificate\s+([^;]+);/.exec(text);
+        const keyLine = /ssl_certificate_key\s+([^;]+);/.exec(text);
+        const proxyLine = /proxy_pass\s+http:\/\/127\.0\.0\.1:(\d+)/.exec(text);
+        const rootLine = /(^|\n)\s*root\s+([^;]+);/.exec(text);
+        result.push({
+            name,
+            available: file,
+            enabled,
+            domains: parseServerNames(text),
+            ssl: !!sslLine,
+            certPath: sslLine ? sslLine[1].trim() : '',
+            keyPath: keyLine ? keyLine[1].trim() : '',
+            proxyPort: proxyLine ? parseInt(proxyLine[1], 10) : null,
+            root: rootLine ? rootLine[2].trim() : '',
+            managedByPanel: name === PANEL_SITE_NAME || !!state.sites[name]
+        });
+    }
+    return result;
+}
+
+function currentSites() {
+    if (NO_SYSTEM()) {
+        if (DEMO_MODE && !sslVirtual.sites.length) return [demoVirtualSite()];
+        return sslVirtual.sites;
+    }
+    return listNginxSites();
+}
+
+function demoVirtualSite() {
+    const p = certPathsFor('vpn.example.com');
+    return {
+        name: PANEL_SITE_NAME,
+        available: PANEL_SITE_CONF,
+        enabled: true,
+        domains: ['vpn.example.com'],
+        ssl: true,
+        certPath: p.fullchain,
+        keyPath: p.privkey,
+        proxyPort: 3000,
+        root: '',
+        httpsPort: 443,
+        managedByPanel: true,
+        virtual: true
+    };
+}
+
+function readSslState() {
+    const st = readJson(SSL_STATE_FILE, { sites: {} });
+    if (!st.sites || typeof st.sites !== 'object' || Array.isArray(st.sites)) st.sites = {};
+    return st;
+}
+function writeSslState(st) {
+    try { writeJson(SSL_STATE_FILE, st, 0o600); } catch (e) { /* не критично */ }
+}
+function rememberSite(entry) {
+    const st = readSslState();
+    st.sites[entry.name] = { ...(st.sites[entry.name] || {}), ...entry };
+    writeSslState(st);
+    if (NO_SYSTEM()) {
+        sslVirtual.sites = sslVirtual.sites.filter(s => s.name !== entry.name).concat({ ...entry, virtual: true });
+    }
+}
+
+function panelDomain() {
+    if (DEMO_MODE) return 'vpn.example.com';
+    if (TEST_MODE) {
+        const site = sslVirtual.sites.find(s => s.name === PANEL_SITE_NAME);
+        return site && site.domains && site.domains[0] ? site.domains[0] : '';
+    }
+    return guessDomain();
+}
+
+function defaultPanelEmail() {
+    const st = readSslState();
+    return st.email || '';
+}
+
+function buildSiteConfig(opts) {
+    const domain = opts.domain;
+    const mode = opts.mode === 'site' ? 'site' : 'panel';
+    const names = opts.www ? `${domain} www.${domain}` : domain;
+    const httpsPort = Number(opts.httpsPort) || 443;
+    const certPath = opts.certPath || '';
+    const keyPath = opts.keyPath || '';
+    const acme = `    location /.well-known/acme-challenge/ {
+        root ${ACME_WEBROOT};
+    }`;
+    const appBlock = mode === 'site'
+        ? `    root ${posixJoin(SITES_ROOT, domain)};
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }`
+        : `    location / {
+        proxy_pass http://127.0.0.1:${PANEL_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+        proxy_cache_bypass $http_upgrade;
+    }`;
+    const header = '# Servpanel: файл создан автоматически (вкладка «Домены и SSL»).\n' +
+        '# Ручные правки будут перезаписаны при повторной привязке домена.\n\n';
+    const httpBlock = certPath
+        ? `server {
+    listen 80;
+    server_name ${names};
+
+${acme}
+
+    location / {
+        return 301 https://$host${httpsPort === 443 ? '' : ':' + httpsPort}$request_uri;
+    }
+}
+`
+        : `server {
+    listen 80;
+    server_name ${names};
+
+    client_max_body_size 512m;
+
+${acme}
+
+${appBlock}
+}
+`;
+    if (!certPath) return header + httpBlock;
+    const httpsBlock = `
+server {
+    listen ${httpsPort} ssl;
+    server_name ${names};
+
+    client_max_body_size 512m;
+
+    ssl_certificate ${certPath};
+    ssl_certificate_key ${keyPath};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:ServpanelTLS:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+${appBlock}
+}
+`;
+    return header + httpBlock + httpsBlock;
+}
+
+function existingSslPort(text) {
+    const m = /listen\s+([0-9]{1,5})\s+ssl/.exec(String(text || ''));
+    return m ? parseInt(m[1], 10) : null;
+}
+
+// Все порты, которые уже слушает конфиг сайта (включая [::]:443).
+function existingListenPorts(text) {
+    const ports = [];
+    // Комментарии убираем, чтобы «# listen 80;» не считался портом.
+    const clean = String(text || '').replace(/#[^\n]*/g, '');
+    const re = /\blisten\s+([^;]+);/g;
+    let m;
+    while ((m = re.exec(clean)) !== null) {
+        const addr = (m[1].trim().split(/\s+/)[0] || '');
+        const pm = /^(?:\[[^\]]+\]|[^:]+):(\d{1,5})$/.exec(addr) || /^(\d{1,5})$/.exec(addr);
+        const port = pm ? parseInt(pm[1], 10) : null;
+        if (port && !ports.includes(port)) ports.push(port);
+    }
+    return ports;
+}
+
+function portListenerInfo(port) {
+    if (NO_SYSTEM()) return '';
+    try { return String(shTry('ss', ['-H', '-ltnp', `sport = :${port}`], { timeout: 8000 }) || ''); }
+    catch (e) { return ''; }
+}
+
+function portIsNginxOrFree(port) {
+    const info = portListenerInfo(port);
+    if (!info.trim()) return true;
+    return /nginx/i.test(info);
+}
+
+function chooseHttpsPort(mode, siteName) {
+    if (NO_SYSTEM()) return mode === 'panel' ? (PANEL_PUBLIC_PORT || 443) : 443;
+    let current = '';
+    try { current = fs.readFileSync(posixJoin(NGX_AVAILABLE, siteName), 'utf8'); } catch (e) { /* нет файла */ }
+    const existing = existingSslPort(current);
+    if (existing && existing !== 80 && portIsNginxOrFree(existing)) return existing;
+    // Если панель уже открывалась по домену на нестандартном порту (например,
+    // 8443), сохраняем этот порт — теперь на нём будет HTTPS, и адрес не изменится.
+    const previous = existingListenPorts(current).find(p => p !== 80 && p !== PANEL_PORT);
+    if (previous && portIsNginxOrFree(previous)) return previous;
+    const candidates = mode === 'panel' ? [443, PANEL_PUBLIC_PORT, 8443] : [443, 8443];
+    const tried = new Set();
+    for (const port of candidates) {
+        // 80 занят HTTP-блоком, PANEL_PORT слушает сам Node — их не предлагаем.
+        if (!port || port === 80 || port === PANEL_PORT || tried.has(port)) continue;
+        tried.add(port);
+        if (portIsNginxOrFree(port)) return port;
+    }
+    return null;
+}
+
+async function applySiteConfig(name, content) {
+    const target = posixJoin(NGX_AVAILABLE, name);
+    const link = posixJoin(NGX_ENABLED, name);
+    const backup = target + '.servpanel-bak';
+    const hadTarget = fs.existsSync(target);
+    const hadLink = fs.existsSync(link);
+    let hadBackup = false;
+    if (hadTarget) {
+        try { fs.copyFileSync(target, backup); hadBackup = true; }
+        catch (e) {
+            // Панель может работать не от root — пробуем через sudo.
+            rootShTry('cp', ['-f', target, backup], { timeout: 15000 });
+            hadBackup = fs.existsSync(backup);
+        }
+        // Без резервной копии перезаписывать рабочий конфиг нельзя:
+        // при ошибке nginx -t откатывать будет нечего.
+        if (!hadBackup) return { ok: false, error: 'Не удалось создать резервную копию конфигурации Nginx.' };
+    }
+    try {
+        writeRootFile(target, content, '0644');
+        if (!hadLink) rootSh('ln', ['-sf', target, link], { timeout: 10000 });
+        const nginxBin = findCommand('nginx') || 'nginx';
+        const test = await rootRun(nginxBin, ['-t'], { timeout: 30000 });
+        if (!test.ok) throw new Error('nginx -t: ' + sslTail(test.stderr || test.stdout));
+        const reload = await rootRun('systemctl', ['reload', 'nginx'], { timeout: 30000 });
+        if (!reload.ok) {
+            const restart = await rootRun('systemctl', ['restart', 'nginx'], { timeout: 30000 });
+            if (!restart.ok) throw new Error('nginx не перезапустился: ' + sslTail(restart.stderr || restart.stdout));
+        }
+        if (hadBackup) { try { fs.unlinkSync(backup); } catch (e) { rootShTry('rm', ['-f', backup], { timeout: 10000 }); } }
+        return { ok: true };
+    } catch (e) {
+        // Откат к предыдущей версии конфига.
+        try {
+            if (hadBackup) rootSh('install', ['-m', '0644', backup, target], { timeout: 15000 });
+            else if (!hadTarget) rootSh('rm', ['-f', target], { timeout: 15000 });
+            if (hadLink) rootSh('ln', ['-sf', target, link], { timeout: 10000 });
+            else rootSh('rm', ['-f', link], { timeout: 10000 });
+            await rootRun('systemctl', ['reload', 'nginx'], { timeout: 30000 });
+        } catch (e2) { /* ignore */ }
+        try { if (hadBackup) fs.unlinkSync(backup); } catch (e3) { /* ignore */ }
+        return { ok: false, error: String((e && e.message) || e) };
+    }
+}
+
+async function ensureSiteRoot(domain) {
+    const dir = posixJoin(SITES_ROOT, domain);
+    const file = posixJoin(dir, 'index.html');
+    if (fs.existsSync(file)) return;
+    rootSh('mkdir', ['-p', dir], { timeout: 15000 });
+    writeRootFile(file, `<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${domain}</title>
+<style>
+  body { margin:0; min-height:100vh; display:grid; place-items:center; font-family:system-ui,sans-serif; background:#0d1117; color:#e6edf3; }
+  main { max-width:640px; padding:40px; text-align:center; }
+  h1 { font-size:28px; margin:0 0 12px; }
+  p { color:#8b949e; line-height:1.6; }
+  code { background:#161b22; padding:2px 6px; border-radius:6px; color:#58a6ff; }
+</style>
+</head>
+<body>
+<main>
+  <h1>${domain}</h1>
+  <p>Сайт создан из панели Servpanel. HTTPS-сертификат Let's Encrypt установлен, ключи и цепочка
+     лежат в <code>/etc/letsencrypt/live/${domain}/</code>.</p>
+  <p>Замените файл <code>/var/www/${domain}/index.html</code> содержимым вашего сайта.</p>
+</main>
+</body>
+</html>
+`, '0644');
+}
+
+async function allowFirewallPorts(ports) {
+    if (NO_SYSTEM()) return;
+    const ufw = findCommand('ufw');
+    if (!ufw) return;
+    for (const port of ports) {
+        if (!port) continue;
+        await rootRun(ufw, ['allow', `${port}/tcp`], { timeout: 15000 });
+    }
+}
+
+// Выпуск сертификата через webroot: certbot кладёт файл проверки в
+// /var/www/html, который уже отдаётся в HTTP-блоке нашего конфига. В отличие
+// от `--nginx`, certbot не переписывает конфигурацию Nginx (не добавляет
+// listen 443 и не ломает нестандартный порт панели) — конфиг остаётся нашим.
+async function issueCertificate(domain, email, www) {
+    const args = ['certonly', '--webroot', '-w', ACME_WEBROOT, '-d', domain];
+    if (www) args.push('-d', 'www.' + domain);
+    args.push('--cert-name', domain, '--non-interactive', '--agree-tos', '-m', email, '--expand', '--keep-until-expiring');
+    return rootRun(findCommand('certbot') || 'certbot', args, { timeout: 300000 });
+}
+
+function resolveDomain(domain) {
+    return new Promise(resolve => {
+        let settled = false;
+        const finish = list => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(Array.isArray(list) ? list : []);
+        };
+        const timer = setTimeout(() => finish([]), 6000);
+        // Сначала A, затем AAAA: домен может быть только IPv6.
+        const try6 = () => dns.promises.resolve6(domain).then(finish).catch(() => finish([]));
+        dns.promises.resolve4(domain)
+            .then(list => (list && list.length ? finish(list) : try6()))
+            .catch(try6);
+    });
+}
+
+function panelCertificateInfo(domain) {
+    if (!domain) return null;
+    try {
+        const cert = currentCertificates().find(c => c.domains.includes(domain));
+        if (!cert) return null;
+        return {
+            name: cert.name,
+            fullchain: cert.fullchain,
+            privkey: cert.privkey,
+            chain: cert.chain,
+            cert: cert.cert,
+            daysLeft: cert.daysLeft != null ? cert.daysLeft : null,
+            validTo: cert.validTo || ''
+        };
+    } catch (e) { return null; }
+}
+
+function sslStatusPayload() {
+    const certs = currentCertificates();
+    const sites = currentSites();
+    const guessed = panelDomain();
+    const panelSite = (guessed && sites.find(s => s.domains.includes(guessed))) ||
+        sites.find(s => s.name === PANEL_SITE_NAME) || null;
+    // Если домен не удалось определить из /root/awg_domain.txt или конфига,
+    // показываем домен из сайта панели, чтобы статус не был пустым.
+    const domain = guessed || (panelSite && panelSite.domains && panelSite.domains[0]) || '';
+    const httpsPort = panelSite
+        ? (existingSslPort(readTextMaybeRoot(panelSite.available)) || panelSite.httpsPort || PANEL_PUBLIC_PORT)
+        : PANEL_PUBLIC_PORT;
+    const cert = certs.find(c => c.domains.includes(domain)) || null;
+    const tools = DEMO_MODE
+        ? {
+            nginx: { installed: true, path: '/usr/sbin/nginx', version: 'nginx/1.24.0 (Ubuntu)', running: true },
+            certbot: { installed: true, path: '/usr/bin/certbot', version: 'certbot 2.9.0' },
+            openssl: { installed: true }
+        }
+        : {
+            nginx: { ...sslTool('nginx', ['-v']), running: !NO_SYSTEM() && isActive('nginx') === 'active' },
+            certbot: sslTool('certbot'),
+            openssl: { installed: !!findCommand('openssl') }
+        };
+    const timer = DEMO_MODE
+        ? { active: true, enabled: true }
+        : NO_SYSTEM()
+            ? { active: false, enabled: false }
+            : { active: isActive('certbot.timer') === 'active', enabled: isEnabled('certbot.timer') === 'enabled' };
+    const warnings = [];
+    if (!tools.nginx.installed) warnings.push('Nginx не установлен — привязка домена недоступна.');
+    if (!tools.certbot.installed) warnings.push("Certbot не установлен — сертификат Let's Encrypt выпустить нельзя.");
+    if (!domain) warnings.push('Панель открыта по IP. Привяжите домен, чтобы включить HTTPS.');
+    else if (!cert && panelSite && !panelSite.ssl) warnings.push('Домен привязан, но сертификат ещё не выпущен.');
+    if (cert && cert.daysLeft != null && cert.daysLeft <= 21) {
+        warnings.push(`Сертификат ${cert.name} истекает через ${cert.daysLeft} дн. — обновите его.`);
+    }
+    if (tools.certbot.installed && !timer.active) {
+        warnings.push('Таймер автопродления certbot.timer неактивен — сертификат может не обновиться сам.');
+    }
+    return {
+        ok: true,
+        demo: DEMO_MODE,
+        test: TEST_MODE,
+        panel: {
+            domain,
+            internalPort: PANEL_PORT,
+            publicPort: PANEL_PUBLIC_PORT,
+            httpsPort,
+            scheme: panelSite && panelSite.ssl ? 'https' : 'http',
+            url: panelSite && panelSite.ssl
+                ? `https://${domain}${httpsPort === 443 ? '' : ':' + httpsPort}`
+                : domain ? `http://${domain}` : ''
+        },
+        tools,
+        timer,
+        paths: {
+            live: LE_LIVE,
+            archive: LE_ARCHIVE,
+            renewal: LE_RENEWAL,
+            nginxAvailable: NGX_AVAILABLE,
+            nginxEnabled: NGX_ENABLED,
+            panelConfig: PANEL_SITE_CONF,
+            acmeWebroot: ACME_WEBROOT,
+            siteRoot: SITES_ROOT
+        },
+        certificates: certs,
+        sites,
+        email: defaultPanelEmail(),
+        warnings
+    };
+}
+
+function sslError(res, status, message, extra = {}) {
+    return res.status(status).json({ error: message, ...extra });
+}
+
+// Статус: сертификаты, сайты, пути и состояние инструментов.
+app.get('/api/ssl/status', checkAuth, (req, res) => {
+    try { res.json(sslStatusPayload()); }
+    catch (e) { res.status(500).json({ error: 'Не удалось прочитать состояние SSL: ' + sslTail(e.message, 200) }); }
+});
+
+// Установка nginx/certbot на Debian/Ubuntu (по явной кнопке администратора).
+app.post('/api/ssl/install-deps', checkAuth, requireAdmin, async (req, res) => {
+    if (NO_SYSTEM()) {
+        auditLog(req, '[DEMO] Установка nginx и certbot запрошена');
+        return res.json({ success: true, demo: true, packages: ['nginx', 'certbot', 'python3-certbot-nginx'] });
+    }
+    const apt = findCommand('apt-get');
+    if (!apt) return sslError(res, 400, 'Автоустановка поддерживается только на Debian/Ubuntu (нужен apt-get).');
+    try {
+        const env = { ...process.env, DEBIAN_FRONTEND: 'noninteractive' };
+        await rootRun(apt, ['update'], { timeout: 300000, env });
+        const install = await rootRun(apt, ['install', '-y', 'nginx', 'certbot', 'python3-certbot-nginx'], { timeout: 600000, env });
+        if (!install.ok) {
+            return sslError(res, 500, 'Не удалось установить пакеты.', { output: sslTail(install.stderr || install.stdout) });
+        }
+        await rootRun('systemctl', ['enable', '--now', 'nginx'], { timeout: 60000 });
+        auditLog(req, 'Установлены nginx и certbot из панели');
+        res.json({ success: true, output: sslTail(install.stdout, 1200) });
+    } catch (e) {
+        sslError(res, 500, 'Ошибка установки: ' + sslTail(e.message, 300));
+    }
+});
+
+// Привязка домена и (по умолчанию) выпуск сертификата.
+app.post('/api/ssl/site', checkAuth, requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const domain = normalizeDomain(body.domain);
+    if (!domain) return sslError(res, 400, 'Некорректный домен. Пример: panel.example.com');
+    const mode = body.mode === 'site' ? 'site' : 'panel';
+    const www = !!body.www;
+    const issue = body.issue !== false;
+    const useForVpn = mode === 'panel' && body.useForVpn !== false;
+    const email = body.email ? normalizeEmail(body.email) : (`admin@${domain}`);
+    if (body.email && !email) return sslError(res, 400, "Некорректный email для Let's Encrypt.");
+
+    const siteName = mode === 'panel' ? PANEL_SITE_NAME : domain;
+    const existingPanel = panelDomain();
+    if (mode === 'site' && existingPanel === domain) {
+        return sslError(res, 409, 'Этот домен уже используется панелью. Выберите режим «домен панели».');
+    }
+
+    if (NO_SYSTEM()) {
+        const httpsPort = DEMO_MODE || mode === 'site' ? 443 : (PANEL_PUBLIC_PORT || 443);
+        const site = {
+            name: siteName,
+            available: posixJoin(NGX_AVAILABLE, siteName),
+            enabled: true,
+            httpsPort,
+            domains: [domain, ...(www ? ['www.' + domain] : [])],
+            ssl: issue,
+            certPath: issue ? certPathsFor(domain).fullchain : '',
+            keyPath: issue ? certPathsFor(domain).privkey : '',
+            proxyPort: mode === 'panel' ? PANEL_PORT : null,
+            root: mode === 'site' ? posixJoin(SITES_ROOT, domain) : '',
+            managedByPanel: true,
+            mode,
+            virtual: true
+        };
+        if (issue) {
+            sslVirtual.certs = sslVirtual.certs.filter(c => c.name !== domain)
+                .concat(demoCertificate(domain, www ? ['www.' + domain] : []));
+        }
+        rememberSite({ ...site, email, created: new Date().toISOString(), useForVpn });
+        auditLog(req, `[DEMO] Домен ${domain} привязан (${mode})${issue ? ', сертификат выпущен' : ''}`);
+        return res.json({
+            success: true,
+            demo: true,
+            domain,
+            mode,
+            www,
+            siteName,
+            httpsPort,
+            url: issue
+                ? `https://${domain}${httpsPort === 443 ? '' : ':' + httpsPort}`
+                : `http://${domain}`,
+            certificates: issue ? certPathsFor(domain) : null,
+            dns: ['203.0.113.10'],
+            warnings: []
+        });
+    }
+
+    const tools = { nginx: sslTool('nginx', ['-v']), certbot: sslTool('certbot') };
+    if (!tools.nginx.installed) {
+        return sslError(res, 409, 'Nginx не установлен. Установите nginx и certbot кнопкой в этой вкладке.', { needDeps: true });
+    }
+    if (issue && !tools.certbot.installed) {
+        return sslError(res, 409, "Certbot не установлен. Установите certbot кнопкой в этой вкладке.", { needDeps: true });
+    }
+    if (!portIsNginxOrFree(80)) {
+        return sslError(res, 409, 'Порт 80 занят другим процессом. Освободите его для проверки домена Let\'s Encrypt.');
+    }
+
+    const dns = await resolveDomain(domain);
+    if (!dns.length) {
+        return sslError(res, 422,
+            `Домен ${domain} не резолвится. Создайте A-запись на IP сервера и повторите.`, { dns: [] });
+    }
+    if (www) {
+        const wwwDns = await resolveDomain('www.' + domain);
+        if (!wwwDns.length) {
+            return sslError(res, 422,
+                `Домен www.${domain} не резолвится. Добавьте A-запись для www или снимите галочку «вместе с www».`,
+                { dns: [] });
+        }
+    }
+
+    const httpsPort = chooseHttpsPort(mode, siteName);
+    if (!httpsPort) {
+        return sslError(res, 409, 'Не удалось подобрать свободный порт для HTTPS. Освободите 443 или укажите другой внешний порт.');
+    }
+
+    try {
+        if (mode === 'site') await ensureSiteRoot(domain);
+        if (issue) await rootRun('mkdir', ['-p', ACME_WEBROOT], { timeout: 15000 });
+        const httpConf = buildSiteConfig({ domain, mode, www, httpsPort, certPath: '', keyPath: '' });
+        const first = await applySiteConfig(siteName, httpConf);
+        if (!first.ok) return sslError(res, 500, 'Конфигурация Nginx отклонена: ' + first.error);
+
+        await allowFirewallPorts([80, httpsPort]);
+
+        let issued = null;
+        const warnings = [];
+        if (issue) {
+            const run = await issueCertificate(domain, email, www);
+            if (!run.ok) {
+                rememberSite({
+                    name: siteName, domain, domains: [domain, ...(www ? ['www.' + domain] : [])],
+                    mode, email, created: new Date().toISOString(), ssl: false, useForVpn,
+                    lastError: sslTail(run.stderr || run.stdout, 500)
+                });
+                return sslError(res, 502,
+                    'Домен добавлен по HTTP, но сертификат выпустить не удалось. Проверьте A-запись, порт 80 и лимиты Let\'s Encrypt.',
+                    { output: sslTail(run.stderr || run.stdout), site: { name: siteName, domain, mode }, dns, needDeps: false });
+            }
+            const paths = certPathsFor(domain);
+            const fullConf = buildSiteConfig({ domain, mode, www, httpsPort, certPath: paths.fullchain, keyPath: paths.privkey });
+            const second = await applySiteConfig(siteName, fullConf);
+            if (!second.ok) {
+                warnings.push('Сертификат выпущен, но HTTPS-конфиг не применился: ' + second.error);
+            } else {
+                issued = paths;
+            }
+        }
+
+        if (mode === 'panel' && useForVpn) {
+            try { writeRootFile('/root/awg_domain.txt', domain + '\n', '0600'); }
+            catch (e) { warnings.push('Не удалось сохранить домен как адрес VPN-клиентов: ' + sslTail(e.message, 120)); }
+        }
+        if (mode === 'panel') {
+            const st = readSslState();
+            st.email = email;
+            writeSslState(st);
+        }
+        rememberSite({
+            name: siteName, domain, domains: [domain, ...(www ? ['www.' + domain] : [])],
+            mode, email, www, created: new Date().toISOString(), ssl: !!issued, useForVpn,
+            httpsPort
+        });
+
+        auditLog(req, `Домен ${domain} привязан (${mode})${issued ? ', сертификат Let\'s Encrypt выпущен' : ''}`);
+        res.json({
+            success: true,
+            domain,
+            mode,
+            www,
+            siteName,
+            httpsPort,
+            url: issued
+                ? `https://${domain}${httpsPort === 443 ? '' : ':' + httpsPort}`
+                : `http://${domain}`,
+            certificates: issued,
+            dns,
+            warnings
+        });
+    } catch (e) {
+        sslError(res, 500, 'Ошибка привязки домена: ' + sslTail(e.message, 400));
+    }
+});
+
+// Продление сертификата (certbot renew для конкретного имени).
+// Без флага --nginx: certbot использует способ проверки, записанный при выпуске
+// (/etc/letsencrypt/renewal/<name>.conf), и не переписывает конфиг Nginx.
+app.post('/api/ssl/renew', checkAuth, requireAdmin, async (req, res) => {
+    const name = String((req.body || {}).name || '').trim();
+    const safeName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name) && !name.includes('..');
+    if (!normalizeDomain(name) && !safeName) {
+        return sslError(res, 400, 'Некорректное имя сертификата.');
+    }
+    if (NO_SYSTEM()) {
+        auditLog(req, `[DEMO] Обновление сертификата ${name}`);
+        return res.json({ success: true, demo: true, name });
+    }
+    if (!findCommand('certbot')) return sslError(res, 409, 'Certbot не установлен.', { needDeps: true });
+    try {
+        const run = await rootRun(findCommand('certbot') || 'certbot', ['renew', '--cert-name', name, '--non-interactive'], { timeout: 300000 });
+        if (!run.ok) {
+            return sslError(res, 502, 'Certbot не смог обновить сертификат.', { output: sslTail(run.stderr || run.stdout) });
+        }
+        await rootRun('systemctl', ['reload', 'nginx'], { timeout: 30000 });
+        auditLog(req, `Обновлён сертификат ${name}`);
+        const cert = currentCertificates().find(c => c.name === name) || null;
+        res.json({ success: true, name, output: sslTail(run.stdout, 1200), certificate: cert });
+    } catch (e) {
+        sslError(res, 500, 'Ошибка обновления: ' + sslTail(e.message, 300));
+    }
+});
+
+// Удаление сайта, созданного из панели (сертификат при этом сохраняется).
+app.delete('/api/ssl/site/:name', checkAuth, requireAdmin, async (req, res) => {
+    const name = path.basename(String(req.params.name || ''));
+    const st = readSslState();
+    const entry = st.sites[name];
+    if (!entry || entry.mode !== 'site') {
+        return sslError(res, 403, 'Удалять можно только дополнительные сайты, созданные из панели.');
+    }
+    if (NO_SYSTEM()) {
+        sslVirtual.sites = sslVirtual.sites.filter(s => s.name !== name);
+        delete st.sites[name];
+        writeSslState(st);
+        auditLog(req, `[DEMO] Удалён сайт ${name}`);
+        return res.json({ success: true, demo: true, name });
+    }
+    const target = posixJoin(NGX_AVAILABLE, name);
+    const link = posixJoin(NGX_ENABLED, name);
+    const backup = target + '.servpanel-del-bak';
+    let hadTarget = false;
+    try {
+        if (fs.existsSync(target)) { fs.copyFileSync(target, backup); hadTarget = true; }
+        rootSh('rm', ['-f', link], { timeout: 15000 });
+        rootSh('rm', ['-f', target], { timeout: 15000 });
+        const test = await rootRun(findCommand('nginx') || 'nginx', ['-t'], { timeout: 30000 });
+        if (!test.ok) throw new Error('nginx -t: ' + sslTail(test.stderr || test.stdout));
+        const reload = await rootRun('systemctl', ['reload', 'nginx'], { timeout: 30000 });
+        if (!reload.ok) throw new Error('nginx не перезагрузился: ' + sslTail(reload.stderr || reload.stdout));
+        delete st.sites[name];
+        writeSslState(st);
+        auditLog(req, `Удалён сайт ${name} (сертификат сохранён)`);
+        res.json({ success: true, name });
+    } catch (e) {
+        try {
+            if (hadTarget) rootSh('install', ['-m', '0644', backup, target], { timeout: 15000 });
+            rootSh('ln', ['-sf', target, link], { timeout: 10000 });
+            await rootRun('systemctl', ['reload', 'nginx'], { timeout: 30000 });
+        } catch (e2) { /* ignore */ }
+        sslError(res, 500, 'Не удалось удалить сайт: ' + sslTail(e.message, 300));
+    } finally {
+        try { fs.unlinkSync(backup); } catch (e) { /* ignore */ }
     }
 });
 
@@ -4799,7 +5728,9 @@ module.exports._internals = {
     splitObfBatch, OBF_ALL_KEYS, OBF_SHARED_KEYS, generateObfProfile,
     totpAt, verifyTotp, base32Encode, base32Decode,
     newTotpSecret, otpauthUri, hashCode, makeUser, verifyUserPassword, safeEqual,
-    FileSessionStore, cascadeHealth, backupConfig, normalizeAgUrl, parseIpList, validGeoUrl
+    FileSessionStore, cascadeHealth, backupConfig, normalizeAgUrl, parseIpList, validGeoUrl,
+    normalizeDomain, normalizeEmail, buildSiteConfig, parseCertificate, parseServerNames,
+    certPathsFor, listCertificates, existingListenPorts, existingSslPort
 };
 
 

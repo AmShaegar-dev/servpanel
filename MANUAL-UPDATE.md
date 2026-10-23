@@ -20,20 +20,20 @@ ssh root@IP_СЕРВЕРА
 
 ```bash
 cd /root
-curl -fLO https://github.com/makar19977v-glitch/servpanel/releases/download/v2.4.4/servpanel-2.4.4.tar.gz
-curl -fLO https://github.com/makar19977v-glitch/servpanel/releases/download/v2.4.4/servpanel-2.4.4.tar.gz.sha256
+curl -fLO https://github.com/makar19977v-glitch/servpanel/releases/download/v2.5.0/servpanel-2.5.0.tar.gz
+curl -fLO https://github.com/makar19977v-glitch/servpanel/releases/download/v2.5.0/servpanel-2.5.0.tar.gz.sha256
 ```
 
 ## 3. Проверьте архив
 
 ```bash
-sha256sum -c servpanel-2.4.4.tar.gz.sha256
+sha256sum -c servpanel-2.5.0.tar.gz.sha256
 ```
 
 В выводе должно быть:
 
 ```text
-servpanel-2.4.4.tar.gz: OK
+servpanel-2.5.0.tar.gz: OK
 ```
 
 Если проверка не прошла, не запускайте установку. Скачайте архив заново.
@@ -41,8 +41,8 @@ servpanel-2.4.4.tar.gz: OK
 ## 4. Распакуйте и запустите обновление
 
 ```bash
-tar -xzf servpanel-2.4.4.tar.gz
-bash /root/servpanel-2.4.4/upgrade.sh
+tar -xzf servpanel-2.5.0.tar.gz
+bash /root/servpanel-2.5.0/upgrade.sh
 ```
 
 Скрипт сам сделает бэкап, проверит новую версию на копии данных, заменит
@@ -58,7 +58,7 @@ node -p "require('/root/servpanel/package.json').version"
 Должно вывести:
 
 ```text
-2.4.4
+2.5.0
 ```
 
 Проверьте, что в git нет локальных изменений кода:
@@ -89,11 +89,11 @@ dnf install -y curl
 Скачайте архив на свой компьютер и загрузите его по SCP:
 
 ```bash
-scp servpanel-2.4.4.tar.gz root@IP_СЕРВЕРА:/root/
+scp servpanel-2.5.0.tar.gz root@IP_СЕРВЕРА:/root/
 ssh root@IP_СЕРВЕРА
 cd /root
-tar -xzf servpanel-2.4.4.tar.gz
-bash /root/servpanel-2.4.4/upgrade.sh
+tar -xzf servpanel-2.5.0.tar.gz
+bash /root/servpanel-2.5.0/upgrade.sh
 ```
 
 ## Важно
