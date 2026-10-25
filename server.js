@@ -87,6 +87,14 @@ const PANEL_VERSION = (() => {
 const GITHUB_REPO = process.env.PANEL_GITHUB_REPO || 'AmShaegar-dev/servpanel';
 const DEFAULT_APK_URL = `https://github.com/${GITHUB_REPO}/releases/latest/download/servpanel.apk`;
 
+// Ссылки на прежний аккаунт GitHub могли сохраниться в настройках прошлых
+// версий (.app_settings.json). Переписываем их на актуальный адрес, иначе
+// вкладка «Приложение» показывает и скачивает APK со старого репозитория.
+const LEGACY_GITHUB_REPO_RE = /makar19977v-glitch[\/:]servpanel/gi;
+function migrateLegacyGithubUrl(value) {
+    return String(value || '').replace(LEGACY_GITHUB_REPO_RE, 'AmShaegar-dev/servpanel');
+}
+
 // Опциональный WARP + Xray для AdGuard Home. Ничего не ставится автоматически:
 // компонент запускается только по кнопке на вкладке «Службы и DNS».
 const WARP_INSTALLER = path.join(APP_DIR, 'install_warp_xray.sh');
@@ -671,10 +679,28 @@ function readAppSettings() {
         if (typeof raw.apk.url === 'string' && (!raw.apk.url || isHttpUrl(raw.apk.url))) apk.url = raw.apk.url;
         if (typeof raw.apk.version === 'string') apk.version = raw.apk.version.slice(0, 32);
     }
+    apk.url = migrateLegacyGithubUrl(apk.url);
     return { metrics, apk };
 }
 function writeAppSettings(settings) {
     writeJson(APP_SETTINGS_FILE, settings, 0o600);
+}
+
+// Приводим сохранённые настройки к новому адресу репозитория один раз при
+// старте: файл переживает обновления панели, поэтому сам не обновится.
+function migrateLegacySettings() {
+    try {
+        const raw = readJson(APP_SETTINGS_FILE, null);
+        if (!raw || !raw.apk || typeof raw.apk.url !== 'string') return false;
+        const fixed = migrateLegacyGithubUrl(raw.apk.url);
+        if (fixed === raw.apk.url) return false;
+        raw.apk.url = fixed;
+        writeJson(APP_SETTINGS_FILE, raw, 0o600);
+        console.log(`Настройки приложения: ссылка на APK переведена на ${fixed}`);
+        return true;
+    } catch (e) {
+        return false;
+    }
 }
 
 function apkCandidatePaths() {
@@ -6385,6 +6411,17 @@ if (require.main === module) {
     if (DEMO_MODE) console.warn('DEMO MODE: используется локальный конфиг-макет, systemd и AmneziaWG не затрагиваются.');
     if (ADMIN_PASSWORD === 'admin123') {
         console.warn('ВНИМАНИЕ: используется пароль по умолчанию admin123. Смените его в интерфейсе!');
+    }
+
+    // Переезд репозитория на новый аккаунт: чиним уже установленную панель,
+    // не дожидаясь редиректа GitHub.
+    migrateLegacySettings();
+    try {
+        if (updater.normalizeRemote(APP_DIR)) {
+            console.log('Git: origin переключён на https://github.com/AmShaegar-dev/servpanel.git');
+        }
+    } catch (e) {
+        console.warn('Git: не удалось проверить origin —', e.message);
     }
 
     // TLS-сертификат: сначала PANEL_TLS_CERT/PANEL_TLS_KEY, затем сертификат

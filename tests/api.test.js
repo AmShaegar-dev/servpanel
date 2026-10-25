@@ -685,6 +685,39 @@ test('Приложение: статус и метрики требуют авт
     assert.equal(mt.status, 401);
 });
 
+test('Настройки: старая ссылка на APK переписывается на новый аккаунт', () => {
+    const file = path.join(DATA_DIR, '.app_settings.json');
+    const had = fs.existsSync(file);
+    const prev = had ? fs.readFileSync(file) : null;
+    const legacy = 'https://github.com/makar19977v-glitch/servpanel/releases/latest/download/servpanel.apk';
+    fs.writeFileSync(file, JSON.stringify({ apk: { url: legacy, version: '' } }));
+    try {
+        assert.equal(
+            internals.readAppSettings().apk.url,
+            'https://github.com/AmShaegar-dev/servpanel/releases/latest/download/servpanel.apk'
+        );
+    } finally {
+        if (had) fs.writeFileSync(file, prev);
+        else fs.rmSync(file, { force: true });
+    }
+});
+
+test('Git: origin старого аккаунта переключается на новый', () => {
+    const { spawnSync } = require('child_process');
+    if (spawnSync('git', ['--version'], { timeout: 5000 }).status !== 0) return;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'servpanel-git-'));
+    const git = (...args) => spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' });
+    try {
+        git('init');
+        git('remote', 'add', 'origin', 'https://github.com/makar19977v-glitch/servpanel.git');
+        assert.equal(updater.normalizeRemote(dir), true);
+        assert.equal(git('remote', 'get-url', 'origin').stdout.trim(), 'https://github.com/AmShaegar-dev/servpanel.git');
+        assert.equal(updater.normalizeRemote(dir), false);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
 test('Приложение: статус отдаёт APK, метрики и адрес API', async () => {
     const r = await request('/api/app/status');
     assert.equal(r.status, 200);
@@ -694,7 +727,7 @@ test('Приложение: статус отдаёт APK, метрики и а�
     assert.equal(typeof r.json.metrics.publicPort, 'number');
     assert.ok(r.json.metrics.runtime && typeof r.json.metrics.runtime === 'object');
     assert.ok(r.json.api && typeof r.json.api === 'object');
-    assert.equal(r.json.api.version, '2.6.2');
+    assert.equal(r.json.api.version, '2.6.3');
     assert.match(r.json.api.appUrl, /^https?:\/\//);
     assert.ok(Array.isArray(r.json.warnings));
 });
