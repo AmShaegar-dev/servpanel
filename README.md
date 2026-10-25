@@ -41,10 +41,10 @@
 Подключитесь к серверу по SSH и выполните одну команду. Установщик спросит **только способ доступа (IP или домен) и порт**. Всё остальное — AmneziaWG, AdGuard Home, каскад, MTProto и удаление компонентов — настраивается уже из веб-панели:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install.sh | sudo bash
 ```
 
-*(Если на минимальном образе Debian нет `curl`, выполните: `apt update && apt install -y curl`, либо используйте `wget -qO- https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install.sh | sudo bash`)*.
+*(Если на минимальном образе Debian нет `curl`, выполните: `apt update && apt install -y curl`, либо используйте `wget -qO- https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install.sh | sudo bash`)*.
 
 **Что сделает установщик автоматически:**
 1. Установит системные зависимости панели (`Node.js 20`, `npm`, `pm2`, `ufw`, `ipset`, `fail2ban`, `sshpass`, `zip`). `nginx` и `certbot` ставятся только при доступе по домену.
@@ -71,7 +71,7 @@ curl -fsSL https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/i
 ```bash
 apt update && apt install -y curl git nodejs npm nginx ufw zip ipset sshpass
 npm install -g pm2
-git clone https://github.com/makar19977v-glitch/servpanel.git /root/servpanel
+git clone https://github.com/AmShaegar-dev/servpanel.git /root/servpanel
 cd /root/servpanel
 npm install --omit=dev
 printf '%s\n' "ВАШ_ПАРОЛЬ" > admin_pass.txt && chmod 600 admin_pass.txt
@@ -682,15 +682,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/makar19977v-glitch/servpanel/releases/download/v2.6.0/servpanel-2.6.0.tar.gz
-curl -fLO https://github.com/makar19977v-glitch/servpanel/releases/download/v2.6.0/servpanel-2.6.0.tar.gz.sha256
-sha256sum -c servpanel-2.6.0.tar.gz.sha256
-tar -xzf servpanel-2.6.0.tar.gz
-bash /root/servpanel-2.6.0/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.6.1/servpanel-2.6.1.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.6.1/servpanel-2.6.1.tar.gz.sha256
+sha256sum -c servpanel-2.6.1.tar.gz.sha256
+tar -xzf servpanel-2.6.1.tar.gz
+bash /root/servpanel-2.6.1/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `2.6.0`. Если `curl` не установлен:
+Должно вывести `2.6.1`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Servpanel 2.6.0 — безопасное обновление существующей панели.
+# Servpanel 2.6.1 — безопасное обновление существующей панели.
 #
 # Что делает:
 #   1. проверяет релиз и запускает его на КОПИИ данных и отдельном порту;
@@ -368,6 +368,27 @@ else
     log "Проверка конфигов: /etc/amnezia/amneziawg/*.conf и awg-routing.sh не изменены."
 fi
 
+# Переезд репозитория на новый аккаунт: старый origin (makar19977v-glitch)
+# ещё работает через редирект GitHub, но встроенное обновление должно ходить
+# по новому адресу. Переключаем remote до проверки origin/main.
+GITHUB_REPO_CANONICAL="https://github.com/AmShaegar-dev/servpanel.git"
+normalize_git_remote() {
+    command -v git >/dev/null 2>&1 || return 0
+    [ -d "$APP_DIR/.git" ] || return 0
+    local origin_url
+    origin_url="$(git -C "$APP_DIR" remote get-url origin 2>/dev/null || true)"
+    case "$origin_url" in
+        *makar19977v-glitch/servpanel*)
+            if git -C "$APP_DIR" remote set-url origin "$GITHUB_REPO_CANONICAL" >>"$LOG" 2>&1; then
+                log "Git: origin переключён на $GITHUB_REPO_CANONICAL"
+            else
+                log "Git: не удалось переключить origin — оставлен $origin_url (GitHub редиректит)."
+            fi
+            ;;
+    esac
+}
+normalize_git_remote || true
+
 # Если файлы кода после установки полностью совпадают с origin/main, приводим
 # индекс .git к этому коммиту. Тогда встроенное GitHub-обновление снова видит
 # чистое дерево. Если есть отличия (например, релиз ещё не опубликован или
@@ -378,7 +399,7 @@ sync_git_if_clean() {
     local origin_url branch
     origin_url="$(git -C "$APP_DIR" remote get-url origin 2>/dev/null || true)"
     case "$origin_url" in
-        *makar19977v-glitch/servpanel*) ;;
+        *makar19977v-glitch/servpanel*|*AmShaegar-dev/servpanel*) ;;
         *) return 0 ;;
     esac
     branch="$(git -C "$APP_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"

@@ -84,7 +84,7 @@ const PANEL_VERSION = (() => {
     try { return String(JSON.parse(fs.readFileSync(path.join(APP_DIR, 'package.json'), 'utf8')).version || ''); }
     catch (e) { return ''; }
 })();
-const GITHUB_REPO = process.env.PANEL_GITHUB_REPO || 'makar19977v-glitch/servpanel';
+const GITHUB_REPO = process.env.PANEL_GITHUB_REPO || 'AmShaegar-dev/servpanel';
 const DEFAULT_APK_URL = `https://github.com/${GITHUB_REPO}/releases/latest/download/servpanel.apk`;
 
 // Опциональный WARP + Xray для AdGuard Home. Ничего не ставится автоматически:
@@ -5839,17 +5839,17 @@ app.post('/api/update/rollback', checkAuth, requireAdmin, (req, res) => {
 // ---------------------------------------------------------------------------
 const MODULES = {
     awg: {
-        url: 'https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install_awg_stateful.sh',
+        url: 'https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install_awg_stateful.sh',
         log: '/var/log/awg_install.log',
         title: 'AmneziaWG'
     },
     mtproto: {
-        url: 'https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install_mtproto_silent.sh',
+        url: 'https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install_mtproto_silent.sh',
         log: '/var/log/mtproto_install.log',
         title: 'MTProto'
     },
     adguard: {
-        url: 'https://raw.githubusercontent.com/makar19977v-glitch/servpanel/main/install_adguard_silent.sh',
+        url: 'https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install_adguard_silent.sh',
         log: '/var/log/adguard_install.log',
         title: 'AdGuard Home'
     },

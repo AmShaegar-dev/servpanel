@@ -102,7 +102,7 @@ apt-get install -y nodejs
 
 # ==================== 3. ПАНЕЛЬ ====================
 echo -e "\n${CYAN}[3/4] Развёртывание Servpanel...${NC}"
-GITHUB_REPO="https://github.com/makar19977v-glitch/servpanel.git"
+GITHUB_REPO="https://github.com/AmShaegar-dev/servpanel.git"
 
 if [ -d /root/servpanel ]; then
     echo -e "${RED}/root/servpanel уже существует.${NC}"

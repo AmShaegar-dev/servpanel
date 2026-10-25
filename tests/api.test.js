@@ -694,7 +694,7 @@ test('Приложение: статус отдаёт APK, метрики и а�
     assert.equal(typeof r.json.metrics.publicPort, 'number');
     assert.ok(r.json.metrics.runtime && typeof r.json.metrics.runtime === 'object');
     assert.ok(r.json.api && typeof r.json.api === 'object');
-    assert.equal(r.json.api.version, '2.6.0');
+    assert.equal(r.json.api.version, '2.6.1');
     assert.match(r.json.api.appUrl, /^https?:\/\//);
     assert.ok(Array.isArray(r.json.warnings));
 });

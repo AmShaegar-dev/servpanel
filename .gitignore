@@ -17,6 +17,7 @@ admin_pass.txt
 app/servpanel.apk
 servpanel_auth.log
 node_modules/
+dist/
 npm-debug.log*
 *.log
 *.bak
