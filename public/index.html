@@ -94,6 +94,9 @@
                     <button class="nav-item" data-tab="tab-ssl" data-title="Домены и SSL" onclick="switchTab('tab-ssl', this)" id="navSsl">
                         <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg></span><span>Домены и SSL</span>
                     </button>
+                    <button class="nav-item" data-tab="tab-app" data-title="Приложение" onclick="switchTab('tab-app', this)" id="navApp">
+                        <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10.5 5.5h3"/><path d="M12 18.5h.01"/></svg></span><span>Приложение</span>
+                    </button>
                 </div>
                 <div class="nav-group">
                     <div class="nav-label">Безопасность</div>
@@ -522,6 +525,95 @@
                             <tbody id="sslSitesTable"><tr><td colspan="5">Загрузка…</td></tr></tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <!-- ПРИЛОЖЕНИЕ -->
+            <div id="tab-app" class="tab-pane">
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Мобильное приложение Servpanel</h3>
+                            <p>Скачайте APK прямо с панели — без GitHub и сторонних ссылок. Файл можно загрузить сюда же.</p>
+                        </div>
+                        <span class="badge badge-muted" id="appApkBadge">проверка</span>
+                    </div>
+                    <div id="appApkBanner"></div>
+                    <div id="appApkSummary" class="stats-cards" style="margin-bottom:14px;"></div>
+                    <div class="controls-row" style="margin-bottom:0;">
+                        <a class="btn btn-primary" id="appApkDownload" href="/api/app/apk" download>⬇ Скачать APK</a>
+                        <button class="btn btn-ghost" onclick="loadAppPanel()">↻ Обновить</button>
+                        <button class="btn btn-soft" id="appApkUploadBtn" onclick="document.getElementById('appApkFile').click()">⬆ Загрузить APK</button>
+                        <input type="file" id="appApkFile" accept=".apk,application/vnd.android.package-archive" style="display:none;" onchange="uploadApk(this)">
+                        <button class="btn btn-dark" id="appApkDeleteBtn" style="display:none;" onclick="deleteApk()">Удалить загруженный</button>
+                    </div>
+                    <div id="appApkResult" class="update-note" style="display:none;"></div>
+                </div>
+
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Доступ приложения</h3>
+                            <p>Адрес, который нужно указать в приложении. Прямой HTTPS работает без Nginx и внешнего прокси.</p>
+                        </div>
+                        <span class="badge badge-muted" id="appApiBadge">API</span>
+                    </div>
+                    <div id="appApiSummary" class="stats-cards" style="margin-bottom:14px;"></div>
+                    <div class="update-note" style="display:block; margin-bottom:12px;">Адрес для приложения: <code id="appApiUrl" class="app-api-url">…</code></div>
+                    <div class="controls-row" style="margin-bottom:0;">
+                        <button class="btn btn-ghost" onclick="copyText(document.getElementById('appApiUrl').innerText)">Копировать адрес</button>
+                        <button class="btn btn-ghost" onclick="switchTab('tab-ssl', document.querySelector('.nav-item[data-tab=&quot;tab-ssl&quot;]'))">Настроить сертификат</button>
+                    </div>
+                    <div class="update-note" id="appApiHint" style="display:none;"></div>
+                </div>
+
+                <div class="card" style="margin-bottom:20px;" data-admin-only>
+                    <div class="card-head">
+                        <div>
+                            <h3>Метрики для приложения</h3>
+                            <p>Отдельный порт с нагрузкой, клиентами и трафиком. Внутренний порт слушает Node, внешний — тот, по которому к нему обращаются снаружи.</p>
+                        </div>
+                        <span class="badge badge-muted" id="appMetricsBadge">выключены</span>
+                    </div>
+                    <div id="appMetricsBanner"></div>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:14px;">
+                        <label class="field"><span>Внутренний порт</span><input type="number" id="appMetricsPort" min="1" max="65535" placeholder="9101"></label>
+                        <label class="field"><span>Внешний порт</span><input type="number" id="appMetricsPublicPort" min="1" max="65535" placeholder="9101"></label>
+                        <label class="field"><span>Адрес прослушивания</span><input type="text" id="appMetricsHost" placeholder="127.0.0.1" autocomplete="off" spellcheck="false"></label>
+                        <label class="field"><span>Формат</span><select id="appMetricsFormat"><option value="json">JSON</option><option value="prometheus">Prometheus</option></select></label>
+                    </div>
+                    <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-muted); margin-bottom:12px;">
+                        <input type="checkbox" id="appMetricsEnabled" style="width:auto;"> Включить отдельный порт метрик
+                    </label>
+                    <div class="controls-row" style="margin-bottom:10px;">
+                        <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:240px;">
+                            <label style="font-size:11px; color:var(--text-muted);">Токен (заголовок Authorization: Bearer …)</label>
+                            <input type="text" id="appMetricsToken" placeholder="сгенерируется автоматически" autocomplete="off" spellcheck="false">
+                        </div>
+                        <button class="btn btn-dark" onclick="regenerateMetricsToken()">↻ Новый токен</button>
+                        <button class="btn btn-ghost" onclick="copyText(document.getElementById('appMetricsToken').value)">Копировать</button>
+                    </div>
+                    <div class="controls-row" style="margin-bottom:0;">
+                        <button class="btn btn-primary" id="appMetricsSaveBtn" onclick="saveMetricsSettings()">Сохранить и применить</button>
+                        <span id="appMetricsHint" style="font-size:11.5px; color:var(--text-dim);"></span>
+                    </div>
+                    <div id="appMetricsUrls" class="update-note" style="display:none;"></div>
+                </div>
+
+                <div class="card" data-admin-only>
+                    <div class="card-head">
+                        <div>
+                            <h3>Как подключить приложение</h3>
+                            <p>Короткая инструкция, которую можно передать пользователям.</p>
+                        </div>
+                    </div>
+                    <ol style="margin:0; padding-left:20px; font-size:12.5px; color:var(--text-muted); line-height:1.9;">
+                        <li>Скачайте APK по кнопке выше и установите (Android разрешит установку из этого источника).</li>
+                        <li>В приложении нажмите «+» и укажите адрес <code class="app-api-url">…</code>.</li>
+                        <li>Войдите логином и паролем панели. Пароль не сохраняется — остаётся только сессия.</li>
+                        <li>Для самоподписанного сертификата включите переключатель «Самоподписанный сертификат».</li>
+                        <li>Если включены метрики — укажите порт и токен в настройках сервера: карточка будет обновляться без входа.</li>
+                    </ol>
                 </div>
             </div>
 

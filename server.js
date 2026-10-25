@@ -76,6 +76,17 @@ const CASCADE_CONF_LEGACY = path.join(AWG_CONF_DIR, 'awg-eu.conf'); // стар�
 const RENAME_SCRIPT = path.join(AWG_DIR, '.panel-rename.sh');
 const INSTALL_STATE = path.join(DATA_DIR, '.install_state.json');
 
+// Настройки мобильного приложения и метрик. Лежат в DATA_DIR, поэтому
+// переживают обновление панели и не попадают в релизный архив.
+const APP_SETTINGS_FILE = path.join(DATA_DIR, '.app_settings.json');
+const APP_APK_DIR = path.join(DATA_DIR, '.app');
+const PANEL_VERSION = (() => {
+    try { return String(JSON.parse(fs.readFileSync(path.join(APP_DIR, 'package.json'), 'utf8')).version || ''); }
+    catch (e) { return ''; }
+})();
+const GITHUB_REPO = process.env.PANEL_GITHUB_REPO || 'makar19977v-glitch/servpanel';
+const DEFAULT_APK_URL = `https://github.com/${GITHUB_REPO}/releases/latest/download/servpanel.apk`;
+
 // Опциональный WARP + Xray для AdGuard Home. Ничего не ставится автоматически:
 // компонент запускается только по кнопке на вкладке «Службы и DNS».
 const WARP_INSTALLER = path.join(APP_DIR, 'install_warp_xray.sh');
@@ -550,7 +561,524 @@ app.use(session({
     }
 }));
 
-app.use(express.static(path.join(APP_DIR, 'public'), { index: 'index.html' }));
+// PANEL_WEB=0 выключает веб-интерфейс: статика не раздаётся, все не-API
+// маршруты отвечают 404. API (/api/*) продолжает работать как обычно.
+const WEB_ENABLED = process.env.PANEL_WEB !== '0';
+
+// Строгая проверка «это запрос к API»: отсекает /api/../index.html и
+// двойное кодирование, чтобы через API-порт нельзя было достать статику.
+function isApiRequest(req) {
+    let p;
+    try {
+        p = decodeURIComponent(req.path || '');
+    } catch (e) {
+        return false;
+    }
+    if (p.includes('..') || p.includes('\\') || p.includes('%') || p.includes('\0')) return false;
+    return p === '/api' || p.startsWith('/api/');
+}
+
+// ---------------------------------------------------------------------------
+// Мобильное приложение: APK, метрики и настройки доступа
+// ---------------------------------------------------------------------------
+// Все настройки лежат в DATA_DIR: обновление панели их не перезаписывает.
+// Переменные окружения задают значения по умолчанию для первого запуска,
+// дальше приоритет у файла .app_settings.json (как у .panel_port).
+let lastClientsSnapshot = [];
+let metricsServer = null;
+let metricsSettings = null;
+let metricsRuntime = { running: false, port: null, tls: false, error: '' };
+let apkHashCache = { key: '', value: '' };
+
+function envPort(name) {
+    const n = parseInt(process.env[name], 10);
+    return Number.isInteger(n) && n > 0 && n < 65536 ? n : 0;
+}
+function isBindHost(v) {
+    return v === '0.0.0.0' || v === '::' || v === '::1' || isIpOrHost(String(v || ''));
+}
+function isHttpUrl(v) {
+    try {
+        const u = new URL(String(v));
+        return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch (e) { return false; }
+}
+function isLoopbackHost(host) {
+    const h = String(host || '');
+    return h === 'localhost' || h === '::1' || h === '127.0.0.1' || h.startsWith('127.');
+}
+function newMetricsToken() {
+    return crypto.randomBytes(32).toString('hex');
+}
+function defaultAppSettings() {
+    const port = envPort('PANEL_METRICS_PORT') || 9101;
+    return {
+        metrics: {
+            enabled: process.env.PANEL_METRICS_ENABLED === '1' || !!envPort('PANEL_METRICS_PORT'),
+            host: process.env.PANEL_METRICS_HOST || '127.0.0.1',
+            port,
+            publicPort: envPort('PANEL_METRICS_PUBLIC_PORT') || port,
+            format: process.env.PANEL_METRICS_FORMAT === 'prometheus' ? 'prometheus' : 'json',
+            token: String(process.env.PANEL_METRICS_TOKEN || ''),
+            tls: process.env.PANEL_METRICS_TLS === '0' ? false : 'auto'
+        },
+        apk: {
+            url: String(process.env.PANEL_APK_URL || DEFAULT_APK_URL),
+            version: String(process.env.PANEL_APK_VERSION || '')
+        }
+    };
+}
+function normalizeMetricsSettings(input, opts = {}) {
+    const strict = !!opts.strict;
+    const base = opts.base || defaultAppSettings().metrics;
+    const src = input && typeof input === 'object' ? input : {};
+    const minPort = TEST_MODE ? 0 : 1;
+    const portOf = (key, fallback, label) => {
+        if (src[key] === undefined || src[key] === '') return fallback;
+        const n = Number(src[key]);
+        if (!Number.isInteger(n) || n < minPort || n > 65535) {
+            if (strict) throw new Error(`Некорректный ${label}: ${src[key]} (нужно ${minPort === 0 ? 0 : 1}–65535)`);
+            return fallback;
+        }
+        return n;
+    };
+    const host = typeof src.host === 'string' && src.host.trim() ? src.host.trim() : base.host;
+    if (!isBindHost(host)) {
+        if (strict) throw new Error('Некорректный адрес метрик: укажите IP или имя хоста');
+    }
+    const token = typeof src.token === 'string' ? src.token.trim() : String(base.token || '');
+    if (token && !/^[A-Za-z0-9._~+/=-]{8,256}$/.test(token)) {
+        if (strict) throw new Error('Токен метрик: допустимы латиница, цифры и символы . _ ~ + / = - (8–256)');
+    }
+    return {
+        enabled: src.enabled === undefined ? !!base.enabled : !!src.enabled,
+        host,
+        port: portOf('port', base.port, 'внутренний порт метрик'),
+        publicPort: portOf('publicPort', portOf('port', base.port, 'порт метрик'), 'внешний порт метрик'),
+        format: src.format === 'prometheus' ? 'prometheus' : 'json',
+        token,
+        tls: src.tls === false || src.tls === '0' ? false : src.tls === true ? true : 'auto',
+        path: '/metrics'
+    };
+}
+function readAppSettings() {
+    const def = defaultAppSettings();
+    const raw = readJson(APP_SETTINGS_FILE, null);
+    const rawMetrics = raw && raw.metrics && typeof raw.metrics === 'object' ? raw.metrics : {};
+    const metrics = normalizeMetricsSettings({ ...def.metrics, ...rawMetrics }, { base: def.metrics });
+    const apk = { ...def.apk };
+    if (raw && raw.apk && typeof raw.apk === 'object') {
+        if (typeof raw.apk.url === 'string' && (!raw.apk.url || isHttpUrl(raw.apk.url))) apk.url = raw.apk.url;
+        if (typeof raw.apk.version === 'string') apk.version = raw.apk.version.slice(0, 32);
+    }
+    return { metrics, apk };
+}
+function writeAppSettings(settings) {
+    writeJson(APP_SETTINGS_FILE, settings, 0o600);
+}
+
+function apkCandidatePaths() {
+    return [
+        path.join(APP_APK_DIR, 'servpanel.apk'),
+        path.join(APP_DIR, 'app', 'servpanel.apk'),
+        path.join(APP_DIR, 'public', 'downloads', 'servpanel.apk'),
+        path.join(APP_DIR, 'servpanel.apk')
+    ];
+}
+function resolveApkFile() {
+    for (const p of apkCandidatePaths()) {
+        try {
+            const st = fs.statSync(p);
+            if (st.isFile() && st.size > 0) return { path: p, stat: st };
+        } catch (e) { /* нет файла */ }
+    }
+    return null;
+}
+function apkSha256(file, st) {
+    const key = `${file}:${st.size}:${st.mtimeMs}`;
+    if (apkHashCache.key === key) return apkHashCache.value;
+    const value = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    apkHashCache = { key, value };
+    return value;
+}
+function apkVersionFromDisk(settings) {
+    if (settings.apk.version) return settings.apk.version;
+    for (const p of [path.join(APP_APK_DIR, 'version.txt'), path.join(APP_DIR, 'app', 'version.txt')]) {
+        try {
+            const v = fs.readFileSync(p, 'utf8').trim();
+            if (/^[0-9A-Za-z._-]{1,32}$/.test(v)) return v;
+        } catch (e) { /* ignore */ }
+    }
+    return '';
+}
+function apkInfo(settings) {
+    const cfg = settings || readAppSettings();
+    const local = resolveApkFile();
+    const version = apkVersionFromDisk(cfg);
+    if (local) {
+        return {
+            available: true,
+            source: 'local',
+            name: 'servpanel.apk',
+            size: local.stat.size,
+            modified: local.stat.mtime.toISOString(),
+            sha256: apkSha256(local.path, local.stat),
+            version,
+            downloadUrl: '/api/app/apk'
+        };
+    }
+    if (cfg.apk.url) {
+        return {
+            available: true,
+            source: 'remote',
+            name: 'servpanel.apk',
+            size: null,
+            modified: '',
+            sha256: '',
+            version,
+            downloadUrl: '/api/app/apk',
+            externalUrl: cfg.apk.url
+        };
+    }
+    return { available: false, source: 'none', name: 'servpanel.apk', size: null, version, downloadUrl: '' };
+}
+
+function diskUsageCached() {
+    const now = Date.now();
+    if (diskUsageCached.at && now - diskUsageCached.at < 5000) return diskUsageCached.value;
+    let disk = { total: 0, used: 0, free: 0, percent: '0%' };
+    try {
+        const dfStr = sh('bash', ['-c', 'df -B1 --output=size,used,avail,pcent / | tail -1']).trim();
+        const df = dfStr.split(/\s+/);
+        const parsed = {
+            total: parseInt(df[0], 10) || 0,
+            used: parseInt(df[1], 10) || 0,
+            free: parseInt(df[2], 10) || 0,
+            percent: df[3] || '0%'
+        };
+        if (parsed.total > 0) disk = parsed;
+    } catch (e) { /* не Linux */ }
+    diskUsageCached.at = now;
+    diskUsageCached.value = disk;
+    return disk;
+}
+diskUsageCached.at = 0;
+diskUsageCached.value = null;
+
+function metricsSnapshot() {
+    const mem = memoryUsage();
+    const disk = diskUsageCached();
+    const clients = DEMO_MODE
+        ? demoClients.map(c => ({ status_code: c.status_code, rx: c.rx, tx: c.tx }))
+        : lastClientsSnapshot;
+    const online = clients.filter(c => c && (c.status_code === 'active' || c.status_code === 'recent')).length;
+    const g = historyData.global && historyData.global.short && historyData.global.short.length
+        ? historyData.global.short[historyData.global.short.length - 1]
+        : null;
+    const totalRx = clients.reduce((s, c) => s + (Number(c && c.rx) || 0), 0);
+    const totalTx = clients.reduce((s, c) => s + (Number(c && c.tx) || 0), 0);
+    const memPercent = mem.total > 0 ? Number(((mem.used / mem.total) * 100).toFixed(1)) : 0;
+    return {
+        ok: true,
+        schema: 1,
+        timestamp: new Date().toISOString(),
+        uptimeSeconds: Math.round(os.uptime()),
+        host: {
+            hostname: os.hostname(),
+            platform: os.platform(),
+            arch: os.arch(),
+            node: process.version
+        },
+        panel: {
+            version: PANEL_VERSION,
+            internalPort: PANEL_PORT,
+            publicPort: PANEL_PUBLIC_PORT,
+            webEnabled: WEB_ENABLED,
+            tls: !!PANEL_TLS_PORT
+        },
+        cpu: {
+            percent: Number(cpuUsagePercent().toFixed(1)),
+            cores: os.cpus().length || 1,
+            load1: Number((os.loadavg()[0] || 0).toFixed(2)),
+            load5: Number((os.loadavg()[1] || 0).toFixed(2)),
+            load15: Number((os.loadavg()[2] || 0).toFixed(2))
+        },
+        memory: {
+            total: mem.total,
+            used: mem.used,
+            free: mem.free,
+            percent: memPercent
+        },
+        disk,
+        clients: { online, total: clients.length },
+        traffic: {
+            rx: g ? Math.round(g.rx) : 0,
+            tx: g ? Math.round(g.tx) : 0,
+            totalRx,
+            totalTx
+        },
+        interfaces: existingIfaces()
+    };
+}
+
+function prometheusMetrics(s) {
+    const lines = [];
+    const esc = v => String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const metric = (name, help, type, value, labels) => {
+        lines.push(`# HELP ${name} ${help}`);
+        lines.push(`# TYPE ${name} ${type}`);
+        const l = labels ? `{${Object.entries(labels).map(([k, v]) => `${k}="${esc(v)}"`).join(',')}}` : '';
+        lines.push(`${name}${l} ${value}`);
+    };
+    metric('servpanel_up', 'Panel is responding to metrics requests', 'gauge', 1);
+    metric('servpanel_info', 'Panel build information', 'gauge', 1, { version: s.panel.version || 'unknown' });
+    metric('servpanel_uptime_seconds', 'Host uptime in seconds', 'gauge', s.uptimeSeconds);
+    metric('servpanel_cpu_percent', 'CPU usage percent', 'gauge', s.cpu.percent);
+    metric('servpanel_cpu_cores', 'CPU cores', 'gauge', s.cpu.cores);
+    metric('servpanel_load1', '1 minute load average', 'gauge', s.cpu.load1);
+    metric('servpanel_load5', '5 minute load average', 'gauge', s.cpu.load5);
+    metric('servpanel_load15', '15 minute load average', 'gauge', s.cpu.load15);
+    metric('servpanel_memory_bytes', 'Memory in bytes', 'gauge', s.memory.total, { kind: 'total' });
+    metric('servpanel_memory_bytes', 'Memory in bytes', 'gauge', s.memory.used, { kind: 'used' });
+    metric('servpanel_memory_bytes', 'Memory in bytes', 'gauge', s.memory.free, { kind: 'free' });
+    metric('servpanel_memory_percent', 'Memory usage percent', 'gauge', s.memory.percent);
+    metric('servpanel_disk_bytes', 'Root filesystem in bytes', 'gauge', s.disk.total, { kind: 'total' });
+    metric('servpanel_disk_bytes', 'Root filesystem in bytes', 'gauge', s.disk.used, { kind: 'used' });
+    metric('servpanel_disk_bytes', 'Root filesystem in bytes', 'gauge', s.disk.free, { kind: 'free' });
+    metric('servpanel_clients_online', 'VPN clients online', 'gauge', s.clients.online);
+    metric('servpanel_clients_total', 'VPN clients total', 'gauge', s.clients.total);
+    metric('servpanel_traffic_rx_bytes_per_second', 'Current RX speed', 'gauge', s.traffic.rx);
+    metric('servpanel_traffic_tx_bytes_per_second', 'Current TX speed', 'gauge', s.traffic.tx);
+    metric('servpanel_traffic_rx_bytes_total', 'Cumulative RX bytes', 'counter', s.traffic.totalRx);
+    metric('servpanel_traffic_tx_bytes_total', 'Cumulative TX bytes', 'counter', s.traffic.totalTx);
+    return lines.join('\n') + '\n';
+}
+
+function metricsTokenMatches(req, token) {
+    const auth = String(req.headers.authorization || '');
+    const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+    const supplied = bearer || String(req.headers['x-metrics-token'] || '') || String((req.query && req.query.token) || '');
+    return !!supplied && safeEqual(supplied, token);
+}
+function metricsRequestHandler(settings) {
+    return (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        let pathname = '/';
+        try { pathname = new URL(req.url, 'http://metrics.local').pathname; } catch (e) { /* ignore */ }
+        if (pathname === '/health' || pathname === '/healthz') {
+            return res.json({ ok: true, running: true, timestamp: new Date().toISOString() });
+        }
+        const allowed = ['/', '/metrics', '/metrics/', '/api/metrics', '/api/metrics/', '/metrics.prom'];
+        if (!allowed.includes(pathname)) return res.status(404).json({ error: 'Not found' });
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+            res.setHeader('Allow', 'GET, HEAD');
+            return res.status(405).json({ error: 'Method not allowed' });
+        }
+        if (settings.token) {
+            if (!metricsTokenMatches(req, settings.token)) {
+                res.setHeader('WWW-Authenticate', 'Bearer realm="servpanel-metrics"');
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+        } else if (!isLoopbackHost(settings.host)) {
+            return res.status(403).json({
+                error: 'Токен метрик не задан. Порт открыт наружу — задайте токен в панели.'
+            });
+        }
+        const snapshot = metricsSnapshot();
+        const wantsProm = settings.format === 'prometheus' ||
+            pathname === '/metrics.prom' ||
+            /text\/plain/.test(String(req.headers.accept || ''));
+        if (wantsProm) {
+            res.type('text/plain; version=0.0.4; charset=utf-8').send(prometheusMetrics(snapshot));
+        } else {
+            res.json(snapshot);
+        }
+    };
+}
+function stopMetricsServer() {
+    if (metricsServer) {
+        try {
+            // keep-alive соединения не должны держать процесс после выключения.
+            if (typeof metricsServer.closeAllConnections === 'function') metricsServer.closeAllConnections();
+            else if (typeof metricsServer.closeIdleConnections === 'function') metricsServer.closeIdleConnections();
+        } catch (e) { /* ignore */ }
+        try { metricsServer.close(); } catch (e) { /* ignore */ }
+        metricsServer = null;
+    }
+    metricsRuntime = { running: false, port: null, tls: false, error: '' };
+}
+function startMetricsServer(settings) {
+    stopMetricsServer();
+    const cfg = settings || readAppSettings().metrics;
+    metricsSettings = cfg;
+    if (!cfg.enabled) return metricsRuntime;
+    const handler = metricsRequestHandler(cfg);
+    let creds = null;
+    if (cfg.tls !== false) {
+        try { creds = loadTlsCredentials(); } catch (e) {
+            metricsRuntime = { running: false, port: null, tls: false, error: e.message };
+            console.error('Метрики: не удалось прочитать TLS-сертификат:', e.message);
+            if (cfg.tls === true) return metricsRuntime;
+        }
+    }
+    if (cfg.tls === true && !creds) {
+        metricsRuntime = { running: false, port: null, tls: false, error: 'TLS включён, но сертификат не найден' };
+        console.error('Метрики: TLS включён, но PANEL_TLS_CERT/PANEL_TLS_KEY не найдены.');
+        return metricsRuntime;
+    }
+    const http = require('http');
+    const https = require('https');
+    const metricsApp = express();
+    metricsApp.disable('x-powered-by');
+    metricsApp.use(handler);
+    const srv = creds ? https.createServer(creds, metricsApp) : http.createServer(metricsApp);
+    srv.on('error', err => {
+        metricsRuntime = { running: false, port: null, tls: !!creds, error: err.message };
+        console.error('Метрики: не удалось открыть порт', cfg.port, '-', err.message);
+    });
+    srv.listen(cfg.port, cfg.host, () => {
+        const actual = srv.address();
+        metricsRuntime = {
+            running: true,
+            port: actual && typeof actual === 'object' ? actual.port : cfg.port,
+            tls: !!creds,
+            error: ''
+        };
+        console.log(`Servpanel metrics: ${creds ? 'https' : 'http'}://${cfg.host}:${metricsRuntime.port}${cfg.path}`);
+    });
+    metricsServer = srv;
+    return metricsRuntime;
+}
+// Ждём фактического открытия порта: listen() асинхронный, а ответ API
+// должен уже содержать running/error, иначе интерфейс покажет «ошибка».
+function waitForMetrics(timeoutMs = 2000) {
+    return new Promise(resolve => {
+        const started = Date.now();
+        const tick = () => {
+            if (metricsRuntime.running || metricsRuntime.error) return resolve(metricsRuntime);
+            if (Date.now() - started >= timeoutMs) return resolve(metricsRuntime);
+            setTimeout(tick, 25);
+        };
+        tick();
+    });
+}
+function metricsUrl(settings, host, port, tls) {
+    const scheme = tls ? 'https' : 'http';
+    const defaultPort = tls ? 443 : 80;
+    const h = host || '127.0.0.1';
+    return `${scheme}://${h}${port === defaultPort ? '' : ':' + port}${settings.path || '/metrics'}`;
+}
+function metricsRuntimeInfo(settings, requestHost) {
+    const externalHost = panelDomain() || requestHost || '<домен-или-IP>';
+    return {
+        enabled: !!settings.enabled,
+        running: !!metricsRuntime.running,
+        host: settings.host,
+        port: settings.port,
+        actualPort: metricsRuntime.port,
+        publicPort: settings.publicPort,
+        format: settings.format,
+        tls: !!metricsRuntime.tls,
+        internalUrl: metricsUrl(settings, settings.host, metricsRuntime.port || settings.port, metricsRuntime.tls),
+        externalUrl: metricsUrl(settings, externalHost, settings.publicPort, metricsRuntime.tls),
+        error: metricsRuntime.error || ''
+    };
+}
+
+function resolveTlsCredentials() {
+    const cert = process.env.PANEL_TLS_CERT || '';
+    const key = process.env.PANEL_TLS_KEY || '';
+    if (cert && key) return { cert, key, source: 'env' };
+    try {
+        const info = panelCertificateInfo(panelDomain());
+        if (info && info.fullchain && info.privkey &&
+            fs.existsSync(info.fullchain) && fs.existsSync(info.privkey)) {
+            return { cert: info.fullchain, key: info.privkey, source: 'panel' };
+        }
+    } catch (e) { /* ignore */ }
+    return null;
+}
+function loadTlsCredentials() {
+    const files = resolveTlsCredentials();
+    if (!files) return null;
+    return {
+        cert: fs.readFileSync(files.cert),
+        key: fs.readFileSync(files.key),
+        source: files.source,
+        certPath: files.cert,
+        keyPath: files.key
+    };
+}
+
+function appUrlSuggestion(req) {
+    const domain = panelDomain();
+    const reqHost = String((req && req.hostname) || '').replace(/^\[|\]$/g, '');
+    const usable = h => !!h && h !== '0.0.0.0' && h !== '::' && h !== '::0';
+    // Домен панели — самый надёжный адрес; иначе берём хост, по которому
+    // пришёл запрос (он точно рабочий), и только потом адрес bind.
+    const pick = bind => (domain || (usable(reqHost) ? reqHost : '') || (usable(bind) ? bind : '127.0.0.1'));
+    if (PANEL_TLS_PORT) {
+        const host = pick(PANEL_TLS_HOST);
+        return `https://${host}${PANEL_TLS_PORT === 443 ? '' : ':' + PANEL_TLS_PORT}`;
+    }
+    if (PANEL_API_PORT) {
+        const host = pick(PANEL_API_HOST);
+        return `${resolveTlsCredentials() ? 'https' : 'http'}://${host}:${PANEL_API_PORT}`;
+    }
+    const host = pick(PANEL_HOST);
+    return `${resolveTlsCredentials() ? 'https' : 'http'}://${host}${PANEL_PUBLIC_PORT === 443 || PANEL_PUBLIC_PORT === 80 ? '' : ':' + PANEL_PUBLIC_PORT}`;
+}
+function appStatusPayload(req) {
+    const settings = readAppSettings();
+    const isAdmin = ((req.session && req.session.role) || 'admin') === 'admin';
+    const reqHost = String((req && req.hostname) || '').replace(/^\[|\]$/g, '');
+    const metrics = {
+        ...settings.metrics,
+        token: isAdmin ? settings.metrics.token : '',
+        tokenSet: !!settings.metrics.token,
+        runtime: metricsRuntimeInfo(settings.metrics, reqHost)
+    };
+    const warnings = [];
+    if (settings.metrics.enabled) {
+        if (!settings.metrics.token && !isLoopbackHost(settings.metrics.host)) {
+            warnings.push('Метрики открыты наружу без токена: любой, кто знает порт, увидит нагрузку и число клиентов.');
+        }
+        if (!metricsRuntimeInfo(settings.metrics, reqHost).tls && !isLoopbackHost(settings.metrics.host)) {
+            warnings.push('Метрики отдаются по HTTP: токен и данные видны по пути. Используйте HTTPS или VPN.');
+        }
+    }
+    if (!WEB_ENABLED && !resolveTlsCredentials()) {
+        warnings.push('Веб-интерфейс выключен, но HTTPS не настроен: сессия panel.sid ходит по HTTP и может быть перехвачена.');
+    }
+    return {
+        apk: apkInfo(settings),
+        metrics,
+        api: {
+            version: PANEL_VERSION,
+            webEnabled: WEB_ENABLED,
+            httpEnabled: HTTP_ENABLED,
+            panelPort: PANEL_PORT,
+            publicPort: PANEL_PUBLIC_PORT,
+            tlsPort: PANEL_TLS_PORT,
+            tlsHost: PANEL_TLS_HOST,
+            apiPort: PANEL_API_PORT,
+            apiHost: PANEL_API_HOST,
+            tlsConfigured: !!resolveTlsCredentials(),
+            appUrl: appUrlSuggestion(req)
+        },
+        warnings
+    };
+}
+
+if (WEB_ENABLED) {
+    app.use(express.static(path.join(APP_DIR, 'public'), { index: 'index.html' }));
+} else {
+    app.use((req, res, next) => {
+        if (isApiRequest(req)) return next();
+        return res.status(404).type('text/plain').send('Web UI disabled');
+    });
+}
 
 // ---------------------------------------------------------------------------
 // Ограничение частоты запросов ко всем /api/* (защита от перебора и флуда)
@@ -966,6 +1494,7 @@ function collectHistory() {
             const jsonStart = String(stdout || '').indexOf('[');
             if (jsonStart === -1) return;
             const data = JSON.parse(String(stdout).substring(jsonStart));
+            lastClientsSnapshot = Array.isArray(data) ? data : [];
             const t = Date.now();
             let totalRxSpeed = 0, totalTxSpeed = 0, counted = 0;
 
@@ -5681,6 +6210,134 @@ echo '{"ok":true,"name":"'"$NEW"'"}'
 `;
 
 // ---------------------------------------------------------------------------
+// API мобильного приложения: статус, APK и метрики
+// ---------------------------------------------------------------------------
+app.get('/api/app/status', checkAuth, (req, res) => {
+    try { res.json(appStatusPayload(req)); }
+    catch (e) { res.status(500).json({ error: 'Не удалось прочитать настройки приложения' }); }
+});
+
+// Компактные метрики доступны и на основном API — приложению не обязателен
+// отдельный порт. Отдельный listener нужен для мониторинга/Prometheus.
+app.get('/api/metrics', checkAuth, (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try { res.json(metricsSnapshot()); }
+    catch (e) { res.status(500).json({ error: 'Ошибка чтения метрик' }); }
+});
+
+app.get('/api/app/apk', checkAuth, (req, res) => {
+    const settings = readAppSettings();
+    const local = resolveApkFile();
+    if (local) {
+        res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+        res.setHeader('Content-Disposition', 'attachment; filename="servpanel.apk"');
+        res.setHeader('Content-Length', local.stat.size);
+        res.setHeader('Cache-Control', 'no-store');
+        const stream = fs.createReadStream(local.path);
+        stream.on('error', () => {
+            if (!res.headersSent) res.status(500).json({ error: 'Не удалось отдать APK' });
+            else res.end();
+        });
+        return stream.pipe(res);
+    }
+    if (settings.apk.url && isHttpUrl(settings.apk.url)) return res.redirect(302, settings.apk.url);
+    res.status(404).json({ error: 'APK не загружен. Загрузите его в панели или укажите ссылку.' });
+});
+
+// Загрузка APK без новых зависимостей: тело — сам файл, не multipart.
+app.post('/api/app/apk', checkAuth, requireAdmin,
+    express.raw({ type: ['application/vnd.android.package-archive', 'application/octet-stream'], limit: '120mb' }),
+    (req, res) => {
+        try {
+            const body = req.body;
+            if (!Buffer.isBuffer(body) || body.length < 4) {
+                return res.status(400).json({ error: 'Ожидается файл APK в теле запроса' });
+            }
+            if (body[0] !== 0x50 || body[1] !== 0x4b) {
+                return res.status(400).json({ error: 'Это не APK: файл должен начинаться с ZIP-заголовка (PK)' });
+            }
+            const rawVersion = String(req.query.version || req.headers['x-app-version'] || '').trim();
+            const version = /^[0-9A-Za-z._-]{1,32}$/.test(rawVersion) ? rawVersion : '';
+            fs.mkdirSync(APP_APK_DIR, { recursive: true, mode: 0o700 });
+            const target = path.join(APP_APK_DIR, 'servpanel.apk');
+            const tmp = path.join(APP_APK_DIR, `.upload-${process.pid}-${Date.now()}.tmp`);
+            fs.writeFileSync(tmp, body, { mode: 0o600 });
+            try { fs.unlinkSync(target); } catch (e) { /* нет старого файла */ }
+            fs.renameSync(tmp, target);
+            const settings = readAppSettings();
+            if (version) settings.apk.version = version;
+            writeAppSettings(settings);
+            auditLog(req, `Загружен APK Servpanel (${(body.length / 1024 / 1024).toFixed(1)} МБ${version ? ', версия ' + version : ''})`);
+            res.json({ success: true, apk: apkInfo(settings) });
+        } catch (e) {
+            res.status(500).json({ error: 'Не удалось сохранить APK: ' + e.message });
+        }
+    });
+
+app.delete('/api/app/apk', checkAuth, requireAdmin, (req, res) => {
+    let removed = false;
+    for (const p of [path.join(APP_APK_DIR, 'servpanel.apk')]) {
+        try { fs.unlinkSync(p); removed = true; } catch (e) { /* нет файла */ }
+    }
+    if (removed) {
+        // Версия относилась к удалённому файлу: иначе панель покажет её
+        // рядом со ссылкой на GitHub, где лежит другая сборка.
+        const settings = readAppSettings();
+        if (settings.apk.version) {
+            settings.apk.version = '';
+            writeAppSettings(settings);
+        }
+        try { fs.unlinkSync(path.join(APP_APK_DIR, 'version.txt')); } catch (e) { /* нет файла */ }
+    }
+    auditLog(req, removed ? 'Удалён загруженный APK Servpanel' : 'Удаление APK: файла не было');
+    res.json({ success: true, removed, apk: apkInfo() });
+});
+
+app.post('/api/app/metrics', checkAuth, requireAdmin, async (req, res) => {
+    const current = readAppSettings();
+    let next;
+    try {
+        next = normalizeMetricsSettings(req.body || {}, { strict: true, base: current.metrics });
+    } catch (e) {
+        return res.status(400).json({ error: e.message });
+    }
+    const busy = [PANEL_PORT, PANEL_TLS_PORT, PANEL_API_PORT].filter(Boolean);
+    if (next.enabled && busy.includes(next.port)) {
+        return res.status(409).json({
+            error: `Порт ${next.port} уже занят панелью. Выберите другой порт для метрик.`
+        });
+    }
+    let generatedToken = false;
+    if (next.enabled && !next.token && !isLoopbackHost(next.host)) {
+        next.token = newMetricsToken();
+        generatedToken = true;
+    }
+    current.metrics = next;
+    writeAppSettings(current);
+    startMetricsServer(next);
+    await waitForMetrics();
+    auditLog(req, `Метрики: ${next.enabled ? 'включены' : 'выключены'} на ${next.host}:${next.port}` +
+        (next.publicPort !== next.port ? ` (внешний ${next.publicPort})` : ''));
+    const status = appStatusPayload(req);
+    res.json({
+        success: true,
+        generatedToken,
+        token: next.token,
+        status
+    });
+});
+
+app.post('/api/app/metrics/token', checkAuth, requireAdmin, async (req, res) => {
+    const settings = readAppSettings();
+    settings.metrics.token = newMetricsToken();
+    writeAppSettings(settings);
+    startMetricsServer(settings.metrics);
+    await waitForMetrics();
+    auditLog(req, 'Сгенерирован новый токен метрик');
+    res.json({ success: true, token: settings.metrics.token, status: appStatusPayload(req) });
+});
+
+// ---------------------------------------------------------------------------
 // Запуск
 // ---------------------------------------------------------------------------
 function readPortFile() {
@@ -5698,9 +6355,22 @@ function readPublicPortFile() {
 // Внутренний порт, который слушает Node. Файл важнее переменной окружения:
 // так обновление панели не сбрасывает кастомный порт.
 const PANEL_PORT = readPortFile() || parseInt(process.env.PANEL_PORT, 10) || 3000;
+// Прямой HTTPS без Nginx: PANEL_TLS_PORT + PANEL_TLS_CERT/PANEL_TLS_KEY.
+// При включённом TLS обычный HTTP по умолчанию не поднимается (PANEL_HTTP=1 вернёт его).
+const PANEL_TLS_PORT = parseInt(process.env.PANEL_TLS_PORT, 10) || 0;
+const PANEL_TLS_HOST = process.env.PANEL_TLS_HOST || process.env.PANEL_HOST || '0.0.0.0';
+const PANEL_TLS_CERT = process.env.PANEL_TLS_CERT || '';
+const PANEL_TLS_KEY = process.env.PANEL_TLS_KEY || '';
+const HTTP_ENABLED = process.env.PANEL_HTTP !== undefined
+    ? process.env.PANEL_HTTP !== '0'
+    : !PANEL_TLS_PORT;
 // Порт, по которому панель доступна снаружи (для правил UFW установщика).
-const PANEL_PUBLIC_PORT = readPublicPortFile() || parseInt(process.env.PANEL_PUBLIC_PORT, 10) || PANEL_PORT;
+const PANEL_PUBLIC_PORT = readPublicPortFile() || parseInt(process.env.PANEL_PUBLIC_PORT, 10) || PANEL_TLS_PORT || PANEL_PORT;
 const PANEL_HOST = process.env.PANEL_HOST || '0.0.0.0';
+// Необязательный второй порт, который отвечает только на /api/*.
+// Удобно, когда веб-интерфейс выключен (PANEL_WEB=0) или спрятан за VPN.
+const PANEL_API_PORT = parseInt(process.env.PANEL_API_PORT, 10) || 0;
+const PANEL_API_HOST = process.env.PANEL_API_HOST || '0.0.0.0';
 
 app.use((err, req, res, next) => {
     if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'Файл слишком большой' });
@@ -5710,14 +6380,108 @@ app.use((err, req, res, next) => {
 });
 
 if (require.main === module) {
-    app.listen(PANEL_PORT, PANEL_HOST, () => {
-        console.log(`Servpanel (FileManager 4.0) слушает ${PANEL_HOST}:${PANEL_PORT}`);
-        console.log(`Режим: DEMO=${process.env.SERVPANEL_DEMO || '-'} TEST=${process.env.SERVPANEL_TEST || '-'} DEMO_MODE=${DEMO_MODE}`);
-        if (DEMO_MODE) console.warn('DEMO MODE: используется локальный конфиг-макет, systemd и AmneziaWG не затрагиваются.');
-        if (ADMIN_PASSWORD === 'admin123') {
-            console.warn('ВНИМАНИЕ: используется пароль по умолчанию admin123. Смените его в интерфейсе!');
+    console.log(`Режим: DEMO=${process.env.SERVPANEL_DEMO || '-'} TEST=${process.env.SERVPANEL_TEST || '-'} DEMO_MODE=${DEMO_MODE}`);
+    if (!WEB_ENABLED) console.warn('PANEL_WEB=0: веб-интерфейс выключен, доступен только /api/*.');
+    if (DEMO_MODE) console.warn('DEMO MODE: используется локальный конфиг-макет, systemd и AmneziaWG не затрагиваются.');
+    if (ADMIN_PASSWORD === 'admin123') {
+        console.warn('ВНИМАНИЕ: используется пароль по умолчанию admin123. Смените его в интерфейсе!');
+    }
+
+    // TLS-сертификат: сначала PANEL_TLS_CERT/PANEL_TLS_KEY, затем сертификат
+    // панели из вкладки «Домены и SSL» (/etc/letsencrypt/live/<домен>/).
+    let tlsCreds = null;
+    try { tlsCreds = loadTlsCredentials(); } catch (e) {
+        console.error('Не удалось прочитать TLS-сертификат:', e.message);
+    }
+    const tlsServers = [];
+
+    const listenLogged = (srv, port, host, label, scheme) => {
+        srv.on('error', err => {
+            console.error(`${label}: не удалось открыть ${host}:${port} — ${err.message}`);
+        });
+        srv.listen(port, host, () => {
+            const addr = srv.address();
+            const actual = addr && typeof addr === 'object' ? addr.port : port;
+            console.log(`${label}: ${scheme}://${host}:${actual}`);
+        });
+        return srv;
+    };
+
+    if (HTTP_ENABLED) {
+        const http = require('http');
+        listenLogged(http.createServer(app), PANEL_PORT, PANEL_HOST, 'Servpanel (FileManager 4.0)', 'http');
+    } else {
+        console.log('PANEL_HTTP=0 (или включён TLS): обычный HTTP-listener не запускается.');
+    }
+
+    // Прямой HTTPS без Nginx и без внешнего прокси.
+    if (PANEL_TLS_PORT) {
+        if (!tlsCreds) {
+            console.error('PANEL_TLS_PORT задан, но сертификат не найден. Укажите PANEL_TLS_CERT/PANEL_TLS_KEY ' +
+                'или привяжите домен во вкладке «Домены и SSL».');
+            process.exit(1);
+        }
+        const https = require('https');
+        try {
+            const tlsServer = https.createServer({ key: tlsCreds.key, cert: tlsCreds.cert }, app);
+            listenLogged(tlsServer, PANEL_TLS_PORT, PANEL_TLS_HOST, 'Servpanel HTTPS', 'https');
+            tlsServers.push(tlsServer);
+        } catch (e) {
+            console.error('Не удалось создать HTTPS-listener:', e.message);
+            process.exit(1);
+        }
+    }
+
+    // Второй listener: только API, без HTML и статики.
+    // Если сертификат есть — он тоже HTTPS (приложение не должно ходить по HTTP).
+    if (PANEL_API_PORT && PANEL_API_PORT !== PANEL_TLS_PORT) {
+        const apiApp = express();
+        apiApp.disable('x-powered-by');
+        apiApp.set('trust proxy', 1);
+        apiApp.use((req, res, next) => {
+            if (isApiRequest(req)) return next();
+            res.status(404).type('text/plain').send('Not found: API only');
+        });
+        apiApp.use(app);
+        let apiServer;
+        if (tlsCreds) {
+            const https = require('https');
+            apiServer = https.createServer({ key: tlsCreds.key, cert: tlsCreds.cert }, apiApp);
+            listenLogged(apiServer, PANEL_API_PORT, PANEL_API_HOST, 'Servpanel API (только /api/*)', 'https');
+            tlsServers.push(apiServer);
+        } else {
+            const http = require('http');
+            apiServer = http.createServer(apiApp);
+            listenLogged(apiServer, PANEL_API_PORT, PANEL_API_HOST, 'Servpanel API (только /api/*)', 'http');
+            console.warn('API-порт работает без TLS: укажите PANEL_TLS_CERT/PANEL_TLS_KEY или привяжите домен.');
+        }
+    } else if (PANEL_API_PORT && PANEL_API_PORT === PANEL_TLS_PORT) {
+        console.log(`API-порт ${PANEL_API_PORT} совпадает с HTTPS-портом — отдельный listener не нужен.`);
+    }
+
+    // Перечитать сертификат без простоя: kill -HUP <pid> или pm2 reload.
+    // Обновляем и HTTPS-панель, и API-порт, и HTTPS-метрики.
+    process.on('SIGHUP', () => {
+        try {
+            const fresh = loadTlsCredentials();
+            if (!fresh) throw new Error('сертификат не найден');
+            for (const srv of tlsServers) srv.setSecureContext({ key: fresh.key, cert: fresh.cert });
+            if (metricsServer && metricsRuntime.tls) {
+                metricsServer.setSecureContext({ key: fresh.key, cert: fresh.cert });
+            }
+            console.log('TLS-сертификат перечитан (панель, API и метрики)');
+        } catch (e) {
+            console.error('Не удалось перечитать TLS-сертификат:', e.message);
         }
     });
+
+    // Отдельный порт метрик. Запускается только если включён в настройках.
+    const startupSettings = readAppSettings();
+    if (startupSettings.metrics.enabled) {
+        startMetricsServer(startupSettings.metrics);
+    } else {
+        console.log('Метрики: отдельный порт выключен (включается во вкладке «Приложение»).');
+    }
 }
 
 module.exports = app;
@@ -5730,7 +6494,10 @@ module.exports._internals = {
     newTotpSecret, otpauthUri, hashCode, makeUser, verifyUserPassword, safeEqual,
     FileSessionStore, cascadeHealth, backupConfig, normalizeAgUrl, parseIpList, validGeoUrl,
     normalizeDomain, normalizeEmail, buildSiteConfig, parseCertificate, parseServerNames,
-    certPathsFor, listCertificates, existingListenPorts, existingSslPort
+    certPathsFor, listCertificates, existingListenPorts, existingSslPort,
+    isApiRequest, isBindHost, isHttpUrl, normalizeMetricsSettings, readAppSettings,
+    writeAppSettings, metricsSnapshot, prometheusMetrics, startMetricsServer, stopMetricsServer,
+    metricsRuntimeInfo, apkInfo, resolveApkFile, APP_SETTINGS_FILE, APP_APK_DIR
 };
 
 

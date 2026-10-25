@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Servpanel 2.5.0 — безопасное обновление существующей панели.
+# Servpanel 2.6.0 — безопасное обновление существующей панели.
 #
 # Что делает:
 #   1. проверяет релиз и запускает его на КОПИИ данных и отдельном порту;
@@ -172,7 +172,7 @@ log "Каталог: $APP_DIR; pm2: $PM2_NAME; порт: $PORT"
 # staging: копия релиза, чтобы ничего не менять в распакованном архиве
 # ---------------------------------------------------------------------------
 STAGE="$(mktemp -d /root/.servpanel-stage-XXXXXX)"
-for item in server.js package.json package-lock.json public lib tests node_modules \
+for item in server.js package.json package-lock.json public lib tests node_modules app \
             README.md DEMO.md "ИЗМЕНЕНИЯ.md" "ОБНОВЛЕНИЕ-2.4.md" install.sh install_adguard_silent.sh \
             install_awg_stateful.sh install_warp_xray.sh warp-domains.txt update.sh LICENSE .gitignore; do
     if [ -e "$SRC_DIR/$item" ]; then
@@ -316,7 +316,7 @@ restore_backup() {
 
 log "Заменяю файлы кода (данные и .git не трогаю)…"
 apply_files() {
-    for item in server.js package.json package-lock.json public lib tests node_modules \
+    for item in server.js package.json package-lock.json public lib tests node_modules app \
                 README.md DEMO.md "ИЗМЕНЕНИЯ.md" "ОБНОВЛЕНИЕ-2.4.md" install.sh install_adguard_silent.sh \
                 install_awg_stateful.sh install_warp_xray.sh warp-domains.txt update.sh LICENSE .gitignore; do
         if [ -e "$STAGE/$item" ]; then

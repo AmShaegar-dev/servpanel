@@ -198,6 +198,21 @@ EOF
 echo "Запуск бекенда панели..."
 pm2 delete awg-admin >/dev/null 2>&1 || true
 PANEL_HOST=$PANEL_BIND_HOST PANEL_PORT=$PANEL_INTERNAL_PORT PANEL_PUBLIC_PORT=$PANEL_PUBLIC_PORT \
+PANEL_WEB=${PANEL_WEB:-1} \
+${PANEL_API_PORT:+PANEL_API_PORT=$PANEL_API_PORT} \
+${PANEL_API_HOST:+PANEL_API_HOST=$PANEL_API_HOST} \
+${PANEL_TLS_PORT:+PANEL_TLS_PORT=$PANEL_TLS_PORT} \
+${PANEL_TLS_CERT:+PANEL_TLS_CERT=$PANEL_TLS_CERT} \
+${PANEL_TLS_KEY:+PANEL_TLS_KEY=$PANEL_TLS_KEY} \
+${PANEL_TLS_HOST:+PANEL_TLS_HOST=$PANEL_TLS_HOST} \
+${PANEL_HTTP:+PANEL_HTTP=$PANEL_HTTP} \
+${PANEL_METRICS_ENABLED:+PANEL_METRICS_ENABLED=$PANEL_METRICS_ENABLED} \
+${PANEL_METRICS_HOST:+PANEL_METRICS_HOST=$PANEL_METRICS_HOST} \
+${PANEL_METRICS_PORT:+PANEL_METRICS_PORT=$PANEL_METRICS_PORT} \
+${PANEL_METRICS_PUBLIC_PORT:+PANEL_METRICS_PUBLIC_PORT=$PANEL_METRICS_PUBLIC_PORT} \
+${PANEL_METRICS_FORMAT:+PANEL_METRICS_FORMAT=$PANEL_METRICS_FORMAT} \
+${PANEL_METRICS_TOKEN:+PANEL_METRICS_TOKEN=$PANEL_METRICS_TOKEN} \
+${PANEL_METRICS_TLS:+PANEL_METRICS_TLS=$PANEL_METRICS_TLS} \
     pm2 start server.js --name awg-admin --update-env
 pm2 save
 env PATH="$PATH:/usr/bin" pm2 startup systemd -u root --hp /root >/dev/null 2>&1 || true
@@ -277,6 +292,15 @@ EOF
 else
     ufw allow "$PANEL_PORT"/tcp >/dev/null 2>&1 || true
     PANEL_URL="http://${SERVER_IP}:${PANEL_PORT}"
+fi
+
+# Прямой API для приложения и порт метрик: открываем только если заданы.
+# Правила добавляются в UFW, но сам UFW не включается.
+if [ -n "${PANEL_API_PORT:-}" ]; then
+    ufw allow "$PANEL_API_PORT"/tcp >/dev/null 2>&1 || true
+fi
+if [ -n "${PANEL_METRICS_PUBLIC_PORT:-}" ]; then
+    ufw allow "$PANEL_METRICS_PUBLIC_PORT"/tcp >/dev/null 2>&1 || true
 fi
 
 # Не включаем UFW принудительно: на сервере с уже настроенным AWG это может

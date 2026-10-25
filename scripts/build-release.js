@@ -28,7 +28,7 @@ const WITH_NM = !args.includes('--no-node-modules');
 
 const ITEMS = [
     'server.js', 'package.json', 'package-lock.json',
-    'public', 'lib', 'tests', 'demo',
+    'public', 'lib', 'tests', 'demo', 'app',
     'README.md', 'DEMO.md', 'MANUAL-UPDATE.md', 'КАК-РАЗВЕРНУТЬ.txt',
     'ИЗМЕНЕНИЯ.md', 'ОБНОВЛЕНИЕ-2.4.md',
     'install.sh', 'install_adguard_silent.sh', 'install_awg_stateful.sh',
@@ -38,7 +38,8 @@ const ITEMS = [
 const FORBIDDEN = new Set([
     'admin_pass.txt', '.secrets.json', '.users.json', '.panel_port', '.panel_public_port',
     '.obf_profiles.json', '.notify.json', '.backup.json', '.backup_pass',
-    '.install_state.json', '.sessions', 'awg_audit.log', 'servpanel_auth.log'
+    '.install_state.json', '.sessions', 'awg_audit.log', 'servpanel_auth.log',
+    '.app_settings.json', '.app'
 ]);
 
 function sha256(file) {

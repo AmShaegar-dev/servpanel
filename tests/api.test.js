@@ -678,6 +678,148 @@ test('SSL: привязка домена требует авторизации',
     assert.equal(res.status, 401);
 });
 
+test('Приложение: статус и метрики требуют авторизации', async () => {
+    const st = await fetch(base + '/api/app/status');
+    assert.equal(st.status, 401);
+    const mt = await fetch(base + '/api/metrics');
+    assert.equal(mt.status, 401);
+});
+
+test('Приложение: статус отдаёт APK, метрики и адрес API', async () => {
+    const r = await request('/api/app/status');
+    assert.equal(r.status, 200);
+    assert.ok(r.json.apk && typeof r.json.apk === 'object');
+    assert.ok(r.json.metrics && typeof r.json.metrics === 'object');
+    assert.equal(typeof r.json.metrics.port, 'number');
+    assert.equal(typeof r.json.metrics.publicPort, 'number');
+    assert.ok(r.json.metrics.runtime && typeof r.json.metrics.runtime === 'object');
+    assert.ok(r.json.api && typeof r.json.api === 'object');
+    assert.equal(r.json.api.version, '2.6.0');
+    assert.match(r.json.api.appUrl, /^https?:\/\//);
+    assert.ok(Array.isArray(r.json.warnings));
+});
+
+test('Приложение: /api/metrics отдаёт компактный снимок', async () => {
+    const r = await request('/api/metrics');
+    assert.equal(r.status, 200);
+    assert.equal(r.json.ok, true);
+    assert.equal(typeof r.json.cpu.percent, 'number');
+    assert.equal(typeof r.json.memory.percent, 'number');
+    assert.ok(r.json.clients && typeof r.json.clients.total === 'number');
+    assert.ok(r.json.panel && typeof r.json.panel.version === 'string');
+});
+
+test('Приложение: настройки метрик валидируются', async () => {
+    const badPort = await request('/api/app/metrics', jsonBody({ enabled: true, port: 70000 }));
+    assert.equal(badPort.status, 400);
+
+    const badHost = await request('/api/app/metrics', jsonBody({ enabled: true, host: 'не-хост!' }));
+    assert.equal(badHost.status, 400);
+
+    const busy = await request('/api/app/metrics', jsonBody({ enabled: true, host: '127.0.0.1', port: 3000 }));
+    assert.equal(busy.status, 409);
+});
+
+test('Приложение: отдельный порт метрик работает с токеном', async () => {
+    const saved = await request('/api/app/metrics', jsonBody({
+        enabled: true,
+        host: '127.0.0.1',
+        port: 0,
+        publicPort: 39101,
+        format: 'json',
+        tls: false,
+        token: 'test-metrics-token-123'
+    }));
+    assert.equal(saved.status, 200);
+    assert.equal(saved.json.success, true);
+    assert.equal(saved.json.token, 'test-metrics-token-123');
+
+    let port = 0;
+    for (let i = 0; i < 40; i++) {
+        const st = await request('/api/app/status');
+        if (st.json.metrics.runtime.running && st.json.metrics.runtime.actualPort) {
+            port = st.json.metrics.runtime.actualPort;
+            break;
+        }
+        await new Promise(r => setTimeout(r, 50));
+    }
+    assert.ok(port > 0, 'listener метрик не запустился');
+
+    const noToken = await fetch(`http://127.0.0.1:${port}/metrics`);
+    assert.equal(noToken.status, 401);
+
+    const ok = await fetch(`http://127.0.0.1:${port}/metrics`, {
+        headers: { Authorization: 'Bearer test-metrics-token-123' }
+    });
+    assert.equal(ok.status, 200);
+    const body = await ok.json();
+    assert.equal(body.ok, true);
+    assert.equal(typeof body.cpu.percent, 'number');
+
+    const prom = await fetch(`http://127.0.0.1:${port}/metrics.prom`, {
+        headers: { Authorization: 'Bearer test-metrics-token-123' }
+    });
+    assert.equal(prom.status, 200);
+    assert.match(await prom.text(), /servpanel_cpu_percent/);
+
+    const off = await request('/api/app/metrics', jsonBody({ enabled: false }));
+    assert.equal(off.status, 200);
+    assert.equal(off.json.status.metrics.runtime.running, false);
+});
+
+test('Приложение: внешний адрес без токена получает токен автоматически', async () => {
+    const r = await request('/api/app/metrics', jsonBody({
+        enabled: true,
+        host: '0.0.0.0',
+        port: 0,
+        publicPort: 39102,
+        token: ''
+    }));
+    assert.equal(r.status, 200);
+    assert.equal(r.json.generatedToken, true);
+    assert.match(r.json.token, /^[a-f0-9]{64}$/);
+    await request('/api/app/metrics', jsonBody({ enabled: false }));
+});
+
+test('Приложение: APK загружается, скачивается и удаляется', async () => {
+    const bytes = Buffer.from('PK\x03\x04servpanel-test-apk');
+    const up = await request('/api/app/apk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: bytes
+    });
+    assert.equal(up.status, 200);
+    assert.equal(up.json.success, true);
+    assert.equal(up.json.apk.source, 'local');
+    assert.equal(up.json.apk.size, bytes.length);
+    assert.match(up.json.apk.sha256, /^[a-f0-9]{64}$/);
+
+    const dl = await request('/api/app/apk');
+    assert.equal(dl.status, 200);
+    assert.equal(dl.headers.get('content-type'), 'application/vnd.android.package-archive');
+    assert.equal(dl.text, bytes.toString());
+
+    const del = await request('/api/app/apk', { method: 'DELETE' });
+    assert.equal(del.status, 200);
+    assert.equal(del.json.removed, true);
+
+    const remote = await fetch(base + '/api/app/apk', { redirect: 'manual', headers: { cookie } });
+    assert.equal(remote.status, 302);
+    assert.match(remote.headers.get('location') || '', /github\.com/);
+});
+
+test('isApiRequest отсекает обходы к статике', () => {
+    const ok = p => internals.isApiRequest({ path: p });
+    assert.equal(ok('/api/login'), true);
+    assert.equal(ok('/api'), true);
+    assert.equal(ok('/api/../index.html'), false);
+    assert.equal(ok('/api/%2e%2e/index.html'), false);
+    assert.equal(ok('/api/%252e%252e/index.html'), false);
+    assert.equal(ok('/api%2f..%2findex.html'), false);
+    assert.equal(ok('/index.html'), false);
+    assert.equal(ok('/api\\..\\index.html'), false);
+});
+
 test('выход закрывает доступ', async () => {
     await request('/api/logout', { method: 'POST' });
     const r = await request('/api/stats');

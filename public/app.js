@@ -1,4 +1,3 @@
-
 let logInterval = null;
 let lastStats = {}; let isFetching = false; 
 let pollingInterval = null; let historyInterval = null; let agInterval = null;
@@ -282,6 +281,7 @@ function switchTab(tabId, el) {
     if (tabId === 'tab-update') loadUpdatePanel();
     if (tabId === 'tab-admin') loadAdminPanel();
     if (tabId === 'tab-ssl') loadSslPanel();
+    if (tabId === 'tab-app') loadAppPanel();
 }
 
 function copyMeko() {
@@ -4422,5 +4422,291 @@ async function updRollback(backup) {
         updSetStatus('Ошибка: ' + e.message, 'err');
         updSetBusy(false);
         toast('Откат не запущен', 'error', e.message);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Вкладка «Приложение»: APK, адрес API и метрики
+// ---------------------------------------------------------------------------
+let appState = null;
+let appLoading = false;
+
+function appBadge(id, text, tone) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'badge ' + (tone || 'badge-muted');
+}
+
+function appBanner(id, type, html) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (!html) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = 'block';
+    el.style.whiteSpace = 'normal';
+    el.style.borderColor = type === 'error' ? 'rgba(248,81,73,.45)'
+        : type === 'warn' ? 'rgba(245,184,75,.45)'
+        : type === 'success' ? 'rgba(46,160,67,.45)' : 'var(--border)';
+    el.style.color = type === 'error' ? '#ffa198'
+        : type === 'warn' ? '#f5b84b'
+        : type === 'success' ? '#7ee787' : 'var(--text-muted)';
+    el.innerHTML = html;
+}
+
+function appTile(label, value, sub, color) {
+    return `<div class="card" style="margin-bottom:0;">
+        <div style="font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--text-dim); margin-bottom:6px;">${esc(label)}</div>
+        <div class="value" style="font-size:16px; color:${color || 'var(--text)'};">${esc(value)}</div>
+        ${sub ? `<div style="font-size:11.5px; color:var(--text-muted); margin-top:4px;">${esc(sub)}</div>` : ''}
+    </div>`;
+}
+
+function renderAppApk(apk) {
+    const summary = document.getElementById('appApkSummary');
+    const dl = document.getElementById('appApkDownload');
+    const delBtn = document.getElementById('appApkDeleteBtn');
+    const uploadBtn = document.getElementById('appApkUploadBtn');
+    if (!apk || !apk.available) {
+        appBadge('appApkBadge', 'нет файла', 'badge-warn');
+        appBanner('appApkBanner', 'warn',
+            'APK ещё не загружен. Загрузите файл кнопкой ниже или укажите ссылку в настройках — ' +
+            'тогда кнопка скачивания будет вести на GitHub.');
+        if (summary) summary.innerHTML = appTile('Источник', 'не настроен', 'загрузите APK в панель');
+        if (dl) { dl.href = '/api/app/apk'; dl.style.opacity = '.55'; }
+        if (delBtn) delBtn.style.display = 'none';
+        if (uploadBtn) uploadBtn.style.display = '';
+        return;
+    }
+    if (dl) { dl.href = apk.downloadUrl || '/api/app/apk'; dl.style.opacity = ''; }
+    if (apk.source === 'local') {
+        appBadge('appApkBadge', 'на панели', 'badge-good');
+        appBanner('appApkBanner', 'success',
+            'APK хранится на этом сервере: скачивание работает даже без доступа к GitHub.');
+        if (summary) summary.innerHTML = [
+            appTile('Версия', apk.version || 'не указана', 'из файла панели'),
+            appTile('Размер', formatBytes(apk.size || 0), 'servpanel.apk'),
+            appTile('SHA-256', (apk.sha256 || '').slice(0, 16) + '…', 'контрольная сумма')
+        ].join('');
+        if (delBtn) delBtn.style.display = '';
+        if (uploadBtn) uploadBtn.style.display = '';
+    } else {
+        appBadge('appApkBadge', 'ссылка GitHub', 'badge-muted');
+        appBanner('appApkBanner', 'info',
+            'Локального файла нет — панель перенаправит на последний релиз GitHub. ' +
+            'Чтобы APK всегда был доступен с сервера, загрузите его сюда.');
+        if (summary) summary.innerHTML = [
+            appTile('Версия', apk.version || 'последняя', 'из релиза'),
+            appTile('Источник', 'GitHub', apk.externalUrl || '')
+        ].join('');
+        if (delBtn) delBtn.style.display = 'none';
+        if (uploadBtn) uploadBtn.style.display = '';
+    }
+}
+
+function renderAppApi(api, warnings) {
+    if (!api) return;
+    const urls = document.querySelectorAll('.app-api-url');
+    urls.forEach(el => { el.textContent = api.appUrl || '—'; });
+    const summary = document.getElementById('appApiSummary');
+    const tlsText = api.tlsConfigured ? 'HTTPS' : 'HTTP';
+    if (summary) {
+        summary.innerHTML = [
+            appTile('Адрес', api.appUrl || '—', 'для приложения', api.tlsConfigured ? '#7ee787' : '#f5b84b'),
+            appTile('Версия панели', api.version || '—', 'API'),
+            appTile('Веб-интерфейс', api.webEnabled ? 'включён' : 'выключен', api.webEnabled ? 'раздаётся public/' : 'только /api/*'),
+            appTile('Соединение', tlsText, api.tlsConfigured ? 'сертификат найден' : 'сертификат не настроен',
+                api.tlsConfigured ? '#7ee787' : '#f5b84b')
+        ].join('');
+    }
+    appBadge('appApiBadge', tlsText, api.tlsConfigured ? 'badge-good' : 'badge-warn');
+    const list = Array.isArray(warnings) ? warnings.slice() : [];
+    if (!api.tlsConfigured) {
+        list.unshift('HTTPS не настроен: пароль и cookie сессии передаются открытым текстом. ' +
+            'Привяжите домен во вкладке «Домены и SSL» и включите прямой HTTPS.');
+    }
+    appBanner('appApiHint', list.length ? 'warn' : 'success', list.length
+        ? list.map(w => '• ' + esc(w)).join('<br>')
+        : 'Всё настроено: приложение подключается по HTTPS и получает cookie panel.sid.');
+}
+
+function renderAppMetrics(metrics) {
+    if (!metrics) return;
+    const runtime = metrics.runtime || {};
+    const en = !!metrics.enabled;
+    appBadge('appMetricsBadge', en ? (runtime.running ? 'работают' : 'ошибка') : 'выключены',
+        en ? (runtime.running ? 'badge-good' : 'badge-warn') : 'badge-muted');
+    const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v === undefined || v === null ? '' : v; };
+    setVal('appMetricsPort', metrics.port);
+    setVal('appMetricsPublicPort', metrics.publicPort);
+    setVal('appMetricsHost', metrics.host);
+    setVal('appMetricsToken', metrics.token || '');
+    const fmt = document.getElementById('appMetricsFormat');
+    if (fmt) fmt.value = metrics.format === 'prometheus' ? 'prometheus' : 'json';
+    const cb = document.getElementById('appMetricsEnabled');
+    if (cb) cb.checked = en;
+    const tokenEl = document.getElementById('appMetricsToken');
+    if (tokenEl) {
+        tokenEl.placeholder = metrics.tokenSet ? 'токен задан (скрыт)' : 'сгенерируется автоматически';
+    }
+    const urls = document.getElementById('appMetricsUrls');
+    if (urls) {
+        if (en && runtime.running) {
+            urls.style.display = 'block';
+            urls.style.whiteSpace = 'normal';
+            urls.style.color = 'var(--text-muted)';
+            urls.innerHTML = `Внутренний адрес: <code>${esc(runtime.internalUrl || '—')}</code><br>` +
+                `Внешний адрес: <code>${esc(runtime.externalUrl || '—')}</code><br>` +
+                `Проверка: <code>curl -H "Authorization: Bearer &lt;токен&gt;" ${esc(runtime.externalUrl || '')}</code>`;
+        } else if (en && runtime.error) {
+            urls.style.display = 'block';
+            urls.style.whiteSpace = 'normal';
+            urls.style.color = '#ffa198';
+            urls.textContent = 'Не удалось открыть порт: ' + runtime.error;
+        } else {
+            urls.style.display = 'none';
+            urls.innerHTML = '';
+        }
+    }
+    const hint = document.getElementById('appMetricsHint');
+    if (hint) {
+        hint.textContent = en
+            ? `Слушает ${metrics.host}:${metrics.port}, снаружи — порт ${metrics.publicPort}.`
+            : 'Отдельный порт выключен: приложение использует /api/metrics на основном адресе.';
+    }
+    const list = [];
+    if (en && !metrics.tokenSet && !/^(127\.|localhost|::1)/.test(String(metrics.host || ''))) {
+        list.push('Порт открыт наружу без токена — задайте токен или слушайте 127.0.0.1.');
+    }
+    if (en && runtime.running && !runtime.tls && !/^(127\.|localhost|::1)/.test(String(metrics.host || ''))) {
+        list.push('Метрики отдаются по HTTP: токен и данные видны по пути. Используйте HTTPS или VPN.');
+    }
+    appBanner('appMetricsBanner', list.length ? 'warn' : '', list.length
+        ? list.map(w => '• ' + esc(w)).join('<br>') : '');
+}
+
+async function loadAppPanel() {
+    if (appLoading) return;
+    appLoading = true;
+    // Первый заход: показываем «загрузка», чтобы не путать с «выключено».
+    if (!appState) {
+        appBadge('appApkBadge', 'загрузка…', 'badge-muted');
+        appBadge('appMetricsBadge', 'загрузка…', 'badge-muted');
+    }
+    try {
+        const data = await apiJson('/api/app/status');
+        appState = data;
+        renderAppApk(data.apk);
+        renderAppApi(data.api, data.warnings);
+        renderAppMetrics(data.metrics);
+    } catch (e) {
+        toast('Не удалось загрузить данные приложения', 'error', e.message);
+    } finally {
+        appLoading = false;
+    }
+}
+
+async function saveMetricsSettings() {
+    const btn = document.getElementById('appMetricsSaveBtn');
+    const num = id => {
+        const el = document.getElementById(id);
+        const v = el ? String(el.value || '').trim() : '';
+        return v === '' ? undefined : Number(v);
+    };
+    const payload = {
+        enabled: !!(document.getElementById('appMetricsEnabled') || {}).checked,
+        host: ((document.getElementById('appMetricsHost') || {}).value || '').trim() || '127.0.0.1',
+        port: num('appMetricsPort'),
+        publicPort: num('appMetricsPublicPort'),
+        format: (document.getElementById('appMetricsFormat') || {}).value || 'json',
+        token: ((document.getElementById('appMetricsToken') || {}).value || '').trim()
+    };
+    sslBusy(btn, true, 'Применяю…');
+    try {
+        const res = await apiJson('/api/app/metrics', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (res.generatedToken) {
+            toast('Метрики включены', 'success', 'Токен сгенерирован автоматически — скопируйте его в приложение.');
+        } else {
+            toast('Настройки метрик сохранены', 'success');
+        }
+        if (res.status) {
+            appState = res.status;
+            renderAppApk(res.status.apk);
+            renderAppApi(res.status.api, res.status.warnings);
+            renderAppMetrics(res.status.metrics);
+        } else {
+            await loadAppPanel();
+        }
+    } catch (e) {
+        toast('Не удалось сохранить метрики', 'error', e.message);
+    } finally {
+        sslBusy(btn, false);
+    }
+}
+
+async function regenerateMetricsToken() {
+    if (!confirm('Сгенерировать новый токен метрик?\n\nСтарый токен сразу перестанет работать — ' +
+        'его нужно обновить в приложении.')) return;
+    try {
+        const res = await apiJson('/api/app/metrics/token', { method: 'POST' });
+        toast('Новый токен создан', 'success', 'Обновите его в настройках сервера в приложении.');
+        if (res.status) {
+            appState = res.status;
+            renderAppApk(res.status.apk);
+            renderAppApi(res.status.api, res.status.warnings);
+            renderAppMetrics(res.status.metrics);
+        } else {
+            await loadAppPanel();
+        }
+    } catch (e) {
+        toast('Не удалось создать токен', 'error', e.message);
+    }
+}
+
+async function uploadApk(input) {
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    const btn = document.getElementById('appApkUploadBtn');
+    if (file.size > 120 * 1024 * 1024) {
+        toast('Файл слишком большой', 'error', 'Максимум 120 МБ.');
+        input.value = '';
+        return;
+    }
+    if (!confirm(`Загрузить ${file.name} (${formatBytes(file.size)}) на сервер?\n\n` +
+        'Файл заменит предыдущий APK и будет доступен для скачивания всем пользователям панели.')) {
+        input.value = '';
+        return;
+    }
+    sslBusy(btn, true, 'Загружаю…');
+    try {
+        const res = await apiJson('/api/app/apk', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/vnd.android.package-archive',
+                'X-App-Version': (file.name.match(/(\d+\.\d+\.\d+)/) || [])[1] || ''
+            },
+            body: file
+        });
+        toast('APK загружен', 'success', res.apk && res.apk.size ? formatBytes(res.apk.size) : '');
+        await loadAppPanel();
+    } catch (e) {
+        toast('Не удалось загрузить APK', 'error', e.message);
+    } finally {
+        sslBusy(btn, false);
+        input.value = '';
+    }
+}
+
+async function deleteApk() {
+    if (!confirm('Удалить загруженный APK с сервера?\n\nКнопка скачивания начнёт вести на GitHub.')) return;
+    try {
+        const res = await apiJson('/api/app/apk', { method: 'DELETE' });
+        toast('APK удалён', 'success', res.removed ? '' : 'Файла не было.');
+        await loadAppPanel();
+    } catch (e) {
+        toast('Не удалось удалить APK', 'error', e.message);
     }
 }

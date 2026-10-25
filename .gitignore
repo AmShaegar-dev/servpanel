@@ -11,6 +11,10 @@ admin_pass.txt
 .backup_pass
 .traffic_history.json
 .sessions/
+# Настройки мобильного приложения и загруженный APK (данные, не код)
+.app_settings.json
+.app/
+app/servpanel.apk
 servpanel_auth.log
 node_modules/
 npm-debug.log*
