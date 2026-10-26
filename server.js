@@ -25,6 +25,8 @@ const os = require('os');
 const zlib = require('zlib');
 const dns = require('dns');
 const updater = require('./lib/updater');
+const proxyUsers = require('./lib/proxy-users');
+const { createProxyBot } = require('./lib/proxy-bot');
 
 const app = express();
 app.disable('x-powered-by');
@@ -39,7 +41,7 @@ const DATA_DIR = process.env.SERVEPANEL_DATA_DIR
 const TEST_MODE = process.env.SERVEPANEL_TEST === '1';
 // Демонстрационный режим: панель работает с локальным файлом-макетом и не
 // трогает systemd/AmneziaWG. Нужен только для скриншотов и локального показа.
-const DEMO_MODE = process.env.SERVPANEL_DEMO === '1';
+const DEMO_MODE = (process.env.SERVEPANEL_DEMO === '1' || process.env.SERVPANEL_DEMO === '1');
 const AWG_DIR = '/root/awg';
 const MANAGE = path.join(AWG_DIR, 'manage_amneziawg.sh');
 const AWG_CONF_DIR = '/etc/amnezia/amneziawg';
@@ -5734,7 +5736,7 @@ app.get('/api/update/check-git', checkAuth, requireAdmin, (req, res) => {
 });
 
 function startUpdateWorker(res, req, opts, auditText) {
-    if (process.env.SERVPANEL_DEMO === '1') {
+    if ((process.env.SERVEPANEL_DEMO === '1' || process.env.SERVPANEL_DEMO === '1')) {
         res.status(400).json({ error: 'В демо-режиме обновление отключено' });
         return false;
     }
@@ -5874,6 +5876,11 @@ const MODULES = {
         log: '/var/log/mtproto_install.log',
         title: 'MTProto'
     },
+    mtproxyl: {
+        url: 'https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install_mtproxyl_silent.sh',
+        log: '/var/log/mtproxyl_install.log',
+        title: 'MTProxyL'
+    },
     adguard: {
         url: 'https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install_adguard_silent.sh',
         log: '/var/log/adguard_install.log',
@@ -5887,6 +5894,7 @@ const MODULES = {
 };
 const LOG_WHITELIST = [
     '/var/log/awg_install.log', '/var/log/mtproto_install.log', '/var/log/adguard_install.log',
+    '/var/log/mtproxyl_install.log',
     '/var/log/awg_uninstall.log', '/var/log/ru-drop.log', '/var/log/awg_audit.log',
     WARP_LOG,
     '/var/log/nginx/error.log', '/var/log/nginx/access.log', '/var/log/auth.log', '/var/log/syslog'
@@ -5960,6 +5968,57 @@ function installEnv(data) {
     } else {
         env.MTPROTO_NGINX = '0';
     }
+
+    // MTProxyL (Liafanx/MTProxyL). Расширенные возможности: движок, Zapret2,
+    // NFT SYN limiter, Selfmask, WEB Proxy, API и встроенный Telegram-бот.
+    env.MTPROXYL_MODE = ['manager', 'reanimator'].includes(String(data.mplMode)) ? String(data.mplMode) : 'manager';
+    env.MTPROXYL_ENGINE = ['binary', 'docker'].includes(String(data.mplEngine)) ? String(data.mplEngine) : 'binary';
+    env.MTPROXYL_PROXY_MODE = ['mtproto', 'web', 'combined'].includes(String(data.mplProxyMode))
+        ? String(data.mplProxyMode) : 'mtproto';
+    env.MTPROXYL_PORT = isPort(data.mplPort) ? String(data.mplPort) : (isPort(data.mtPort) ? String(data.mtPort) : '443');
+    env.MTPROXYL_SNI = data.mplSni && HOST_RE.test(String(data.mplSni))
+        ? String(data.mplSni)
+        : (data.mtDomain && HOST_RE.test(String(data.mtDomain)) ? String(data.mtDomain) : 'autoscout24.ru');
+    if (data.mplHost && HOST_RE.test(String(data.mplHost))) env.MTPROXYL_HOST = String(data.mplHost);
+    const mplSecret = mtprotoHex32(data.mplSecret);
+    if (mplSecret) env.MTPROXYL_SECRET = mplSecret;
+    const mplAdTag = mtprotoHex32(data.mplAdTag) || adTag;
+    if (mplAdTag) env.MTPROXYL_AD_TAG = mplAdTag;
+    const mplUser = mtprotoUser(data.mplUser);
+    if (mplUser) {
+        env.MTPROXYL_USER = mplUser;
+        env.MTPROXYL_USER_SECRET = mtprotoHex32(data.mplUserSecret) || crypto.randomBytes(16).toString('hex');
+    }
+    env.MTPROXYL_ZAPRET2 = data.mplZapret2 === false || data.mplZapret2 === 'no' ? 'no' : 'yes';
+    env.MTPROXYL_SYN_LIMITER = ['meko', 'classic', 'off'].includes(String(data.mplSynLimiter))
+        ? String(data.mplSynLimiter) : 'meko';
+    env.MTPROXYL_MEKO = data.mplMeko === false || data.mplMeko === 'no' ? 'no' : 'yes';
+    if (data.mplSelfmask && HOST_RE.test(String(data.mplSelfmask))) {
+        env.MTPROXYL_SELFMASK = String(data.mplSelfmask);
+        env.MTPROXYL_SELFMASK_CERT = ['letsencrypt', 'selfsigned'].includes(String(data.mplSelfmaskCert))
+            ? String(data.mplSelfmaskCert) : 'letsencrypt';
+        if (data.mplSelfmaskEmail && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(data.mplSelfmaskEmail))) {
+            env.MTPROXYL_SELFMASK_EMAIL = String(data.mplSelfmaskEmail);
+        }
+    }
+    const mplWeb = data.mplWeb === true || data.mplWeb === 'yes' || data.mplWeb === '1';
+    env.MTPROXYL_WEB = mplWeb ? 'yes' : 'no';
+    if (mplWeb) {
+        env.MTPROXYL_WEB_DOMAIN = data.mplWebDomain && HOST_RE.test(String(data.mplWebDomain))
+            ? String(data.mplWebDomain) : '';
+        env.MTPROXYL_WEB_CARRIER = ['https', 'https-lanes', 'websocket', 'websocket-lanes'].includes(String(data.mplWebCarrier))
+            ? String(data.mplWebCarrier) : 'https';
+    }
+    env.MTPROXYL_API = data.mplApi === false || data.mplApi === 'no' ? 'no' : 'yes';
+    env.MTPROXYL_API_LISTEN = /^[A-Za-z0-9.:[\]-]{3,64}$/.test(String(data.mplApiListen || ''))
+        ? String(data.mplApiListen) : '127.0.0.1:9190';
+    if (data.mplTgbotToken && /^\d{5,}:[A-Za-z0-9_-]{20,}$/.test(String(data.mplTgbotToken))) {
+        env.MTPROXYL_TGBOT_TOKEN = String(data.mplTgbotToken);
+        if (data.mplTgbotAdmin && /^\d{3,20}$/.test(String(data.mplTgbotAdmin))) {
+            env.MTPROXYL_TGBOT_ADMIN = String(data.mplTgbotAdmin);
+        }
+    }
+    env.MTPROXYL_FORCE = data.mplForce ? '1' : '0';
     return env;
 }
 
@@ -6008,6 +6067,54 @@ app.post('/api/install/module', checkAuth, (req, res) => {
         }
         if (data.publicHost && !HOST_RE.test(String(data.publicHost))) {
             return res.status(400).json({ error: 'Некорректный public_host' });
+        }
+    }
+    if (module === 'mtproxyl') {
+        if (data.mplMode && !['manager', 'reanimator'].includes(String(data.mplMode))) {
+            return res.status(400).json({ error: 'Неизвестный режим MTProxyL' });
+        }
+        if (data.mplEngine && !['binary', 'docker'].includes(String(data.mplEngine))) {
+            return res.status(400).json({ error: 'Неизвестный движок MTProxyL' });
+        }
+        if (data.mplProxyMode && !['mtproto', 'web', 'combined'].includes(String(data.mplProxyMode))) {
+            return res.status(400).json({ error: 'Неизвестный режим прокси MTProxyL' });
+        }
+        if (data.mplPort && !isPort(data.mplPort)) {
+            return res.status(400).json({ error: 'Некорректный порт MTProxyL' });
+        }
+        if (data.mplSni && !HOST_RE.test(String(data.mplSni))) {
+            return res.status(400).json({ error: 'Некорректный SNI-домен MTProxyL' });
+        }
+        if (data.mplHost && !HOST_RE.test(String(data.mplHost))) {
+            return res.status(400).json({ error: 'Некорректный публичный адрес MTProxyL' });
+        }
+        if (data.mplSecret && !mtprotoHex32(data.mplSecret)) {
+            return res.status(400).json({ error: 'Секрет MTProxyL должен быть 32 hex-символа' });
+        }
+        if (data.mplAdTag && !mtprotoHex32(data.mplAdTag)) {
+            return res.status(400).json({ error: 'ad_tag MTProxyL должен быть 32 hex-символа' });
+        }
+        if (data.mplUser && !mtprotoUser(data.mplUser)) {
+            return res.status(400).json({ error: 'Некорректное имя пользователя MTProxyL' });
+        }
+        if (data.mplUserSecret && !mtprotoHex32(data.mplUserSecret)) {
+            return res.status(400).json({ error: 'Секрет пользователя MTProxyL должен быть 32 hex-символа' });
+        }
+        if (data.mplSynLimiter && !['meko', 'classic', 'off'].includes(String(data.mplSynLimiter))) {
+            return res.status(400).json({ error: 'Неизвестный SYN limiter' });
+        }
+        if (data.mplSelfmask && !HOST_RE.test(String(data.mplSelfmask))) {
+            return res.status(400).json({ error: 'Некорректный домен Selfmask' });
+        }
+        const mplWebWanted = data.mplWeb === true || data.mplWeb === 'yes' || data.mplWeb === '1';
+        if (mplWebWanted && (!data.mplWebDomain || !HOST_RE.test(String(data.mplWebDomain)))) {
+            return res.status(400).json({ error: 'Для WEB Proxy MTProxyL укажите корректный домен' });
+        }
+        if (data.mplWebCarrier && !['https', 'https-lanes', 'websocket', 'websocket-lanes'].includes(String(data.mplWebCarrier))) {
+            return res.status(400).json({ error: 'Неизвестный carrier WEB Proxy' });
+        }
+        if (data.mplTgbotToken && !/^\d{5,}:[A-Za-z0-9_-]{20,}$/.test(String(data.mplTgbotToken))) {
+            return res.status(400).json({ error: 'Некорректный токен Telegram-бота' });
         }
     }
     try {
@@ -6149,6 +6256,257 @@ app.get('/api/mtproto/links', checkAuth, (req, res) => {
     } catch (e) {
         res.status(500).json({ error: 'Не удалось прочитать ссылки MTProto' });
     }
+});
+
+// ---------------------------------------------------------------------------
+// Прокси: пользователи MTProto (MTProxyL / telemt) и Telegram-бот
+// ---------------------------------------------------------------------------
+const PROXY_BOT_FILE = path.join(DATA_DIR, '.proxybot.json');
+const proxyBot = createProxyBot({
+    configFile: PROXY_BOT_FILE,
+    users: proxyUsers,
+    log: (message) => console.log(message)
+});
+
+function proxyUsername(value) {
+    const s = String(value || '').trim();
+    return /^[A-Za-z0-9_.-]{1,64}$/.test(s) ? s : '';
+}
+
+function proxyInt(value, { max = Number.MAX_SAFE_INTEGER } = {}) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0 || n > max) return undefined;
+    return Math.floor(n);
+}
+
+function proxyDate(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const s = String(value).trim();
+    const t = Date.parse(s);
+    if (Number.isNaN(t)) return undefined;
+    return new Date(t).toISOString().replace(/\.\d{3}Z$/, '+00:00');
+}
+
+function proxyUserPatch(body, { create = false } = {}) {
+    const src = body && typeof body === 'object' ? body : {};
+    const out = {};
+    if (create) {
+        const username = proxyUsername(src.username);
+        if (!username) {
+            const e = new Error('Некорректное имя пользователя');
+            e.code = 'bad_request';
+            throw e;
+        }
+        out.username = username;
+        if (src.secret !== undefined && src.secret !== '') {
+            const secret = mtprotoHex32(src.secret);
+            if (!secret) {
+                const e = new Error('Секрет должен быть 32 hex-символа');
+                e.code = 'bad_request';
+                throw e;
+            }
+            out.secret = secret;
+        }
+    }
+
+    if ('enabled' in src) out.enabled = src.enabled === true || src.enabled === 'true' || src.enabled === 1;
+
+    for (const field of ['max_tcp_conns', 'max_unique_ips', 'data_quota_bytes', 'rate_limit_up_bps', 'rate_limit_down_bps']) {
+        if (!(field in src)) continue;
+        const value = proxyInt(src[field]);
+        if (value === undefined) {
+            const e = new Error(`Некорректное значение ${field}`);
+            e.code = 'bad_request';
+            throw e;
+        }
+        out[field] = value;
+    }
+
+    if ('expiration_rfc3339' in src) {
+        const value = proxyDate(src.expiration_rfc3339);
+        if (value === undefined) {
+            const e = new Error('Некорректная дата окончания');
+            e.code = 'bad_request';
+            throw e;
+        }
+        out.expiration_rfc3339 = value;
+    }
+
+    if ('user_ad_tag' in src) {
+        if (src.user_ad_tag === null || src.user_ad_tag === '') out.user_ad_tag = null;
+        else {
+            const tag = mtprotoHex32(src.user_ad_tag);
+            if (!tag) {
+                const e = new Error('ad_tag должен быть 32 hex-символа');
+                e.code = 'bad_request';
+                throw e;
+            }
+            out.user_ad_tag = tag;
+        }
+    }
+
+    if ('notes' in src) {
+        const notes = String(src.notes == null ? '' : src.notes).trim().slice(0, 500);
+        out.notes = notes || null;
+    }
+
+    if (create && src.secret === undefined) {
+        out.secret = crypto.randomBytes(16).toString('hex');
+    }
+
+    return out;
+}
+
+function proxyError(res, e) {
+    const code = (e && e.code) || '';
+    const map = {
+        bad_request: 400,
+        user_exists: 409,
+        not_found: 404,
+        no_backend: 503,
+        needs_key: 409,
+        unauthorized: 502,
+        api_key_failed: 502,
+        api_key_save_failed: 500,
+        bad_token: 400,
+        no_admins: 400
+    };
+    const status = map[code] || 502;
+    const payload = { error: (e && e.message) || 'Ошибка прокси', code };
+    if (e && e.key) payload.key = e.key;
+    return res.status(status).json(payload);
+}
+
+app.get('/api/proxy/status', checkAuth, async (req, res) => {
+    try {
+        res.json(await proxyUsers.status());
+    } catch (e) { proxyError(res, e); }
+});
+
+app.get('/api/proxy/users', checkAuth, async (req, res) => {
+    try {
+        const users = await proxyUsers.listUsers();
+        res.json({ users });
+    } catch (e) { proxyError(res, e); }
+});
+
+app.post('/api/proxy/users', checkAuth, requireAdmin, async (req, res) => {
+    try {
+        const payload = proxyUserPatch(req.body, { create: true });
+        const created = await proxyUsers.createUser(payload);
+        auditLog(req, `Прокси: создан пользователь ${payload.username}`);
+        res.json(created);
+    } catch (e) { proxyError(res, e); }
+});
+
+app.patch('/api/proxy/users/:name', checkAuth, requireAdmin, async (req, res) => {
+    const name = proxyUsername(req.params.name);
+    if (!name) return res.status(400).json({ error: 'Некорректное имя пользователя' });
+    try {
+        const patch = proxyUserPatch(req.body);
+        if (!Object.keys(patch).length) return res.status(400).json({ error: 'Нет изменений' });
+        const user = await proxyUsers.patchUser(name, patch);
+        auditLog(req, `Прокси: изменён пользователь ${name}`);
+        res.json(user);
+    } catch (e) { proxyError(res, e); }
+});
+
+app.delete('/api/proxy/users/:name', checkAuth, requireAdmin, async (req, res) => {
+    const name = proxyUsername(req.params.name);
+    if (!name) return res.status(400).json({ error: 'Некорректное имя пользователя' });
+    try {
+        const result = await proxyUsers.deleteUser(name);
+        auditLog(req, `Прокси: удалён пользователь ${name}`);
+        res.json(result);
+    } catch (e) { proxyError(res, e); }
+});
+
+app.post('/api/proxy/users/:name/:action', checkAuth, requireAdmin, async (req, res) => {
+    const name = proxyUsername(req.params.name);
+    const action = String(req.params.action || '');
+    if (!name) return res.status(400).json({ error: 'Некорректное имя пользователя' });
+    if (!['enable', 'disable', 'rotate-secret', 'reset-quota', 'reset-traffic'].includes(action)) {
+        return res.status(400).json({ error: 'Неизвестное действие' });
+    }
+    try {
+        let body;
+        if (action === 'rotate-secret') {
+            const secret = req.body && req.body.secret ? mtprotoHex32(req.body.secret) : '';
+            if (req.body && req.body.secret && !secret) {
+                return res.status(400).json({ error: 'Секрет должен быть 32 hex-символа' });
+            }
+            body = { secret: secret || crypto.randomBytes(16).toString('hex') };
+        }
+        const result = await proxyUsers.userAction(name, action, body);
+        auditLog(req, `Прокси: действие ${action} для ${name}`);
+        res.json(result);
+    } catch (e) { proxyError(res, e); }
+});
+
+app.get('/api/proxy/users/:name/links', checkAuth, async (req, res) => {
+    const name = proxyUsername(req.params.name);
+    if (!name) return res.status(400).json({ error: 'Некорректное имя пользователя' });
+    try {
+        const links = await proxyUsers.userLinks(name);
+        const flat = [];
+        for (const key of ['tls', 'secure', 'classic', 'web']) {
+            if (Array.isArray(links[key])) flat.push(...links[key]);
+        }
+        if (Array.isArray(links.tls_domains)) {
+            for (const item of links.tls_domains) {
+                if (item && item.link) flat.push(item.link);
+            }
+        }
+        const unique = [...new Set(flat.filter(Boolean))];
+        let qr = '';
+        if (unique.length) {
+            try { qr = await qrDataUrl(unique[0]); } catch (e) { qr = ''; }
+        }
+        res.json({ username: name, links: unique, qr });
+    } catch (e) { proxyError(res, e); }
+});
+
+app.post('/api/proxy/restart', checkAuth, requireAdmin, async (req, res) => {
+    try {
+        const result = await proxyUsers.restart();
+        auditLog(req, 'Прокси: перезапуск движка');
+        res.json(result || { restarted: true });
+    } catch (e) { proxyError(res, e); }
+});
+
+// Ключ API MTProxyL нельзя прочитать повторно (хранится SHA-256), поэтому
+// панель выдаёт новый ключ и сохраняет его у себя.
+app.post('/api/proxy/api-key', checkAuth, requireAdmin, async (req, res) => {
+    try {
+        const result = proxyUsers.rotatePanelKey();
+        auditLog(req, 'Прокси: выдан новый ключ API MTProxyL');
+        res.json(result);
+    } catch (e) { proxyError(res, e); }
+});
+
+app.get('/api/proxy/bot', checkAuth, requireAdmin, (req, res) => {
+    const st = proxyBot.status();
+    res.json({
+        ...st,
+        token: st.token ? `${st.token.slice(0, 8)}…${st.token.slice(-4)}` : '',
+        configFile: PROXY_BOT_FILE
+    });
+});
+
+app.post('/api/proxy/bot', checkAuth, requireAdmin, async (req, res) => {
+    try {
+        const st = await proxyBot.update(req.body || {});
+        auditLog(req, `Прокси-бот: ${st.enabled ? 'включён' : 'выключен'}`);
+        res.json({ ...st, token: st.token ? `${st.token.slice(0, 8)}…${st.token.slice(-4)}` : '' });
+    } catch (e) { proxyError(res, e); }
+});
+
+app.post('/api/proxy/bot/test', checkAuth, requireAdmin, async (req, res) => {
+    try {
+        const result = await proxyBot.sendTest(req.body && req.body.text);
+        res.json({ ok: true, ...result });
+    } catch (e) { proxyError(res, e); }
 });
 
 // ---------------------------------------------------------------------------
@@ -6498,7 +6856,7 @@ app.use((err, req, res, next) => {
 });
 
 if (require.main === module) {
-    console.log(`Режим: DEMO=${process.env.SERVPANEL_DEMO || '-'} TEST=${process.env.SERVPANEL_TEST || '-'} DEMO_MODE=${DEMO_MODE}`);
+    console.log(`Режим: DEMO=${(process.env.SERVEPANEL_DEMO || process.env.SERVPANEL_DEMO || '-')} TEST=${process.env.SERVPANEL_TEST || '-'} DEMO_MODE=${DEMO_MODE}`);
     if (!WEB_ENABLED) console.warn('PANEL_WEB=0: веб-интерфейс выключен, доступен только /api/*.');
     if (DEMO_MODE) console.warn('DEMO MODE: используется локальный конфиг-макет, systemd и AmneziaWG не затрагиваются.');
     if (ADMIN_PASSWORD === 'admin123') {
@@ -6611,6 +6969,12 @@ if (require.main === module) {
     } else {
         console.log('Метрики: отдельный порт выключен (включается во вкладке «Приложение»).');
     }
+
+    // Telegram-бот управления прокси. Работает внутри панели, поэтому
+    // отдельная служба не нужна; при выключенном конфиге просто не стартует.
+    proxyBot.start().catch((e) => {
+        console.warn('Прокси-бот: не удалось запустить —', e.message);
+    });
 }
 
 module.exports = app;
@@ -6625,6 +6989,7 @@ module.exports._internals = {
     normalizeDomain, normalizeEmail, buildSiteConfig, parseCertificate, parseServerNames,
     certPathsFor, listCertificates, existingListenPorts, existingSslPort,
     isApiRequest, isBindHost, isHttpUrl, normalizeMetricsSettings, readAppSettings,
+    installEnv, proxyUserPatch, proxyUsername,
     writeAppSettings, metricsSnapshot, prometheusMetrics, startMetricsServer, stopMetricsServer,
     metricsRuntimeInfo, apkInfo, resolveApkFile, APP_SETTINGS_FILE, APP_APK_DIR
 };

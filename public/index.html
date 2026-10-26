@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="2.7.0">
+    <meta name="panel-version" content="2.8.0">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -81,6 +81,9 @@
                     </button>
                     <button class="nav-item" data-tab="tab-obf" data-title="Обфускация" onclick="switchTab('tab-obf', this)" id="navObf">
                         <span class="nav-ico">✦</span><span>Обфускация</span><span class="nav-dot" id="navObfDot"></span>
+                    </button>
+                    <button class="nav-item" data-tab="tab-proxy" data-title="Прокси и пользователи" onclick="switchTab('tab-proxy', this)" id="navProxy">
+                        <span class="nav-ico">✈</span><span>Прокси</span><span class="nav-badge" id="navProxyBadge" style="display:none;">0</span>
                     </button>
                 </div>
                 <div class="nav-group">
@@ -877,6 +880,7 @@
                     <div class="quick-grid">
                         <button class="quick-action" onclick="openWizard('install')"><span class="qa-ico">↓</span><strong>Установить AWG</strong><small>Стандартная установка</small></button>
                         <button class="quick-action" onclick="openWizard('mtproto')"><span class="qa-ico">✈</span><strong>Установить MTProto</strong><small>Telemt / Zig / фикс</small></button>
+                        <button class="quick-action" onclick="openMtproxylWizard()"><span class="qa-ico">◈</span><strong>Установить MTProxyL</strong><small>API, лимиты, бот</small></button>
                         <button class="quick-action" onclick="openWizard('cascade')"><span class="qa-ico">⇄</span><strong>Установить каскад</strong><small>RU + EU</small></button>
                         <button class="quick-action" onclick="openWizard('adguard')"><span class="qa-ico">◎</span><strong>Установить AdGuard</strong><small>DNS-защита</small></button>
                     </div>
@@ -1015,6 +1019,25 @@
                         <button class="btn-dark" onclick="copyMeko()">📋 Скопировать команду для терминала</button>
                     </div>
 
+                    <div class="card advanced-only" style="flex: 1;">
+                        <div class="card-head">
+                            <div>
+                                <h3>MTProxyL — расширенный менеджер</h3>
+                                <p>Telemt под управлением MTProxyL: Manager/Reanimator, Zapret2, NFT SYN limiter, Selfmask, WEB Proxy, API и Telegram-бот.</p>
+                            </div>
+                            <span class="badge badge-good">API</span>
+                        </div>
+                        <button class="btn-primary" style="width: 100%;" onclick="openMtproxylWizard()">Установить MTProxyL</button>
+                        <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
+                            <button class="btn-dark" onclick="switchTab('tab-proxy')">👥 Пользователи и лимиты</button>
+                            <a class="btn-dark" href="https://github.com/Liafanx/MTProxyL" target="_blank" rel="noopener" style="text-decoration:none; padding:8px 12px; display:inline-block;">Документация MTProxyL</a>
+                        </div>
+                        <p style="color:var(--text-muted); font-size:12px; margin:12px 0 0;">
+                            После установки панель сама подключится к <code>mtproxyl-api</code> и сохранит ключ.
+                            Если API уже был настроен — нажмите «Выдать ключ API» в разделе «Прокси».
+                        </p>
+                    </div>
+
                     <div class="card" style="flex: 1;">
                         <h3>AdGuard Home</h3>
                         <p style="color: var(--text-muted); font-size: 13px;">Установка персонального DNS-блокировщика рекламы.</p>
@@ -1113,6 +1136,82 @@
                     <p style="color:var(--text-muted); font-size:12px; margin-top:0;">Только для тонкой настройки. Обычно менять здесь ничего не нужно.</p>
                     <textarea id="cascadeConfText" rows="10" spellcheck="false" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:13px; background:rgba(0,0,0,.3); color:#c9d1d9; border:1px solid var(--border); border-radius:6px; padding:10px; resize:vertical;"></textarea>
                     <button class="btn-primary" style="margin-top:10px;" onclick="saveCascadeConf()">💾 Сохранить awg1.conf</button>
+                </div>
+            </div>
+
+            <!-- ПРОКСИ И ПОЛЬЗОВАТЕЛИ -->
+            <div id="tab-proxy" class="tab-pane">
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Прокси и пользователи</h3>
+                            <p>Единое управление MTProxyL и Telemt: пользователи, лимиты, квоты, ссылки и Telegram-бот.</p>
+                        </div>
+                        <span id="proxyBackendBadge" class="badge badge-muted">проверка…</span>
+                    </div>
+                    <div id="proxyStatusGrid" class="stats-cards" style="margin-bottom:14px;"></div>
+                    <div id="proxyNotice" class="wizard-note info" style="display:none; margin-bottom:14px;"></div>
+                    <div class="controls-row" style="flex-wrap:wrap;">
+                        <button class="btn-primary" onclick="openProxyUserModal()">＋ Добавить пользователя</button>
+                        <button class="btn-dark" onclick="loadProxyTab(true)">↻ Обновить</button>
+                        <button class="btn-dark" onclick="proxyRestart()">⟳ Перезапустить прокси</button>
+                        <button class="btn-dark" onclick="proxyRotateKey()">🔑 Выдать ключ API</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Пользователи прокси</h3>
+                            <p>Скорость, уникальные IP, TCP-соединения, квота трафика, срок действия и рекламная метка.</p>
+                        </div>
+                        <span id="proxyUsersCount" class="badge badge-muted">0</span>
+                    </div>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width:15%;">Пользователь</th>
+                                    <th style="width:10%;">Статус</th>
+                                    <th style="width:16%;">Трафик / квота</th>
+                                    <th style="width:14%;">Лимиты</th>
+                                    <th style="width:13%;">Скорость</th>
+                                    <th style="width:10%;">Срок</th>
+                                    <th style="width:22%;">Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody id="proxyUsersTable">
+                                <tr><td colspan="7" style="text-align:center; color:var(--text-muted);">Загрузка…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Telegram-бот</h3>
+                            <p>Бот Servpanel управляет теми же пользователями через API прокси. Отдельная служба не нужна.</p>
+                        </div>
+                        <span id="proxyBotBadge" class="badge badge-muted">выключен</span>
+                    </div>
+                    <div class="wizard-grid">
+                        <label class="field"><span>Токен бота</span>
+                            <input id="proxyBotToken" placeholder="123456789:AA…" autocomplete="off">
+                        </label>
+                        <label class="field"><span>Telegram ID администраторов</span>
+                            <input id="proxyBotAdmins" placeholder="123456789, 987654321">
+                        </label>
+                    </div>
+                    <label class="form-check" style="margin:4px 0 12px;">
+                        <input type="checkbox" id="proxyBotEnabled"> Включить бота
+                    </label>
+                    <div class="controls-row" style="flex-wrap:wrap;">
+                        <button class="btn-primary" onclick="saveProxyBot()">Сохранить</button>
+                        <button class="btn-dark" onclick="testProxyBot()">Отправить тест</button>
+                        <button class="btn-dark" onclick="loadProxyBot()">↻ Обновить</button>
+                    </div>
+                    <div id="proxyBotInfo" class="wizard-note info" style="margin-top:12px;"></div>
                 </div>
             </div>
 
@@ -1266,7 +1365,7 @@
                     </div>
                     <div class="update-source">
                         <span>Или ссылка на релиз:</span>
-                        <input type="text" id="updUrl" placeholder="https://example.com/servpanel-2.7.0.tar.gz" style="flex:1; min-width:240px;">
+                        <input type="text" id="updUrl" placeholder="https://example.com/servpanel-2.8.0.tar.gz" style="flex:1; min-width:240px;">
                         <button class="btn btn-dark" id="updUrlBtn" onclick="updFromUrl()">Установить по URL</button>
                     </div>
                     <div class="update-source">

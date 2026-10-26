@@ -281,6 +281,7 @@ function switchTab(tabId, el) {
     if (tabId === 'tab-admin') loadAdminPanel();
     if (tabId === 'tab-ssl') loadSslPanel();
     if (tabId === 'tab-app') loadAppPanel();
+    if (tabId === 'tab-proxy') loadProxyTab();
 }
 
 function copyMeko() {
@@ -2886,7 +2887,15 @@ function wizardDefaults(scenario) {
         kind: 'telemt', domain: 'ozon.ru', port: '443', version: '',
         fix: true, fixType: 'v3', fixPort: '',
         adTag: '', mtUser: '', mtUserSecret: '', publicHost: '',
-        web: false, webHost: '', webUser: 'webuser', webSecret: '', nginx: true
+        web: false, webHost: '', webUser: 'webuser', webSecret: '', nginx: true,
+        mplMode: 'manager', mplEngine: 'binary', mplProxyMode: 'mtproto',
+        mplPort: '', mplHost: '', mplSni: 'autoscout24.ru', mplSecret: '',
+        mplAdTag: '', mplUser: '', mplUserSecret: '',
+        mplZapret2: true, mplSynLimiter: 'meko', mplMeko: true,
+        mplSelfmask: '', mplSelfmaskCert: 'letsencrypt', mplSelfmaskEmail: '',
+        mplWeb: false, mplWebDomain: '', mplWebCarrier: 'https',
+        mplApi: true, mplApiListen: '127.0.0.1:9190',
+        mplTgbotToken: '', mplTgbotAdmin: '', mplForce: false
     };
     if (scenario === 'install') return { role: 'single', version: '3.1', route: 'all', port: '443', domain: '', remoteIp: '', remotePort: '22', remotePass: '' };
     if (scenario === 'backup') return { enabled: true, run: true };
@@ -2900,6 +2909,14 @@ function suggestClientName() {
         if (!used.has(n)) return n;
     }
     return 'client-' + String(Date.now()).slice(-4);
+}
+
+function openMtproxylWizard() {
+    openWizard('mtproto');
+    if (wizardState.scenario === 'mtproto') {
+        wizardState.data.kind = 'mtproxyl';
+        renderWizard();
+    }
 }
 
 function openWizard(scenario) {
@@ -3155,23 +3172,102 @@ function renderAdGuardOptions() {
 function renderMtprotoOptions() {
     const d = wizardState.data;
     const kind = d.kind || 'telemt';
-    return `<p class="wizard-lead">Панель соберёт все параметры заранее и запустит MEKO без единого вопроса. Порты откроются в UFW автоматически.</p>
+    const isMpl = kind === 'mtproxyl';
+    return `<p class="wizard-lead">Панель соберёт все параметры заранее и запустит установщик без единого вопроса. Порты откроются в UFW автоматически.</p>
         <div class="wizard-section-title">Что устанавливаем</div>
         <div class="choice-grid">
             ${wizChoice('telemt', '✈', 'Telemt', 'MTProto + FakeTLS, рекомендуемый вариант', kind === 'telemt', 'kind')}
             ${wizChoice('zig', '⚡', 'MTProto.zig', 'Лёгкий прокси на Zig', kind === 'zig', 'kind')}
+            ${wizChoice('mtproxyl', '◈', 'MTProxyL', 'Telemt + API, лимиты и бот', kind === 'mtproxyl', 'kind')}
             ${wizChoice('fix', '🛠', 'Только фикс', 'MEKO FIX для уже установленного прокси', kind === 'fix', 'kind')}
             <button type="button" class="choice" disabled style="opacity:.55; cursor:not-allowed;" title="MEKO пока не реализовал автоматическую установку MTG">
                 <span class="choice-ico">◌</span><strong>MTG</strong><small>Пока не поддерживается в MEKO</small>
             </button>
         </div>
-        ${kind !== 'fix' ? `
+        ${!isMpl && kind !== 'fix' ? `
         <div class="wizard-grid" style="margin-top:14px;">
             <label class="field"><span>SNI-домен маскировки</span><input id="wizMtDomain" value="${esc(d.domain)}" placeholder="ozon.ru" oninput="wizardState.data.domain=this.value"></label>
             <label class="field"><span>Порт прокси</span><input id="wizMtPort" type="number" min="1" max="65535" value="${esc(d.port)}" oninput="wizardState.data.port=this.value"></label>
         </div>
         ${kind === 'telemt' ? `<label class="field" style="margin-top:12px;"><span>Версия Telemt</span><input id="wizMtVersion" value="${esc(d.version)}" placeholder="Пусто — последняя" oninput="wizardState.data.version=this.value"></label>` : ''}
         ` : ''}
+        ${isMpl ? `
+        <div class="wizard-section-title">Режим и движок</div>
+        <div class="wizard-grid">
+            <label class="field"><span>Режим MTProxyL</span>
+                <select id="wizMplMode" onchange="wizardState.data.mplMode=this.value">
+                    <option value="manager" ${d.mplMode === 'manager' ? 'selected' : ''}>Manager — новый прокси под управлением MTProxyL</option>
+                    <option value="reanimator" ${d.mplMode === 'reanimator' ? 'selected' : ''}>Reanimator — реанимация существующего</option>
+                </select>
+            </label>
+            <label class="field"><span>Движок telemt</span>
+                <select id="wizMplEngine" onchange="wizardState.data.mplEngine=this.value">
+                    <option value="binary" ${d.mplEngine === 'binary' ? 'selected' : ''}>Бинарник (systemd)</option>
+                    <option value="docker" ${d.mplEngine === 'docker' ? 'selected' : ''}>Docker</option>
+                </select>
+            </label>
+            <label class="field"><span>Режим прокси</span>
+                <select id="wizMplProxyMode" onchange="wizardState.data.mplProxyMode=this.value">
+                    <option value="mtproto" ${d.mplProxyMode === 'mtproto' ? 'selected' : ''}>MTProto</option>
+                    <option value="web" ${d.mplProxyMode === 'web' ? 'selected' : ''}>WEB</option>
+                    <option value="combined" ${d.mplProxyMode === 'combined' ? 'selected' : ''}>MTProto + WEB</option>
+                </select>
+            </label>
+            <label class="field"><span>Порт прокси</span><input id="wizMplPort" type="number" min="1" max="65535" value="${esc(d.mplPort || d.port || '443')}" placeholder="443" oninput="wizardState.data.mplPort=this.value"></label>
+            <label class="field"><span>SNI-домен маскировки</span><input id="wizMplSni" value="${esc(d.mplSni)}" placeholder="autoscout24.ru" oninput="wizardState.data.mplSni=this.value"></label>
+            <label class="field"><span>Публичный адрес для ссылок</span><input id="wizMplHost" value="${esc(d.mplHost)}" placeholder="Пусто — определить сам" oninput="wizardState.data.mplHost=this.value"></label>
+        </div>
+        <div class="wizard-section-title">Обходы блокировок</div>
+        <div class="wizard-grid">
+            <div class="field"><span>Zapret2 MTProto fix</span><label class="form-check" style="margin-top:8px;"><input type="checkbox" id="wizMplZapret2" ${d.mplZapret2 ? 'checked' : ''} onchange="wizardState.data.mplZapret2=this.checked"> Установить Zapret2</label></div>
+            <label class="field"><span>NFT SYN limiter</span>
+                <select id="wizMplSynLimiter" onchange="wizardState.data.mplSynLimiter=this.value">
+                    <option value="meko" ${d.mplSynLimiter === 'meko' ? 'selected' : ''}>meko — рекомендуется</option>
+                    <option value="classic" ${d.mplSynLimiter === 'classic' ? 'selected' : ''}>classic</option>
+                    <option value="off" ${d.mplSynLimiter === 'off' ? 'selected' : ''}>off — не устанавливать</option>
+                </select>
+            </label>
+            <div class="field"><span>Обходы By-MEKO</span><label class="form-check" style="margin-top:8px;"><input type="checkbox" id="wizMplMeko" ${d.mplMeko ? 'checked' : ''} onchange="wizardState.data.mplMeko=this.checked"> Включить обходы MEKO</label></div>
+        </div>
+        <div class="wizard-section-title">Пользователи и реклама</div>
+        <div class="wizard-grid">
+            <label class="field"><span>Первый пользователь (необязательно)</span><input id="wizMplUser" value="${esc(d.mplUser)}" placeholder="например vasya" oninput="wizardState.data.mplUser=this.value"></label>
+            <label class="field"><span>Секрет пользователя</span><input id="wizMplUserSecret" value="${esc(d.mplUserSecret)}" placeholder="Пусто — сгенерировать" oninput="wizardState.data.mplUserSecret=this.value"></label>
+            <label class="field"><span>Основной секрет (необязательно)</span><input id="wizMplSecret" value="${esc(d.mplSecret)}" placeholder="32 hex-символа" oninput="wizardState.data.mplSecret=this.value"></label>
+            <label class="field"><span>ad_tag (необязательно)</span><input id="wizMplAdTag" value="${esc(d.mplAdTag)}" placeholder="32 hex-символа" oninput="wizardState.data.mplAdTag=this.value"></label>
+        </div>
+        <div class="wizard-section-title">Selfmask и WEB Proxy</div>
+        <div class="wizard-grid">
+            <label class="field"><span>Домен Selfmask</span><input id="wizMplSelfmask" value="${esc(d.mplSelfmask)}" placeholder="Пусто — не устанавливать" oninput="wizardState.data.mplSelfmask=this.value"></label>
+            <label class="field"><span>Сертификат Selfmask</span>
+                <select id="wizMplSelfmaskCert" onchange="wizardState.data.mplSelfmaskCert=this.value">
+                    <option value="letsencrypt" ${d.mplSelfmaskCert === 'letsencrypt' ? 'selected' : ''}>Let's Encrypt</option>
+                    <option value="selfsigned" ${d.mplSelfmaskCert === 'selfsigned' ? 'selected' : ''}>Самоподписанный</option>
+                </select>
+            </label>
+            <label class="field"><span>E-mail для Let's Encrypt</span><input id="wizMplSelfmaskEmail" value="${esc(d.mplSelfmaskEmail)}" placeholder="admin@example.com" oninput="wizardState.data.mplSelfmaskEmail=this.value"></label>
+            <div class="field"><span>WEB Proxy</span><label class="form-check" style="margin-top:8px;"><input type="checkbox" id="wizMplWeb" ${d.mplWeb ? 'checked' : ''} onchange="wizardState.data.mplWeb=this.checked; renderWizard()"> Включить WEB Proxy</label></div>
+            ${d.mplWeb ? `
+            <label class="field"><span>Домен WEB Proxy</span><input id="wizMplWebDomain" value="${esc(d.mplWebDomain)}" placeholder="web.example.com" oninput="wizardState.data.mplWebDomain=this.value"></label>
+            <label class="field"><span>Carrier</span>
+                <select id="wizMplWebCarrier" onchange="wizardState.data.mplWebCarrier=this.value">
+                    <option value="https" ${d.mplWebCarrier === 'https' ? 'selected' : ''}>https</option>
+                    <option value="https-lanes" ${d.mplWebCarrier === 'https-lanes' ? 'selected' : ''}>https-lanes</option>
+                    <option value="websocket" ${d.mplWebCarrier === 'websocket' ? 'selected' : ''}>websocket</option>
+                    <option value="websocket-lanes" ${d.mplWebCarrier === 'websocket-lanes' ? 'selected' : ''}>websocket-lanes</option>
+                </select>
+            </label>` : ''}
+        </div>
+        <div class="wizard-section-title">API и Telegram-бот</div>
+        <div class="wizard-grid">
+            <div class="field"><span>API управления</span><label class="form-check" style="margin-top:8px;"><input type="checkbox" id="wizMplApi" ${d.mplApi ? 'checked' : ''} onchange="wizardState.data.mplApi=this.checked"> Включить (нужно панели)</label></div>
+            <label class="field"><span>Адрес API</span><input id="wizMplApiListen" value="${esc(d.mplApiListen)}" placeholder="127.0.0.1:9190" oninput="wizardState.data.mplApiListen=this.value"></label>
+            <label class="field"><span>Токен встроенного бота MTProxyL</span><input id="wizMplTgbotToken" value="${esc(d.mplTgbotToken)}" placeholder="Необязательно" autocomplete="off" oninput="wizardState.data.mplTgbotToken=this.value"></label>
+            <label class="field"><span>Telegram ID администратора</span><input id="wizMplTgbotAdmin" value="${esc(d.mplTgbotAdmin)}" placeholder="Только вместе с токеном" oninput="wizardState.data.mplTgbotAdmin=this.value"></label>
+        </div>
+        <label class="form-check" style="margin-top:4px;"><input type="checkbox" id="wizMplForce" ${d.mplForce ? 'checked' : ''} onchange="wizardState.data.mplForce=this.checked"> Переустановить поверх существующего (--force)</label>
+        <div class="wizard-note info">Панель включит <code>mtproxyl-api</code>, сохранит ключ и сразу подключит управление пользователями. Свой бот Servpanel настраивается во вкладке «Прокси»; встроенный бот MTProxyL — необязателен.</div>
+        ` : `
         <div class="wizard-section-title">Фикс MEKO</div>
         <label class="form-check" style="margin-bottom:8px;"><input type="checkbox" id="wizMtFix" ${d.fix || kind === 'fix' ? 'checked' : ''} ${kind === 'fix' ? 'disabled' : ''} onchange="wizardState.data.fix=this.checked; renderWizard()"> Установить фикс MEKO</label>
         ${(d.fix || kind === 'fix') ? `
@@ -3208,7 +3304,10 @@ function renderMtprotoOptions() {
         </div>
         `}
         ` : ''}
-        <div class="wizard-note" style="margin-top:14px;">Установщик MEKO поставит и менеджер <code>mekopr</code>. Ссылки <code>tg://</code> появятся в разделе «Установка» после завершения.</div>`;
+        `}
+        <div class="wizard-note" style="margin-top:14px;">${isMpl
+            ? 'MTProxyL поставит движок telemt и менеджер <code>mtproxyl</code>. Ссылки <code>tg://</code> появятся в разделе «Прокси» после создания пользователей.'
+            : 'Установщик MEKO поставит и менеджер <code>mekopr</code>. Ссылки <code>tg://</code> появятся в разделе «Установка» после завершения.'}</div>`;
 }
 
 function renderInstallOptions() {
@@ -3316,7 +3415,27 @@ function renderWizardReview() {
             <div class="wizard-note" style="margin-top:14px;">Логин и пароль AdGuard не обязательны, если API доступен локально без авторизации.</div>`;
     }
     if (wizardState.scenario === 'mtproto') {
-        const kind = { telemt: 'Telemt', zig: 'MTProto.zig', fix: 'Только фикс MEKO' }[d.kind] || d.kind;
+        const kind = { telemt: 'Telemt', zig: 'MTProto.zig', mtproxyl: 'MTProxyL', fix: 'Только фикс MEKO' }[d.kind] || d.kind;
+        if (d.kind === 'mtproxyl') {
+            const mode = { manager: 'Manager', reanimator: 'Reanimator' }[d.mplMode] || d.mplMode;
+            const engine = { binary: 'бинарник', docker: 'Docker' }[d.mplEngine] || d.mplEngine;
+            const pmode = { mtproto: 'MTProto', web: 'WEB', combined: 'MTProto + WEB' }[d.mplProxyMode] || d.mplProxyMode;
+            return `<p class="wizard-lead">Проверьте параметры MTProxyL. Установщик запустится без вопросов, порты откроются в UFW, панель подключится к API.</p>
+                <div class="wizard-summary">
+                    ${row('Режим', esc(mode))}
+                    ${row('Движок', esc(engine))}
+                    ${row('Прокси', esc(pmode))}
+                    ${row('Порт / SNI', `${esc(d.mplPort || '443')} · ${esc(d.mplSni || 'autoscout24.ru')}`)}
+                    ${row('Публичный адрес', esc(d.mplHost || 'определить автоматически'))}
+                    ${row('Zapret2 / SYN', `${d.mplZapret2 ? 'да' : 'нет'} · ${esc(d.mplSynLimiter || 'meko')}`)}
+                    ${row('Первый пользователь', d.mplUser ? esc(d.mplUser) : 'создать позже')}
+                    ${row('Selfmask', d.mplSelfmask ? esc(d.mplSelfmask) : 'нет')}
+                    ${row('WEB Proxy', d.mplWeb ? esc(d.mplWebDomain || '—') : 'нет')}
+                    ${row('API', d.mplApi ? esc(d.mplApiListen || '127.0.0.1:9190') : 'выключен')}
+                    ${row('Встроенный бот', d.mplTgbotToken ? 'да' : 'нет')}
+                </div>
+                <div class="wizard-note" style="margin-top:14px;">После установки пользователи и лимиты появятся во вкладке «Прокси». Если API уже был настроен ранее, панель попросит выдать новый ключ.</div>`;
+        }
         const fix = d.kind === 'fix' || d.fix
             ? `${d.fixType || 'v3'}, порт ${d.fixPort || d.port || '443'}`
             : 'не устанавливать';
@@ -3386,6 +3505,51 @@ function wizardValidate() {
             const el = document.getElementById(id);
             if (el) d[key] = el.value.trim();
         };
+        if (d.kind === 'mtproxyl') {
+            grab('wizMplMode', 'mplMode');
+            grab('wizMplEngine', 'mplEngine');
+            grab('wizMplProxyMode', 'mplProxyMode');
+            grab('wizMplPort', 'mplPort');
+            grab('wizMplSni', 'mplSni');
+            grab('wizMplHost', 'mplHost');
+            grab('wizMplSynLimiter', 'mplSynLimiter');
+            grab('wizMplUser', 'mplUser');
+            grab('wizMplUserSecret', 'mplUserSecret');
+            grab('wizMplSecret', 'mplSecret');
+            grab('wizMplAdTag', 'mplAdTag');
+            grab('wizMplSelfmask', 'mplSelfmask');
+            grab('wizMplSelfmaskCert', 'mplSelfmaskCert');
+            grab('wizMplSelfmaskEmail', 'mplSelfmaskEmail');
+            grab('wizMplWebDomain', 'mplWebDomain');
+            grab('wizMplWebCarrier', 'mplWebCarrier');
+            grab('wizMplApiListen', 'mplApiListen');
+            grab('wizMplTgbotToken', 'mplTgbotToken');
+            grab('wizMplTgbotAdmin', 'mplTgbotAdmin');
+            const chk = (id, key) => {
+                const el = document.getElementById(id);
+                if (el) d[key] = el.checked;
+            };
+            chk('wizMplZapret2', 'mplZapret2');
+            chk('wizMplMeko', 'mplMeko');
+            chk('wizMplWeb', 'mplWeb');
+            chk('wizMplApi', 'mplApi');
+            chk('wizMplForce', 'mplForce');
+
+            if (!isValidPortValue(d.mplPort || '443')) { toast('Проверьте порт', 'error', 'Порт MTProxyL должен быть от 1 до 65535.'); return false; }
+            if (!isValidRemoteHost(d.mplSni)) { toast('Проверьте SNI', 'error', 'Укажите SNI-домен, например autoscout24.ru.'); return false; }
+            if (d.mplHost && !isValidRemoteHost(d.mplHost)) { toast('Проверьте адрес', 'error', 'Публичный адрес — IP или домен.'); return false; }
+            if (d.mplSecret && !/^[0-9a-fA-F]{32}$/.test(d.mplSecret)) { toast('Неверный секрет', 'error', 'Основной секрет — 32 hex-символа.'); return false; }
+            if (d.mplAdTag && !/^[0-9a-fA-F]{32}$/.test(d.mplAdTag)) { toast('Неверный ad_tag', 'error', 'ad_tag — 32 hex-символа.'); return false; }
+            if (d.mplUser && !/^[A-Za-z0-9_.-]{1,64}$/.test(d.mplUser)) { toast('Неверное имя', 'error', 'Имя пользователя: A–Z, a–z, 0–9, _, . и -, до 64 символов.'); return false; }
+            if (d.mplUserSecret && !/^[0-9a-fA-F]{32}$/.test(d.mplUserSecret)) { toast('Неверный секрет', 'error', 'Секрет пользователя — 32 hex-символа.'); return false; }
+            if (d.mplSelfmask && !isValidRemoteHost(d.mplSelfmask)) { toast('Проверьте Selfmask', 'error', 'Домен Selfmask — IP или домен.'); return false; }
+            if (d.mplSelfmaskEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(d.mplSelfmaskEmail)) { toast('Проверьте e-mail', 'error', 'Укажите корректный e-mail для Let\'s Encrypt.'); return false; }
+            if (d.mplWeb && !isValidRemoteHost(d.mplWebDomain)) { toast('Проверьте домен WEB', 'error', 'Для WEB Proxy нужен домен.'); return false; }
+            if (d.mplApiListen && !/^[A-Za-z0-9.:[\]-]{3,64}$/.test(d.mplApiListen)) { toast('Проверьте адрес API', 'error', 'Адрес API — вида 127.0.0.1:9190.'); return false; }
+            if (d.mplTgbotToken && !/^\d{5,}:[A-Za-z0-9_-]{20,}$/.test(d.mplTgbotToken)) { toast('Неверный токен', 'error', 'Токен бота — вида 123456789:AA…'); return false; }
+            if (d.mplTgbotToken && !/^\d{3,20}$/.test(d.mplTgbotAdmin)) { toast('Нужен Telegram ID', 'error', 'Для встроенного бота укажите Telegram ID администратора.'); return false; }
+            return true;
+        }
         grab('wizMtDomain', 'domain');
         grab('wizMtPort', 'port');
         grab('wizMtVersion', 'version');
@@ -3661,6 +3825,44 @@ async function executeInstallWizard() {
 
 async function executeMtprotoWizard() {
     const d = wizardState.data;
+    if (d.kind === 'mtproxyl') {
+        const options = {
+            mplMode: d.mplMode || 'manager',
+            mplEngine: d.mplEngine || 'binary',
+            mplProxyMode: d.mplProxyMode || 'mtproto',
+            mplPort: d.mplPort || d.port || '443',
+            mplSni: d.mplSni || 'autoscout24.ru',
+            mplHost: d.mplHost || '',
+            mplSecret: d.mplSecret || '',
+            mplAdTag: d.mplAdTag || '',
+            mplUser: d.mplUser || '',
+            mplUserSecret: d.mplUserSecret || '',
+            mplZapret2: d.mplZapret2 !== false,
+            mplSynLimiter: d.mplSynLimiter || 'meko',
+            mplMeko: d.mplMeko !== false,
+            mplSelfmask: d.mplSelfmask || '',
+            mplSelfmaskCert: d.mplSelfmaskCert || 'letsencrypt',
+            mplSelfmaskEmail: d.mplSelfmaskEmail || '',
+            mplWeb: !!d.mplWeb,
+            mplWebDomain: d.mplWebDomain || '',
+            mplWebCarrier: d.mplWebCarrier || 'https',
+            mplApi: d.mplApi !== false,
+            mplApiListen: d.mplApiListen || '127.0.0.1:9190',
+            mplTgbotToken: d.mplTgbotToken || '',
+            mplTgbotAdmin: d.mplTgbotAdmin || '',
+            mplForce: !!d.mplForce
+        };
+        await startInstall('mtproxyl', '/var/log/mtproxyl_install.log', options);
+        return {
+            html: wizardSuccess('Установка MTProxyL запущена', 'Ставится движок telemt и менеджер MTProxyL. Порты открываются в UFW, панель подключается к API автоматически.',
+                resultButton('Показать прогресс', 'showInstallProgress()', true) +
+                resultButton('Пользователи прокси', "closeWizard(); switchTab('tab-proxy')") +
+                resultButton('Закрыть', 'closeWizard()')
+            ),
+            toast: 'Установка MTProxyL запущена',
+            toastMessage: 'Прогресс — во вкладке «Установка»'
+        };
+    }
     const options = {
         kind: d.kind || 'telemt',
         mtDomain: d.domain || 'ozon.ru',
@@ -4908,5 +5110,470 @@ async function deleteApk() {
         await loadAppPanel();
     } catch (e) {
         toast('Не удалось удалить APK', 'error', e.message);
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Прокси: пользователи MTProto (MTProxyL / telemt) и Telegram-бот
+   -------------------------------------------------------------------------- */
+let proxyState = { status: null, users: [], bot: null };
+
+function proxyArg(value) {
+    return String(value == null ? '' : value)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\r?\n/g, ' ');
+}
+
+function proxyFmtDate(value) {
+    if (!value) return 'бессрочно';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleDateString('ru-RU');
+}
+
+function proxyFmtRate(bps) {
+    const v = Number(bps) || 0;
+    if (v <= 0) return '∞';
+    if (v >= 1000000) return (v / 1000000).toFixed(v % 1000000 ? 1 : 0) + ' Мбит/с';
+    if (v >= 1000) return Math.round(v / 1000) + ' кбит/с';
+    return v + ' бит/с';
+}
+
+function proxyBackendLabel(backend) {
+    return {
+        mtproxyl: 'MTProxyL',
+        telemt: 'Telemt',
+        demo: 'Демо-режим',
+        zig: 'MTProto.zig',
+        none: 'не найден'
+    }[backend] || backend || 'не найден';
+}
+
+async function loadProxyTab(force) {
+    const tbody = document.getElementById('proxyUsersTable');
+    if (tbody && (!proxyState.users.length || force)) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:22px;">Загрузка…</td></tr>';
+    }
+    try {
+        const st = await apiJson('/api/proxy/status');
+        proxyState.status = st;
+        renderProxyStatus(st);
+    } catch (e) {
+        proxyState.status = { backend: 'none', reason: e.message };
+        renderProxyStatus(proxyState.status);
+    }
+    try {
+        const data = await apiJson('/api/proxy/users');
+        proxyState.users = Array.isArray(data.users) ? data.users : [];
+        renderProxyUsers(proxyState.users);
+        const badge = document.getElementById('navProxyBadge');
+        if (badge) {
+            badge.innerText = String(proxyState.users.length);
+            badge.style.display = proxyState.users.length ? '' : 'none';
+        }
+    } catch (e) {
+        proxyState.users = [];
+        const st = proxyState.status || {};
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:22px;">${esc(st.reason || e.message)}</td></tr>`;
+        }
+        const count = document.getElementById('proxyUsersCount');
+        if (count) count.innerText = '0';
+    }
+    loadProxyBot();
+}
+
+function renderProxyStatus(st) {
+    const badge = document.getElementById('proxyBackendBadge');
+    if (badge) {
+        const warn = !st || ['none', 'zig'].includes(st.backend) || st.needsKey;
+        badge.className = 'badge ' + (warn ? 'badge-warn' : 'badge-good');
+        badge.innerText = proxyBackendLabel(st && st.backend) + (st && st.version ? ' · ' + st.version : '');
+    }
+    const notice = document.getElementById('proxyNotice');
+    if (notice) {
+        const text = (st && (st.reason || st.error)) || '';
+        if (text || (st && st.needsKey)) {
+            notice.style.display = 'block';
+            notice.innerHTML = esc(text) + (st && st.needsKey
+                ? ' Нажмите «Выдать ключ API», чтобы подключить панель к MTProxyL.'
+                : '');
+        } else {
+            notice.style.display = 'none';
+            notice.innerHTML = '';
+        }
+    }
+    const grid = document.getElementById('proxyStatusGrid');
+    if (!grid) return;
+    if (!st || ['none', 'zig'].includes(st.backend)) {
+        grid.innerHTML = appTile('Движок', proxyBackendLabel(st && st.backend), st && st.reason ? st.reason : 'установите MTProxyL или Telemt');
+        return;
+    }
+    const tiles = [
+        appTile('Движок', proxyBackendLabel(st.backend), st.mode || ''),
+        appTile('Порт', st.port == null ? '—' : String(st.port), st.domain || ''),
+        appTile('Пользователей', String(proxyState.users.length || 0), `${st.connections || 0} соединений`),
+        appTile('Трафик', formatBytes(st.trafficTotal || 0), 'за всё время'),
+        appTile('Uptime', proxyFmtUptime(st.uptime || 0), 'без перезапуска')
+    ];
+    grid.innerHTML = tiles.join('');
+}
+
+function proxyFmtUptime(seconds) {
+    const s = Math.max(0, Number(seconds) || 0);
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (d) return `${d} д ${h} ч`;
+    if (h) return `${h} ч ${m} мин`;
+    return `${m} мин`;
+}
+
+function renderProxyUsers(users) {
+    const tbody = document.getElementById('proxyUsersTable');
+    const count = document.getElementById('proxyUsersCount');
+    if (count) count.innerText = String(users.length);
+    if (!tbody) return;
+    if (!users.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:22px;">Пользователей пока нет. Нажмите «Добавить пользователя».</td></tr>';
+        return;
+    }
+    const isAdmin = currentRole === 'admin';
+    tbody.innerHTML = users.map(u => {
+        const name = String(u.username || '');
+        const enabled = u.enabled !== false;
+        const conns = Number(u.current_connections) || 0;
+        const ips = Number(u.active_unique_ips) || 0;
+        const status = enabled
+            ? (conns > 0 ? '<span class="status-active">● онлайн</span>' : '<span class="status-inactive">○ ожидание</span>')
+            : '<span class="badge badge-bad">выключен</span>';
+        const traffic = Number((u.traffic && u.traffic.total_bytes) || u.total_octets) || 0;
+        const quota = u.data_quota_bytes == null ? null : Number(u.data_quota_bytes);
+        const pct = quota ? Math.min(100, Math.round((traffic / quota) * 100)) : 0;
+        const trafficCell = `<div>${esc(formatBytes(traffic))} / ${quota ? esc(formatBytes(quota)) : '∞'}</div>` +
+            (quota ? `<div style="height:4px;background:rgba(0,0,0,.35);border-radius:3px;margin-top:5px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:${pct >= 95 ? '#f85149' : pct >= 75 ? '#f5b84b' : '#2ea043'};"></div></div>` : '');
+        const limits = `TCP: ${u.max_tcp_conns == null ? '∞' : esc(u.max_tcp_conns)} · IP: ${u.max_unique_ips == null ? '∞' : esc(u.max_unique_ips)}`;
+        const limitsCell = `<div>${limits}</div><div style="font-size:11px;color:var(--text-muted);">сейчас: ${conns} TCP · ${ips} IP</div>`;
+        const rateCell = (u.rate_limit_up_bps || u.rate_limit_down_bps)
+            ? `↑ ${esc(proxyFmtRate(u.rate_limit_up_bps))}<br>↓ ${esc(proxyFmtRate(u.rate_limit_down_bps))}`
+            : '<span style="color:var(--text-muted)">без лимита</span>';
+        const actions = isAdmin ? `<div class="proxy-actions">
+                <button class="btn-dark" title="Ссылки и QR" onclick="showProxyUserLinks('${proxyArg(name)}')">🔗</button>
+                <button class="btn-dark" title="Изменить" onclick="openProxyUserModal('${proxyArg(name)}')">✎</button>
+                <button class="btn-dark" title="${enabled ? 'Выключить' : 'Включить'}" onclick="proxyUserAction('${proxyArg(name)}','${enabled ? 'disable' : 'enable'}')">${enabled ? '⏸' : '▶'}</button>
+                <button class="btn-dark" title="Новый секрет" onclick="proxyUserAction('${proxyArg(name)}','rotate-secret')">🔑</button>
+                <button class="btn-dark" title="Сбросить квоту" onclick="proxyUserAction('${proxyArg(name)}','reset-quota')">♻</button>
+                <button class="btn-dark" title="Удалить" onclick="deleteProxyUser('${proxyArg(name)}')">🗑</button>
+            </div>` : `<button class="btn-dark" onclick="showProxyUserLinks('${proxyArg(name)}')">🔗 Ссылки</button>`;
+        return `<tr>
+            <td><strong>${esc(name)}</strong>${u.notes ? `<div style="font-size:11px;color:var(--text-muted);">${esc(u.notes)}</div>` : ''}</td>
+            <td>${status}</td>
+            <td>${trafficCell}</td>
+            <td>${limitsCell}</td>
+            <td>${rateCell}</td>
+            <td>${esc(proxyFmtDate(u.expiration_rfc3339))}</td>
+            <td>${actions}</td>
+        </tr>`;
+    }).join('');
+}
+
+function openProxyUserModal(name) {
+    const isEdit = !!name;
+    const u = isEdit ? (proxyState.users.find(x => String(x.username) === String(name)) || {}) : {};
+    const gb = (bytes) => bytes == null ? '' : String(Number((Number(bytes) / (1024 ** 3)).toFixed(2)));
+    const mbps = (bps) => bps == null ? '' : String(Number((Number(bps) / 1000000).toFixed(2)));
+    const dateValue = u.expiration_rfc3339 ? new Date(u.expiration_rfc3339).toISOString().slice(0, 10) : '';
+    const caps = (proxyState.status && proxyState.status.capabilities) || {};
+    const html = `
+        <div class="wizard-grid">
+            <label class="field"><span>Имя пользователя</span>
+                <input id="pufName" value="${esc(u.username || '')}" ${isEdit ? 'disabled' : ''} placeholder="alice">
+            </label>
+            <label class="field"><span>Секрет (32 hex)</span>
+                <input id="pufSecret" value="" placeholder="${isEdit ? 'Пусто — не менять' : 'Пусто — сгенерировать'}" autocomplete="off">
+            </label>
+            <label class="field"><span>Лимит TCP-соединений</span>
+                <input id="pufConns" type="number" min="0" value="${u.max_tcp_conns == null ? '' : esc(u.max_tcp_conns)}" placeholder="Пусто — без лимита">
+            </label>
+            <label class="field"><span>Лимит уникальных IP</span>
+                <input id="pufIps" type="number" min="0" value="${u.max_unique_ips == null ? '' : esc(u.max_unique_ips)}" placeholder="Пусто — без лимита">
+            </label>
+            <label class="field"><span>Квота трафика, ГБ</span>
+                <input id="pufQuota" type="number" min="0" step="0.1" value="${gb(u.data_quota_bytes)}" placeholder="Пусто — без лимита">
+            </label>
+            <label class="field"><span>Срок действия</span>
+                <input id="pufExpiry" type="date" value="${esc(dateValue)}">
+            </label>
+            <label class="field"><span>Скорость отдачи, Мбит/с</span>
+                <input id="pufUp" type="number" min="0" step="0.1" value="${mbps(u.rate_limit_up_bps)}" placeholder="Пусто — без лимита">
+            </label>
+            <label class="field"><span>Скорость загрузки, Мбит/с</span>
+                <input id="pufDown" type="number" min="0" step="0.1" value="${mbps(u.rate_limit_down_bps)}" placeholder="Пусто — без лимита">
+            </label>
+            <label class="field"><span>ad_tag (32 hex)</span>
+                <input id="pufTag" value="${esc(u.user_ad_tag || '')}" placeholder="Необязательно">
+            </label>
+            <label class="field"><span>Заметка</span>
+                <input id="pufNotes" value="${esc(u.notes || '')}" placeholder="Например: iPhone">
+            </label>
+        </div>
+        <label class="form-check" style="margin:4px 0 14px;">
+            <input type="checkbox" id="pufEnabled" ${u.enabled !== false ? 'checked' : ''}> Пользователь включён
+        </label>
+        ${caps.notes === false ? '<div class="wizard-note info">Движок telemt не хранит заметки — поле будет проигнорировано.</div>' : ''}
+        <div class="wizard-note info">Квота указывается в гигабайтах, скорости — в мегабитах в секунду. Пустое поле снимает лимит.</div>
+        <div style="display:flex;gap:9px;justify-content:flex-end;margin-top:16px;">
+            <button class="btn-dark" onclick="closeModal()">Отмена</button>
+            <button class="btn-primary" onclick="saveProxyUser(${isEdit ? `'${proxyArg(name)}'` : 'null'})">${isEdit ? 'Сохранить' : 'Создать'}</button>
+        </div>`;
+    openModal(isEdit ? 'Пользователь ' + name : 'Новый пользователь прокси', html);
+}
+
+async function saveProxyUser(name) {
+    const val = (id) => { const el = document.getElementById(id); return el ? String(el.value).trim() : ''; };
+    const num = (id) => {
+        const v = val(id);
+        if (v === '') return null;
+        const n = Number(v);
+        return Number.isFinite(n) && n >= 0 ? n : undefined;
+    };
+    const payload = {};
+
+    if (!name) {
+        const username = val('pufName');
+        if (!/^[A-Za-z0-9_.-]{1,64}$/.test(username)) {
+            toast('Неверное имя', 'error', 'Разрешены A–Z, a–z, 0–9, _, . и -, до 64 символов.');
+            return;
+        }
+        payload.username = username;
+    }
+
+    const secret = val('pufSecret');
+    if (secret) {
+        if (!/^[0-9a-fA-F]{32}$/.test(secret)) {
+            toast('Неверный секрет', 'error', 'Секрет — 32 hex-символа.');
+            return;
+        }
+        payload.secret = secret.toLowerCase();
+    }
+
+    const conns = num('pufConns');
+    const ips = num('pufIps');
+    const quota = num('pufQuota');
+    const up = num('pufUp');
+    const down = num('pufDown');
+    if ([conns, ips, quota, up, down].includes(undefined)) {
+        toast('Проверьте числа', 'error', 'Лимиты и скорости должны быть неотрицательными числами.');
+        return;
+    }
+    payload.max_tcp_conns = conns;
+    payload.max_unique_ips = ips;
+    payload.data_quota_bytes = quota === null ? null : Math.round(quota * (1024 ** 3));
+    payload.rate_limit_up_bps = up === null ? null : Math.round(up * 1000000);
+    payload.rate_limit_down_bps = down === null ? null : Math.round(down * 1000000);
+
+    const expiry = val('pufExpiry');
+    payload.expiration_rfc3339 = expiry
+        ? new Date(expiry + 'T23:59:59Z').toISOString().replace(/\.\d{3}Z$/, '+00:00')
+        : null;
+
+    const tag = val('pufTag');
+    if (tag && !/^[0-9a-fA-F]{32}$/.test(tag)) {
+        toast('Неверный ad_tag', 'error', 'ad_tag — 32 hex-символа.');
+        return;
+    }
+    payload.user_ad_tag = tag ? tag.toLowerCase() : null;
+    payload.notes = val('pufNotes') || null;
+    const enabledEl = document.getElementById('pufEnabled');
+    payload.enabled = !!(enabledEl && enabledEl.checked);
+
+    try {
+        if (name) {
+            await apiJson(`/api/proxy/users/${encodeURIComponent(name)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            toast('Пользователь обновлён', 'success', name);
+        } else {
+            await apiJson('/api/proxy/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            toast('Пользователь создан', 'success', payload.username);
+        }
+        closeModal();
+        await loadProxyTab(true);
+    } catch (e) {
+        toast('Не удалось сохранить', 'error', e.message);
+    }
+}
+
+async function deleteProxyUser(name) {
+    if (!confirm(`Удалить пользователя «${name}»? Его ссылка перестанет работать.`)) return;
+    try {
+        await apiJson(`/api/proxy/users/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        toast('Пользователь удалён', 'success', name);
+        await loadProxyTab(true);
+    } catch (e) {
+        toast('Не удалось удалить', 'error', e.message);
+    }
+}
+
+async function proxyUserAction(name, action) {
+    const labels = {
+        enable: 'Пользователь включён',
+        disable: 'Пользователь выключен',
+        'rotate-secret': 'Секрет обновлён',
+        'reset-quota': 'Квота сброшена',
+        'reset-traffic': 'Статистика трафика сброшена'
+    };
+    if (action === 'rotate-secret' && !confirm(`Выдать новый секрет для «${name}»? Старая ссылка перестанет работать.`)) return;
+    try {
+        const data = await apiJson(`/api/proxy/users/${encodeURIComponent(name)}/${action}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        toast(labels[action] || 'Готово', 'success', name);
+        if (action === 'rotate-secret') {
+            const secret = (data && data.secret) || (data && data.user && data.user.secret) || '';
+            if (secret) {
+                openModal('Новый секрет · ' + name, `
+                    <p>Секрет показывается один раз. Обновите ссылку у пользователя.</p>
+                    <div class="proxy-link-row" style="margin:12px 0;">
+                        <input readonly value="${esc(secret)}">
+                        <button class="btn-dark" onclick="copyText('${proxyArg(secret)}')">Копировать</button>
+                    </div>`);
+            }
+        }
+        await loadProxyTab(true);
+    } catch (e) {
+        toast('Действие не выполнено', 'error', e.message);
+    }
+}
+
+async function showProxyUserLinks(name) {
+    try {
+        const data = await apiJson(`/api/proxy/users/${encodeURIComponent(name)}/links`);
+        const links = Array.isArray(data.links) ? data.links : [];
+        if (!links.length) {
+            openModal('Ссылки · ' + name, '<p>Ссылок нет. Проверьте, что пользователь включён, а движок запущен.</p>');
+            return;
+        }
+        const rows = links.map(link => `<div class="proxy-link-row">
+            <input readonly value="${esc(link)}">
+            <button class="btn-dark" onclick="copyText('${proxyArg(link)}')">Копировать</button>
+        </div>`).join('');
+        openModal('Ссылки · ' + name, `
+            <div style="display:flex;flex-direction:column;gap:8px;">${rows}</div>
+            ${data.qr ? `<div style="text-align:center;margin-top:16px;"><img src="${data.qr}" alt="QR" style="width:220px;height:220px;background:#fff;padding:8px;border-radius:12px;"></div>` : ''}
+            <div class="wizard-note info" style="margin-top:14px;">Ссылка <code>tg://</code> открывается в Telegram. QR удобно показать с экрана.</div>`);
+    } catch (e) {
+        toast('Не удалось получить ссылки', 'error', e.message);
+    }
+}
+
+async function proxyRestart() {
+    if (!confirm('Перезапустить движок прокси? Активные подключения прервутся на несколько секунд.')) return;
+    try {
+        await apiJson('/api/proxy/restart', { method: 'POST' });
+        toast('Прокси перезапущен', 'success');
+        await loadProxyTab(true);
+    } catch (e) {
+        toast('Не удалось перезапустить', 'error', e.message);
+    }
+}
+
+async function proxyRotateKey() {
+    if (!confirm('Выдать новый ключ API MTProxyL?\n\nСтарый ключ перестанет работать во всех интеграциях. Панель сохранит новый ключ автоматически.')) return;
+    try {
+        const res = await apiJson('/api/proxy/api-key', { method: 'POST' });
+        if (res && res.key) {
+            openModal('Ключ API', `
+                <p>Ключ выдан, но сохранить его на диск не удалось. Скопируйте и сохраните вручную:</p>
+                <div class="proxy-link-row" style="margin-top:12px;">
+                    <input readonly value="${esc(res.key)}">
+                    <button class="btn-dark" onclick="copyText('${proxyArg(res.key)}')">Копировать</button>
+                </div>`);
+        } else {
+            toast('Ключ API обновлён', 'success', res && res.path ? res.path : '');
+        }
+        await loadProxyTab(true);
+    } catch (e) {
+        toast('Не удалось выдать ключ', 'error', e.message);
+    }
+}
+
+async function loadProxyBot() {
+    try {
+        const st = await apiJson('/api/proxy/bot');
+        proxyState.bot = st;
+        const badge = document.getElementById('proxyBotBadge');
+        if (badge) {
+            badge.className = 'badge ' + (st.running ? 'badge-good' : st.enabled ? 'badge-warn' : 'badge-muted');
+            badge.innerText = st.running ? 'работает' : st.enabled ? 'включён, но не запущен' : 'выключен';
+        }
+        const tokenEl = document.getElementById('proxyBotToken');
+        if (tokenEl) {
+            tokenEl.value = '';
+            tokenEl.placeholder = st.tokenSet ? `Сохранён: ${st.token}` : '123456789:AA…';
+        }
+        const adminsEl = document.getElementById('proxyBotAdmins');
+        if (adminsEl) adminsEl.value = (st.admins || []).join(', ');
+        const enabledEl = document.getElementById('proxyBotEnabled');
+        if (enabledEl) enabledEl.checked = !!st.enabled;
+        const info = document.getElementById('proxyBotInfo');
+        if (info) {
+            const lines = [];
+            if (st.botUsername) lines.push(`Бот: <b>@${esc(st.botUsername)}</b>.`);
+            if (st.lastError) lines.push(`Последняя ошибка: ${esc(st.lastError)}.`);
+            lines.push('Команды: /status, /users, /user, /link, /add, /del, /enable, /disable, /rotate, /reset, /restart.');
+            if (!st.admins || !st.admins.length) {
+                lines.push('Сначала отправьте боту /start — он покажет ваш Telegram ID, добавьте его в список администраторов.');
+            }
+            info.innerHTML = lines.join(' ');
+        }
+    } catch (e) {
+        const info = document.getElementById('proxyBotInfo');
+        if (info) info.innerHTML = esc(e.message);
+    }
+}
+
+async function saveProxyBot() {
+    const tokenEl = document.getElementById('proxyBotToken');
+    const adminsEl = document.getElementById('proxyBotAdmins');
+    const enabledEl = document.getElementById('proxyBotEnabled');
+    const body = {
+        enabled: !!(enabledEl && enabledEl.checked),
+        admins: String((adminsEl && adminsEl.value) || '').split(/[,\s;]+/).filter(Boolean)
+    };
+    const token = String((tokenEl && tokenEl.value) || '').trim();
+    if (token) body.token = token;
+    try {
+        await apiJson('/api/proxy/bot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        toast('Настройки бота сохранены', 'success', body.enabled ? 'бот перезапущен' : 'бот выключен');
+        await loadProxyBot();
+    } catch (e) {
+        toast('Не удалось сохранить бота', 'error', e.message);
+    }
+}
+
+async function testProxyBot() {
+    try {
+        const res = await apiJson('/api/proxy/bot/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        toast('Тест отправлен', 'success', res && res.chatId ? 'chat ' + res.chatId : '');
+    } catch (e) {
+        toast('Тест не отправлен', 'error', e.message);
     }
 }

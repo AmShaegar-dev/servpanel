@@ -1,4 +1,4 @@
-# 🌐 Servpanel 2.7 — Веб-панель управления AmneziaWG & Server Suite
+# 🌐 Servpanel 2.8 — Веб-панель управления AmneziaWG & Server Suite
 
 Современная, отказоустойчивая и безопасная веб-панель для управления VPN-сервером **AmneziaWG (версий 3.1 / 2.0 / 1.5)**, правилами фаервола (UFW, GeoIP RU-Drop, DNS-перехват), блокировщиком рекламы **AdGuard Home**, прокси **MTProto (MEKO)**, доменами и HTTPS-сертификатами **Let's Encrypt**, а также системными службами Linux.
 
@@ -600,7 +600,7 @@ SSH, из панели.
 
 | Параметр | Значения |
 | --- | --- |
-| Вид установки | `Telemt`, `MTProto.zig`, `Только фикс MEKO` |
+| Вид установки | `Telemt`, `MTProto.zig`, `MTProxyL`, `Только фикс MEKO` |
 | SNI-домен маскировки | по умолчанию `ozon.ru` |
 | Порт прокси | по умолчанию `443` |
 | Версия Telemt | пусто — последняя с GitHub |
@@ -630,6 +630,74 @@ SSH, из панели.
 Установщик панели — `install_mtproto_silent.sh`. Он проверяет домен, порты,
 hex-секреты и вид установки до запуска, поэтому ошибка ввода не приводит к
 полуустановленному прокси.
+
+---
+
+## ◈ MTProxyL: прокси, пользователи и лимиты
+
+**MTProxyL** ([Liafanx/MTProxyL](https://github.com/Liafanx/MTProxyL)) —
+менеджер MTProto-прокси на движке telemt. Кроме самого прокси он даёт API
+управления, лимиты на пользователя и Telegram-бота. Панель ставит его из
+того же мастера **«Установить MTProto»** (вариант `MTProxyL`) или кнопкой
+**«Установить MTProxyL»** на вкладке «Установка».
+
+Что можно выбрать в мастере:
+
+| Параметр | Значения |
+| --- | --- |
+| Режим | `Manager` — новый прокси, `Reanimator` — реанимация существующего |
+| Движок | бинарник (systemd) или `Docker` |
+| Режим прокси | `MTProto`, `WEB`, `MTProto + WEB` |
+| Порт / SNI | порт прокси и домен маскировки (`autoscout24.ru` по умолчанию) |
+| Обходы | Zapret2, NFT SYN limiter (`meko`/`classic`/`off`), обходы By-MEKO |
+| Selfmask | домен, Let's Encrypt или самоподписанный сертификат |
+| WEB Proxy | домен и carrier: `https`, `https-lanes`, `websocket`, `websocket-lanes` |
+| API | `mtproxyl-api` на `127.0.0.1:9190` (нужен панели) |
+| Telegram | токен и ID администратора для встроенного бота MTProxyL |
+| Пользователь | первый пользователь, его секрет и `ad_tag` |
+
+После установки панель сама забирает ключ `mtproxyl-api`, проверяет его
+запросом `/v1/health` и сохраняет в `/etc/mtproxyl-api/servpanel.key`
+(права `0600`). Ключ нельзя прочитать повторно — MTProxyL хранит только
+SHA-256, поэтому если API уже был настроен раньше, нажмите
+**«Выдать ключ API»** во вкладке «Прокси».
+
+### Вкладка «Прокси»
+
+Единый интерфейс для **MTProxyL** и **Telemt** (у них совместимый REST API):
+
+* создание и удаление пользователей, включение и выключение;
+* новый секрет одной кнопкой, сброс квоты и статистики трафика;
+* лимиты: скорость отдачи и загрузки, уникальные IP, TCP-соединения;
+* квота трафика, срок действия, `ad_tag`, заметки;
+* ссылки `tg://` для каждого пользователя и QR-код;
+* перезапуск движка и выдача ключа API.
+
+**MTProto.zig** пользователей и лимиты не поддерживает — панель честно
+показывает это вместо пустого списка.
+
+Порты открываются в UFW автоматически: порт прокси, `80`/`443` для WEB и
+Selfmask, SSH и порт панели. API по умолчанию слушает loopback и наружу не
+открывается.
+
+### Telegram-бот панели
+
+Во вкладке «Прокси» есть собственный бот Servpanel (long polling, отдельная
+служба не нужна). Он работает через тот же API и отвечает только ID из
+списка администраторов:
+
+```
+/status  /users  /user имя  /link имя
+/add имя [conns=8] [ips=3] [quota=50] [days=30] [up=10] [down=20] [tag=hex]
+/del имя  /enable имя  /disable имя  /rotate имя  /reset имя  /restart
+```
+
+Конфиг хранится в `DATA_DIR/.proxybot.json` с правами `0600`. Отправьте боту
+`/start` — он покажет ваш Telegram ID, добавьте его в панели и включите бота.
+
+> Встроенный бот MTProxyL — отдельная функция самого MTProxyL. Его можно
+> включить в мастере, но панель для управления пользователями использует
+> свой бот и API.
 
 ---
 
@@ -750,15 +818,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.7.0/servpanel-2.7.0.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.7.0/servpanel-2.7.0.tar.gz.sha256
-sha256sum -c servpanel-2.7.0.tar.gz.sha256
-tar -xzf servpanel-2.7.0.tar.gz
-bash /root/servpanel-2.7.0/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.8.0/servpanel-2.8.0.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.8.0/servpanel-2.8.0.tar.gz.sha256
+sha256sum -c servpanel-2.8.0.tar.gz.sha256
+tar -xzf servpanel-2.8.0.tar.gz
+bash /root/servpanel-2.8.0/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `2.7.0`. Если `curl` не установлен:
+Должно вывести `2.8.0`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:

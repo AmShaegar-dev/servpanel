@@ -32,14 +32,14 @@ const ITEMS = [
     'README.md', 'DEMO.md', 'MANUAL-UPDATE.md', 'КАК-РАЗВЕРНУТЬ.txt',
     'ИЗМЕНЕНИЯ.md', 'ОБНОВЛЕНИЕ-2.4.md',
     'install.sh', 'install_adguard_silent.sh', 'install_awg_stateful.sh',
-    'install_mtproto_silent.sh', 'install_warp_xray.sh', 'warp-domains.txt',
+    'install_mtproto_silent.sh', 'install_mtproxyl_silent.sh', 'install_warp_xray.sh', 'warp-domains.txt',
     'update.sh', 'upgrade.sh', 'LICENSE', '.gitignore'
 ];
 const FORBIDDEN = new Set([
     'admin_pass.txt', '.secrets.json', '.users.json', '.panel_port', '.panel_public_port',
     '.obf_profiles.json', '.notify.json', '.backup.json', '.backup_pass',
     '.install_state.json', '.sessions', 'awg_audit.log', 'servpanel_auth.log',
-    '.app_settings.json', '.app'
+    '.app_settings.json', '.app', '.proxybot.json'
 ]);
 
 function sha256(file) {
@@ -78,7 +78,7 @@ for (const bad of FORBIDDEN) {
     const p = path.join(STAGE, bad);
     if (fs.existsSync(p)) throw new Error('В релиз попал файл данных: ' + bad);
 }
-for (const required of ['server.js', 'package.json', 'public/index.html', 'public/style.css', 'public/app.js', 'lib/update-worker.js']) {
+for (const required of ['server.js', 'package.json', 'public/index.html', 'public/style.css', 'public/app.js', 'lib/update-worker.js', 'lib/proxy-users.js', 'lib/proxy-bot.js', 'install_mtproxyl_silent.sh']) {
     if (!fs.existsSync(path.join(STAGE, required))) throw new Error('В релизе нет ' + required);
 }
 if (WITH_NM && !fs.existsSync(path.join(STAGE, 'node_modules', 'qrcode'))) {

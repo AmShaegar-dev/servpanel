@@ -1204,3 +1204,41 @@ body.expert .expert-badge { display: inline-flex; }
 @media (max-width: 700px) {
     .update-grid { grid-template-columns: 1fr; }
 }
+
+/* --------------------------------------------------------------------------
+   Прокси: пользователи, ссылки, Telegram-бот
+   -------------------------------------------------------------------------- */
+.proxy-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.proxy-actions button {
+    padding: 4px 7px;
+    font-size: 11px;
+    min-width: 30px;
+}
+.proxy-link-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    min-width: 0;
+}
+.proxy-link-row input {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    background: rgba(0, 0, 0, .35);
+    color: #9fc4ff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 9px;
+}
+.proxy-link-row button { flex: 0 0 auto; }
+#tab-proxy .card-head h3 { margin-bottom: 2px; }
+#tab-proxy .badge { white-space: nowrap; }
+@media (max-width: 700px) {
+    .proxy-link-row { flex-direction: column; align-items: stretch; }
+    .proxy-link-row button { width: 100%; }
+}

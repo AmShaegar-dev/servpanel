@@ -887,6 +887,178 @@ test('MTProto: endpoint ссылок всегда возвращает масс�
     assert.ok(Array.isArray(r.json.links));
 });
 
+test('Прокси: в тестовом режиме движок не обнаружен', async () => {
+    const r = await request('/api/proxy/status');
+    assert.equal(r.status, 200);
+    assert.equal(r.json.backend, 'none');
+    assert.equal(r.json.reason, 'test');
+    assert.equal(r.json.capabilities.users, false);
+});
+
+test('Прокси: список пользователей без движка возвращает 503', async () => {
+    const r = await request('/api/proxy/users');
+    assert.equal(r.status, 503);
+    assert.equal(r.json.code, 'no_backend');
+});
+
+test('Прокси: создание отклоняет неверное имя до обращения к движку', async () => {
+    const r = await request('/api/proxy/users', jsonBody({ username: '../evil' }));
+    assert.equal(r.status, 400);
+    assert.match(r.json.error, /имя/i);
+});
+
+test('Прокси: нормализация лимитов, квоты и даты', () => {
+    const patch = internals.proxyUserPatch({
+        max_tcp_conns: '8',
+        max_unique_ips: 3,
+        data_quota_bytes: '1073741824',
+        rate_limit_up_bps: '10000000',
+        expiration_rfc3339: '2030-01-02',
+        user_ad_tag: 'D'.repeat(32),
+        notes: '  iPhone  ',
+        enabled: 'true'
+    });
+    assert.equal(patch.max_tcp_conns, 8);
+    assert.equal(patch.max_unique_ips, 3);
+    assert.equal(patch.data_quota_bytes, 1073741824);
+    assert.equal(patch.rate_limit_up_bps, 10000000);
+    assert.equal(patch.expiration_rfc3339, '2030-01-02T00:00:00+00:00');
+    assert.equal(patch.user_ad_tag, 'd'.repeat(32));
+    assert.equal(patch.notes, 'iPhone');
+    assert.equal(patch.enabled, true);
+
+    assert.throws(() => internals.proxyUserPatch({ max_tcp_conns: -1 }), /max_tcp_conns/);
+    assert.throws(() => internals.proxyUserPatch({ expiration_rfc3339: 'не дата' }), /дата/i);
+    assert.throws(() => internals.proxyUserPatch({ user_ad_tag: 'xyz' }), /ad_tag/i);
+});
+
+test('Прокси: изменение требует администратора', async () => {
+    await request('/api/logout', { method: 'POST' });
+    assert.equal((await login('viewer-pass-123', 'viewer1')).status, 200);
+
+    const denied = await request('/api/proxy/users/alice/enable', jsonBody({}));
+    assert.equal(denied.status, 403);
+
+    const list = await request('/api/proxy/users');
+    assert.equal(list.status, 503);
+    assert.equal(list.json.code, 'no_backend');
+
+    await request('/api/logout', { method: 'POST' });
+    assert.equal((await login('test-admin-pass-123')).status, 200);
+});
+
+test('Прокси: бот выключен по умолчанию и не отдаёт токен', async () => {
+    const r = await request('/api/proxy/bot');
+    assert.equal(r.status, 200);
+    assert.equal(r.json.enabled, false);
+    assert.equal(r.json.running, false);
+    assert.equal(r.json.tokenSet, false);
+    assert.equal(r.json.token, '');
+    assert.deepEqual(r.json.admins, []);
+});
+
+test('Прокси: неверный токен бота отклоняется', async () => {
+    const r = await request('/api/proxy/bot', jsonBody({ token: 'not-a-token' }));
+    assert.equal(r.status, 400);
+    assert.equal(r.json.code, 'bad_token');
+});
+
+test('MTProxyL: неизвестный режим отклоняется', async () => {
+    const r = await request('/api/install/module', jsonBody({ module: 'mtproxyl', mplMode: 'nope' }));
+    assert.equal(r.status, 400);
+    assert.match(r.json.error, /режим/i);
+});
+
+test('MTProxyL: неизвестный движок отклоняется', async () => {
+    const r = await request('/api/install/module', jsonBody({ module: 'mtproxyl', mplEngine: 'qemu' }));
+    assert.equal(r.status, 400);
+    assert.match(r.json.error, /движок/i);
+});
+
+test('MTProxyL: неизвестный режим прокси отклоняется', async () => {
+    const r = await request('/api/install/module', jsonBody({ module: 'mtproxyl', mplProxyMode: 'socks' }));
+    assert.equal(r.status, 400);
+    assert.match(r.json.error, /режим прокси/i);
+});
+
+test('MTProxyL: неверный порт отклоняется', async () => {
+    const r = await request('/api/install/module', jsonBody({ module: 'mtproxyl', mplPort: '70000' }));
+    assert.equal(r.status, 400);
+    assert.match(r.json.error, /порт/i);
+});
+
+test('MTProxyL: неверный SNI отклоняется', async () => {
+    const r = await request('/api/install/module', jsonBody({ module: 'mtproxyl', mplSni: 'bad host' }));
+    assert.equal(r.status, 400);
+    assert.match(r.json.error, /SNI/i);
+});
+
+test('MTProxyL: WEB Proxy требует домен', async () => {
+    const r = await request('/api/install/module', jsonBody({ module: 'mtproxyl', mplWeb: true }));
+    assert.equal(r.status, 400);
+    assert.match(r.json.error, /домен/i);
+});
+
+test('MTProxyL: неверный токен встроенного бота отклоняется', async () => {
+    const r = await request('/api/install/module', jsonBody({ module: 'mtproxyl', mplTgbotToken: 'bad' }));
+    assert.equal(r.status, 400);
+    assert.match(r.json.error, /токен/i);
+});
+
+test('MTProxyL: installEnv собирает все переменные установки', () => {
+    const env = internals.installEnv({
+        module: 'mtproxyl',
+        mplMode: 'reanimator',
+        mplEngine: 'docker',
+        mplProxyMode: 'combined',
+        mplPort: '8443',
+        mplSni: 'example.com',
+        mplHost: '203.0.113.5',
+        mplSecret: 'a'.repeat(32),
+        mplAdTag: 'b'.repeat(32),
+        mplUser: 'alice',
+        mplUserSecret: 'c'.repeat(32),
+        mplZapret2: false,
+        mplSynLimiter: 'classic',
+        mplMeko: false,
+        mplSelfmask: 'mask.example.com',
+        mplSelfmaskCert: 'selfsigned',
+        mplSelfmaskEmail: 'admin@example.com',
+        mplWeb: true,
+        mplWebDomain: 'web.example.com',
+        mplWebCarrier: 'websocket-lanes',
+        mplApi: true,
+        mplApiListen: '0.0.0.0:9190',
+        mplTgbotToken: '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw',
+        mplTgbotAdmin: '987654321',
+        mplForce: true
+    });
+    assert.equal(env.MTPROXYL_MODE, 'reanimator');
+    assert.equal(env.MTPROXYL_ENGINE, 'docker');
+    assert.equal(env.MTPROXYL_PROXY_MODE, 'combined');
+    assert.equal(env.MTPROXYL_PORT, '8443');
+    assert.equal(env.MTPROXYL_SNI, 'example.com');
+    assert.equal(env.MTPROXYL_HOST, '203.0.113.5');
+    assert.equal(env.MTPROXYL_SECRET, 'a'.repeat(32));
+    assert.equal(env.MTPROXYL_AD_TAG, 'b'.repeat(32));
+    assert.equal(env.MTPROXYL_USER, 'alice');
+    assert.equal(env.MTPROXYL_USER_SECRET, 'c'.repeat(32));
+    assert.equal(env.MTPROXYL_ZAPRET2, 'no');
+    assert.equal(env.MTPROXYL_SYN_LIMITER, 'classic');
+    assert.equal(env.MTPROXYL_MEKO, 'no');
+    assert.equal(env.MTPROXYL_SELFMASK, 'mask.example.com');
+    assert.equal(env.MTPROXYL_SELFMASK_CERT, 'selfsigned');
+    assert.equal(env.MTPROXYL_SELFMASK_EMAIL, 'admin@example.com');
+    assert.equal(env.MTPROXYL_WEB, 'yes');
+    assert.equal(env.MTPROXYL_WEB_DOMAIN, 'web.example.com');
+    assert.equal(env.MTPROXYL_WEB_CARRIER, 'websocket-lanes');
+    assert.equal(env.MTPROXYL_API, 'yes');
+    assert.equal(env.MTPROXYL_API_LISTEN, '0.0.0.0:9190');
+    assert.equal(env.MTPROXYL_TGBOT_TOKEN, '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw');
+    assert.equal(env.MTPROXYL_TGBOT_ADMIN, '987654321');
+    assert.equal(env.MTPROXYL_FORCE, '1');
+});
+
 test('выход закрывает доступ', async () => {
     await request('/api/logout', { method: 'POST' });
     const r = await request('/api/stats');

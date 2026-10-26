@@ -1,12 +1,12 @@
 {
   "name": "servpanel",
-  "version": "2.7.0",
-  "description": "Servpanel — web panel for AmneziaWG, RU->EU cascade, AdGuard Home, clients, security and backups",
+  "version": "2.8.0",
+  "description": "Servpanel — web panel for AmneziaWG, RU->EU cascade, AdGuard Home, MTProto proxies, clients, security and backups",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "test": "npm run check && node --test tests/api.test.js",
-    "check": "node --check server.js && node --check public/app.js && node --check lib/updater.js && node --check lib/update-worker.js"
+    "check": "node --check server.js && node --check public/app.js && node --check lib/updater.js && node --check lib/update-worker.js && node --check lib/proxy-users.js && node --check lib/proxy-bot.js"
   },
   "keywords": [
     "amneziawg",
