@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="2.8.0">
+    <meta name="panel-version" content="2.8.2">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -537,7 +537,7 @@
                     <div class="card-head">
                         <div>
                             <h3>Мобильное приложение Servpanel</h3>
-                            <p>Скачайте APK прямо с панели — без GitHub и сторонних ссылок. Файл можно загрузить сюда же.</p>
+                            <p>Скачайте последнюю сборку приложения. Панель берёт версию из релизов GitHub и не хранит APK у себя.</p>
                         </div>
                         <span class="badge badge-muted" id="appApkBadge">проверка</span>
                     </div>
@@ -545,10 +545,7 @@
                     <div id="appApkSummary" class="stats-cards" style="margin-bottom:14px;"></div>
                     <div class="controls-row" style="margin-bottom:0;">
                         <a class="btn btn-primary" id="appApkDownload" href="/api/app/apk" download>⬇ Скачать APK</a>
-                        <button class="btn btn-ghost" onclick="loadAppPanel()">↻ Обновить</button>
-                        <button class="btn btn-soft" id="appApkUploadBtn" onclick="document.getElementById('appApkFile').click()">⬆ Загрузить APK</button>
-                        <input type="file" id="appApkFile" accept=".apk,application/vnd.android.package-archive" style="display:none;" onchange="uploadApk(this)">
-                        <button class="btn btn-dark" id="appApkDeleteBtn" style="display:none;" onclick="deleteApk()">Удалить загруженный</button>
+                        <button class="btn btn-ghost" onclick="refreshApkVersion()">↻ Проверить обновление</button>
                     </div>
                     <div id="appApkResult" class="update-note" style="display:none;"></div>
                 </div>
@@ -1365,7 +1362,7 @@
                     </div>
                     <div class="update-source">
                         <span>Или ссылка на релиз:</span>
-                        <input type="text" id="updUrl" placeholder="https://example.com/servpanel-2.8.0.tar.gz" style="flex:1; min-width:240px;">
+                        <input type="text" id="updUrl" placeholder="https://example.com/servpanel-2.8.2.tar.gz" style="flex:1; min-width:240px;">
                         <button class="btn btn-dark" id="updUrlBtn" onclick="updFromUrl()">Установить по URL</button>
                     </div>
                     <div class="update-source">

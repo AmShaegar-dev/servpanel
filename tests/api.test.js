@@ -685,17 +685,18 @@ test('Приложение: статус и метрики требуют авт
     assert.equal(mt.status, 401);
 });
 
-test('Настройки: старая ссылка на APK переписывается на новый аккаунт', () => {
+test('Настройки: старые ссылки на APK переписываются на релиз приложения', () => {
     const file = path.join(DATA_DIR, '.app_settings.json');
     const had = fs.existsSync(file);
     const prev = had ? fs.readFileSync(file) : null;
     const legacy = 'https://github.com/makar19977v-glitch/servpanel/releases/latest/download/servpanel.apk';
-    fs.writeFileSync(file, JSON.stringify({ apk: { url: legacy, version: '' } }));
+    const panelApk = 'https://github.com/AmShaegar-dev/servpanel/releases/latest/download/servpanel.apk';
+    const expected = 'https://github.com/AmShaegar-dev/servpanel-android/releases/latest/download/servpanel-mobile.apk';
     try {
-        assert.equal(
-            internals.readAppSettings().apk.url,
-            'https://github.com/AmShaegar-dev/servpanel/releases/latest/download/servpanel.apk'
-        );
+        for (const url of [legacy, panelApk]) {
+            fs.writeFileSync(file, JSON.stringify({ apk: { url, version: '' } }));
+            assert.equal(internals.readAppSettings().apk.url, expected);
+        }
     } finally {
         if (had) fs.writeFileSync(file, prev);
         else fs.rmSync(file, { force: true });
@@ -814,31 +815,64 @@ test('Приложение: внешний адрес без токена пол
     await request('/api/app/metrics', jsonBody({ enabled: false }));
 });
 
-test('Приложение: APK загружается, скачивается и удаляется', async () => {
-    const bytes = Buffer.from('PK\x03\x04servpanel-test-apk');
+test('Приложение: версия APK берётся из app/version.txt, пока GitHub не опрошен', async () => {
+    const expected = fs.readFileSync(path.join(__dirname, '..', 'app', 'version.txt'), 'utf8').trim();
+    const st = await request('/api/app/status');
+    assert.equal(st.status, 200);
+    assert.equal(st.json.apk.version, expected);
+    assert.equal(st.json.apk.versionSource, 'file');
+    assert.equal(st.json.apk.available, true);
+    assert.equal(st.json.apk.source, 'remote');
+    assert.match(st.json.apk.externalUrl, /servpanel-android\/releases\/latest\/download\/servpanel-mobile\.apk/);
+});
+
+test('Приложение: APK скачивается из GitHub, загрузка из панели отключена', async () => {
     const up = await request('/api/app/apk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/octet-stream' },
-        body: bytes
+        body: Buffer.from('PK\x03\x04servpanel-test-apk')
     });
-    assert.equal(up.status, 200);
-    assert.equal(up.json.success, true);
-    assert.equal(up.json.apk.source, 'local');
-    assert.equal(up.json.apk.size, bytes.length);
-    assert.match(up.json.apk.sha256, /^[a-f0-9]{64}$/);
-
-    const dl = await request('/api/app/apk');
-    assert.equal(dl.status, 200);
-    assert.equal(dl.headers.get('content-type'), 'application/vnd.android.package-archive');
-    assert.equal(dl.text, bytes.toString());
+    assert.equal(up.status, 405);
+    assert.match(up.json.error, /отключена/i);
 
     const del = await request('/api/app/apk', { method: 'DELETE' });
-    assert.equal(del.status, 200);
-    assert.equal(del.json.removed, true);
+    assert.equal(del.status, 405);
 
     const remote = await fetch(base + '/api/app/apk', { redirect: 'manual', headers: { cookie } });
     assert.equal(remote.status, 302);
-    assert.match(remote.headers.get('location') || '', /github\.com/);
+    assert.match(remote.headers.get('location') || '',
+        /servpanel-android\/releases\/latest\/download\/servpanel-mobile\.apk/);
+});
+
+test('Приложение: локальный APK отдаётся, если ссылка отключена', async () => {
+    const settingsFile = path.join(DATA_DIR, '.app_settings.json');
+    const had = fs.existsSync(settingsFile);
+    const prev = had ? fs.readFileSync(settingsFile, 'utf8') : '';
+    const apkDir = path.join(DATA_DIR, '.app');
+    const apkFile = path.join(apkDir, 'servpanel.apk');
+    const bytes = Buffer.from('PK\x03\x04servpanel-local-apk');
+    try {
+        fs.mkdirSync(apkDir, { recursive: true });
+        fs.writeFileSync(apkFile, bytes);
+        const raw = had ? JSON.parse(prev) : {};
+        raw.apk = { url: '', version: '' };
+        fs.writeFileSync(settingsFile, JSON.stringify(raw), { mode: 0o600 });
+
+        const expected = fs.readFileSync(path.join(__dirname, '..', 'app', 'version.txt'), 'utf8').trim();
+        const st = await request('/api/app/status');
+        assert.equal(st.json.apk.source, 'local');
+        assert.equal(st.json.apk.version, expected);
+
+        const dl = await request('/api/app/apk');
+        assert.equal(dl.status, 200);
+        assert.equal(dl.headers.get('content-type'), 'application/vnd.android.package-archive');
+        assert.equal(dl.text, bytes.toString());
+    } finally {
+        fs.rmSync(apkFile, { force: true });
+        fs.rmSync(apkDir, { recursive: true, force: true });
+        if (had) fs.writeFileSync(settingsFile, prev);
+        else fs.rmSync(settingsFile, { force: true });
+    }
 });
 
 test('isApiRequest отсекает обходы к статике', () => {

@@ -87,14 +87,23 @@ const PANEL_VERSION = (() => {
     catch (e) { return ''; }
 })();
 const GITHUB_REPO = process.env.PANEL_GITHUB_REPO || 'AmShaegar-dev/servpanel';
-const DEFAULT_APK_URL = `https://github.com/${GITHUB_REPO}/releases/latest/download/servpanel.apk`;
 
-// Ссылки на прежний аккаунт GitHub могли сохраниться в настройках прошлых
-// версий (.app_settings.json). Переписываем их на актуальный адрес, иначе
-// вкладка «Приложение» показывает и скачивает APK со старого репозитория.
+// APK публикуется в отдельном репозитории приложения. Панель не хранит файл
+// у себя: она показывает версию последнего релиза и отдаёт ссылку на него.
+const APP_REPO = process.env.PANEL_APK_REPO || 'AmShaegar-dev/servpanel-android';
+const DEFAULT_APK_URL = `https://github.com/${APP_REPO}/releases/latest/download/servpanel-mobile.apk`;
+const APP_VERSION_TTL_MS = 10 * 60 * 1000;
+let appVersionCache = { at: 0, value: '', error: '' };
+
+// Ссылки на прежний аккаунт GitHub и на старый APK из релиза панели могли
+// сохраниться в настройках прошлых версий (.app_settings.json). Переписываем
+// их на актуальный адрес, иначе вкладка «Приложение» показывает и скачивает
+// устаревшую сборку.
 const LEGACY_GITHUB_REPO_RE = /makar19977v-glitch[\/:]servpanel/gi;
+const LEGACY_APK_URL_RE = /^https?:\/\/github\.com\/AmShaegar-dev\/servpanel\/releases\/(?:latest\/download|download\/[^/]+)\/servpanel\.apk$/i;
 function migrateLegacyGithubUrl(value) {
-    return String(value || '').replace(LEGACY_GITHUB_REPO_RE, 'AmShaegar-dev/servpanel');
+    const fixed = String(value || '').replace(LEGACY_GITHUB_REPO_RE, 'AmShaegar-dev/servpanel');
+    return LEGACY_APK_URL_RE.test(fixed) ? DEFAULT_APK_URL : fixed;
 }
 
 // Опциональный WARP + Xray для AdGuard Home. Ничего не ставится автоматически:
@@ -678,10 +687,11 @@ function readAppSettings() {
     const metrics = normalizeMetricsSettings({ ...def.metrics, ...rawMetrics }, { base: def.metrics });
     const apk = { ...def.apk };
     if (raw && raw.apk && typeof raw.apk === 'object') {
-        if (typeof raw.apk.url === 'string' && (!raw.apk.url || isHttpUrl(raw.apk.url))) apk.url = raw.apk.url;
+        if (typeof raw.apk.url === 'string' && (!raw.apk.url || isHttpUrl(raw.apk.url))) {
+            apk.url = migrateLegacyGithubUrl(raw.apk.url);
+        }
         if (typeof raw.apk.version === 'string') apk.version = raw.apk.version.slice(0, 32);
     }
-    apk.url = migrateLegacyGithubUrl(apk.url);
     return { metrics, apk };
 }
 function writeAppSettings(settings) {
@@ -729,20 +739,83 @@ function apkSha256(file, st) {
     apkHashCache = { key, value };
     return value;
 }
-function apkVersionFromDisk(settings) {
-    if (settings.apk.version) return settings.apk.version;
-    for (const p of [path.join(APP_APK_DIR, 'version.txt'), path.join(APP_DIR, 'app', 'version.txt')]) {
-        try {
-            const v = fs.readFileSync(p, 'utf8').trim();
-            if (/^[0-9A-Za-z._-]{1,32}$/.test(v)) return v;
-        } catch (e) { /* ignore */ }
-    }
+function appVersionOverride() {
+    const v = String(process.env.PANEL_APK_VERSION || '').trim();
+    return /^[0-9A-Za-z._-]{1,32}$/.test(v) ? v : '';
+}
+function normalizeAppVersion(value) {
+    const v = String(value || '').trim().replace(/^v/i, '');
+    return /^[0-9A-Za-z._-]{1,32}$/.test(v) ? v : '';
+}
+function apkVersionFromFile() {
+    try {
+        const v = fs.readFileSync(path.join(APP_DIR, 'app', 'version.txt'), 'utf8').trim();
+        if (/^[0-9A-Za-z._-]{1,32}$/.test(v)) return v;
+    } catch (e) { /* нет файла */ }
     return '';
 }
-function apkInfo(settings) {
+function apkVersionFromDisk(settings) {
+    if (settings.apk.version) return settings.apk.version;
+    return apkVersionFromFile();
+}
+
+// Версию APK берём из последнего релиза приложения, а не из файла в панели:
+// иначе после обновления приложения панель продолжает показывать старую
+// версию (кнопка «Обновить» перечитывала тот же устаревший version.txt).
+// Результат кешируется на 10 минут; ?refresh=1 обновляет его принудительно.
+async function fetchLatestAppVersion(force = false) {
+    const override = appVersionOverride();
+    if (override) return override;
+    const fallback = apkVersionFromFile();
+    if (TEST_MODE) return fallback;
+    if (!force && appVersionCache.value && Date.now() - appVersionCache.at < APP_VERSION_TTL_MS) {
+        return appVersionCache.value;
+    }
+    try {
+        const res = await fetch(`https://api.github.com/repos/${APP_REPO}/releases/latest`, {
+            headers: { 'User-Agent': 'servpanel', Accept: 'application/vnd.github+json' },
+            signal: AbortSignal.timeout(5000)
+        });
+        if (!res.ok) throw new Error('GitHub ответил ' + res.status);
+        const data = await res.json();
+        const version = normalizeAppVersion(data && (data.tag_name || data.name));
+        if (!version) throw new Error('в последнем релизе нет номера версии');
+        appVersionCache = { at: Date.now(), value: version, error: '' };
+        return version;
+    } catch (e) {
+        appVersionCache = {
+            at: Date.now(),
+            value: appVersionCache.value || '',
+            error: e && e.message ? e.message : 'ошибка запроса'
+        };
+        return appVersionCache.value || fallback;
+    }
+}
+
+function apkInfo(settings, opts = {}) {
     const cfg = settings || readAppSettings();
     const local = resolveApkFile();
-    const version = apkVersionFromDisk(cfg);
+    const override = appVersionOverride();
+    const latest = opts.remoteVersion || appVersionCache.value || '';
+    const fileVersion = apkVersionFromFile();
+    const diskVersion = apkVersionFromDisk(cfg);
+    const versionSource = override ? 'env' : (latest ? 'github' : (fileVersion ? 'file' : ''));
+    if (cfg.apk.url) {
+        return {
+            available: true,
+            source: 'remote',
+            name: 'servpanel-mobile.apk',
+            size: null,
+            modified: '',
+            sha256: '',
+            version: override || latest || fileVersion,
+            versionSource,
+            latestVersion: latest,
+            versionError: appVersionCache.error || '',
+            downloadUrl: '/api/app/apk',
+            externalUrl: cfg.apk.url
+        };
+    }
     if (local) {
         return {
             available: true,
@@ -751,24 +824,23 @@ function apkInfo(settings) {
             size: local.stat.size,
             modified: local.stat.mtime.toISOString(),
             sha256: apkSha256(local.path, local.stat),
-            version,
+            version: override || diskVersion,
+            versionSource: override ? 'env' : (diskVersion ? 'file' : ''),
+            latestVersion: latest,
+            versionError: appVersionCache.error || '',
             downloadUrl: '/api/app/apk'
         };
     }
-    if (cfg.apk.url) {
-        return {
-            available: true,
-            source: 'remote',
-            name: 'servpanel.apk',
-            size: null,
-            modified: '',
-            sha256: '',
-            version,
-            downloadUrl: '/api/app/apk',
-            externalUrl: cfg.apk.url
-        };
-    }
-    return { available: false, source: 'none', name: 'servpanel.apk', size: null, version, downloadUrl: '' };
+    return {
+        available: false,
+        source: 'none',
+        name: 'servpanel-mobile.apk',
+        size: null,
+        version: override || fileVersion,
+        versionSource: override ? 'env' : (fileVersion ? 'file' : ''),
+        latestVersion: latest,
+        downloadUrl: ''
+    };
 }
 
 function diskUsageCached() {
@@ -1057,7 +1129,7 @@ function appUrlSuggestion(req) {
     const host = pick(PANEL_HOST);
     return `${resolveTlsCredentials() ? 'https' : 'http'}://${host}${PANEL_PUBLIC_PORT === 443 || PANEL_PUBLIC_PORT === 80 ? '' : ':' + PANEL_PUBLIC_PORT}`;
 }
-function appStatusPayload(req) {
+function appStatusPayload(req, remoteVersion) {
     const settings = readAppSettings();
     const isAdmin = ((req.session && req.session.role) || 'admin') === 'admin';
     const reqHost = String((req && req.hostname) || '').replace(/^\[|\]$/g, '');
@@ -1080,7 +1152,7 @@ function appStatusPayload(req) {
         warnings.push('Веб-интерфейс выключен, но HTTPS не настроен: сессия panel.sid ходит по HTTP и может быть перехвачена.');
     }
     return {
-        apk: apkInfo(settings),
+        apk: apkInfo(settings, { remoteVersion }),
         metrics,
         api: {
             version: PANEL_VERSION,
@@ -6688,9 +6760,14 @@ echo '{"ok":true,"name":"'"$NEW"'"}'
 // ---------------------------------------------------------------------------
 // API мобильного приложения: статус, APK и метрики
 // ---------------------------------------------------------------------------
-app.get('/api/app/status', checkAuth, (req, res) => {
-    try { res.json(appStatusPayload(req)); }
-    catch (e) { res.status(500).json({ error: 'Не удалось прочитать настройки приложения' }); }
+app.get('/api/app/status', checkAuth, async (req, res) => {
+    try {
+        const refresh = req.query && (req.query.refresh === '1' || req.query.refresh === 'true');
+        await fetchLatestAppVersion(refresh);
+        res.json(appStatusPayload(req, appVersionCache.value || ''));
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось прочитать настройки приложения' });
+    }
 });
 
 // Компактные метрики доступны и на основном API — приложению не обязателен
@@ -6703,6 +6780,7 @@ app.get('/api/metrics', checkAuth, (req, res) => {
 
 app.get('/api/app/apk', checkAuth, (req, res) => {
     const settings = readAppSettings();
+    if (settings.apk.url && isHttpUrl(settings.apk.url)) return res.redirect(302, settings.apk.url);
     const local = resolveApkFile();
     if (local) {
         res.setHeader('Content-Type', 'application/vnd.android.package-archive');
@@ -6716,57 +6794,16 @@ app.get('/api/app/apk', checkAuth, (req, res) => {
         });
         return stream.pipe(res);
     }
-    if (settings.apk.url && isHttpUrl(settings.apk.url)) return res.redirect(302, settings.apk.url);
-    res.status(404).json({ error: 'APK не загружен. Загрузите его в панели или укажите ссылку.' });
+    res.status(404).json({ error: 'APK недоступен: укажите PANEL_APK_URL или добавьте файл в app/servpanel.apk.' });
 });
 
-// Загрузка APK без новых зависимостей: тело — сам файл, не multipart.
-app.post('/api/app/apk', checkAuth, requireAdmin,
-    express.raw({ type: ['application/vnd.android.package-archive', 'application/octet-stream'], limit: '120mb' }),
-    (req, res) => {
-        try {
-            const body = req.body;
-            if (!Buffer.isBuffer(body) || body.length < 4) {
-                return res.status(400).json({ error: 'Ожидается файл APK в теле запроса' });
-            }
-            if (body[0] !== 0x50 || body[1] !== 0x4b) {
-                return res.status(400).json({ error: 'Это не APK: файл должен начинаться с ZIP-заголовка (PK)' });
-            }
-            const rawVersion = String(req.query.version || req.headers['x-app-version'] || '').trim();
-            const version = /^[0-9A-Za-z._-]{1,32}$/.test(rawVersion) ? rawVersion : '';
-            fs.mkdirSync(APP_APK_DIR, { recursive: true, mode: 0o700 });
-            const target = path.join(APP_APK_DIR, 'servpanel.apk');
-            const tmp = path.join(APP_APK_DIR, `.upload-${process.pid}-${Date.now()}.tmp`);
-            fs.writeFileSync(tmp, body, { mode: 0o600 });
-            try { fs.unlinkSync(target); } catch (e) { /* нет старого файла */ }
-            fs.renameSync(tmp, target);
-            const settings = readAppSettings();
-            if (version) settings.apk.version = version;
-            writeAppSettings(settings);
-            auditLog(req, `Загружен APK Servpanel (${(body.length / 1024 / 1024).toFixed(1)} МБ${version ? ', версия ' + version : ''})`);
-            res.json({ success: true, apk: apkInfo(settings) });
-        } catch (e) {
-            res.status(500).json({ error: 'Не удалось сохранить APK: ' + e.message });
-        }
-    });
+// Загрузка APK из панели убрана: панель только отдаёт последнюю сборку.
+app.post('/api/app/apk', checkAuth, (req, res) => {
+    res.status(405).json({ error: 'Загрузка APK из панели отключена. Скачайте последнюю сборку из GitHub.' });
+});
 
-app.delete('/api/app/apk', checkAuth, requireAdmin, (req, res) => {
-    let removed = false;
-    for (const p of [path.join(APP_APK_DIR, 'servpanel.apk')]) {
-        try { fs.unlinkSync(p); removed = true; } catch (e) { /* нет файла */ }
-    }
-    if (removed) {
-        // Версия относилась к удалённому файлу: иначе панель покажет её
-        // рядом со ссылкой на GitHub, где лежит другая сборка.
-        const settings = readAppSettings();
-        if (settings.apk.version) {
-            settings.apk.version = '';
-            writeAppSettings(settings);
-        }
-        try { fs.unlinkSync(path.join(APP_APK_DIR, 'version.txt')); } catch (e) { /* нет файла */ }
-    }
-    auditLog(req, removed ? 'Удалён загруженный APK Servpanel' : 'Удаление APK: файла не было');
-    res.json({ success: true, removed, apk: apkInfo() });
+app.delete('/api/app/apk', checkAuth, (req, res) => {
+    res.status(405).json({ error: 'Загрузка APK из панели отключена. Скачайте последнюю сборку из GitHub.' });
 });
 
 app.post('/api/app/metrics', checkAuth, requireAdmin, async (req, res) => {

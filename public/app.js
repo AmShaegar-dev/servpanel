@@ -4866,43 +4866,49 @@ function appTile(label, value, sub, color) {
 function renderAppApk(apk) {
     const summary = document.getElementById('appApkSummary');
     const dl = document.getElementById('appApkDownload');
-    const delBtn = document.getElementById('appApkDeleteBtn');
-    const uploadBtn = document.getElementById('appApkUploadBtn');
     if (!apk || !apk.available) {
-        appBadge('appApkBadge', 'нет файла', 'badge-warn');
+        appBadge('appApkBadge', 'недоступен', 'badge-warn');
         appBanner('appApkBanner', 'warn',
-            'APK ещё не загружен. Загрузите файл кнопкой ниже или укажите ссылку в настройках — ' +
-            'тогда кнопка скачивания будет вести на GitHub.');
-        if (summary) summary.innerHTML = appTile('Источник', 'не настроен', 'загрузите APK в панель');
+            'Не удалось определить APK. Проверьте доступ панели к GitHub или задайте PANEL_APK_URL.');
+        if (summary) summary.innerHTML = appTile('Источник', 'не настроен', 'нет файла и ссылки');
         if (dl) { dl.href = '/api/app/apk'; dl.style.opacity = '.55'; }
-        if (delBtn) delBtn.style.display = 'none';
-        if (uploadBtn) uploadBtn.style.display = '';
         return;
     }
     if (dl) { dl.href = apk.downloadUrl || '/api/app/apk'; dl.style.opacity = ''; }
+
+    const sourceLabel = apk.source === 'local' ? 'файл на сервере' : 'GitHub';
+    const versionSub = apk.versionSource === 'github' ? 'последний релиз'
+        : apk.versionSource === 'env' ? 'PANEL_APK_VERSION'
+        : apk.versionSource === 'file' ? 'app/version.txt'
+        : 'версия не определена';
+    const tiles = [
+        appTile('Версия', apk.version || 'неизвестна', versionSub),
+        appTile('Источник', sourceLabel, apk.source === 'local' ? 'servpanel.apk' : 'последняя сборка')
+    ];
     if (apk.source === 'local') {
-        appBadge('appApkBadge', 'на панели', 'badge-good');
-        appBanner('appApkBanner', 'success',
-            'APK хранится на этом сервере: скачивание работает даже без доступа к GitHub.');
-        if (summary) summary.innerHTML = [
-            appTile('Версия', apk.version || 'не указана', 'из файла панели'),
-            appTile('Размер', formatBytes(apk.size || 0), 'servpanel.apk'),
-            appTile('SHA-256', (apk.sha256 || '').slice(0, 16) + '…', 'контрольная сумма')
-        ].join('');
-        if (delBtn) delBtn.style.display = '';
-        if (uploadBtn) uploadBtn.style.display = '';
-    } else {
-        appBadge('appApkBadge', 'ссылка GitHub', 'badge-muted');
-        appBanner('appApkBanner', 'info',
-            'Локального файла нет — панель перенаправит на последний релиз GitHub. ' +
-            'Чтобы APK всегда был доступен с сервера, загрузите его сюда.');
-        if (summary) summary.innerHTML = [
-            appTile('Версия', apk.version || 'последняя', 'из релиза'),
-            appTile('Источник', 'GitHub', apk.externalUrl || '')
-        ].join('');
-        if (delBtn) delBtn.style.display = 'none';
-        if (uploadBtn) uploadBtn.style.display = '';
+        tiles.push(appTile('Размер', formatBytes(apk.size || 0), 'servpanel.apk'));
+        tiles.push(appTile('SHA-256', (apk.sha256 || '').slice(0, 16) + '…', 'контрольная сумма'));
     }
+    if (summary) summary.innerHTML = tiles.join('');
+
+    if (apk.versionError) {
+        appBadge('appApkBadge', 'GitHub недоступен', 'badge-warn');
+        appBanner('appApkBanner', 'warn',
+            'Не удалось проверить последнюю версию на GitHub: ' + esc(apk.versionError) +
+            '. Показана версия из app/version.txt — нажмите «Проверить обновление» позже.');
+        return;
+    }
+    if (apk.source === 'local' && apk.latestVersion && apk.version && apk.latestVersion !== apk.version) {
+        appBadge('appApkBadge', 'устарел', 'badge-warn');
+        appBanner('appApkBanner', 'warn',
+            'На сервере APK ' + esc(apk.version) + ', а в GitHub уже ' + esc(apk.latestVersion) +
+            '. Обновите файл app/servpanel.apk или задайте PANEL_APK_URL.');
+        return;
+    }
+    appBadge('appApkBadge', apk.source === 'local' ? 'на сервере' : 'актуально', 'badge-good');
+    appBanner('appApkBanner', 'success', apk.source === 'local'
+        ? 'APK лежит на этом сервере и доступен без GitHub.'
+        : 'Кнопка скачивания ведёт на последнюю сборку в релизах GitHub.');
 }
 
 function renderAppApi(api, warnings) {
@@ -4986,8 +4992,8 @@ function renderAppMetrics(metrics) {
         ? list.map(w => '• ' + esc(w)).join('<br>') : '');
 }
 
-async function loadAppPanel() {
-    if (appLoading) return;
+async function loadAppPanel(force = false) {
+    if (appLoading) return false;
     appLoading = true;
     // Первый заход: показываем «загрузка», чтобы не путать с «выключено».
     if (!appState) {
@@ -4995,15 +5001,30 @@ async function loadAppPanel() {
         appBadge('appMetricsBadge', 'загрузка…', 'badge-muted');
     }
     try {
-        const data = await apiJson('/api/app/status');
+        const data = await apiJson('/api/app/status' + (force ? '?refresh=1' : ''));
         appState = data;
         renderAppApk(data.apk);
         renderAppApi(data.api, data.warnings);
         renderAppMetrics(data.metrics);
+        return true;
     } catch (e) {
         toast('Не удалось загрузить данные приложения', 'error', e.message);
+        return false;
     } finally {
         appLoading = false;
+    }
+}
+
+// Принудительно перечитывает версию последнего релиза приложения, минуя
+// десятиминутный кеш сервера.
+async function refreshApkVersion() {
+    const ok = await loadAppPanel(true);
+    if (!ok) return;
+    const apk = appState && appState.apk;
+    if (apk && apk.version) {
+        toast('Проверка завершена', 'success', 'Версия приложения: ' + apk.version);
+    } else {
+        toast('Версия не определена', 'warn', 'Проверьте доступ панели к GitHub.');
     }
 }
 
@@ -5065,51 +5086,6 @@ async function regenerateMetricsToken() {
         }
     } catch (e) {
         toast('Не удалось создать токен', 'error', e.message);
-    }
-}
-
-async function uploadApk(input) {
-    const file = input && input.files && input.files[0];
-    if (!file) return;
-    const btn = document.getElementById('appApkUploadBtn');
-    if (file.size > 120 * 1024 * 1024) {
-        toast('Файл слишком большой', 'error', 'Максимум 120 МБ.');
-        input.value = '';
-        return;
-    }
-    if (!confirm(`Загрузить ${file.name} (${formatBytes(file.size)}) на сервер?\n\n` +
-        'Файл заменит предыдущий APK и будет доступен для скачивания всем пользователям панели.')) {
-        input.value = '';
-        return;
-    }
-    sslBusy(btn, true, 'Загружаю…');
-    try {
-        const res = await apiJson('/api/app/apk', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/vnd.android.package-archive',
-                'X-App-Version': (file.name.match(/(\d+\.\d+\.\d+)/) || [])[1] || ''
-            },
-            body: file
-        });
-        toast('APK загружен', 'success', res.apk && res.apk.size ? formatBytes(res.apk.size) : '');
-        await loadAppPanel();
-    } catch (e) {
-        toast('Не удалось загрузить APK', 'error', e.message);
-    } finally {
-        sslBusy(btn, false);
-        input.value = '';
-    }
-}
-
-async function deleteApk() {
-    if (!confirm('Удалить загруженный APK с сервера?\n\nКнопка скачивания начнёт вести на GitHub.')) return;
-    try {
-        const res = await apiJson('/api/app/apk', { method: 'DELETE' });
-        toast('APK удалён', 'success', res.removed ? '' : 'Файла не было.');
-        await loadAppPanel();
-    } catch (e) {
-        toast('Не удалось удалить APK', 'error', e.message);
     }
 }
 

@@ -243,28 +243,32 @@ ufw deny 3443/tcp          # снаружи порт закрыт
 Вкладка **«Приложение»** в панели собирает всё, что нужно для Android-клиента:
 ссылку на APK, адрес API и отдельный порт метрик.
 
-### Скачивание и загрузка APK
+### Скачивание APK
 
-* Кнопка **«Скачать APK»** отдаёт файл прямо с панели — GitHub не нужен.
-* Если локального файла нет, панель отвечает `302` на последний релиз
-  GitHub (`releases/latest/download/servpanel.apk`).
-* Кнопка **«Загрузить APK»** кладёт файл в `DATA_DIR/.app/servpanel.apk`
-  (по умолчанию `/root/servpanel/.app/servpanel.apk`). Загрузка идёт сырым
-  телом запроса, без `multipart`, лимит — 120 МБ. Проверяется ZIP-заголовок
-  `PK`, чтобы случайно не сохранить HTML-страницу.
-* Загруженный APK переживает обновление панели: файл лежит в данных, а не в
-  коде.
+* Кнопка **«Скачать APK»** ведёт на последнюю сборку в релизах
+  [servpanel-android](https://github.com/AmShaegar-dev/servpanel-android)
+  (`releases/latest/download/servpanel-mobile.apk`).
+* Версия в панели берётся из последнего релиза приложения через GitHub API и
+  кешируется на 10 минут. Кнопка **«Проверить обновление»** перечитывает её
+  принудительно (`GET /api/app/status?refresh=1`).
+* Загружать APK в панель больше не нужно: файл не хранится на сервере и не
+  устаревает вместе с панелью. Раньше загруженный APK из `DATA_DIR/.app`
+  остаётся доступен только если ссылка отключена (`PANEL_APK_URL` пустой).
+* Если панель не может достучаться до GitHub, показывается версия из
+  `app/version.txt` и предупреждение. Скачивание при этом всё равно работает:
+  браузер идёт на GitHub напрямую.
 
-Порядок поиска файла: `DATA_DIR/.app/servpanel.apk` →
+Порядок поиска локального файла (только когда `PANEL_APK_URL` пустой):
 `APP_DIR/app/servpanel.apk` → `APP_DIR/public/downloads/servpanel.apk` →
 `APP_DIR/servpanel.apk`. Версия для подписи берётся из `app/version.txt`
-или из поля «Версия» в настройках.
+или из `PANEL_APK_VERSION`.
 
 | Переменная | Значение | Что делает |
 | --- | --- | --- |
-| `PANEL_APK_URL` | `https://…/servpanel.apk` | Внешняя ссылка, если локального файла нет. |
-| `PANEL_APK_VERSION` | `1.2.0` | Версия APK для отображения в панели. |
-| `PANEL_GITHUB_REPO` | `owner/repo` | Репозиторий для ссылки по умолчанию. |
+| `PANEL_APK_URL` | ссылка на последний APK | Внешняя ссылка для скачивания. Пустая — отдавать локальный файл. |
+| `PANEL_APK_VERSION` | `1.4.0` | Версия APK для отображения (перекрывает GitHub). |
+| `PANEL_APK_REPO` | `AmShaegar-dev/servpanel-android` | Репозиторий релизов приложения. |
+| `PANEL_GITHUB_REPO` | `owner/repo` | Репозиторий панели для обновлений. |
 
 ### Порт метрик: внутренний и внешний
 
@@ -321,9 +325,7 @@ curl https://panel.example.com:9101/health
 | `GET` | `/api/sysinfo` | сессия | CPU, RAM, диск, uptime. |
 | `GET` | `/api/metrics` | сессия | Компактный снимок метрик (JSON). |
 | `GET` | `/api/app/status` | сессия | APK, адрес API, настройки метрик и предупреждения. |
-| `GET` | `/api/app/apk` | сессия | Скачать APK (файл или `302` на GitHub). |
-| `POST` | `/api/app/apk` | админ | Загрузить APK (сырое тело, ≤ 120 МБ). |
-| `DELETE` | `/api/app/apk` | админ | Удалить загруженный APK. |
+| `GET` | `/api/app/apk` | сессия | Скачать APK (`302` на последний релиз приложения). |
 | `POST` | `/api/app/metrics` | админ | Сохранить и сразу применить настройки метрик. |
 | `POST` | `/api/app/metrics/token` | админ | Сгенерировать новый токен метрик. |
 
@@ -818,15 +820,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.8.1/servpanel-2.8.1.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.8.1/servpanel-2.8.1.tar.gz.sha256
-sha256sum -c servpanel-2.8.1.tar.gz.sha256
-tar -xzf servpanel-2.8.1.tar.gz
-bash /root/servpanel-2.8.1/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.8.2/servpanel-2.8.2.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.8.2/servpanel-2.8.2.tar.gz.sha256
+sha256sum -c servpanel-2.8.2.tar.gz.sha256
+tar -xzf servpanel-2.8.2.tar.gz
+bash /root/servpanel-2.8.2/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `2.8.1`. Если `curl` не установлен:
+Должно вывести `2.8.2`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:
