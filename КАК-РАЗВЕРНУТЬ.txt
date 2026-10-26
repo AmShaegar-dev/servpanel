@@ -1,28 +1,28 @@
-SERVEPANEL 2.6.3 — БЫСТРЫЙ ПЕРЕХОД С 1.0.0
+SERVEPANEL 2.7.0 — БЫСТРЫЙ ПЕРЕХОД С 1.0.0
 ================================================
 
 ВАЖНО: в старой панели 1.0.0 НЕ НАЖИМАЙТЕ «Обновить с GitHub».
 Она делает git reset --hard и может стереть новую версию.
 Первый переход выполняется один раз по SSH скриптом upgrade.sh.
 
-Архив:  servpanel-2.6.3.tar.gz
-SHA256: см. файл servpanel-2.6.3.tar.gz.sha256
+Архив:  servpanel-2.7.0.tar.gz
+SHA256: см. файл servpanel-2.7.0.tar.gz.sha256
 
 1. Скопировать архив на сервер (PowerShell на Windows):
 
-   scp C:\Users\Adm\Desktop\servpanel-fixed\servpanel-2.6.3.tar.gz root@IP:/root/
+   scp C:\Users\Adm\Desktop\servpanel-fixed\servpanel-2.7.0.tar.gz root@IP:/root/
 
 2. Зайти по SSH и проверить архив:
 
    ssh root@IP
    cd /root
-   sha256sum servpanel-2.6.3.tar.gz
+   sha256sum servpanel-2.7.0.tar.gz
    # должно совпасть с SHA256 выше
 
 3. Распаковать и запустить:
 
-   tar -xzf /root/servpanel-2.6.3.tar.gz -C /root
-   bash /root/servpanel-2.6.3/upgrade.sh
+   tar -xzf /root/servpanel-2.7.0.tar.gz -C /root
+   bash /root/servpanel-2.7.0/upgrade.sh
 
    Скрипт сам:
    - проверит новую версию на копии данных и отдельном порту;
@@ -52,9 +52,21 @@ SHA256: см. файл servpanel-2.6.3.tar.gz.sha256
    его туннельный IP. Правила AdGuard можно записать из панели RU-входа:
    WARP на RU при этом не нужен.
 
+6. Новая вкладка «Установка»:
+   - AWG ставится стандартно: без выбора пресетов, версия 3.1, порт 443.
+     Конфигурацию клиента генерируйте в Архитекторе
+     (architect.vai-rice.space/amneziawg), в мастере обфускации панели
+     или импортом .conf во вкладке «Обфускация».
+   - MTProto: кнопка «Установить MTProto» открывает мастер. Выберите
+     Telemt / MTProto.zig / только фикс, домен, порт, ad_tag, пользователя
+     и WEB-режим заранее — установщик MEKO пройдёт без вопросов.
+     Ссылки tg:// появятся в панели после завершения.
+   - Порты для AWG, MTProto, AdGuard и WARP открываются в UFW
+     автоматически. Если UFW выключен, правила применятся после включения.
+
 Откат вручную:
 
-   bash /root/servpanel-2.6.3/upgrade.sh --rollback \
+   bash /root/servpanel-2.7.0/upgrade.sh --rollback \
      /root/backups/servpanel-pre-update-YYYYMMDD-HHMMSS.tar.gz
 
 Журнал:

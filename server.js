@@ -5892,11 +5892,20 @@ const LOG_WHITELIST = [
     '/var/log/nginx/error.log', '/var/log/nginx/access.log', '/var/log/auth.log', '/var/log/syslog'
 ];
 
+function mtprotoHex32(value) {
+    const s = String(value || '').trim();
+    return /^[0-9a-fA-F]{32}$/.test(s) ? s.toLowerCase() : '';
+}
+
+function mtprotoUser(value) {
+    const s = String(value || '').trim();
+    return /^[A-Za-z0-9_-]{1,64}$/.test(s) ? s : '';
+}
+
 function installEnv(data) {
     const env = { ...process.env, PANEL_PORT: String(PANEL_PUBLIC_PORT) };
     if (data.domain && HOST_RE.test(String(data.domain))) env.SERVER_PUB_IP = String(data.domain);
-    env.AWG_VERSION = ['1.5', '2.0', '3.1'].includes(String(data.version)) ? String(data.version) : '2.0';
-    env.AWG_PRESET = ['default', 'mobile'].includes(String(data.preset)) ? String(data.preset) : 'default';
+    env.AWG_VERSION = ['1.5', '2.0', '3.1'].includes(String(data.version)) ? String(data.version) : '3.1';
     env.AWG_ROUTE = ['all', 'amnezia', 'custom'].includes(String(data.route)) ? String(data.route) : 'all';
     if (data.customRoute) {
         const nets = parseCidrList(data.customRoute);
@@ -5920,6 +5929,37 @@ function installEnv(data) {
         ? String(warpListenPort) : '443';
     env.WARP_SOCKS_PORT = Number.isInteger(warpSocksPort) && warpSocksPort >= 1 && warpSocksPort <= 65535
         ? String(warpSocksPort) : '40000';
+
+    // MTProto / WEB-прокси (MEKO). Значения проверяются здесь и в скрипте,
+    // чтобы установщик MEKO не задавал ни одного вопроса.
+    env.MTPROTO_KIND = ['telemt', 'zig', 'fix', 'mtg'].includes(String(data.kind)) ? String(data.kind) : 'telemt';
+    env.MTPROTO_DOMAIN = data.mtDomain && HOST_RE.test(String(data.mtDomain)) ? String(data.mtDomain) : 'ozon.ru';
+    env.MTPROTO_PORT = isPort(data.mtPort) ? String(data.mtPort) : '443';
+    const mtVersion = String(data.mtVersion || '').trim();
+    env.MTPROTO_VERSION = /^[0-9][0-9A-Za-z._-]{0,19}$/.test(mtVersion) ? mtVersion : '';
+    env.MTPROTO_FIX_TYPE = ['v2', 'v3', 'v4', 'nft'].includes(String(data.fixType)) ? String(data.fixType) : 'v3';
+    env.MTPROTO_FIX_PORT = isPort(data.fixPort) ? String(data.fixPort) : env.MTPROTO_PORT;
+    env.MTPROTO_NO_FIX = data.noFix ? '1' : '0';
+    const adTag = mtprotoHex32(data.adTag);
+    if (adTag) env.MTPROTO_AD_TAG = adTag;
+    const mtWeb = data.web === true || data.web === '1';
+    const mtUser = mtprotoUser(data.mtUser);
+    if (mtUser && !mtWeb) {
+        env.MTPROTO_USER = mtUser;
+        env.MTPROTO_USER_SECRET = mtprotoHex32(data.mtUserSecret) || crypto.randomBytes(16).toString('hex');
+    }
+    if (data.publicHost && HOST_RE.test(String(data.publicHost))) {
+        env.MTPROTO_PUBLIC_HOST = String(data.publicHost);
+    }
+    env.MTPROTO_WEB = mtWeb ? '1' : '0';
+    if (mtWeb) {
+        env.MTPROTO_WEB_HOST = data.webHost && HOST_RE.test(String(data.webHost)) ? String(data.webHost) : '';
+        env.MTPROTO_WEB_USER = mtprotoUser(data.webUser) || 'webuser';
+        env.MTPROTO_WEB_SECRET = mtprotoHex32(data.webSecret) || crypto.randomBytes(16).toString('hex');
+        env.MTPROTO_NGINX = data.nginx === false ? '0' : '1';
+    } else {
+        env.MTPROTO_NGINX = '0';
+    }
     return env;
 }
 
@@ -5932,6 +5972,43 @@ app.post('/api/install/module', checkAuth, (req, res) => {
     const mod = MODULES[module];
     if (module === 'awg' && data.awgMode === 'cascade' && (!data.remoteIp || !data.remotePass)) {
         return res.status(400).json({ error: 'Для каскадной установки нужны IP и пароль удалённого сервера' });
+    }
+    if (module === 'mtproto') {
+        const kind = String(data.kind || 'telemt');
+        if (kind === 'mtg') {
+            return res.status(400).json({ error: 'MEKO пока не поддерживает автоматическую установку MTG. Выберите Telemt, MTProto.zig или только фикс.' });
+        }
+        if (!['telemt', 'zig', 'fix'].includes(kind)) {
+            return res.status(400).json({ error: 'Неизвестный вид MTProto-прокси' });
+        }
+        const web = data.web === true || data.web === '1';
+        if (web && kind !== 'telemt') {
+            return res.status(400).json({ error: 'WEB-режим доступен только для Telemt' });
+        }
+        if (web && (!data.webHost || !HOST_RE.test(String(data.webHost)))) {
+            return res.status(400).json({ error: 'Для WEB-режима укажите корректный домен' });
+        }
+        if (data.mtDomain && !HOST_RE.test(String(data.mtDomain))) {
+            return res.status(400).json({ error: 'Некорректный SNI-домен' });
+        }
+        if (data.mtPort && !isPort(data.mtPort)) {
+            return res.status(400).json({ error: 'Некорректный порт прокси' });
+        }
+        if (data.fixPort && !isPort(data.fixPort)) {
+            return res.status(400).json({ error: 'Некорректный порт фикса' });
+        }
+        if (data.adTag && !mtprotoHex32(data.adTag)) {
+            return res.status(400).json({ error: 'ad_tag должен быть 32 hex-символа' });
+        }
+        if (data.mtUser && !mtprotoUser(data.mtUser)) {
+            return res.status(400).json({ error: 'Некорректное имя пользователя' });
+        }
+        if (data.mtUserSecret && !mtprotoHex32(data.mtUserSecret)) {
+            return res.status(400).json({ error: 'Секрет пользователя должен быть 32 hex-символа' });
+        }
+        if (data.publicHost && !HOST_RE.test(String(data.publicHost))) {
+            return res.status(400).json({ error: 'Некорректный public_host' });
+        }
     }
     try {
         sh('sudo', ['bash', '-c', `rm -f ${mod.log} && touch ${mod.log} && chmod 666 ${mod.log}`]);
@@ -6057,6 +6134,21 @@ app.get('/api/install/state', checkAuth, (req, res) => {
         const prog = installProgress(st.logFile);
         res.json({ active: prog.status === 'running', ...st, status: prog.status, steps: prog.steps, progress: prog.progress });
     } catch (e) { res.json({ active: false }); }
+});
+
+// Ссылки Telemt/MTPROTO, сохранённые установщиком MEKO.
+app.get('/api/mtproto/links', checkAuth, (req, res) => {
+    const file = '/root/mtproto_links.txt';
+    try {
+        if (!fs.existsSync(file)) return res.json({ links: [] });
+        const links = fs.readFileSync(file, 'utf8')
+            .split(/\r?\n/)
+            .map(s => s.trim())
+            .filter(s => /^(tg:\/\/|https:\/\/)/.test(s));
+        res.json({ links });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось прочитать ссылки MTProto' });
+    }
 });
 
 // ---------------------------------------------------------------------------

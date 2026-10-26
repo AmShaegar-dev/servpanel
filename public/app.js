@@ -15,11 +15,10 @@ async function startInstall(module, expectedLogFile, presetOptions = null) {
             if (check !== 'INSTALL') { alert("Установка отменена."); return; }
 
             options = {
-                version: (document.getElementById('awgInstallVersion') || document.getElementById('awgVersion') || {}).value || '',
-                preset: (document.getElementById('awgInstallPreset') || document.getElementById('awgPreset') || {}).value || 'auto',
+                version: (document.getElementById('awgInstallVersion') || document.getElementById('awgVersion') || {}).value || '3.1',
                 route: (document.getElementById('awgInstallRoute') || document.getElementById('awgRoute') || {}).value || 'all',
                 customRoute: (document.getElementById('awgCustomRoute') || {}).value || '',
-                ipv6: (document.getElementById('awgInstallIpv6') || document.getElementById('awgIpv6') || {}).value || 'off',
+                ipv6: (document.getElementById('awgInstallIpv6') || document.getElementById('awgIpv6') || {}).value || 'disallow',
                 port: (document.getElementById('awgInstallPort') || document.getElementById('awgPort') || {}).value || '',
                 isolation: document.getElementById('awgIsolation').checked,
                 keepPackages: document.getElementById('awgKeepPackages').checked,
@@ -289,6 +288,50 @@ function copyMeko() {
     navigator.clipboard.writeText(cmd).then(() => {
         alert("Команда скопирована! Теперь просто вставьте её в ваш SSH-терминал.");
     }).catch(() => { alert("Не удалось скопировать."); });
+}
+
+async function loadMtprotoLinks(showToast) {
+    const card = document.getElementById('mtprotoLinksCard');
+    const text = document.getElementById('mtprotoLinksText');
+    if (card) card.style.display = 'block';
+    try {
+        const res = await fetch('/api/mtproto/links');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const links = Array.isArray(data.links) ? data.links : [];
+        if (text) {
+            text.value = links.length
+                ? links.join('\n')
+                : 'Ссылки пока не найдены. Установка могла ещё не завершиться.';
+        }
+        if (showToast) toast(links.length ? 'Ссылки загружены' : 'Ссылок пока нет', links.length ? 'success' : 'info');
+        return links;
+    } catch (e) {
+        if (text) text.value = 'Не удалось загрузить ссылки: ' + e.message;
+        if (showToast) toast('Ошибка', 'error', e.message);
+        return [];
+    }
+}
+
+function showMtprotoLinks() {
+    closeWizard();
+    switchTab('tab-install', document.getElementById('navInstall'));
+    setTimeout(() => {
+        const card = document.getElementById('mtprotoLinksCard');
+        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        loadMtprotoLinks(true);
+    }, 200);
+}
+
+function copyMtprotoLinks() {
+    const el = document.getElementById('mtprotoLinksText');
+    if (!el || !el.value || el.value.startsWith('Ссылки пока')) {
+        toast('Ссылок нет', 'error', 'Сначала дождитесь завершения установки.');
+        return;
+    }
+    navigator.clipboard.writeText(el.value)
+        .then(() => toast('Скопировано', 'success'))
+        .catch(() => { el.select(); document.execCommand('copy'); toast('Скопировано', 'success'); });
 }
 
 function formatBytes(bytes) {
@@ -2826,6 +2869,7 @@ let wizardState = {
 
 const WIZARD_META = {
     install: { title: 'Установка VPN', icon: '↓' },
+    mtproto: { title: 'Установка MTProto', icon: '✈' },
     client: { title: 'Новый клиент', icon: '＋' },
     obf: { title: 'Усиление обфускации', icon: '✦' },
     cascade: { title: 'Каскад RU → EU', icon: '⇄' },
@@ -2838,7 +2882,13 @@ function wizardDefaults(scenario) {
     if (scenario === 'obf') return { preset: 'balanced', regen: true };
     if (scenario === 'cascade') return { role: 'ru', mode: 'install', remoteIp: '', remotePort: '22', remotePass: '' };
     if (scenario === 'adguard') return { action: 'auto', url: '', probe: 'loading', detected: null, enable: true, refresh: true };
-    if (scenario === 'install') return { role: 'single', usage: 'mobile', version: '3.1', route: 'all', remoteIp: '', remotePort: '22', remotePass: '' };
+    if (scenario === 'mtproto') return {
+        kind: 'telemt', domain: 'ozon.ru', port: '443', version: '',
+        fix: true, fixType: 'v3', fixPort: '',
+        adTag: '', mtUser: '', mtUserSecret: '', publicHost: '',
+        web: false, webHost: '', webUser: 'webuser', webSecret: '', nginx: true
+    };
+    if (scenario === 'install') return { role: 'single', version: '3.1', route: 'all', port: '443', domain: '', remoteIp: '', remotePort: '22', remotePass: '' };
     if (scenario === 'backup') return { enabled: true, run: true };
     return {};
 }
@@ -2855,7 +2905,7 @@ function suggestClientName() {
 function openWizard(scenario) {
     if (scenario === 'health') { closeWizard(); runHealthCheck(); return; }
     if (scenario && !WIZARD_META[scenario]) scenario = null;
-    if (scenario && ['install', 'cascade', 'backup'].includes(scenario) && currentRole !== 'admin') {
+    if (scenario && ['install', 'mtproto', 'cascade', 'backup'].includes(scenario) && currentRole !== 'admin') {
         toast('Недостаточно прав', 'error', 'Это действие доступно только администратору.');
         return;
     }
@@ -2882,7 +2932,7 @@ function closeWizard() {
 function chooseScenario(key) {
     if (key === 'health') { closeWizard(); runHealthCheck(); return; }
     if (!WIZARD_META[key]) return;
-    if (['install', 'cascade', 'backup'].includes(key) && currentRole !== 'admin') {
+    if (['install', 'mtproto', 'cascade', 'backup'].includes(key) && currentRole !== 'admin') {
         toast('Недостаточно прав', 'error', 'Это действие доступно только администратору.');
         return;
     }
@@ -2900,6 +2950,8 @@ function wizPick(el, key, value) {
     const grid = el && el.parentElement;
     if (grid) grid.querySelectorAll('.choice').forEach(c => c.classList.remove('selected'));
     if (el) el.classList.add('selected');
+    // Некоторые варианты раскрывают дополнительные поля — перерисовываем шаг.
+    if (['kind', 'role', 'usage', 'mode', 'action'].includes(key)) renderWizard();
 }
 
 function wizChoice(value, icon, title, desc, selected, key) {
@@ -2974,6 +3026,7 @@ function renderWizardHome() {
     const backupOn = !!(backup && backup.config && backup.config.enabled);
     const cards = [
         ['install', '↓', 'Установить VPN', vpn ? 'VPN уже установлен — можно переустановить' : 'AmneziaWG с рекомендованными настройками', vpn ? 'уже есть' : 'рекомендуется'],
+        ['mtproto', '✈', 'Установить MTProto', 'Telemt, MTProto.zig или фикс MEKO — без терминала', 'прокси'],
         ['client', '＋', 'Добавить клиента', 'Ключ, QR и vpn:// сразу — без скачивания файлов', `${(panelState.clients || []).length} клиентов`],
         ['obf', '✦', 'Усилить обфускацию', 'Готовый профиль вместо стандартных параметров', score === null ? 'нет данных' : `${score}/100`],
         ['cascade', '⇄', 'Настроить каскад', 'Вход в РФ и выход в EU, с прогрессом установки', (panelState.cascade && panelState.cascade.configured) ? 'настроен' : 'не настроен'],
@@ -2998,6 +3051,7 @@ function renderWizardOptions() {
     if (wizardState.scenario === 'obf') return renderObfOptions();
     if (wizardState.scenario === 'cascade') return renderCascadeOptions();
     if (wizardState.scenario === 'adguard') return renderAdGuardOptions();
+    if (wizardState.scenario === 'mtproto') return renderMtprotoOptions();
     if (wizardState.scenario === 'install') return renderInstallOptions();
     if (wizardState.scenario === 'backup') return renderBackupOptions();
     return '';
@@ -3098,10 +3152,69 @@ function renderAdGuardOptions() {
         <label class="form-check"><input type="checkbox" id="wizAgRefresh" ${d.refresh ? 'checked' : ''} onchange="wizardState.data.refresh=this.checked"> Обновить списки фильтрации</label>`;
 }
 
+function renderMtprotoOptions() {
+    const d = wizardState.data;
+    const kind = d.kind || 'telemt';
+    return `<p class="wizard-lead">Панель соберёт все параметры заранее и запустит MEKO без единого вопроса. Порты откроются в UFW автоматически.</p>
+        <div class="wizard-section-title">Что устанавливаем</div>
+        <div class="choice-grid">
+            ${wizChoice('telemt', '✈', 'Telemt', 'MTProto + FakeTLS, рекомендуемый вариант', kind === 'telemt', 'kind')}
+            ${wizChoice('zig', '⚡', 'MTProto.zig', 'Лёгкий прокси на Zig', kind === 'zig', 'kind')}
+            ${wizChoice('fix', '🛠', 'Только фикс', 'MEKO FIX для уже установленного прокси', kind === 'fix', 'kind')}
+            <button type="button" class="choice" disabled style="opacity:.55; cursor:not-allowed;" title="MEKO пока не реализовал автоматическую установку MTG">
+                <span class="choice-ico">◌</span><strong>MTG</strong><small>Пока не поддерживается в MEKO</small>
+            </button>
+        </div>
+        ${kind !== 'fix' ? `
+        <div class="wizard-grid" style="margin-top:14px;">
+            <label class="field"><span>SNI-домен маскировки</span><input id="wizMtDomain" value="${esc(d.domain)}" placeholder="ozon.ru" oninput="wizardState.data.domain=this.value"></label>
+            <label class="field"><span>Порт прокси</span><input id="wizMtPort" type="number" min="1" max="65535" value="${esc(d.port)}" oninput="wizardState.data.port=this.value"></label>
+        </div>
+        ${kind === 'telemt' ? `<label class="field" style="margin-top:12px;"><span>Версия Telemt</span><input id="wizMtVersion" value="${esc(d.version)}" placeholder="Пусто — последняя" oninput="wizardState.data.version=this.value"></label>` : ''}
+        ` : ''}
+        <div class="wizard-section-title">Фикс MEKO</div>
+        <label class="form-check" style="margin-bottom:8px;"><input type="checkbox" id="wizMtFix" ${d.fix || kind === 'fix' ? 'checked' : ''} ${kind === 'fix' ? 'disabled' : ''} onchange="wizardState.data.fix=this.checked; renderWizard()"> Установить фикс MEKO</label>
+        ${(d.fix || kind === 'fix') ? `
+        <div class="wizard-grid">
+            <label class="field"><span>Тип фикса</span>
+                <select id="wizMtFixType" onchange="wizardState.data.fixType=this.value">
+                    <option value="v3" ${d.fixType === 'v3' ? 'selected' : ''}>v3 — u32, рекомендуется</option>
+                    <option value="v2" ${d.fixType === 'v2' ? 'selected' : ''}>v2 — TTL + Length</option>
+                    <option value="v4" ${d.fixType === 'v4' ? 'selected' : ''}>v4 — zapret2</option>
+                    <option value="nft" ${d.fixType === 'nft' ? 'selected' : ''}>nft — совместим с Docker</option>
+                </select>
+            </label>
+            <label class="field"><span>Порт фикса</span><input id="wizMtFixPort" type="number" min="1" max="65535" value="${esc(d.fixPort)}" placeholder="Как у прокси" oninput="wizardState.data.fixPort=this.value"></label>
+        </div>` : ''}
+        ${kind === 'telemt' ? `
+        <div class="wizard-section-title">Telemt: пользователи и ссылки</div>
+        <label class="form-check" style="margin-bottom:8px;"><input type="checkbox" id="wizMtWeb" ${d.web ? 'checked' : ''} onchange="wizardState.data.web=this.checked; renderWizard()"> WEB-режим (домен + Nginx)</label>
+        ${d.web ? `
+        <div class="wizard-grid">
+            <label class="field"><span>Домен WEB-режима</span><input id="wizMtWebHost" value="${esc(d.webHost)}" placeholder="proxy.example.com" oninput="wizardState.data.webHost=this.value"></label>
+            <label class="field"><span>Пользователь WEB</span><input id="wizMtWebUser" value="${esc(d.webUser)}" placeholder="webuser" oninput="wizardState.data.webUser=this.value"></label>
+            <label class="field"><span>Секрет WEB</span><input id="wizMtWebSecret" value="${esc(d.webSecret)}" placeholder="Пусто — сгенерировать" oninput="wizardState.data.webSecret=this.value"></label>
+            <div class="field"><span>Nginx + Certbot</span><label class="form-check" style="margin-top:8px;"><input type="checkbox" id="wizMtNginx" ${d.nginx ? 'checked' : ''} onchange="wizardState.data.nginx=this.checked"> Установить и выпустить SSL</label></div>
+            <label class="field"><span>ad_tag (необязательно)</span><input id="wizMtAdTag" value="${esc(d.adTag)}" placeholder="32 hex-символа" oninput="wizardState.data.adTag=this.value"></label>
+            <label class="field"><span>public_host (необязательно)</span><input id="wizMtPublicHost" value="${esc(d.publicHost)}" placeholder="my.domain.com" oninput="wizardState.data.publicHost=this.value"></label>
+        </div>
+        <div class="wizard-note info">В WEB-режиме MEKO не применяет ad_tag и public_host из CLI. Панель допишет их в telemt.toml после установки.</div>
+        ` : `
+        <div class="wizard-grid">
+            <label class="field"><span>ad_tag (необязательно)</span><input id="wizMtAdTag" value="${esc(d.adTag)}" placeholder="32 hex-символа" oninput="wizardState.data.adTag=this.value"></label>
+            <label class="field"><span>Пользователь (необязательно)</span><input id="wizMtUser" value="${esc(d.mtUser)}" placeholder="например vasya" oninput="wizardState.data.mtUser=this.value"></label>
+            <label class="field"><span>Секрет пользователя</span><input id="wizMtUserSecret" value="${esc(d.mtUserSecret)}" placeholder="Пусто — сгенерировать" oninput="wizardState.data.mtUserSecret=this.value"></label>
+            <label class="field"><span>public_host (необязательно)</span><input id="wizMtPublicHost" value="${esc(d.publicHost)}" placeholder="my.domain.com" oninput="wizardState.data.publicHost=this.value"></label>
+        </div>
+        `}
+        ` : ''}
+        <div class="wizard-note" style="margin-top:14px;">Установщик MEKO поставит и менеджер <code>mekopr</code>. Ссылки <code>tg://</code> появятся в разделе «Установка» после завершения.</div>`;
+}
+
 function renderInstallOptions() {
     const d = wizardState.data;
     const vpn = hasVpnInterface();
-    return `<p class="wizard-lead">Мастер подставит рекомендованные параметры. Вам нужно выбрать только сценарий использования — остальное панель сделает сама.</p>
+    return `<p class="wizard-lead">Стандартная установка AmneziaWG: панель сама подберёт рабочие параметры. Пресеты обфускации больше не нужны — конфигурацию клиента генерирует Архитектор или встроенный генератор панели.</p>
         ${vpn ? `<div class="wizard-note">На сервере уже есть VPN-интерфейс. Повторная установка перезапишет конфигурацию и может отключить текущих клиентов.</div>` : ''}
         <div class="wizard-section-title">Роль сервера</div>
         <div class="choice-grid">
@@ -3109,26 +3222,22 @@ function renderInstallOptions() {
             ${wizChoice('ru', '⇄', 'Вход RU', 'Каскад: клиенты сюда, выход в EU', d.role === 'ru', 'role')}
             ${wizChoice('eu', '⇄', 'Выход EU', 'Каскад: принимает туннель из RU', d.role === 'eu', 'role')}
         </div>
-        <div class="wizard-section-title">Как будете подключаться</div>
-        <div class="choice-grid">
-            ${wizChoice('mobile', '▯', 'Мобильный / ТСПУ', 'Порт 443, профиль mobile, максимум совместимости', d.usage === 'mobile', 'usage')}
-            ${wizChoice('home', '⌂', 'Домашний Wi-Fi', 'Случайный порт, профиль default', d.usage === 'home', 'usage')}
-            ${wizChoice('universal', '◈', 'Универсально', 'Порт 443, профиль mobile, весь трафик', d.usage === 'universal', 'usage')}
-        </div>
         <div class="wizard-grid" style="margin-top:14px;">
             <label class="field"><span>Версия протокола</span>
                 <select id="wizInstallVersion" onchange="wizardState.data.version=this.value">
-                    <option value="3.1" ${d.version === '3.1' ? 'selected' : ''}>3.1 — максимум защиты</option>
+                    <option value="3.1" ${d.version === '3.1' ? 'selected' : ''}>3.1 — рекомендуется</option>
                     <option value="2.0" ${d.version === '2.0' ? 'selected' : ''}>2.0 — стабильность</option>
                     <option value="1.5" ${d.version === '1.5' ? 'selected' : ''}>1.5 — старые клиенты</option>
                 </select>
             </label>
+            <label class="field"><span>UDP-порт</span><input id="wizInstallPortValue" type="number" min="1" max="65535" value="${esc(d.port || '443')}" placeholder="443" oninput="wizardState.data.port=this.value"></label>
             <label class="field"><span>Маршрутизация</span>
                 <select id="wizInstallRoute" onchange="wizardState.data.route=this.value">
                     <option value="all" ${d.route === 'all' ? 'selected' : ''}>Весь трафик</option>
                     <option value="amnezia" ${d.route === 'amnezia' ? 'selected' : ''}>Список Amnezia + DNS</option>
                 </select>
             </label>
+            <label class="field"><span>Домен (Endpoint)</span><input id="wizInstallDomain" value="${esc(d.domain || '')}" placeholder="Пусто — по IP" oninput="wizardState.data.domain=this.value"></label>
         </div>
         ${d.role !== 'single' ? `
         <div class="wizard-section-title">Второй сервер для каскада</div>
@@ -3137,7 +3246,7 @@ function renderInstallOptions() {
             <label class="field"><span>SSH-порт</span><input id="wizInstallPort" type="number" value="${esc(d.remotePort || '22')}" oninput="wizardState.data.remotePort=this.value"></label>
         </div>
         <label class="field"><span>Root-пароль удалённого сервера</span><input id="wizInstallPass" type="password" value="${esc(d.remotePass)}" oninput="wizardState.data.remotePass=this.value"></label>` : ''}
-        <div class="wizard-note" style="margin-top:14px;">Установка AWG потребует несколько перезагрузок сервера. Прогресс будет виден в разделе «Установка».</div>`;
+        <div class="wizard-note" style="margin-top:14px;">Установка AWG потребует несколько перезагрузок сервера. После установки откройте вкладку «Обфускация» или <a href="https://architect.vai-rice.space/amneziawg/" target="_blank" rel="noopener">Архитектор</a>, чтобы сгенерировать конфиг клиента.</div>`;
 }
 
 function renderBackupOptions() {
@@ -3206,20 +3315,34 @@ function renderWizardReview() {
             </div>
             <div class="wizard-note" style="margin-top:14px;">Логин и пароль AdGuard не обязательны, если API доступен локально без авторизации.</div>`;
     }
+    if (wizardState.scenario === 'mtproto') {
+        const kind = { telemt: 'Telemt', zig: 'MTProto.zig', fix: 'Только фикс MEKO' }[d.kind] || d.kind;
+        const fix = d.kind === 'fix' || d.fix
+            ? `${d.fixType || 'v3'}, порт ${d.fixPort || d.port || '443'}`
+            : 'не устанавливать';
+        return `<p class="wizard-lead">Проверьте параметры. Установщик MEKO запустится без вопросов, порты откроются в UFW.</p>
+            <div class="wizard-summary">
+                ${row('Вид', esc(kind))}
+                ${d.kind !== 'fix' ? row('SNI-домен', esc(d.domain || 'ozon.ru')) : ''}
+                ${d.kind !== 'fix' ? row('Порт прокси', esc(d.port || '443')) : ''}
+                ${d.kind === 'telemt' ? row('Версия Telemt', esc(d.version || 'последняя')) : ''}
+                ${row('Фикс MEKO', esc(fix))}
+                ${d.kind === 'telemt' ? row('WEB-режим', d.web ? `да, ${esc(d.webHost || '—')}` : 'нет') : ''}
+                ${d.kind === 'telemt' ? row('ad_tag / public_host', [d.adTag ? 'ad_tag' : '', d.publicHost ? 'public_host' : ''].filter(Boolean).join(', ') || 'не заданы') : ''}
+            </div>
+            <div class="wizard-note" style="margin-top:14px;">MEKO установит прокси и менеджер <code>mekopr</code>. Ссылки <code>tg://</code> появятся в разделе «Установка».</div>`;
+    }
     if (wizardState.scenario === 'install') {
-        const usage = { mobile: 'Мобильный / ТСПУ', home: 'Домашний Wi-Fi', universal: 'Универсально' }[d.usage] || d.usage;
         const role = { single: 'Один сервер', ru: 'Вход RU (каскад)', eu: 'Выход EU (каскад)' }[d.role] || d.role;
-        const port = d.usage === 'mobile' || d.usage === 'universal' ? '443' : '39743';
-        return `<p class="wizard-lead">Проверьте рекомендованную конфигурацию. После запуска начнётся установка с перезагрузками.</p>
+        return `<p class="wizard-lead">Проверьте параметры стандартной установки. После запуска начнётся установка с перезагрузками.</p>
             <div class="wizard-summary">
                 ${row('Роль', esc(role))}
-                ${row('Версия', 'AWG ' + esc(d.version))}
-                ${row('Профиль', d.usage === 'home' ? 'default' : 'mobile')}
+                ${row('Версия', 'AWG ' + esc(d.version || '3.1'))}
                 ${row('Маршрутизация', d.route === 'all' ? 'Весь трафик' : 'Список Amnezia + DNS')}
-                ${row('UDP-порт', port)}
-                ${row('Домен', esc((panelState.server && panelState.server.domain) || 'по IP'))}
+                ${row('UDP-порт', esc(d.port || '443'))}
+                ${row('Домен', esc(d.domain || (panelState.server && panelState.server.domain) || 'по IP'))}
             </div>
-            <div class="wizard-note" style="margin-top:14px;">Установка AWG перезагрузит сервер несколько раз. Не закрывайте вкладку и дождитесь завершения.</div>`;
+            <div class="wizard-note" style="margin-top:14px;">Установка AWG перезагрузит сервер несколько раз. Конфиг клиента потом генерируется в Архитекторе или во вкладке «Обфускация».</div>`;
     }
     if (wizardState.scenario === 'backup') {
         return `<p class="wizard-lead">Проверьте параметры резервного копирования.</p>
@@ -3258,7 +3381,47 @@ function wizardValidate() {
         }
         return true;
     }
+    if (wizardState.scenario === 'mtproto') {
+        const grab = (id, key) => {
+            const el = document.getElementById(id);
+            if (el) d[key] = el.value.trim();
+        };
+        grab('wizMtDomain', 'domain');
+        grab('wizMtPort', 'port');
+        grab('wizMtVersion', 'version');
+        grab('wizMtFixType', 'fixType');
+        grab('wizMtFixPort', 'fixPort');
+        grab('wizMtAdTag', 'adTag');
+        grab('wizMtUser', 'mtUser');
+        grab('wizMtUserSecret', 'mtUserSecret');
+        grab('wizMtPublicHost', 'publicHost');
+        grab('wizMtWebHost', 'webHost');
+        grab('wizMtWebUser', 'webUser');
+        grab('wizMtWebSecret', 'webSecret');
+        if (d.kind !== 'fix') {
+            if (!isValidRemoteHost(d.domain)) { toast('Проверьте домен', 'error', 'Укажите SNI-домен, например ozon.ru.'); return false; }
+            if (!isValidPortValue(d.port)) { toast('Проверьте порт', 'error', 'Порт прокси должен быть от 1 до 65535.'); return false; }
+        }
+        if (d.fix || d.kind === 'fix') {
+            if (!isValidPortValue(d.fixPort || d.port)) { toast('Проверьте порт фикса', 'error', 'Порт фикса должен быть от 1 до 65535.'); return false; }
+        }
+        if (d.adTag && !/^[0-9a-fA-F]{32}$/.test(d.adTag)) { toast('Неверный ad_tag', 'error', 'ad_tag — 32 hex-символа.'); return false; }
+        if (d.mtUser && !/^[A-Za-z0-9_-]{1,64}$/.test(d.mtUser)) { toast('Неверное имя', 'error', 'Имя пользователя: A–Z, a–z, 0–9, _ и -, до 64 символов.'); return false; }
+        if (d.mtUserSecret && !/^[0-9a-fA-F]{32}$/.test(d.mtUserSecret)) { toast('Неверный секрет', 'error', 'Секрет пользователя — 32 hex-символа.'); return false; }
+        if (d.web) {
+            if (!isValidRemoteHost(d.webHost)) { toast('Проверьте домен WEB', 'error', 'Для WEB-режима нужен домен.'); return false; }
+            if (d.webUser && !/^[A-Za-z0-9_-]{1,64}$/.test(d.webUser)) { toast('Неверное имя WEB', 'error', 'Имя WEB-пользователя: A–Z, a–z, 0–9, _ и -, до 64 символов.'); return false; }
+            if (d.webSecret && !/^[0-9a-fA-F]{32}$/.test(d.webSecret)) { toast('Неверный секрет WEB', 'error', 'Секрет WEB — 32 hex-символа.'); return false; }
+        }
+        return true;
+    }
     if (wizardState.scenario === 'install') {
+        const portEl = document.getElementById('wizInstallPortValue');
+        const domainEl = document.getElementById('wizInstallDomain');
+        if (portEl) d.port = portEl.value.trim();
+        if (domainEl) d.domain = domainEl.value.trim();
+        if (!isValidPortValue(d.port || '443')) { toast('Проверьте порт', 'error', 'UDP-порт должен быть от 1 до 65535.'); return false; }
+        if (d.domain && !isValidRemoteHost(d.domain)) { toast('Проверьте домен', 'error', 'Укажите домен или оставьте поле пустым.'); return false; }
         if (d.role !== 'single') {
             const ip = document.getElementById('wizInstallIp');
             const pass = document.getElementById('wizInstallPass');
@@ -3284,6 +3447,11 @@ function isValidRemoteHost(v) {
     const s = String(v || '').trim();
     if (!s || s.length > 253) return false;
     return /^(\d{1,3}\.){3}\d{1,3}$/.test(s) || /^[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(s);
+}
+
+function isValidPortValue(v) {
+    const n = Number(v);
+    return Number.isInteger(n) && n >= 1 && n <= 65535;
 }
 
 function wizardPrepareObf() {
@@ -3313,6 +3481,7 @@ async function wizardExecute() {
         else if (wizardState.scenario === 'obf') result = await executeObfWizard();
         else if (wizardState.scenario === 'cascade') result = await executeCascadeWizard();
         else if (wizardState.scenario === 'adguard') result = await executeAdGuardWizard();
+        else if (wizardState.scenario === 'mtproto') result = await executeMtprotoWizard();
         else if (wizardState.scenario === 'install') result = await executeInstallWizard();
         else if (wizardState.scenario === 'backup') result = await executeBackupWizard();
         else throw new Error('Неизвестный сценарий');
@@ -3444,7 +3613,7 @@ async function executeCascadeWizard() {
         };
     }
     const options = {
-        version: '3.1', preset: 'mobile', route: 'all', customRoute: '', ipv6: 'disallow',
+        version: '3.1', route: 'all', customRoute: '', ipv6: 'disallow',
         port: '443', isolation: true, keepPackages: true, noTweaks: false,
         awgMode: 'cascade', cascadeRole: d.role, remoteIp: d.remoteIp,
         remotePort: d.remotePort || '22', remotePass: d.remotePass, domain: ''
@@ -3465,11 +3634,10 @@ async function executeInstallWizard() {
     const role = d.role || 'single';
     const options = {
         version: d.version || '3.1',
-        preset: d.usage === 'home' ? 'default' : 'mobile',
         route: d.route || 'all',
         customRoute: '',
         ipv6: 'disallow',
-        port: d.usage === 'mobile' || d.usage === 'universal' ? '443' : '39743',
+        port: d.port || '443',
         isolation: true,
         keepPackages: true,
         noTweaks: false,
@@ -3478,7 +3646,7 @@ async function executeInstallWizard() {
         remoteIp: d.remoteIp || '',
         remotePort: d.remotePort || '22',
         remotePass: d.remotePass || '',
-        domain: (panelState.server && panelState.server.domain) || ''
+        domain: d.domain || (panelState.server && panelState.server.domain) || ''
     };
     await startInstall('awg', '/var/log/awg_install.log', options);
     return {
@@ -3487,6 +3655,38 @@ async function executeInstallWizard() {
             resultButton('Закрыть', 'closeWizard()')
         ),
         toast: 'Установка AWG запущена',
+        toastMessage: 'Прогресс — во вкладке «Установка»'
+    };
+}
+
+async function executeMtprotoWizard() {
+    const d = wizardState.data;
+    const options = {
+        kind: d.kind || 'telemt',
+        mtDomain: d.domain || 'ozon.ru',
+        mtPort: d.port || '443',
+        mtVersion: d.version || '',
+        fixType: d.fixType || 'v3',
+        fixPort: d.fixPort || '',
+        noFix: d.kind === 'fix' ? false : !d.fix,
+        adTag: d.adTag || '',
+        mtUser: d.web ? '' : (d.mtUser || ''),
+        mtUserSecret: d.web ? '' : (d.mtUserSecret || ''),
+        publicHost: d.publicHost || '',
+        web: d.kind === 'telemt' && !!d.web,
+        webHost: d.kind === 'telemt' ? (d.webHost || '') : '',
+        webUser: d.webUser || 'webuser',
+        webSecret: d.webSecret || '',
+        nginx: d.nginx !== false
+    };
+    await startInstall('mtproto', '/var/log/mtproto_install.log', options);
+    return {
+        html: wizardSuccess('Установка MTProto запущена', 'MEKO ставит прокси и менеджер. Порты открываются в UFW автоматически. Ссылки появятся после завершения.',
+            resultButton('Показать прогресс', 'showInstallProgress()', true) +
+            resultButton('Ссылки для подключения', 'showMtprotoLinks()') +
+            resultButton('Закрыть', 'closeWizard()')
+        ),
+        toast: 'Установка MTProto запущена',
         toastMessage: 'Прогресс — во вкладке «Установка»'
     };
 }

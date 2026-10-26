@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="2.4.4">
+    <meta name="panel-version" content="2.7.0">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -875,7 +875,8 @@
                         <span class="badge badge-good">рекомендуется</span>
                     </div>
                     <div class="quick-grid">
-                        <button class="quick-action" onclick="openWizard('install')"><span class="qa-ico">↓</span><strong>Установить AWG</strong><small>Один сервер</small></button>
+                        <button class="quick-action" onclick="openWizard('install')"><span class="qa-ico">↓</span><strong>Установить AWG</strong><small>Стандартная установка</small></button>
+                        <button class="quick-action" onclick="openWizard('mtproto')"><span class="qa-ico">✈</span><strong>Установить MTProto</strong><small>Telemt / Zig / фикс</small></button>
                         <button class="quick-action" onclick="openWizard('cascade')"><span class="qa-ico">⇄</span><strong>Установить каскад</strong><small>RU + EU</small></button>
                         <button class="quick-action" onclick="openWizard('adguard')"><span class="qa-ico">◎</span><strong>Установить AdGuard</strong><small>DNS-защита</small></button>
                     </div>
@@ -883,8 +884,13 @@
 
                 <div class="stats-cards">
                     <div class="card advanced-only" style="flex: 1; min-width: 320px;">
-                        <h3>AmneziaWG (С перезагрузками)</h3>
-                        <p style="color: var(--text-muted); font-size: 13px;">Полная установка AWG. Потребует 3 перезагрузки сервера.</p>
+                        <div class="card-head">
+                            <div>
+                                <h3>AmneziaWG — стандартная установка</h3>
+                                <p>Панель поставит AWG с рекомендованными параметрами. Конфигурацию клиента можно сгенерировать в Архитекторе или в панели.</p>
+                            </div>
+                            <span class="badge badge-good">стандарт</span>
+                        </div>
 
                         <div class="mb-3">
                             <label class="form-label text-info fw-bold">Режим установки</label>
@@ -921,74 +927,92 @@
                             </div>
                         </div>
                         
-                        <div class="controls-row" style="margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                            <div>
-                                <label style="font-size: 11px; color: var(--text-muted);">Версия протокола</label>
-                                <select id="awgInstallVersion" style="width: 100%; margin-top: 3px;">
-                                    <option value="3.1">Версия 3.1 (Последняя)</option>
-                                    <option value="2.0" selected>Версия 2.0 (Стабильная)</option>
-                                    <option value="1.5">Версия 1.5 (Legacy)</option>
-                                </select>
+                        <button class="btn-primary" style="width: 100%;" onclick="startInstall('awg', '/var/log/awg_install.log')">Установить AmneziaWG</button>
+
+                        <details style="margin-top: 14px;">
+                            <summary style="cursor:pointer; color:#79c0ff; font-size:13px;">Дополнительные параметры</summary>
+                            <div class="controls-row" style="margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                <div>
+                                    <label style="font-size: 11px; color: var(--text-muted);">Версия протокола</label>
+                                    <select id="awgInstallVersion" style="width: 100%; margin-top: 3px;">
+                                        <option value="3.1" selected>Версия 3.1 (рекомендуется)</option>
+                                        <option value="2.0">Версия 2.0</option>
+                                        <option value="1.5">Версия 1.5 (Legacy)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="font-size: 11px; color: var(--text-muted);">UDP Порт</label>
+                                    <input type="number" id="awgInstallPort" placeholder="443 (по умолчанию)" style="width: 100%; margin-top: 3px; box-sizing: border-box;" title="Для обхода ТСПУ на моб. сетях рекомендуется 443">
+                                </div>
+                                <div style="grid-column: span 2;">
+                                    <label style="font-size: 11px; color: var(--text-muted);">Режим маршрутизации (IPv4)</label>
+                                    <select id="awgInstallRoute" style="width: 100%; margin-top: 3px;" onchange="document.getElementById('awgCustomRouteContainer').style.display = this.value === 'custom' ? 'block' : 'none'">
+                                        <option value="all" selected>Весь трафик (0.0.0.0/0)</option>
+                                        <option value="amnezia">Список Amnezia + DNS</option>
+                                        <option value="custom">Пользовательский список (Split-tunnel)</option>
+                                    </select>
+                                </div>
+                                <div id="awgCustomRouteContainer" style="grid-column: span 2; display: none;">
+                                    <input type="text" id="awgCustomRoute" placeholder="Пример: 192.168.1.0/24,10.50.0.0/16" style="width: 100%; font-size: 12px; box-sizing: border-box;">
+                                </div>
+                                <div>
+                                    <label style="font-size: 11px; color: var(--text-muted);">Настройки IPv6</label>
+                                    <select id="awgInstallIpv6" style="width: 100%; margin-top: 3px;">
+                                        <option value="disallow" selected>Отключить (disallow)</option>
+                                        <option value="allow">Оставить включенным (allow)</option>
+                                        <option value="tunnel">Dual-stack в туннеле (ULA)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="font-size: 11px; color: var(--text-muted);">Домен для подключения</label>
+                                    <input type="text" id="awgInstallDomain" placeholder="vpn.example.com (пусто = IP)" style="width: 100%; margin-top: 3px; box-sizing: border-box;">
+                                </div>
+                                <div style="grid-column: span 2; font-size: 12px; color: var(--text-main); margin-top: 5px; display: flex; flex-direction: column; gap: 8px;">
+                                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                                        <input type="checkbox" id="awgIsolation" checked> Изолировать клиентов друг от друга (isolation=on)
+                                    </label>
+                                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                                        <input type="checkbox" id="awgKeepPackages" checked> Сохранить системные пакеты (snapd и др.)
+                                    </label>
+                                    <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                                        <input type="checkbox" id="awgNoTweaks"> Без UFW, Fail2Ban и оптимизаций
+                                    </label>
+                                </div>
                             </div>
-                            <div>
-                                <label style="font-size: 11px; color: var(--text-muted);">Профиль обфускации</label>
-                                <select id="awgInstallPreset" style="width: 100%; margin-top: 3px;">
-                                    <option value="default" selected>Стандартный (default)</option>
-                                    <option value="mobile">Мобильный (mobile)</option>
-                                </select>
-                            </div>
-                            <div style="grid-column: span 2;">
-                                <label style="font-size: 11px; color: var(--text-muted);">Режим маршрутизации (IPv4)</label>
-                                <select id="awgInstallRoute" style="width: 100%; margin-top: 3px;" onchange="document.getElementById('awgCustomRouteContainer').style.display = this.value === 'custom' ? 'block' : 'none'">
-                                    <option value="all" selected>Весь трафик (0.0.0.0/0)</option>
-                                    <option value="amnezia">Список Amnezia + DNS</option>
-                                    <option value="custom">Пользовательский список (Split-tunnel)</option>
-                                </select>
-                            </div>
-                            <div id="awgCustomRouteContainer" style="grid-column: span 2; display: none;">
-                                <input type="text" id="awgCustomRoute" placeholder="Пример: 192.168.1.0/24,10.50.0.0/16" style="width: 100%; font-size: 12px; box-sizing: border-box;">
-                            </div>
-                            <div>
-                                <label style="font-size: 11px; color: var(--text-muted);">Настройки IPv6</label>
-                                <select id="awgInstallIpv6" style="width: 100%; margin-top: 3px;">
-                                    <option value="disallow" selected>Отключить (disallow)</option>
-                                    <option value="allow">Оставить включенным (allow)</option>
-                                    <option value="tunnel">Dual-stack в туннеле (ULA)</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label style="font-size: 11px; color: var(--text-muted);">UDP Порт</label>
-                                <input type="number" id="awgInstallPort" placeholder="39743" style="width: 100%; margin-top: 3px; box-sizing: border-box;" title="Для обхода ТСПУ на моб. сетях рекомендуется 443">
-                            </div>
-                            <div style="grid-column: span 2;">
-                                <label style="font-size: 11px; color: var(--text-muted);">Домен для подключения (Endpoint)</label>
-                                <input type="text" id="awgInstallDomain" placeholder="vpn.example.com (оставьте пустым для IP)" style="width: 100%; margin-top: 3px; box-sizing: border-box;">
-                            </div>
-                            <div style="grid-column: span 2; font-size: 12px; color: var(--text-main); margin-top: 5px; display: flex; flex-direction: column; gap: 8px;">
-                                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                                    <input type="checkbox" id="awgIsolation" checked> Изолировать клиентов друг от друга (isolation=on)
-                                </label>
-                                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                                    <input type="checkbox" id="awgKeepPackages" checked> Сохранить системные пакеты (snapd и др.)
-                                </label>
-                                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                                    <input type="checkbox" id="awgNoTweaks"> Без UFW, Fail2Ban и оптимизаций
-                                </label>
+                        </details>
+
+                        <div style="margin-top: 18px; border-top: 1px solid var(--border); padding-top: 15px;">
+                            <h4 style="margin: 0 0 6px;">Конфигурация клиента</h4>
+                            <p style="color: var(--text-muted); font-size: 12.5px; margin: 0 0 10px;">AWG ставится со стандартными параметрами. Сгенерируйте обфускацию в Архитекторе или в панели, затем импортируйте <code>.conf</code>.</p>
+                            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                                <a class="btn-dark" href="https://architect.vai-rice.space/amneziawg/" target="_blank" rel="noopener" style="text-decoration:none; padding:8px 12px; display:inline-block;">🧩 Открыть Архитектор</a>
+                                <button class="btn-dark" onclick="openWizard('obf')">✦ Сгенерировать в панели</button>
+                                <button class="btn-dark" onclick="openObfTab(); setExpert(true); setTimeout(()=>document.getElementById('obfImportText')?.scrollIntoView({behavior:'smooth',block:'center'}),150)">⬆ Импорт .conf</button>
                             </div>
                         </div>
-                        <button class="btn-primary" style="width: 100%;" onclick="startInstall('awg', '/var/log/awg_install.log')">Начать установку AWG</button>
+
                         <div style="margin-top: 15px; border-top: 1px solid var(--border); padding-top: 15px;">
-                        <button class="btn-danger" style="width: 100%; background: #da3633;" onclick="uninstallAwg()">🗑 Полностью удалить AmneziaWG</button>
+                            <button class="btn-danger" style="width: 100%; background: #da3633;" onclick="uninstallAwg()">🗑 Полностью удалить AmneziaWG</button>
+                        </div>
                     </div>
-                </div>
                     
                     <div class="card advanced-only" style="flex: 1;">
-                        <h3>MTProto / WEB Proxy (MEKO)</h3>
-                        <p style="color: var(--text-muted); font-size: 13px;">Установка Telemt, MTG с фиксами от MEKO. Рекомендуется ручная установка через терминал для полного контроля.</p>
-                        <div style="background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 11px; margin-bottom: 10px; border: 1px solid var(--border); word-break: break-all; color: #58a6ff;">
+                        <div class="card-head">
+                            <div>
+                                <h3>MTProto / WEB Proxy (MEKO)</h3>
+                                <p>Telemt, MTProto.zig и фикс MEKO. Панель задаст все вопросы заранее и запустит установку без терминала.</p>
+                            </div>
+                            <span class="badge badge-good">мастер</span>
+                        </div>
+                        <button class="btn-primary" style="width: 100%;" onclick="openWizard('mtproto')">Установить прокси</button>
+                        <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
+                            <button class="btn-dark" onclick="showMtprotoLinks()">🔗 Ссылки для подключения</button>
+                            <a class="btn-dark" href="https://github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO" target="_blank" rel="noopener" style="text-decoration:none; padding:8px 12px; display:inline-block;">Документация MEKO</a>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 11px; margin-top: 12px; margin-bottom: 10px; border: 1px solid var(--border); word-break: break-all; color: #58a6ff;">
                             curl -fsSL https://raw.githubusercontent.com/Mekotofeuka/MTPROTO_FIX_By_MEKO/main/install.sh | sudo bash
                         </div>
-                        <button class="btn-dark" onclick="copyMeko()">📋 Скопировать команду</button>
+                        <button class="btn-dark" onclick="copyMeko()">📋 Скопировать команду для терминала</button>
                     </div>
 
                     <div class="card" style="flex: 1;">
@@ -1008,6 +1032,18 @@
                         <div id="installProgressBar" style="height:100%; width:0%; background:#2ea043; transition:width .4s;"></div>
                     </div>
                     <textarea id="installLogText" readonly rows="20" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; background: #000; color: #0f0; border: 1px solid var(--border); border-radius: 6px; padding: 10px; resize: none;"></textarea>
+                </div>
+
+                <div id="mtprotoLinksCard" class="card" style="display: none; margin-top: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
+                        <h3 style="margin:0;">Ссылки MTProto</h3>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn btn-soft" onclick="loadMtprotoLinks(true)">Обновить</button>
+                            <button class="btn btn-dark" onclick="copyMtprotoLinks()">Скопировать</button>
+                        </div>
+                    </div>
+                    <textarea id="mtprotoLinksText" readonly rows="6" style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; background: #000; color: #58a6ff; border: 1px solid var(--border); border-radius: 6px; padding: 10px; resize: vertical;"></textarea>
+                    <p style="color: var(--text-muted); font-size: 12px; margin: 8px 0 0;">Ссылки создаются установщиком MEKO. Если их нет — откройте MEKO Manager командой <code>sudo mekopr</code>.</p>
                 </div>
             </div>
 
@@ -1230,7 +1266,7 @@
                     </div>
                     <div class="update-source">
                         <span>Или ссылка на релиз:</span>
-                        <input type="text" id="updUrl" placeholder="https://example.com/servpanel-2.4.4.tar.gz" style="flex:1; min-width:240px;">
+                        <input type="text" id="updUrl" placeholder="https://example.com/servpanel-2.7.0.tar.gz" style="flex:1; min-width:240px;">
                         <button class="btn btn-dark" id="updUrlBtn" onclick="updFromUrl()">Установить по URL</button>
                     </div>
                     <div class="update-source">

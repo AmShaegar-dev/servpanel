@@ -32,7 +32,7 @@ const ITEMS = [
     'README.md', 'DEMO.md', 'MANUAL-UPDATE.md', 'КАК-РАЗВЕРНУТЬ.txt',
     'ИЗМЕНЕНИЯ.md', 'ОБНОВЛЕНИЕ-2.4.md',
     'install.sh', 'install_adguard_silent.sh', 'install_awg_stateful.sh',
-    'install_warp_xray.sh', 'warp-domains.txt',
+    'install_mtproto_silent.sh', 'install_warp_xray.sh', 'warp-domains.txt',
     'update.sh', 'upgrade.sh', 'LICENSE', '.gitignore'
 ];
 const FORBIDDEN = new Set([

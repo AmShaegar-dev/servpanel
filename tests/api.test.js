@@ -727,7 +727,7 @@ test('Приложение: статус отдаёт APK, метрики и а�
     assert.equal(typeof r.json.metrics.publicPort, 'number');
     assert.ok(r.json.metrics.runtime && typeof r.json.metrics.runtime === 'object');
     assert.ok(r.json.api && typeof r.json.api === 'object');
-    assert.equal(r.json.api.version, '2.6.3');
+    assert.equal(r.json.api.version, require('../package.json').version);
     assert.match(r.json.api.appUrl, /^https?:\/\//);
     assert.ok(Array.isArray(r.json.warnings));
 });
@@ -851,6 +851,40 @@ test('isApiRequest отсекает обходы к статике', () => {
     assert.equal(ok('/api%2f..%2findex.html'), false);
     assert.equal(ok('/index.html'), false);
     assert.equal(ok('/api\\..\\index.html'), false);
+});
+
+test('MTProto: MTG отклоняется с понятной ошибкой', async () => {
+    const r = await request('/api/install/module', jsonBody({ module: 'mtproto', kind: 'mtg' }));
+    assert.equal(r.status, 400);
+    assert.match(r.json.error, /MTG/);
+});
+
+test('MTProto: WEB-режим требует домен', async () => {
+    const r = await request('/api/install/module', jsonBody({ module: 'mtproto', kind: 'telemt', web: true }));
+    assert.equal(r.status, 400);
+    assert.match(r.json.error, /домен/i);
+});
+
+test('MTProto: неверный ad_tag отклоняется до запуска установки', async () => {
+    const r = await request('/api/install/module', jsonBody({
+        module: 'mtproto', kind: 'telemt', adTag: 'not-hex'
+    }));
+    assert.equal(r.status, 400);
+    assert.match(r.json.error, /ad_tag/i);
+});
+
+test('MTProto: неверный порт фикса отклоняется', async () => {
+    const r = await request('/api/install/module', jsonBody({
+        module: 'mtproto', kind: 'telemt', fixPort: '70000'
+    }));
+    assert.equal(r.status, 400);
+    assert.match(r.json.error, /порт/i);
+});
+
+test('MTProto: endpoint ссылок всегда возвращает массив', async () => {
+    const r = await request('/api/mtproto/links');
+    assert.equal(r.status, 200);
+    assert.ok(Array.isArray(r.json.links));
 });
 
 test('выход закрывает доступ', async () => {

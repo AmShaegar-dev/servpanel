@@ -187,9 +187,14 @@ WARP_INSTALLED_AT=$(date -Is)
 EOF
 chmod 600 /root/awg/warp.env
 
-if ufw status 2>/dev/null | grep -q "Status: active"; then
+if command -v ufw >/dev/null 2>&1; then
     ufw allow "${WARP_LISTEN_PORT}/tcp" >/dev/null 2>&1 || true
     echo "UFW: разрешён TCP/${WARP_LISTEN_PORT}."
+    if ! ufw status 2>/dev/null | grep -q "Status: active"; then
+        echo "UFW не включён: правило добавлено и применится после включения."
+    fi
+else
+    echo "WARNING: ufw не найден. Откройте TCP/${WARP_LISTEN_PORT} вручную."
 fi
 
 echo "Готово: Xray слушает ${WARP_LISTEN_IP}:${WARP_LISTEN_PORT}, WARP SOCKS — 127.0.0.1:${WARP_SOCKS_PORT}."

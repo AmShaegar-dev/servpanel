@@ -50,14 +50,27 @@ else
 fi
 
 PORT_TO_OPEN="${PANEL_PORT:-4444}"
+
+ufw_open() {
+    local port="$1" proto="${2:-tcp}"
+    [ -n "$port" ] || return 0
+    case "$port" in ''|*[!0-9]*) return 0 ;; esac
+    if command -v ufw >/dev/null 2>&1; then
+        ufw allow "$port/$proto" >/dev/null 2>&1 || true
+        echo "UFW: разрешён $proto/$port"
+    fi
+}
+
+# Открываем порты панели и AWG. UDP-порт AWG открываем и до установки
+# (если задан), и после — по фактическому ListenPort из конфига.
 echo "Проверка портов панели (${PORT_TO_OPEN}, 80, 443, 22, 2233, 4443)..."
-if command -v ufw >/dev/null 2>&1; then
-    sudo ufw allow ${PORT_TO_OPEN}/tcp >/dev/null 2>&1 || true
-    sudo ufw allow 80/tcp >/dev/null 2>&1 || true
-    sudo ufw allow 443/tcp >/dev/null 2>&1 || true
-    sudo ufw allow 22/tcp >/dev/null 2>&1 || true
-    sudo ufw allow 2233/tcp >/dev/null 2>&1 || true
-fi
+ufw_open "$PORT_TO_OPEN" tcp
+ufw_open 80 tcp
+ufw_open 443 tcp
+ufw_open 22 tcp
+ufw_open 2233 tcp
+ufw_open 4443 tcp
+[ -n "${AWG_PORT:-}" ] && ufw_open "$AWG_PORT" udp
 
 echo "Скачиваем оригинальный скрипт AmneziaWG..."
 curl -fsSL "$INSTALLER_URL" -o /root/install_amneziawg.sh
@@ -66,7 +79,6 @@ chmod +x /root/install_amneziawg.sh
 INSTALL_CMD="sudo bash /root/install_amneziawg.sh --yes"
 
 [ -n "$AWG_VERSION" ] && INSTALL_CMD="$INSTALL_CMD --protocol $AWG_VERSION"
-[ -n "$AWG_PRESET" ] && [ "$AWG_PRESET" != "default" ] && INSTALL_CMD="$INSTALL_CMD --preset=$AWG_PRESET"
 
 if [ "$AWG_ROUTE" = "amnezia" ]; then
     INSTALL_CMD="$INSTALL_CMD --route-amnezia"
@@ -99,9 +111,17 @@ eval "$INSTALL_CMD"
 if grep -q "Установка завершена" "$LOG_FILE" || grep -q "Installation complete" "$LOG_FILE"; then
     echo "=== INSTALLATION DONE ==="
 
-    # Возвращаем открытие порта из оригинального скрипта
-    if command -v ufw >/dev/null 2>&1; then
-        sudo ufw allow ${PORT_TO_OPEN}/tcp >/dev/null 2>&1 || true
+    # Открываем порт панели и фактические UDP-порты AWG из конфигов.
+    ufw_open "$PORT_TO_OPEN" tcp
+    for conf in /etc/amnezia/amneziawg/*.conf /etc/wireguard/*.conf; do
+        [ -f "$conf" ] || continue
+        awg_listen_port="$(awk -F'=' '/^[[:space:]]*ListenPort/{gsub(/[^0-9]/,"",$2); print $2; exit}' "$conf")"
+        if [ -n "$awg_listen_port" ]; then
+            ufw_open "$awg_listen_port" udp
+        fi
+    done
+    if command -v ufw >/dev/null 2>&1 && ! ufw status 2>/dev/null | grep -q "Status: active"; then
+        echo "UFW не включён: правила для AWG добавлены и применятся после включения."
     fi
     
     # ЛИНКОВКА КАСКАДА
