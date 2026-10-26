@@ -62,6 +62,22 @@ function jsonBody(obj, extra = {}) {
     };
 }
 
+/**
+ * Удаление с повторами: в Windows антивирус или ещё не закрытый поток
+ * могут на миг заблокировать файл, и обычный rmSync падает с EPERM.
+ */
+async function removeWithRetry(target, opts) {
+    for (let i = 0; ; i += 1) {
+        try {
+            fs.rmSync(target, opts);
+            return;
+        } catch (e) {
+            if (i >= 20) throw e;
+            await new Promise((r) => setTimeout(r, 50));
+        }
+    }
+}
+
 async function login(password, username = '', code = '', ip = '') {
     const headers = { 'Content-Type': 'application/json' };
     if (ip) headers['X-Forwarded-For'] = ip;
@@ -868,10 +884,10 @@ test('Приложение: локальный APK отдаётся, если с
         assert.equal(dl.headers.get('content-type'), 'application/vnd.android.package-archive');
         assert.equal(dl.text, bytes.toString());
     } finally {
-        fs.rmSync(apkFile, { force: true });
-        fs.rmSync(apkDir, { recursive: true, force: true });
+        await removeWithRetry(apkFile, { force: true });
+        await removeWithRetry(apkDir, { recursive: true, force: true });
         if (had) fs.writeFileSync(settingsFile, prev);
-        else fs.rmSync(settingsFile, { force: true });
+        else await removeWithRetry(settingsFile, { force: true });
     }
 });
 
