@@ -178,13 +178,8 @@ EOF
         systemctl restart systemd-resolved >/dev/null 2>&1 || true
     fi
 fi
-for unit in dnsmasq dstls; do
-    if systemctl is-active --quiet "$unit" 2>/dev/null; then
-        say "Останавливаем $unit — он занимал 853."
-        systemctl stop "$unit" >/dev/null 2>&1 || true
-        systemctl disable "$unit" >/dev/null 2>&1 || true
-    fi
-done
+# dnsmasq, bind9 и named не трогаем: на 853 они не слушают, а чужой
+# DNS-сервер может быть нужен другим сервисам.
 
 # --- служба -------------------------------------------------------------
 say "[5/6] Служба systemd..."
