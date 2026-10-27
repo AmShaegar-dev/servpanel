@@ -6935,7 +6935,7 @@ function modulePorts(id) {
     const ports = [];
     if (id === 'adguard') {
         [adguardInfo().port, '3000', '3001'].filter(Boolean).forEach(p => ports.push(p));
-        ['53', '853'].forEach(p => ports.push(p));
+        ports.push('853');
     }
     if (id === 'warp') [warpInfo().port].filter(Boolean).forEach(p => ports.push(p));
     if (id === 'mtproto') [mtprotoInfo().port].filter(Boolean).forEach(p => ports.push(p));

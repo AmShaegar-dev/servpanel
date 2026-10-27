@@ -94,6 +94,9 @@ pm2 save && pm2 startup
    Оригинальный установщик AmneziaWG требует перезагрузок сервера для активации нового ядра и модуля DKMS. Наша обертка `install_awg_stateful.sh` сохраняет выбранные вами в браузере флаги в `/root/awg_install_params.env` и создает временную задачу `@reboot` в `/etc/cron.d/awg_resume`. После перезагрузки сервер сам продолжает установку со следующего шага, а в конце удаляет временные файлы.
 5. **Бесконфликтный AdGuard Home (`install_adguard_silent.sh`):**
    По умолчанию AdGuard Home пытается занять порт `3000` для первичной настройки, на котором уже работает бэкенд панели. Наш скрипт заранее создает конфигурацию `/opt/AdGuardHome/AdGuardHome.yaml`, фиксируя веб-интерфейс AdGuard (и уберегая порт `3000` при совпадении), и проводит тихую установку без зависаний.
+* DNS-порт AdGuard: 853/tcp (DNS-over-TLS). Plain DNS на 53 в конфиге
+  отключён, `systemd-resolved` и `/etc/resolv.conf` установщик не меняет.
+  В AdGuard включите «Настройки > Шифрование > DNS-over-TLS» на порту 853.
 6. **Аудит и авто-бэкапы:**
    Любое редактирование конфига `/etc/amnezia/amneziawg/awg0.conf` через веб-панель автоматически создает резервную копию вида `awg0.conf.bak_<timestamp>`. Все важные действия (логин, смена пароля, удаление клиентов, установка модулей) записываются с IP-адресом в `/var/log/awg_audit.log`.
 7. **Интерфейс-мастер (v2.3):**
@@ -820,15 +823,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.8.3/servpanel-2.8.3.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.8.3/servpanel-2.8.3.tar.gz.sha256
-sha256sum -c servpanel-2.8.3.tar.gz.sha256
-tar -xzf servpanel-2.8.3.tar.gz
-bash /root/servpanel-2.8.3/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.8.4/servpanel-2.8.4.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.8.4/servpanel-2.8.4.tar.gz.sha256
+sha256sum -c servpanel-2.8.4.tar.gz.sha256
+tar -xzf servpanel-2.8.4.tar.gz
+bash /root/servpanel-2.8.4/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `2.8.3`. Если `curl` не установлен:
+Должно вывести `2.8.4`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:

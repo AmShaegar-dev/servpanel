@@ -6,8 +6,10 @@
 # считал AdGuard не настроенным, поднимал мастер на 3000 и не укладывался в
 # ожидания панели: установка «зависала» или AdGuard оставался не настроенным.
 #
-# Теперь скрипт готовит полноценный конфиг (порт, веб-админ, DNS на 53 через
-# systemd-resolved) и только потом ставит службу.
+# Теперь скрипт готовит полноценный конфиг и только потом ставит службу.
+#
+# DNS работает только по DNS-over-TLS (TCP 853) — plain DNS на 53 не
+# включается, systemd-resolved и /etc/resolv.conf остаются как есть.
 #
 # Переменные:
 #   ADGUARD_PORT=<порт>   веб-интерфейс и API (по умолчанию 3000 или первый
@@ -133,7 +135,9 @@ theme: auto
 dns:
   bind_hosts:
     - 0.0.0.0
-  port: 53
+  port: 853
+  tls_port: 853
+  serve_plain_dns: false
   anonymize_client_ip: false
   ratelimit: 20
   refuse_any: true
@@ -160,23 +164,23 @@ schema_version: 28
 EOF
 chmod 600 "$AG_DIR/AdGuardHome.yaml"
 
-# --- DNS на 53: освобождаем порт ---------------------------------------
-say "[4/6] Освобождаем порт 53 для DNS AdGuard..."
+# --- порт 853: освобождаем только его ----------------------------------
 if systemctl list-unit-files 2>/dev/null | grep -q '^systemd-resolved.service'; then
-    mkdir -p /etc/systemd/resolved.conf.d
-    cat > /etc/systemd/resolved.conf.d/servpanel-adguard.conf << 'EOF'
+    # systemd-resolved может сам слушать 853 (DNS over TLS). Останавливаем его
+    # только если порт занят, и только stub-режим — 53 и resolv.conf не трогаем.
+    if command -v ss >/dev/null 2>&1 && ss -lntH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]853\$"; then
+        say "Порт 853 занят systemd-resolved — отключаем его DNS-over-TLS."
+        mkdir -p /etc/systemd/resolved.conf.d
+        cat > /etc/systemd/resolved.conf.d/servpanel-adguard.conf << 'EOF'
 [Resolve]
-DNSStubListener=no
+DNSOverTLS=no
 EOF
-    systemctl restart systemd-resolved >/dev/null 2>&1 || true
-    if [ -f /run/systemd/resolve/resolv.conf ]; then
-        ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf 2>/dev/null || true
+        systemctl restart systemd-resolved >/dev/null 2>&1 || true
     fi
-    say "systemd-resolved больше не слушает 53."
 fi
-for unit in dnsmasq bind9 named; do
+for unit in dnsmasq dstls; do
     if systemctl is-active --quiet "$unit" 2>/dev/null; then
-        say "Останавливаем $unit — он занимал 53."
+        say "Останавливаем $unit — он занимал 853."
         systemctl stop "$unit" >/dev/null 2>&1 || true
         systemctl disable "$unit" >/dev/null 2>&1 || true
     fi
@@ -229,11 +233,9 @@ done
 say "[6/6] Порты в UFW и сохранение параметров..."
 if command -v ufw >/dev/null 2>&1; then
     ufw allow "$chosen/tcp" >/dev/null 2>&1 || true
-    ufw allow 53/tcp >/dev/null 2>&1 || true
-    ufw allow 53/udp >/dev/null 2>&1 || true
-    # DNS-over-TLS и DoH, если пользователь захочет включить позже.
+    # DNS принимается только по DNS-over-TLS (TCP 853).
     ufw allow 853/tcp >/dev/null 2>&1 || true
-    say "UFW: открыты $chosen/tcp, 53/tcp, 53/udp, 853/tcp."
+    say "UFW: открыты $chosen/tcp (веб-интерфейс) и 853/tcp (DNS over TLS)."
 fi
 
 mkdir -p /root/awg
@@ -246,5 +248,6 @@ EOF
 chmod 600 /root/awg/adguard.env
 
 say "AdGuard Home готов: http://$PUBLIC_IP:$chosen"
-say "DNS-порт: 53 (tcp/udp). При первом входе создайте пользователя и пароль."
+say "DNS: 853/tcp — только DNS-over-TLS (DoT). Порт 53 и systemd-resolved не меняются."
+say "DoT включается в AdGuard: Настройки -> Шифрование -> DNS-over-TLS на порту 853."
 say "=== INSTALLATION DONE ==="

@@ -1144,6 +1144,12 @@ test('Установщики AdGuard и WARP: безопасные подста�
     assert.match(ag, /INSTALLATION DONE/);
     assert.match(ag, /ADGUARD_PORT/);
     assert.match(ag, /\$\{PORTS\[@\]\}|\$\{p\}/);
+    // DNS только по DoT: 853 в конфиге и UFW, 53 не занимаем и resolved не трогаем.
+    assert.match(ag, /tls_port: 853/);
+    assert.match(ag, /ufw allow 853\/tcp/);
+    assert.ok(!/ufw allow 53\//.test(ag), 'порт 53 не открывается');
+    assert.ok(!/DNSStubListener/.test(ag), 'systemd-resolved не отключается');
+    assert.ok(!/systemctl (stop|disable) (dnsmasq|bind9|named)/.test(ag), 'чужой DNS не останавливается');
     const warp = read('install_warp_xray.sh');
     assert.match(warp, /INSTALLATION DONE/);
     assert.match(warp, /WARP_LISTEN_IP="\$\{WARP_LISTEN_IP:-127\.0\.0\.1\}"/);
