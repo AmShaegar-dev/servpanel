@@ -656,14 +656,14 @@
                     <div class="card-head">
                         <div>
                             <h3>Cloudflare WARP для AdGuard <span class="badge badge-muted">опционально</span></h3>
-                            <p>Xray принимает TLS на IP туннеля, WARP идёт в SOCKS5. AdGuard подменяет A-записи выбранных доменов на этот IP — трафик остаётся внутри AWG-каскада.</p>
+                            <p>Xray принимает TLS на 127.0.0.1:443, WARP уходит в SOCKS5. AdGuard подменяет A-записи выбранных доменов на 127.0.0.1 — запросы к ним идут через WARP, минуя блокировки провайдера.</p>
                         </div>
                         <span id="warpStatusBadge" class="badge badge-muted">не установлен</span>
                     </div>
                     <div id="warpStatusText" class="sub-text" style="margin-bottom: 12px;">Проверка состояния...</div>
 
                     <div class="controls-row" style="margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
-                        <input type="text" id="warpListenIp" value="10.8.1.1" placeholder="IP Xray (10.8.1.1)" aria-label="IP Xray" style="width: 170px;" title="IP туннеля AWG на этом сервере. 0.0.0.0 — только если понимаете риск публичного доступа." onblur="if(!this.value.trim())this.value='10.8.1.1'">
+                        <input type="text" id="warpListenIp" value="127.0.0.1" placeholder="127.0.0.1" aria-label="IP Xray" style="width: 170px;" title="Адрес, на котором Xray принимает TLS. Штатное значение — 127.0.0.1: слушает только этот сервер. IP интерфейса AWG нужен, только если обращаться к Xray удалённо." onblur="if(!this.value.trim())this.value='127.0.0.1'">
                         <input type="number" id="warpListenPort" value="443" placeholder="443" aria-label="Порт Xray" style="width: 90px;" title="TCP-порт Xray" onblur="if(!this.value)this.value='443'">
                         <input type="number" id="warpSocksPort" value="40000" placeholder="40000" aria-label="SOCKS5-порт WARP" style="width: 100px;" title="Локальный SOCKS5-порт WARP" onblur="if(!this.value)this.value='40000'">
                         <button class="btn-primary" onclick="installWarp()">Установить WARP + Xray</button>
@@ -678,7 +678,7 @@
                         <input type="text" id="warpAgUrl" placeholder="URL AdGuard API (127.0.0.1:8090)" style="width: 240px;">
                         <input type="text" id="warpAgUser" placeholder="Логин AdGuard" style="width: 140px;">
                         <input type="password" id="warpAgPass" placeholder="Пароль AdGuard" style="width: 140px;">
-                        <input type="text" id="warpRewriteIp" value="10.8.1.1" placeholder="IP для dnsrewrite" aria-label="IP для dnsrewrite" style="width: 170px;" title="IP туннеля AWG, на который AdGuard перепишет A-записи" onblur="if(!this.value.trim())this.value='10.8.1.1'">
+                        <input type="text" id="warpRewriteIp" value="127.0.0.1" placeholder="127.0.0.1" aria-label="IP для dnsrewrite" style="width: 170px;" title="Адрес, на который AdGuard перепишет A-записи. 127.0.0.1 — Xray на этом же сервере." onblur="if(!this.value.trim())this.value='127.0.0.1'">
                         <button class="btn-primary" onclick="syncWarpAdGuard()">Записать правила</button>
                     </div>
                     <div id="warpAgResult" class="sub-text" style="margin-top: 8px;"></div>
@@ -1037,8 +1037,34 @@
 
                     <div class="card" style="flex: 1;">
                         <h3>AdGuard Home</h3>
-                        <p style="color: var(--text-muted); font-size: 13px;">Установка персонального DNS-блокировщика рекламы.</p>
+                        <p style="color: var(--text-muted); font-size: 13px;">Установка персонального DNS-блокировщика. Порт веб-интерфейса выбирается в мастере, DNS — 53.</p>
                         <button class="btn-primary" onclick="openWizard('adguard')">Установить AdGuard</button>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Компоненты</h3>
+                            <p>Что установлено на сервере. Удаление доступно у каждого компонента — панель остановит службы, уберёт конфиги и закроет порты в UFW.</p>
+                        </div>
+                        <button class="btn btn-dark" onclick="loadModules(true)">↻ Проверить</button>
+                    </div>
+                    <div id="modulesGrid" class="stats-cards" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));">
+                        <div class="card" style="margin-bottom:0;"><div style="color:var(--text-muted);">Проверка компонентов…</div></div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-top: 20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Компоненты</h3>
+                            <p>Что установлено на сервере. Удаление доступно у каждого компонента: панель остановит службы, уберёт конфиги и закроет порты в UFW.</p>
+                        </div>
+                        <button class="btn btn-dark" onclick="loadModules(true)">↻ Проверить</button>
+                    </div>
+                    <div id="modulesGrid" class="stats-cards" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));">
+                        <div class="card" style="margin-bottom:0;"><div style="color:var(--text-muted);">Проверка компонентов…</div></div>
                     </div>
                 </div>
 
@@ -1153,6 +1179,7 @@
                         <button class="btn-dark" onclick="loadProxyTab(true)">↻ Обновить</button>
                         <button class="btn-dark" onclick="proxyRestart()">⟳ Перезапустить прокси</button>
                         <button class="btn-dark" onclick="proxyRotateKey()">🔑 Выдать ключ API</button>
+                        <button class="btn-dark" onclick="proxyDiag()">🩺 Диагностика</button>
                     </div>
                 </div>
 
@@ -1362,7 +1389,7 @@
                     </div>
                     <div class="update-source">
                         <span>Или ссылка на релиз:</span>
-                        <input type="text" id="updUrl" placeholder="https://example.com/servpanel-2.8.3.tar.gz" style="flex:1; min-width:240px;">
+                        <input type="text" id="updUrl" placeholder="https://example.com/servpanel-2.8.2.tar.gz" style="flex:1; min-width:240px;">
                         <button class="btn btn-dark" id="updUrlBtn" onclick="updFromUrl()">Установить по URL</button>
                     </div>
                     <div class="update-source">

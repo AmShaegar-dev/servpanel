@@ -274,6 +274,7 @@ function switchTab(tabId, el) {
     if (pageEl) pageEl.innerText = cleanTitle === 'Дашборд' ? 'Обзор' : cleanTitle;
     if (window.innerWidth <= 860) document.getElementById('sidebar').classList.remove('open');
     if (tabId === 'tab-services') { loadServices(); connectAdGuard(false); loadAdGuardFull(); loadWarpStatus(); }
+    if (tabId === 'tab-install') loadModules();
     else if (agInterval) { clearInterval(agInterval); agInterval = null; }
     if (tabId === 'tab-cascade') { loadCascadeSetup(); loadCascadeStatus(true); loadCascadeHealth(); }
     if (tabId === 'tab-obf') { loadObfCurrent(); loadObfProfiles(); }
@@ -282,6 +283,99 @@ function switchTab(tabId, el) {
     if (tabId === 'tab-ssl') loadSslPanel();
     if (tabId === 'tab-app') loadAppPanel();
     if (tabId === 'tab-proxy') loadProxyTab();
+}
+
+/* --------------------------------------------------------------------------
+   Модули: AdGuard Home, WARP + Xray и прочие компоненты из вкладки «Установка».
+   У каждого модуля есть состояние (установлен / служба / порт) и кнопка
+   удаления, поэтому панель больше не требует ручной чистки по SSH.
+   -------------------------------------------------------------------------- */
+let modulesState = { modules: [], loadedAt: 0 };
+
+async function loadModules(force) {
+    try {
+        const data = await apiJson('/api/modules' + (force ? '?refresh=1' : ''));
+        modulesState = { modules: Array.isArray(data.modules) ? data.modules : [], loadedAt: Date.now() };
+        renderModules();
+        return modulesState.modules;
+    } catch (e) {
+        const box = document.getElementById('modulesGrid');
+        if (box) box.innerHTML = `<div class="wizard-note">Не удалось прочитать состояние компонентов: ${esc(e.message)}</div>`;
+        return [];
+    }
+}
+
+function moduleById(id) {
+    return (modulesState.modules || []).find(m => m.id === id) || null;
+}
+
+function renderModules() {
+    const box = document.getElementById('modulesGrid');
+    if (!box) return;
+    box.innerHTML = (modulesState.modules || []).map(m => {
+        const badge = m.installed
+            ? `<span class="badge ${m.running ? 'badge-good' : 'badge-warn'}">${m.running ? 'работает' : 'остановлен'}</span>`
+            : '<span class="badge badge-muted">не установлен</span>';
+        const facts = [];
+        if (m.port) facts.push(`порт ${esc(String(m.port))}`);
+        if (m.manager === 'snap') facts.push('snap');
+        if (m.configPath) facts.push(`<span class="mono" style="font-size:11px;">${esc(m.configPath)}</span>`);
+        if (m.service && m.installed) facts.push(esc(m.service));
+        return `<div class="card module-card" style="margin-bottom:0;">
+            <div class="card-head" style="margin-bottom:8px;">
+                <div><h3 style="margin:0;">${esc(m.title)}</h3></div>
+                ${badge}
+            </div>
+            <p style="color:var(--text-muted); font-size:12.5px; margin:0 0 10px;">${esc(m.description || '')}</p>
+            ${facts.length ? `<div style="color:var(--text-muted); font-size:11.5px; margin-bottom:10px;">${facts.join(' · ')}</div>` : ''}
+            <div class="controls-row" style="flex-wrap:wrap; margin-bottom:0;">
+                <button class="btn btn-primary" onclick="configureModule('${m.id}')">${m.installed ? 'Настроить' : 'Установить'}</button>
+                <button class="btn btn-dark" onclick="uninstallModule('${m.id}')" ${m.installed ? '' : 'disabled style="opacity:.5;"'}>🗑 Удалить</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function configureModule(id) {
+    if (id === 'adguard') { openWizard('adguard'); loadModules(true); return; }
+    if (id === 'warp') { switchTab('tab-services', document.getElementById('navServices')); setTimeout(() => {
+        const card = document.getElementById('warpCard');
+        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 250); return; }
+    if (id === 'mtproto' || id === 'mtproxyl') { openWizard('mtproto'); if (id === 'mtproxyl') openMtproxylWizard(); return; }
+    if (id === 'awg') { openWizard('install'); return; }
+}
+
+async function uninstallModule(id) {
+    const m = moduleById(id);
+    const title = m ? m.title : id;
+    const extra = id === 'adguard'
+        ? '\n\nAdGuard Home будет остановлен, его конфиг и статистика удалены.'
+        : id === 'warp'
+            ? '\n\nБудут удалены WARP, Xray и их конфиги. Прокси перестанет отвечать на порту Xray.'
+            : '';
+    const check = prompt(`Полностью удалить «${title}» с сервера?${extra}\n\nДля подтверждения введите слово DELETE:`);
+    if (check !== 'DELETE') return;
+    try {
+        const res = await apiJson('/api/modules/uninstall', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ module: id })
+        });
+        toast('Удаление запущено', 'success', res.title || title);
+        const wr = document.getElementById('installLogWrapper');
+        if (wr && res.logFile) {
+            wr.style.display = 'block';
+            document.getElementById('installLogText').value = 'Ожидание журнала удаления…\n';
+            if (logInterval) clearInterval(logInterval);
+            logInterval = setInterval(() => pollLog(res.logFile), 2000);
+            wr.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        setTimeout(() => loadModules(true), 6000);
+        if (id === 'warp' && typeof loadWarpStatus === 'function') setTimeout(() => loadWarpStatus(), 12000);
+        if (id === 'adguard' && typeof loadServices === 'function') setTimeout(() => loadServices(), 12000);
+    } catch (e) {
+        toast('Не удалось запустить удаление', 'error', e.message);
+    }
 }
 
 function copyMeko() {
@@ -794,10 +888,10 @@ async function toggleDns(enable) {
 }
 
 const WARP_DEFAULTS = {
-    listenIp: '10.8.1.1',
+    listenIp: '127.0.0.1',
     listenPort: '443',
     socksPort: '40000',
-    rewriteIp: '10.8.1.1'
+    rewriteIp: '127.0.0.1'
 };
 
 // Возвращает значение поля, а если оно пустое — подставляет значение по умолчанию.
@@ -882,7 +976,7 @@ async function installWarp() {
     const listenPort = warpField('warpListenPort', WARP_DEFAULTS.listenPort);
     const socksPort = warpField('warpSocksPort', WARP_DEFAULTS.socksPort);
     if (!/^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(listenIp.trim())) {
-        return alert('Укажите корректный IP для Xray (например, 10.8.1.1)');
+        return alert('Укажите корректный IP для Xray (обычно 127.0.0.1)');
     }
     if (!confirm('Установить Cloudflare WARP + Xray?\n\nБудут установлены пакеты cloudflare-warp и Xray, WARP переключится в SOCKS5-режим. AdGuard не изменится до нажатия «Записать правила».')) return;
     switchTab('tab-install', document.getElementById('navInstall'));
@@ -2882,7 +2976,7 @@ function wizardDefaults(scenario) {
     if (scenario === 'client') return { name: suggestClientName(), expires: '', count: 1, device: 'phone' };
     if (scenario === 'obf') return { preset: 'balanced', regen: true };
     if (scenario === 'cascade') return { role: 'ru', mode: 'install', remoteIp: '', remotePort: '22', remotePass: '' };
-    if (scenario === 'adguard') return { action: 'auto', url: '', probe: 'loading', detected: null, enable: true, refresh: true };
+    if (scenario === 'adguard') return { action: 'auto', url: '', probe: 'loading', detected: null, enable: true, refresh: true, port: '3000' };
     if (scenario === 'mtproto') return {
         kind: 'telemt', domain: 'ozon.ru', port: '443', version: '',
         fix: true, fixType: 'v3', fixPort: '',
@@ -3162,6 +3256,12 @@ function renderAdGuardOptions() {
             ${detected ? wizChoice('connect', '◎', 'Подключить', 'Использовать найденный AdGuard', d.action === 'connect', 'action') : ''}
             ${wizChoice('install', '↓', 'Установить AdGuard', 'Если он ещё не установлен', d.action === 'install', 'action')}
             ${wizChoice('manual', '⌁', 'Указать URL', 'Нестандартный порт или контейнер', d.action === 'manual', 'action')}
+        </div>
+        <div class="wizard-grid" style="margin-top:14px;">
+            <label class="field"><span>Персональный порт AdGuard</span>
+                <input id="wizAgPort" type="number" min="1" max="65535" value="${esc(d.port || '3000')}" placeholder="3000" oninput="wizardState.data.port=this.value">
+            </label>
+            <div class="wizard-note info" style="margin-top:0;">Веб-интерфейс и API AdGuard: <code>http://IP:порт</code>. Если порт занят (например, панелью на 3000), укажите другой — например 3001 или 8080. Порт откроется в UFW после установки.</div>
         </div>
         ${d.action === 'manual' ? `<label class="field" style="margin-top:14px;"><span>URL API AdGuard</span><input id="wizAgUrl" placeholder="http://127.0.0.1:8090" value="${esc(d.url || '')}" oninput="wizardState.data.url=this.value"></label>` : ''}
         <div class="wizard-section-title">После подключения</div>
@@ -3922,16 +4022,20 @@ async function executeBackupWizard() {
 async function executeAdGuardWizard() {
     const d = wizardState.data;
     if (d.action === 'install') {
-        await startInstall('adguard', '/var/log/adguard_install.log', {});
+        await startInstall('adguard', '/var/log/adguard_install.log', { agPort: d.port || '3000' });
+        const port = Number(d.port) || 3000;
         return {
-            html: wizardSuccess('Установка AdGuard запущена', 'После завершения вернитесь в мастер и выберите «Подключить».',
+            html: wizardSuccess('Установка AdGuard запущена', `AdGuard слушает порт <b>${port}</b>. Когда установка закончится, вернитесь в мастер и выберите «Подключить» — панель сама найдёт API на этом порту.`,
                 resultButton('Показать прогресс', 'showInstallProgress()', true) +
+                resultButton('Проверить установку', 'closeWizard(); setTimeout(()=>openWizard(\'adguard\'),18000)') +
                 resultButton('Закрыть', 'closeWizard()')
             ),
-            toast: 'Установка AdGuard запущена'
+            toast: 'Установка AdGuard запущена',
+            toastMessage: 'Порт ' + port
         };
     }
     let url = d.action === 'manual' ? d.url : (d.detected && d.detected.url) || '';
+    if (!url && d.port) url = `${location.protocol === 'https:' ? 'http' : location.protocol}//${location.hostname}:${Number(d.port) || 3000}`;
     if (!url) throw new Error('AdGuard не найден. Установите его или укажите URL вручную.');
     const stats = await apiJson('/api/adguard/stats', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -5460,6 +5564,28 @@ async function proxyRestart() {
         await loadProxyTab(true);
     } catch (e) {
         toast('Не удалось перезапустить', 'error', e.message);
+    }
+}
+
+async function proxyDiag() {
+    try {
+        const d = await apiJson('/api/proxy/diag');
+        const rows = (d.checks || []).map(c => `<div class="wizard-summary-row">
+            <span>${c.ok ? '<span class="val-rx">✓</span>' : '<span class="val-tx">✗</span>'} ${esc(c.name)}</span>
+            <b class="mono" style="font-size:10.5px; color:${c.ok ? 'var(--text-muted)' : 'var(--danger)'};">${esc(c.detail || '')}</b>
+        </div>`).join('');
+        openModal('Диагностика прокси', `
+            <p style="color:var(--text-muted); font-size:13px; margin-top:0;">
+                Панель нашла движок: <b>${esc(proxyBackendLabel(d.backend))}</b>${d.reason ? ' — ' + esc(d.reason) : ''}
+            </p>
+            <div class="wizard-summary" style="width:100%; margin:12px 0;">${rows || '<div class="wizard-summary-row"><span>Проверки не выполнены</span></div>'}</div>
+            <p style="color:var(--text-muted); font-size:12px; margin:0;">
+                Клиенты AWG и пользователи прокси — разные вещи: панель показывает клиентов VPN из конфига AmneziaWG,
+                а пользователей прокси берёт из API движка. Если proxy был установлен вручную и API выключен,
+                пользователи не видны, пока не включить API.
+            </p>`);
+    } catch (e) {
+        toast('Диагностика не удалась', 'error', e.message);
     }
 }
 

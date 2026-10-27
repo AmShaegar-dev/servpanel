@@ -7,7 +7,7 @@ trap 'echo "ERROR: установка WARP/Xray прервана (код $?)"' E
 echo "=== Cloudflare WARP + Xray для AdGuard ==="
 echo "Дата: $(date -Is)"
 
-WARP_LISTEN_IP="${WARP_LISTEN_IP:-10.8.1.1}"
+WARP_LISTEN_IP="${WARP_LISTEN_IP:-127.0.0.1}"
 WARP_LISTEN_PORT="${WARP_LISTEN_PORT:-443}"
 WARP_SOCKS_PORT="${WARP_SOCKS_PORT:-40000}"
 
@@ -36,12 +36,17 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 echo "[1/6] Системные пакеты..."
-apt-get update
-apt-get install -y curl gnupg lsb-release ca-certificates unzip iproute2
+apt-get update || echo "WARNING: apt-get update завершился с ошибкой, продолжаем."
+apt-get install -y curl gnupg lsb-release ca-certificates unzip iproute2 \
+    || { echo "ERROR: не удалось установить базовые пакеты."; exit 1; }
 
-if [ "$WARP_LISTEN_IP" != "0.0.0.0" ] && ! ip -4 addr show 2>/dev/null | grep -q "inet ${WARP_LISTEN_IP}/"; then
+# 127.0.0.1 — штатный адрес WARP-прокси (только с этого же сервера). Порт Xray
+# слушает локально и его не нужно открывать наружу; если нужен доступ из
+# туннеля AWG, укажите IP интерфейса — он должен существовать.
+if [ "$WARP_LISTEN_IP" != "0.0.0.0" ] && [ "$WARP_LISTEN_IP" != "127.0.0.1" ] \
+    && ! ip -4 addr show 2>/dev/null | grep -q "inet ${WARP_LISTEN_IP}/"; then
     echo "ERROR: IP ${WARP_LISTEN_IP} не назначен ни одному интерфейсу."
-    echo "Укажите IP туннеля AWG (например, 10.8.1.1) или 0.0.0.0."
+    echo "Оставьте 127.0.0.1 либо укажите существующий IP (например, адрес awg0)."
     exit 1
 fi
 
@@ -54,19 +59,34 @@ if ! command -v warp-cli >/dev/null 2>&1; then
     fi
     ARCH="$(dpkg --print-architecture)"
     install -d -m 0755 /usr/share/keyrings
-    curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg \
-        | gpg --yes --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+    if ! curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg \
+        | gpg --yes --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg; then
+        echo "ERROR: не удалось скачать ключ репозитория Cloudflare."
+        exit 1
+    fi
     echo "deb [arch=${ARCH} signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ ${CODENAME} main" \
         > /etc/apt/sources.list.d/cloudflare-client.list
-    apt-get update
-    apt-get install -y cloudflare-warp
+    if ! apt-get update || ! apt-get install -y cloudflare-warp; then
+        echo "ERROR: пакет cloudflare-warp для ${CODENAME}/${ARCH} не установился."
+        echo "Проверьте: apt-cache policy cloudflare-warp"
+        exit 1
+    fi
+fi
+
+if ! command -v warp-cli >/dev/null 2>&1; then
+    echo "ERROR: warp-cli отсутствует после установки пакета."
+    exit 1
 fi
 
 systemctl enable --now warp-svc >/dev/null 2>&1 || true
-sleep 2
+for _ in $(seq 1 15); do
+    warp-cli --accept-tos status >/dev/null 2>&1 && break
+    sleep 1
+done
+# Регистрация могла уже быть сделана (повторная установка) — не ошибка.
 warp-cli --accept-tos registration new >/dev/null 2>&1 || true
-warp-cli --accept-tos mode proxy
-warp-cli --accept-tos proxy port "$WARP_SOCKS_PORT"
+warp-cli --accept-tos mode proxy || { echo "ERROR: не удалось включить proxy-режим WARP."; exit 1; }
+warp-cli --accept-tos proxy port "$WARP_SOCKS_PORT" || { echo "ERROR: не удалось задать порт SOCKS ${WARP_SOCKS_PORT}."; exit 1; }
 warp-cli --accept-tos connect >/dev/null 2>&1 || true
 
 echo -n "Ожидание подключения WARP"
@@ -188,15 +208,24 @@ EOF
 chmod 600 /root/awg/warp.env
 
 if command -v ufw >/dev/null 2>&1; then
-    ufw allow "${WARP_LISTEN_PORT}/tcp" >/dev/null 2>&1 || true
-    echo "UFW: разрешён TCP/${WARP_LISTEN_PORT}."
+    if [ "$WARP_LISTEN_IP" = "127.0.0.1" ] || [ "$WARP_LISTEN_IP" = "0.0.0.0" ]; then
+        echo "UFW: TCP/${WARP_LISTEN_PORT} наружу не открываем — Xray слушает ${WARP_LISTEN_IP}."
+    else
+        ufw allow "${WARP_LISTEN_PORT}/tcp" >/dev/null 2>&1 || true
+        echo "UFW: разрешён TCP/${WARP_LISTEN_PORT}."
+    fi
     if ! ufw status 2>/dev/null | grep -q "Status: active"; then
         echo "UFW не включён: правило добавлено и применится после включения."
     fi
 else
-    echo "WARNING: ufw не найден. Откройте TCP/${WARP_LISTEN_PORT} вручную."
+    echo "WARNING: ufw не найден. Порты открывать вручную не нужно, если Xray слушает 127.0.0.1."
 fi
 
-echo "Готово: Xray слушает ${WARP_LISTEN_IP}:${WARP_LISTEN_PORT}, WARP SOCKS — 127.0.0.1:${WARP_SOCKS_PORT}."
-echo "Теперь в панели укажите IP ${WARP_LISTEN_IP} для dnsrewrite в AdGuard."
+if [ "$WARP_LISTEN_IP" = "127.0.0.1" ]; then
+    echo "Xray слушает 127.0.0.1:${WARP_LISTEN_PORT}, WARP SOCKS — 127.0.0.1:${WARP_SOCKS_PORT}."
+    echo "Для AdGuard укажите 127.0.0.1 (localhost) вместо IP туннеля."
+else
+    echo "Xray слушает ${WARP_LISTEN_IP}:${WARP_LISTEN_PORT}, WARP SOCKS — 127.0.0.1:${WARP_SOCKS_PORT}."
+    echo "Для AdGuard укажите IP ${WARP_LISTEN_IP}."
+fi
 echo "INSTALLATION DONE"

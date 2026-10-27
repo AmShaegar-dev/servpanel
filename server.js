@@ -331,6 +331,32 @@ function readKeyValueFile(file) {
     return out;
 }
 
+function readTextSafe(file, limit = 1024 * 1024) {
+    try {
+        const st = fs.statSync(file);
+        if (!st.isFile() || st.size > limit) return '';
+        return fs.readFileSync(file, 'utf8');
+    } catch (e) { return ''; }
+}
+
+function fileExists(p) {
+    try { return fs.existsSync(p); } catch (e) { return false; }
+}
+
+const XRAY_CONFIG = '/usr/local/etc/xray/config.json';
+
+// Входящий порт Xray нашего формата (dokodemo-door с исходящим тегом "warp").
+// Чужой конфиг не трогаем: если тега нет — возвращаем null.
+function xrayInbound() {
+    let cfg;
+    try { cfg = JSON.parse(readTextSafe(XRAY_CONFIG)); } catch (e) { return null; }
+    const outs = Array.isArray(cfg.outbounds) ? cfg.outbounds : [];
+    if (!outs.some(o => o && o.tag === 'warp')) return null;
+    const inb = (Array.isArray(cfg.inbounds) ? cfg.inbounds : []).find(i => i && i.port);
+    if (!inb) return null;
+    return { listen: String(inb.listen || ''), port: String(inb.port) };
+}
+
 // WARP могли поставить вручную (пакетом Cloudflare или из snap) — тогда
 // /root/awg/warp.env отсутствует. Поэтому наличие компонента определяем не
 // только по флагу установщика, но и по бинарнику/юниту systemd.
@@ -347,10 +373,14 @@ function warpBinaryPresent() {
 
 function warpConfig() {
     const env = readKeyValueFile(WARP_ENV_FILE);
+    // Если warp.env нет (WARP ставили вручную), берём порт из нашего Xray.
+    const xray = xrayInbound();
     return {
         installed: env.WARP_INSTALLED === '1' || warpBinaryPresent(),
-        listenIp: IPV4_RE.test(env.WARP_LISTEN_IP || '') ? env.WARP_LISTEN_IP : '10.8.1.1',
-        listenPort: isPort(env.WARP_LISTEN_PORT) ? String(Number(env.WARP_LISTEN_PORT)) : '443',
+        listenIp: IPV4_RE.test(env.WARP_LISTEN_IP || '') ? env.WARP_LISTEN_IP
+            : (xray && IPV4_RE.test(xray.listen) ? xray.listen : '127.0.0.1'),
+        listenPort: isPort(env.WARP_LISTEN_PORT) ? String(Number(env.WARP_LISTEN_PORT))
+            : (xray && isPort(xray.port) ? String(Number(xray.port)) : '443'),
         socksPort: isPort(env.WARP_SOCKS_PORT) ? String(Number(env.WARP_SOCKS_PORT)) : '40000',
         installedAt: env.WARP_INSTALLED_AT || ''
     };
@@ -3322,12 +3352,14 @@ app.post('/api/warp/adguard', checkAuth, requireAdmin, async (req, res) => {
     const base = normalizeAgUrl(body.url);
     if (!base) return res.status(400).json({ error: 'Укажите корректный URL AdGuard API' });
 
+    // Обычный режим: Xray на этом же сервере (127.0.0.1). IP туннеля нужен,
+    // только когда AdGuard стоит на другом сервере или Xray слушает awg0.
     const cfg = warpConfig();
     let rewriteIp = String(body.rewriteIp || '').trim();
-    if (!rewriteIp || rewriteIp === '0.0.0.0') rewriteIp = String(cfg.listenIp || '10.8.1.1').trim();
-    if (rewriteIp === '0.0.0.0') rewriteIp = '10.8.1.1';
-    if (!IPV4_RE.test(rewriteIp) || rewriteIp.startsWith('127.')) {
-        return res.status(400).json({ error: 'Укажите IP туннеля для dnsrewrite (например, 10.8.1.1)' });
+    if (!rewriteIp || rewriteIp === '0.0.0.0') rewriteIp = String(cfg.listenIp || '127.0.0.1').trim();
+    if (rewriteIp === '0.0.0.0') rewriteIp = '127.0.0.1';
+    if (!IPV4_RE.test(rewriteIp)) {
+        return res.status(400).json({ error: 'Укажите корректный IP для dnsrewrite (обычно 127.0.0.1)' });
     }
 
     let domains;
@@ -6002,7 +6034,7 @@ function installEnv(data) {
     env.REMOTE_PORT = isPort(data.remotePort) ? String(data.remotePort) : '22';
     if (data.remotePass) env.REMOTE_PASS = String(data.remotePass);
     // Опциональный WARP + Xray. Значения проверяются и здесь, и в скрипте.
-    env.WARP_LISTEN_IP = IPV4_RE.test(String(data.listenIp || '')) ? String(data.listenIp) : '10.8.1.1';
+    env.WARP_LISTEN_IP = IPV4_RE.test(String(data.listenIp || '')) ? String(data.listenIp) : '127.0.0.1';
     const warpListenPort = Number(data.listenPort);
     const warpSocksPort = Number(data.socksPort);
     env.WARP_LISTEN_PORT = Number.isInteger(warpListenPort) && warpListenPort >= 1 && warpListenPort <= 65535
@@ -6091,10 +6123,15 @@ function installEnv(data) {
         }
     }
     env.MTPROXYL_FORCE = data.mplForce ? '1' : '0';
+
+    // AdGuard Home: порт веб-интерфейса и API. Если не задан, установщик
+    // возьмёт 3000 или первый свободный порт в обход порта панели.
+    const agPort = Number(data.agPort);
+    env.ADGUARD_PORT = Number.isInteger(agPort) && agPort >= 1 && agPort <= 65535 ? String(agPort) : '';
     return env;
 }
 
-app.post('/api/install/module', checkAuth, (req, res) => {
+app.post('/api/install/module', checkAuth, requireAdmin, (req, res) => {
     const data = req.body || {};
     const module = data.module;
     if (typeof module !== 'string' || !Object.prototype.hasOwnProperty.call(MODULES, module)) {
@@ -6188,6 +6225,9 @@ app.post('/api/install/module', checkAuth, (req, res) => {
         if (data.mplTgbotToken && !/^\d{5,}:[A-Za-z0-9_-]{20,}$/.test(String(data.mplTgbotToken))) {
             return res.status(400).json({ error: 'Некорректный токен Telegram-бота' });
         }
+    }
+    if (module === 'adguard' && data.agPort !== undefined && data.agPort !== '' && !isPort(data.agPort)) {
+        return res.status(400).json({ error: 'Некорректный порт AdGuard' });
     }
     try {
         sh('sudo', ['bash', '-c', `rm -f ${mod.log} && touch ${mod.log} && chmod 666 ${mod.log}`]);
@@ -6456,6 +6496,14 @@ app.get('/api/proxy/status', checkAuth, async (req, res) => {
     } catch (e) { proxyError(res, e); }
 });
 
+// Диагностика: почему панель не видит прокси. Проверяет файлы ключей,
+// адреса API и отвечает ли /v1/health. Помогает на серверах, где прокси
+// ставили вручную и API остался выключенным.
+app.get('/api/proxy/diag', checkAuth, async (req, res) => {
+    try { res.json(await proxyUsers.diagnose()); }
+    catch (e) { res.status(500).json({ error: 'Диагностика не удалась: ' + e.message }); }
+});
+
 app.get('/api/proxy/users', checkAuth, async (req, res) => {
     try {
         const users = await proxyUsers.listUsers();
@@ -6582,9 +6630,341 @@ app.post('/api/proxy/bot/test', checkAuth, requireAdmin, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Состояние и удаление модулей (AdGuard Home, WARP + Xray, прокси, AWG)
+// ---------------------------------------------------------------------------
+// Раньше из панели удалялся только AWG: AdGuard и WARP оставались в системе и
+// мешали повторной установке (занятый порт, чужой конфиг Xray). Теперь у
+// каждого компонента есть состояние и полное удаление.
+const AG_DIR = '/opt/AdGuardHome';
+const AG_CONFIG = AG_DIR + '/AdGuardHome.yaml';
+const AG_SNAP_DIR = '/var/snap/adguard-home';
+
+function adguardPortFromConfig() {
+    const text = readTextSafe(AG_CONFIG);
+    const m = text.match(/^[ \t]*bind_port[ \t]*:[ \t]*(\d{1,5})[ \t]*$/m);
+    return m && isPort(m[1]) ? String(Number(m[1])) : '';
+}
+
+function adguardInfo() {
+    const snap = fileExists(AG_SNAP_DIR);
+    const config = readTextSafe(AG_CONFIG) ? AG_CONFIG : '';
+    const installed = !!config || snap || fileExists('/usr/bin/AdGuardHome') ||
+        fileExists('/usr/local/bin/AdGuardHome') || fileExists(AG_DIR + '/AdGuardHome');
+    const state = installed ? isActive('AdGuardHome') : 'unknown';
+    return {
+        installed,
+        running: state === 'active',
+        state,
+        service: 'AdGuardHome',
+        manager: snap ? 'snap' : 'systemd',
+        port: adguardPortFromConfig(),
+        configPath: config || (snap ? AG_SNAP_DIR : (installed ? AG_DIR : ''))
+    };
+}
+
+function warpInfo() {
+    const cfg = warpConfig();
+    const hasXray = fileExists(XRAY_CONFIG) || fileExists('/usr/local/bin/xray');
+    const installed = cfg.installed || hasXray;
+    const active = hasXray ? isActive('xray') === 'active' : false;
+    return {
+        installed,
+        running: installed && (active || isActive('warp-svc') === 'active'),
+        state: active ? 'active' : 'inactive',
+        service: hasXray ? 'xray' : 'warp-svc',
+        port: cfg.listenPort,
+        listenIp: cfg.listenIp,
+        socksPort: cfg.socksPort,
+        configPath: fileExists(XRAY_CONFIG) ? XRAY_CONFIG : WARP_ENV_FILE
+    };
+}
+
+function mtprotoInfo() {
+    const d = proxyUsers.detectCached ? proxyUsers.detectCached() : null;
+    const backend = d ? d.backend : '';
+    const telemtCfg = ['/etc/telemt/telemt.toml', '/etc/telemt/config.toml', '/opt/telemt/config.toml']
+        .find(fileExists) || '';
+    let port = '';
+    const m = telemtCfg ? readTextSafe(telemtCfg, 256 * 1024).match(/^[ \t]*port[ \t]*=[ \t]*(\d{1,5})[ \t]*$/m) : null;
+    if (m && isPort(m[1])) port = String(Number(m[1]));
+    const units = ['telemt', 'mtproto', 'mtproxyl', 'mtproto.zig', 'mtproto-zig', 'mtg'];
+    const activeUnit = units.find(u => isActive(u) === 'active') || '';
+    const installed = (!!backend && backend !== 'none' && backend !== 'demo') || !!telemtCfg ||
+        !!activeUnit || fileExists('/usr/local/bin/telemt') || fileExists('/usr/local/bin/mtproxyl');
+    return {
+        installed,
+        running: !!activeUnit,
+        state: activeUnit ? 'active' : 'inactive',
+        service: activeUnit,
+        backend,
+        port,
+        configPath: telemtCfg
+    };
+}
+
+function awgModuleInfo() {
+    const iface = ['awg0', 'amn0', 'awg1'].find(n => fileExists(path.join(AWG_CONF_DIR, n + '.conf'))) || '';
+    return {
+        installed: !!iface || fileExists('/usr/bin/awg'),
+        running: !!iface && isActive('awg-quick@' + iface) === 'active',
+        state: iface ? isActive('awg-quick@' + iface) : 'unknown',
+        service: iface ? 'awg-quick@' + iface : '',
+        port: '',
+        configPath: iface ? path.join(AWG_CONF_DIR, iface + '.conf') : ''
+    };
+}
+
+const MODULE_DESCRIPTIONS = {
+    adguard: 'DNS-фильтр рекламы. Веб-интерфейс и API на своём порту.',
+    warp: 'Xray принимает TLS, WARP уводит DNS в SOCKS5.',
+    mtproto: 'Telemt, MTProxyL или MTProto.zig с фиксом MEKO.',
+    awg: 'VPN-сервер и клиенты.'
+};
+
+function modulesSnapshot() {
+    if (DEMO_MODE) {
+        return [
+            { id: 'adguard', title: 'AdGuard Home', installed: true, running: true, state: 'active', service: 'AdGuardHome', manager: 'systemd', port: '3001', configPath: '/opt/AdGuardHome/AdGuardHome.yaml' },
+            { id: 'warp', title: 'Cloudflare WARP + Xray', installed: false, running: false, state: 'inactive', service: 'xray', port: '443', listenIp: '127.0.0.1', socksPort: '40000', configPath: '' },
+            { id: 'mtproto', title: 'MTProto-прокси', installed: true, running: true, state: 'active', service: 'telemt', backend: 'demo', port: '443', configPath: '/etc/telemt/telemt.toml' },
+            { id: 'awg', title: 'AmneziaWG', installed: true, running: true, state: 'active', service: 'awg-quick@awg0', port: '', configPath: path.join(AWG_CONF_DIR, 'awg0.conf') }
+        ].map(m => ({ ...m, description: MODULE_DESCRIPTIONS[m.id] }));
+    }
+    const items = [
+        { id: 'adguard', title: 'AdGuard Home', ...adguardInfo() },
+        { id: 'warp', title: 'Cloudflare WARP + Xray', ...warpInfo() },
+        { id: 'mtproto', title: 'MTProto-прокси', ...mtprotoInfo() },
+        { id: 'awg', title: 'AmneziaWG', ...awgModuleInfo() }
+    ];
+    return items.map(m => ({ ...m, description: MODULE_DESCRIPTIONS[m.id] }));
+}
+
+app.get('/api/modules', checkAuth, (req, res) => {
+    try { res.json({ modules: modulesSnapshot() }); }
+    catch (e) { res.status(500).json({ error: 'Не удалось прочитать состояние модулей' }); }
+});
+
+const MODULE_UNINSTALL = {
+    adguard: {
+        title: 'AdGuard Home',
+        log: '/var/log/adguard_uninstall.log',
+        bin: 'adguard_uninstall',
+        script: String.raw`
+AG_DIR=/opt/AdGuardHome
+SNAP_DIR=/var/snap/adguard-home
+
+if [ -d "$SNAP_DIR" ]; then
+  echo "AdGuard установлен через snap — удаляем snap-пакет."
+  snap remove adguard-home >/dev/null 2>&1 || true
+fi
+
+for unit in AdGuardHome adguard-home; do
+  systemctl stop "$unit" >/dev/null 2>&1 || true
+  systemctl disable "$unit" >/dev/null 2>&1 || true
+done
+
+if [ -x "$AG_DIR/AdGuardHome" ]; then
+  "$AG_DIR/AdGuardHome" --service stop >/dev/null 2>&1 || true
+fi
+if [ -x "$AG_DIR/uninstall.sh" ]; then
+  bash "$AG_DIR/uninstall.sh" --uninstall >/dev/null 2>&1 || true
+fi
+
+rm -f /usr/lib/systemd/system/AdGuardHome.service /lib/systemd/system/AdGuardHome.service \
+      /etc/systemd/system/AdGuardHome.service /usr/lib/systemd/system/adguard-home.service \
+      /etc/systemd/system/adguard-home.service
+rm -rf "$AG_DIR" "$SNAP_DIR" /etc/AdGuardHome
+rm -f /usr/bin/AdGuardHome /usr/local/bin/AdGuardHome
+systemctl daemon-reload >/dev/null 2>&1 || true
+systemctl reset-failed >/dev/null 2>&1 || true
+
+if command -v ufw >/dev/null 2>&1; then
+  for port in "\${PORTS[@]}"; do
+    ufw delete allow "$port/tcp" >/dev/null 2>&1 || true
+    ufw delete allow "$port/udp" >/dev/null 2>&1 || true
+  done
+fi
+`
+    },
+    warp: {
+        title: 'Cloudflare WARP + Xray',
+        log: '/var/log/warp_uninstall.log',
+        bin: 'warp_uninstall',
+        script: String.raw`
+XRAY_CONFIG=/usr/local/etc/xray/config.json
+XRAY_OURS=0
+if [ -f "$XRAY_CONFIG" ] && grep -q '"tag"[[:space:]]*:[[:space:]]*"warp"' "$XRAY_CONFIG"; then
+  XRAY_OURS=1
+fi
+
+WARP_PORT=""
+if [ -f /root/awg/warp.env ]; then
+  . /root/awg/warp.env 2>/dev/null || true
+  WARP_PORT="\${WARP_LISTEN_PORT:-}"
+fi
+
+systemctl stop xray >/dev/null 2>&1 || true
+systemctl disable xray >/dev/null 2>&1 || true
+
+if [ "$XRAY_OURS" = "1" ]; then
+  echo "Удаляем конфиг Xray, созданный панелью."
+  LAST_BAK="$(ls -1t "$XRAY_CONFIG".bak_* 2>/dev/null | head -1 || true)"
+  rm -f "$XRAY_CONFIG"
+  if [ -n "\${LAST_BAK:-}" ]; then
+    cp -a "$LAST_BAK" "$XRAY_CONFIG" && echo "Возвращён предыдущий конфиг Xray: $LAST_BAK"
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl start xray >/dev/null 2>&1 || true
+  fi
+else
+  echo "Xray установлен не панелью — оставляем его конфиг как есть."
+fi
+rm -rf /var/log/xray
+find /usr/local/bin /usr/local/share -maxdepth 2 -name 'xray*' -exec rm -rf {} + 2>/dev/null || true
+
+systemctl stop warp-svc >/dev/null 2>&1 || true
+systemctl disable warp-svc >/dev/null 2>&1 || true
+if command -v warp-cli >/dev/null 2>&1; then
+  warp-cli --accept-tos disconnect >/dev/null 2>&1 || true
+  warp-cli --accept-tos registration delete >/dev/null 2>&1 || true
+fi
+if command -v snap >/dev/null 2>&1 && snap list 2>/dev/null | grep -q '^warp-cli'; then
+  snap remove warp-cli >/dev/null 2>&1 || true
+fi
+if command -v dpkg >/dev/null 2>&1 && dpkg -s cloudflare-warp >/dev/null 2>&1; then
+  DEBIAN_FRONTEND=noninteractive apt-get purge -y cloudflare-warp >/dev/null 2>&1 || true
+fi
+rm -f /etc/apt/sources.list.d/cloudflare-client.list \
+      /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg \
+      /etc/systemd/system/xray.service /etc/systemd/system/xray@.service \
+      /usr/lib/systemd/system/xray.service /lib/systemd/system/xray.service
+rm -f /root/awg/warp.env /root/awg/warp-adguard.json
+systemctl daemon-reload >/dev/null 2>&1 || true
+systemctl reset-failed >/dev/null 2>&1 || true
+
+if command -v ufw >/dev/null 2>&1 && [ -n "$WARP_PORT" ]; then
+  ufw delete allow "\${WARP_PORT}/tcp" >/dev/null 2>&1 || true
+fi
+`
+    },
+    mtproto: {
+        title: 'MTProto-прокси',
+        log: '/var/log/mtproto_uninstall.log',
+        bin: 'mtproto_uninstall',
+        script: String.raw`
+for unit in mtproxyl-api mtproxyl mtproto.zig mtproto-zig mtg telemt mtproto; do
+  if systemctl list-unit-files 2>/dev/null | grep -q "^\${unit}\.service"; then
+    echo "Останавливаем \${unit}.service"
+    systemctl stop "$unit" >/dev/null 2>&1 || true
+    systemctl disable "$unit" >/dev/null 2>&1 || true
+  fi
+done
+
+if command -v docker >/dev/null 2>&1; then
+  for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Ei 'telemt|mtproto|mtg|mtproxyl' || true); do
+    echo "Удаляем контейнер $c"
+    docker rm -f "$c" >/dev/null 2>&1 || true
+  done
+fi
+
+if command -v mtproxyl >/dev/null 2>&1; then
+  mtproxyl api off >/dev/null 2>&1 || true
+  mtproxyl api uninstall >/dev/null 2>&1 || true
+fi
+[ -x /opt/mtproxyl/uninstall.sh ] && bash /opt/mtproxyl/uninstall.sh >/dev/null 2>&1 || true
+[ -x /opt/telemt/uninstall.sh ] && bash /opt/telemt/uninstall.sh >/dev/null 2>&1 || true
+rm -rf /etc/telemt /opt/telemt /etc/mtproxyl /opt/mtproxyl /etc/mtproxyl-api \
+       /opt/mtproto.zig /etc/mtproto.zig
+rm -f /usr/local/bin/telemt /usr/local/bin/mtproxyl /usr/local/bin/mtproxyl-api \
+      /usr/local/bin/mtg /usr/local/bin/mtproto.zig
+rm -f /etc/sudoers.d/mtproxyl-api
+rm -f /root/mtproto_links.txt /root/mtproto_links.mtproxyl.txt /root/mtproxyl-links.txt
+rm -f /etc/systemd/system/mtproxyl-api.service /etc/systemd/system/mtproto.zig.service
+systemctl daemon-reload >/dev/null 2>&1 || true
+systemctl reset-failed >/dev/null 2>&1 || true
+
+if command -v ufw >/dev/null 2>&1; then
+  for port in "\${PORTS[@]}"; do
+    ufw delete allow "$port/tcp" >/dev/null 2>&1 || true
+  done
+fi
+`
+    }
+};
+
+function runDetached(title, logFile, script) {
+    sh('sudo', ['bash', '-c', `rm -f ${logFile} && touch ${logFile} && chmod 666 ${logFile}`]);
+    const file = `/tmp/run_uninstall_${logFile.replace(/\W+/g, '_')}.sh`;
+    fs.writeFileSync(file, `#!/bin/bash\nset -u\n${script}\necho "=== УДАЛЕНИЕ ЗАВЕРШЕНО ==="\n`, { mode: 0o700 });
+    const fd = fs.openSync(logFile, 'a');
+    try {
+        const child = spawn('bash', [file], { detached: true, stdio: ['ignore', fd, fd] });
+        child.unref();
+    } finally {
+        fs.closeSync(fd);
+    }
+    if (!LOG_WHITELIST.includes(logFile)) LOG_WHITELIST.push(logFile);
+    return { success: true, title, logFile };
+}
+
+const AWG_UNINSTALL_SCRIPT = `#!/bin/bash
+echo "Начинаем удаление AmneziaWG..." > /var/log/awg_uninstall.log
+if [ -f "/root/install_amneziawg.sh" ]; then
+    bash /root/install_amneziawg.sh --uninstall --yes >> /var/log/awg_uninstall.log 2>&1
+else
+    curl -fsSL https://raw.githubusercontent.com/bivlked/amneziawg-installer/main/install_amneziawg.sh -o /tmp/uninstall_awg.sh
+    bash /tmp/uninstall_awg.sh --uninstall --yes >> /var/log/awg_uninstall.log 2>&1
+fi
+systemctl stop awg-routing.timer awg-routing.service 2>/dev/null || true
+systemctl disable awg-routing.timer 2>/dev/null || true
+rm -f /etc/systemd/system/awg-routing.service /etc/systemd/system/awg-routing.timer
+rm -rf /etc/amnezia/amneziawg /root/awg /root/awg_domain.txt
+systemctl daemon-reload 2>/dev/null || true
+echo "=== УДАЛЕНИЕ ЗАВЕРШЕНО ===" >> /var/log/awg_uninstall.log
+`;
+
+function awgUninstall() {
+    fs.writeFileSync('/tmp/run_uninstall_awg.sh', AWG_UNINSTALL_SCRIPT, { mode: 0o700 });
+    const child = spawn('bash', ['/tmp/run_uninstall_awg.sh'], { detached: true, stdio: 'ignore' });
+    child.unref();
+    return { success: true, title: 'AmneziaWG', logFile: '/var/log/awg_uninstall.log' };
+}
+
+// Порты, которые нужно закрыть в UFW при удалении: состояние читаем до
+// удаления, потому что после него конфигов уже нет.
+function modulePorts(id) {
+    const ports = [];
+    if (id === 'adguard') {
+        [adguardInfo().port, '3000', '3001'].filter(Boolean).forEach(p => ports.push(p));
+        ['53', '853'].forEach(p => ports.push(p));
+    }
+    if (id === 'warp') [warpInfo().port].filter(Boolean).forEach(p => ports.push(p));
+    if (id === 'mtproto') [mtprotoInfo().port].filter(Boolean).forEach(p => ports.push(p));
+    return [...new Set(ports.filter(isPort))];
+}
+
+app.post('/api/modules/uninstall', checkAuth, requireAdmin, (req, res) => {
+    const id = String((req.body && req.body.module) || '');
+    try {
+        if (id === 'awg') {
+            const r = awgUninstall();
+            auditLog(req, 'Запущено полное удаление AmneziaWG');
+            return res.json(r);
+        }
+        const mod = MODULE_UNINSTALL[id];
+        if (!mod) return res.status(400).json({ error: 'Неизвестный модуль' });
+        const list = modulePorts(id).map(p => `'${p}'`).join(' ');
+        const result = runDetached(mod.title, mod.log, `PORTS=(${list})\n${mod.script}`);
+        auditLog(req, `Запущено удаление модуля ${mod.title}`);
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: 'Ошибка запуска удаления: ' + (e.message || 'неизвестно') });
+    }
+});
+
+// ---------------------------------------------------------------------------
 // Полное удаление AmneziaWG
 // ---------------------------------------------------------------------------
-app.post('/api/uninstall/awg', checkAuth, (req, res) => {
+app.post('/api/uninstall/awg', checkAuth, requireAdmin, (req, res) => {
     try {
         const script = `#!/bin/bash
 echo "Начинаем удаление AmneziaWG..." > /var/log/awg_uninstall.log

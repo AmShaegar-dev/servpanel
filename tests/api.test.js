@@ -62,22 +62,6 @@ function jsonBody(obj, extra = {}) {
     };
 }
 
-/**
- * Удаление с повторами: в Windows антивирус или ещё не закрытый поток
- * могут на миг заблокировать файл, и обычный rmSync падает с EPERM.
- */
-async function removeWithRetry(target, opts) {
-    for (let i = 0; ; i += 1) {
-        try {
-            fs.rmSync(target, opts);
-            return;
-        } catch (e) {
-            if (i >= 20) throw e;
-            await new Promise((r) => setTimeout(r, 50));
-        }
-    }
-}
-
 async function login(password, username = '', code = '', ip = '') {
     const headers = { 'Content-Type': 'application/json' };
     if (ip) headers['X-Forwarded-For'] = ip;
@@ -884,10 +868,10 @@ test('Приложение: локальный APK отдаётся, если с
         assert.equal(dl.headers.get('content-type'), 'application/vnd.android.package-archive');
         assert.equal(dl.text, bytes.toString());
     } finally {
-        await removeWithRetry(apkFile, { force: true });
-        await removeWithRetry(apkDir, { recursive: true, force: true });
+        fs.rmSync(apkFile, { force: true });
+        fs.rmSync(apkDir, { recursive: true, force: true });
         if (had) fs.writeFileSync(settingsFile, prev);
-        else await removeWithRetry(settingsFile, { force: true });
+        else fs.rmSync(settingsFile, { force: true });
     }
 });
 
@@ -1107,6 +1091,96 @@ test('MTProxyL: installEnv собирает все переменные уста
     assert.equal(env.MTPROXYL_TGBOT_TOKEN, '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw');
     assert.equal(env.MTPROXYL_TGBOT_ADMIN, '987654321');
     assert.equal(env.MTPROXYL_FORCE, '1');
+});
+
+test('AdGuard: порт установки передаётся в установщик', () => {
+    const env = internals.installEnv({ module: 'adguard', agPort: '8080' });
+    assert.equal(env.ADGUARD_PORT, '8080');
+    const empty = internals.installEnv({ module: 'adguard' });
+    assert.equal(empty.ADGUARD_PORT, '', 'пустой порт — установщик выберет сам');
+    const bad = internals.installEnv({ module: 'adguard', agPort: '99999' });
+    assert.equal(bad.ADGUARD_PORT, '');
+});
+
+test('WARP: по умолчанию Xray слушает 127.0.0.1', () => {
+    const env = internals.installEnv({ module: 'warp' });
+    assert.equal(env.WARP_LISTEN_IP, '127.0.0.1');
+    assert.equal(env.WARP_LISTEN_PORT, '443');
+    assert.equal(env.WARP_SOCKS_PORT, '40000');
+    const custom = internals.installEnv({ module: 'warp', listenIp: '10.8.1.1', listenPort: '8443' });
+    assert.equal(custom.WARP_LISTEN_IP, '10.8.1.1');
+    assert.equal(custom.WARP_LISTEN_PORT, '8443');
+});
+
+test('Компоненты: список отдаётся только после входа', async () => {
+    const anon = await fetch(base + '/api/modules');
+    assert.equal(anon.status, 401);
+    const r = await request('/api/modules');
+    assert.equal(r.status, 200);
+    assert.ok(Array.isArray(r.json.modules));
+    const ids = r.json.modules.map(m => m.id);
+    for (const id of ['adguard', 'warp', 'mtproto', 'awg']) {
+        assert.ok(ids.includes(id), 'нет модуля ' + id);
+    }
+    for (const m of r.json.modules) {
+        assert.equal(typeof m.installed, 'boolean');
+        assert.equal(typeof m.running, 'boolean');
+        assert.ok(m.title);
+    }
+});
+
+test('Компоненты: удаление принимает только известные модули', async () => {
+    const bad = await request('/api/modules/uninstall', jsonBody({ module: 'zzz' }));
+    assert.equal(bad.status, 400);
+    const empty = await request('/api/modules/uninstall', jsonBody({}));
+    assert.equal(empty.status, 400);
+});
+
+// Установщики должны остаться валидным bash: их подмены легко поймать только
+// на Linux, поэтому проверяем хотя бы баланс ${...} и наличие финальной метки.
+test('Установщики AdGuard и WARP: безопасные подстановки в shell', () => {
+    const read = (name) => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
+    const ag = read('install_adguard_silent.sh');
+    assert.match(ag, /INSTALLATION DONE/);
+    assert.match(ag, /ADGUARD_PORT/);
+    assert.match(ag, /\$\{PORTS\[@\]\}|\$\{p\}/);
+    const warp = read('install_warp_xray.sh');
+    assert.match(warp, /INSTALLATION DONE/);
+    assert.match(warp, /WARP_LISTEN_IP="\$\{WARP_LISTEN_IP:-127\.0\.0\.1\}"/);
+    // В шаблоне server.js подстановки shell экранированы: ${...} не должно
+    // превращаться в JS-переменные.
+    const server = read('server.js');
+    const block = server.slice(server.indexOf('const MODULE_UNINSTALL'), server.indexOf('function awgUninstall'));
+    const raw = [...block.matchAll(/String\.raw`([\s\S]*?)`/g)].map(m => m[1]);
+    assert.equal(raw.length, 3, 'три сценария удаления');
+    for (const script of raw) {
+        const unescaped = script.replace(/\\\$\{/g, '');
+        assert.ok(!/\$\{[A-Za-z_]/.test(unescaped), 'неэкранированная подстановка: ' + (unescaped.match(/\$\{[A-Za-z_]+/) || [''])[0]);
+    }
+});
+
+test('Прокси: диагностика отдаёт проверки и предупреждает об отсутствии движка', async () => {
+    const r = await request('/api/proxy/diag');
+    assert.equal(r.status, 200);
+    assert.ok(Array.isArray(r.json.checks));
+    assert.ok(r.json.checks.some(c => /telemt/i.test(c.name)), 'проверка telemt API');
+    assert.ok(r.json.checks.some(c => /MTProxyL/i.test(c.name)), 'проверка MTProxyL API');
+});
+
+test('Прокси: ключ MTProxyL пишется в файл с правами 600', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'servpanel-mtp-key-'));
+    const file = path.join(dir, 'servpanel.key');
+    const prev = process.env.SERVEPANEL_MTPROXYL_KEY_FILE;
+    process.env.SERVEPANEL_MTPROXYL_KEY_FILE = file;
+    try {
+        delete require.cache[require.resolve('../lib/proxy-users')];
+        const mod = require('../lib/proxy-users');
+        assert.equal(mod.panelKeyPath(), file);
+    } finally {
+        if (prev === undefined) delete process.env.SERVEPANEL_MTPROXYL_KEY_FILE;
+        else process.env.SERVEPANEL_MTPROXYL_KEY_FILE = prev;
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
 });
 
 test('выход закрывает доступ', async () => {
