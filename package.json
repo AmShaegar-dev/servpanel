@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "npm run check && node --test tests/api.test.js",
-    "check": "node --check server.js && node --check public/app.js && node --check lib/updater.js && node --check lib/update-worker.js && node --check lib/proxy-users.js && node --check lib/proxy-bot.js"
+    "check": "node --check server.js && node --check public/app.js && node --check lib/updater.js && node --check lib/update-worker.js && node --check lib/proxy-users.js && node --check lib/proxy-bot.js && bash -n install.sh && bash -n uninstall.sh && bash -n lib/server-install.sh && bash -n lib/server-admin.sh",
+    "uninstall": "bash uninstall.sh"
   },
   "keywords": [
     "amneziawg",

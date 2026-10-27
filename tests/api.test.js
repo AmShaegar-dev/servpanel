@@ -62,22 +62,6 @@ function jsonBody(obj, extra = {}) {
     };
 }
 
-/**
- * Удаление с повторами: в Windows антивирус или ещё не закрытый поток
- * могут на миг заблокировать файл, и обычный rmSync падает с EPERM.
- */
-async function removeWithRetry(target, opts) {
-    for (let i = 0; ; i += 1) {
-        try {
-            fs.rmSync(target, opts);
-            return;
-        } catch (e) {
-            if (i >= 20) throw e;
-            await new Promise((r) => setTimeout(r, 50));
-        }
-    }
-}
-
 async function login(password, username = '', code = '', ip = '') {
     const headers = { 'Content-Type': 'application/json' };
     if (ip) headers['X-Forwarded-For'] = ip;
@@ -884,9 +868,8 @@ test('Приложение: локальный APK отдаётся, если с
         assert.equal(dl.headers.get('content-type'), 'application/vnd.android.package-archive');
         assert.equal(dl.text, bytes.toString());
     } finally {
-        // Windows может держать файл открытым после отдачи — с повторами.
-        await removeWithRetry(apkFile, { force: true });
-        await removeWithRetry(apkDir, { recursive: true, force: true });
+        fs.rmSync(apkFile, { force: true });
+        fs.rmSync(apkDir, { recursive: true, force: true });
         if (had) fs.writeFileSync(settingsFile, prev);
         else fs.rmSync(settingsFile, { force: true });
     }
@@ -1204,6 +1187,32 @@ test('Прокси: ключ MTProxyL пишется в файл с правам
         else process.env.SERVEPANEL_MTPROXYL_KEY_FILE = prev;
         fs.rmSync(dir, { recursive: true, force: true });
     }
+});
+
+test('Удаление панели из консоли: меню и режимы', () => {
+    const read = (name) => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
+    const main = read('install.sh');
+    assert.match(main, /Установить панель/);
+    assert.match(main, /Удалить панель/);
+    assert.match(main, /Только панель/);
+    assert.match(main, /Полная очистка/);
+    assert.match(main, /ACTION=panel/);
+    assert.match(main, /ACTION=full/);
+
+    const admin = read('lib/server-admin.sh');
+    assert.match(admin, /--component/);
+    for (const c of ['awg', 'adguard', 'warp', 'mtproto']) {
+        assert.match(admin, new RegExp('^\\s*' + c + '\\)$', 'm'), 'компонент ' + c);
+    }
+    assert.match(admin, /servpanel-before-remove/);
+
+    const cli = read('uninstall.sh');
+    assert.match(cli, /lib\/server-admin\.sh/);
+
+    const pkg = JSON.parse(read('package.json'));
+    assert.match(pkg.scripts.check, /lib\/server-admin\.sh/);
+    assert.match(pkg.scripts.check, /lib\/server-install\.sh/);
+    assert.match(pkg.scripts.check, /install\.sh/);
 });
 
 test('выход закрывает доступ', async () => {

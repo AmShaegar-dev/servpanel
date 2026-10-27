@@ -33,7 +33,7 @@ const ITEMS = [
     'ИЗМЕНЕНИЯ.md', 'ОБНОВЛЕНИЕ-2.4.md',
     'install.sh', 'install_adguard_silent.sh', 'install_awg_stateful.sh',
     'install_mtproto_silent.sh', 'install_mtproxyl_silent.sh', 'install_warp_xray.sh', 'warp-domains.txt',
-    'update.sh', 'upgrade.sh', 'LICENSE', '.gitignore'
+    'update.sh', 'upgrade.sh', 'uninstall.sh', 'LICENSE', '.gitignore'
 ];
 const FORBIDDEN = new Set([
     'admin_pass.txt', '.secrets.json', '.users.json', '.panel_port', '.panel_public_port',
