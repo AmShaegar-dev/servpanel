@@ -2866,22 +2866,15 @@ function cascadeRoleFrom(confText) {
     const ini = parseIni(confText);
     const iface = ini.Interface || {};
     const peer = ini.Peer || {};
-    const firstAddr = String(iface.Address || '').split(',')[0].trim();
-    const peerNets = String(peer.AllowedIPs || '').split(',').map(s => s.trim()).filter(Boolean);
-    // Панель может записать вместо 0.0.0.0/0 весь список адресов — это тот же
-    // «весь трафик»: ищем сеть с префиксом ≤ 8, покрывающую публичные адреса.
-    const coversAll = peerNets.some(n => {
-        const m = n.match(/^(\d{1,3})\.\d{1,3}\.\d{1,3}\.\d{1,3}\/(\d{1,2})$/);
-        return !!m && Number(m[2]) <= 8;
-    });
-    // Интерфейс сервера-входа: адрес подсети /24 и ListenPort.
-    if (/^10\.9\.9\.\d+\/(2[4-9]|30)$/.test(firstAddr) && iface.ListenPort) return 'ru';
-    // Интерфейс сервера-выхода: свой адрес /32, у пира только адрес в туннеле.
-    if (/^10\.9\.9\.\d+\/32$/.test(firstAddr) && peerNets.length && peerNets.every(n => /^10\.9\.9\.\d+\/32$/.test(n))) return 'eu';
-    // Клиентский конфиг со всем трафиком — его подставляют на вход (RU).
-    if (/^10\.9\.9\.\d+\/32$/.test(firstAddr) && !iface.ListenPort && coversAll) return 'ru';
-    return '';
+    const firstAddr = String(iface.Address || "").split(",")[0].trim();
+    const peerNets = String(peer.AllowedIPs || "").split(",").map(s => s.trim()).filter(Boolean);
+    if (!/^10\.9\.9\.\d+\/\d{1,2}$/.test(firstAddr)) return "";
+    if (iface.ListenPort) return "ru";
+    if (peerNets.length === 1 && /^10\.9\.9\.\d+\/32$/.test(peerNets[0])) return "eu";
+    return "ru";
 }
+
+
 
 
 
@@ -2908,39 +2901,120 @@ function firstIpv4(value) {
 // Адрес второй стороны ВНУТРИ туннеля (10.9.9.x). Первый адрес из AllowedIPs
 // брать нельзя: клиенты панели записывают туда список маршрутов (1.0.0.0/8 …).
 function firstTunnelIp(value) {
-    const m = String(value || '').match(/\b(10\.9\.9\.(?:\d{1,3}))\b/);
-    return m ? m[1] : '';
+    const m = String(value || "").match(/\b(10\.9\.9\.\d{1,3})\b/);
+    return m ? m[1] : "";
 }
+
+
 
 // Endpoint для awg1 с учётом роли:
 //   * на RU нужен ВНУТРЕННИЙ адрес EU в туннеле (10.9.9.3) — публичный IP
 //     внутри туннеля недоступен, и awg-quick падал;
 //   * на EU нужен публичный адрес RU.
+// Адреса туннеля (10.9.9.x) из конфигов этого сервера: awg0/amn0 и
+// клиентские .conf. Нужны, чтобы отличить публичный адрес второй стороны
+// от внутреннего, который внутри туннеля недоступен.
+function localTunnelIps() {
+    const ips = new Set(['10.9.9.1']);
+    for (const dir of [AWG_CONF_DIR, AWG_DIR]) {
+        let names = [];
+        try { names = fs.readdirSync(dir); } catch (e) { continue; }
+        for (const name of names) {
+            if (!/\.conf$/.test(name)) continue;
+            const text = readTextSafe(path.join(dir, name));
+            let m;
+            const re = /\b(10\.9\.9\.\d{1,3})\b/g;
+            while ((m = re.exec(text))) ips.add(m[1]);
+        }
+    }
+    return ips;
+}
+
+function isPublicAddress(host, localIps) {
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return false;
+    if (localIps.has(host)) return false;
+    return !/^(10\.|127\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(host);
+}
+
 function cascadeEndpointPlan() {
     const conf = existingCascadeConf();
     if (!conf) return null;
     let ini;
     try { ini = parseIni(readTextSafe(conf)); } catch (e) { return null; }
     const peer = ini.Peer || {};
-    const listenPort = isPort(ini.Interface && ini.Interface.ListenPort) ? String(ini.Interface.ListenPort) : '';
+    const listenPort = isPort(ini.Interface && ini.Interface.ListenPort) ? String(ini.Interface.ListenPort) : "";
     const role = cascadeRole();
-    if (role === 'eu' && /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(peer.Endpoint || '')) {
-        // Внутренний адрес в Endpoint на выходе означает чужой конфиг.
+    // На выходе внутренний адрес в Endpoint означает чужой конфиг.
+    if (role === "eu" && /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(String(peer.Endpoint || ""))) return null;
+    if (role === "ru") {
+        const localIps = localTunnelIps();
+        const epMatch = String(peer.Endpoint || "").match(/^([A-Za-z0-9.\-]+):(\d{1,5})$/);
+        if (!epMatch || !isPort(epMatch[2])) return null;
+        const resolved = resolveHostSync(epMatch[1]);
+        if (resolved && isPublicAddress(resolved, localIps)) {
+            return { host: resolved, port: String(epMatch[2]), raw: resolved + ":" + epMatch[2], source: "public" };
+        }
+        const tunnelIp = firstTunnelIp(peer.AllowedIPs);
+        if (tunnelIp && !localIps.has(tunnelIp)) {
+            return { host: tunnelIp, port: String(epMatch[2]), raw: tunnelIp + ":" + epMatch[2], source: "tunnel" };
+        }
         return null;
     }
-    if (role === 'ru') {
-        const tunnelIp = firstTunnelIp(peer.AllowedIPs);
-        if (!tunnelIp || !listenPort) return null;
-        return { host: tunnelIp, port: listenPort, raw: `${tunnelIp}:${listenPort}`, source: 'tunnel' };
-    }
-    const m = String(peer.Endpoint || '').match(/^([A-Za-z0-9.\-]+):(\d{1,5})$/);
+    const m = String(peer.Endpoint || "").match(/^([A-Za-z0-9.\-]+):(\d{1,5})$/);
     if (!m || !isIpOrHost(m[1]) || !isPort(m[2])) return null;
-    return { host: m[1], port: m[2], raw: `${m[1]}:${m[2]}`, source: 'public' };
+    return { host: m[1], port: m[2], raw: m[1] + ":" + m[2], source: "public" };
 }
+
 
 function cascadeEndpoint() {
     const plan = cascadeEndpointPlan();
     return plan ? { host: plan.host, port: plan.port, raw: plan.raw } : null;
+}
+
+// Клиентский конфиг панели часто содержит домен в Endpoint. В маршрутах нужен
+// адрес, поэтому резолвим имя и берём внутренний 10.9.9.x, если он есть.
+const dnsAnsCache = new Map();
+// Синхронное разрешение домена: в клиентском конфиге панели Endpoint — имя
+// хоста второй стороны. Внутренний 10.9.9.x для этого не подходит.
+function resolveHostSync(host) {
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return host;
+    const cached = dnsAnsCache.get(host);
+    if (cached && Date.now() - cached.at < 60000) return cached.ip;
+    try {
+        const out = require('child_process').execFileSync('getent', ['hosts', host], { encoding: 'utf8', timeout: 5000 }).trim();
+        const parts = out.split(/\s+/);
+        const ip = parts.find(x => /^\d{1,3}(\.\d{1,3}){3}$/.test(x)) || '';
+        if (ip) dnsAnsCache.set(host, { at: Date.now(), ip });
+        return ip;
+    } catch (e) {
+        return '';
+    }
+}
+async function resolveHost(host) {
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return host;
+    const cached = dnsAnsCache.get(host);
+    if (cached && Date.now() - cached.at < 60000) return cached.ip;
+    try {
+        const res = await dns.promises.lookup(host, { family: 4 });
+        dnsAnsCache.set(host, { at: Date.now(), ip: res.address });
+        return res.address;
+    } catch (e) {
+        return '';
+    }
+}
+
+async function cascadeEndpointPlanAsync() {
+    const plan = cascadeEndpointPlan();
+    if (plan) return plan;
+    const conf = existingCascadeConf();
+    if (!conf) return null;
+    let peer = {};
+    try { peer = (parseIni(readTextSafe(conf)).Peer) || {}; } catch (e) { return null; }
+    const m = String(peer.Endpoint || '').match(/^([A-Za-z0-9.\-]+):(\d{1,5})$/);
+    if (!m) return null;
+    const ip = await resolveHost(m[1]);
+    if (!ip || !firstTunnelIp(ip)) return null;
+    return { host: ip, port: m[2], raw: ip + ':' + m[2], source: 'tunnel' };
 }
 
 // Приводит конфиг к виду, который требует CASCADE.md: без DNS и с
@@ -2954,8 +3028,8 @@ function normalizeCascadeConf(text) {
     return lines.join('\n').trim() + '\n';
 }
 
-function installRouting(ifaces, extraRuNets) {
-    const plan = cascadeEndpointPlan();
+async function installRouting(ifaces, extraRuNets) {
+    const plan = await cascadeEndpointPlanAsync();
     if (!plan) throw new Error('Не удалось определить адрес второго сервера в туннеле (проверьте awg1.conf)');
     const script = buildRoutingScript(ifaces, extraRuNets, plan);
     writeRootFile(ROUTING_SCRIPT, script, '0755');
@@ -3119,7 +3193,7 @@ function teardownRouting() {
 }
 
 // Настройка каскада из клиентского конфига EU-сервера (вставка в панель)
-app.post('/api/cascade/setup', checkAuth, (req, res) => {
+app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
     const { config, ifaces, extraRuNets } = req.body || {};
     const conf = String(config || '');
     if (conf.length > 64 * 1024) return res.status(400).json({ error: 'Конфиг слишком большой' });
@@ -3151,7 +3225,7 @@ app.post('/api/cascade/setup', checkAuth, (req, res) => {
         sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
         // Небольшая задержка на поднятие интерфейса
         try { sh('sleep', ['2']); } catch (e) { /* ignore */ }
-        const r = installRouting(ifaces, extra);
+        const r = await installRouting(ifaces, extra);
         const ep = r.endpoint;
         auditLog(req, `Каскад настроен (${cascadeRole().toUpperCase()}): awg1 -> ${ep.raw}, интерфейсы: ${ifaces.join(', ')}`);
         res.json({
@@ -3180,7 +3254,7 @@ app.post('/api/cascade/refresh', checkAuth, (req, res) => {
 
 // Починка каскада: ставит Table = off, пересобирает awg1 и маршруты.
 // Нужна, если каскад настраивали вручную или старой версией панели.
-app.post('/api/cascade/repair', checkAuth, requireAdmin, (req, res) => {
+app.post('/api/cascade/repair', checkAuth, requireAdmin, async (req, res) => {
     const conf = existingCascadeConf();
     if (!conf) return res.status(400).json({ error: 'Туннель не настроен: сначала вставьте конфиг клиента с другого сервера' });
     try {
@@ -3203,7 +3277,7 @@ app.post('/api/cascade/repair', checkAuth, requireAdmin, (req, res) => {
             ifaces = [...new Set([...mangle.matchAll(/-A PREROUTING.*?-i\s+(\S+).*?(?:--set-xmark|--set-mark)\s+0x1/g)].map(m => m[1]))];
         } catch (e) { /* ignore */ }
         if (!ifaces.length) ifaces = ['awg0'];
-        const r = installRouting(ifaces, []);
+        const r = await installRouting(ifaces, []);
         auditLog(req, `Каскад пересобран (${plan.source}): awg1 -> ${plan.raw}, интерфейсы: ${ifaces.join(', ')}`);
         res.json({ success: true, endpoint: plan.raw, endpointSource: plan.source, role: cascadeRole(), ifaces, output: r.out });
     } catch (e) {
@@ -3229,7 +3303,7 @@ app.get('/api/cascade/config', checkAuth, (req, res) => {
 });
 
 // Совместимость со старым вызовом из вкладки «Защита и Cron»
-app.post('/api/tools/cascade', checkAuth, (req, res) => {
+app.post('/api/tools/cascade', checkAuth, async (req, res) => {
     const { ifaces, enable } = req.body || {};
     if (enable) {
         if (!existingCascadeConf()) {
@@ -3238,7 +3312,7 @@ app.post('/api/tools/cascade', checkAuth, (req, res) => {
         if (!validIfaces(ifaces)) return res.json({ error: 'Выберите существующие интерфейсы' });
         try {
             const extra = parseCidrList('') || [];
-            installRouting(ifaces, extra);
+            await installRouting(ifaces, extra);
             auditLog(req, `Маршруты каскада применены: ${ifaces.join(', ')}`);
             res.json({ success: true });
         } catch (e) { res.json({ error: 'Ошибка настройки каскада: ' + e.message }); }
@@ -7595,7 +7669,7 @@ module.exports._internals = {
     installEnv, proxyUserPatch, proxyUsername,
     writeAppSettings, metricsSnapshot, prometheusMetrics, startMetricsServer, stopMetricsServer,
     metricsRuntimeInfo, apkInfo, resolveApkFile, APP_SETTINGS_FILE, APP_APK_DIR,
-    normalizeCascadeConf, firstIpv4, firstTunnelIp, buildRoutingScript, cascadeRole,
+    normalizeCascadeConf, firstIpv4, firstTunnelIp, buildRoutingScript, cascadeRole, localTunnelIps, isPublicAddress,
     cascadeEndpointPlan, cascadeRoleFrom, cascadeHealth
 };
 

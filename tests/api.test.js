@@ -1285,6 +1285,17 @@ test('Каскад: клиентский конфиг панели распоз�
     const panelClient = '[Interface]\nPrivateKey = a\nAddress = 10.9.9.2/32, fddd:2c4:2c4:ffff::a09:902/128\nMTU = 1280\n\n[Peer]\nPublicKey = b\nAllowedIPs = 0.0.0.0/0, ::/0, 10.9.9.3/32\nEndpoint = 194.124.250.127:3977\n';
     assert.equal(internals.cascadeRoleFrom(panelClient), 'ru');
 });
+test('Каскад: адрес второй стороны — публичный, а не внутренний', () => {
+    const client = '[Interface]\nPrivateKey = a\nAddress = 10.9.9.1/24\nListenPort = 3977\n\n[Peer]\nPublicKey = b\nAllowedIPs = 10.9.9.2/32\nEndpoint = 194.124.250.127:3977\n';
+    assert.equal(internals.cascadeRoleFrom(client), 'ru');
+    // Внутренние адреса этого сервера не должны попасть в правила.
+    const local = internals.localTunnelIps ? Array.from(internals.localTunnelIps()) : [];
+    for (const ip of ['10.9.9.2', '10.9.9.3', '10.9.9.4']) {
+        const isLocal = local.includes(ip);
+        const isPublic = internals.isPublicAddress ? internals.isPublicAddress(ip, new Set(local)) : !isLocal;
+        assert.ok(!isPublic, 'внутренний адрес ' + ip + ' не публичный');
+    }
+});
 test('выход закрывает доступ', async () => {
     await request('/api/logout', { method: 'POST' });
     const r = await request('/api/stats');
