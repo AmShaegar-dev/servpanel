@@ -3212,44 +3212,37 @@ function createPeerClient(name) {
 
 async function installRouting(ifaces, extraRuNets) {
     const plan = await cascadeEndpointPlanAsync();
-    if (!plan) throw new Error('Не удалось определить адрес второго сервера в туннеле (проверьте awg1.conf)');
-    // Приводим конфиг к рабочему виду до запуска службы: Table = off, без DNS,
-    // без IPv6 при выключенном IPv6, с параметрами обфускации этой стороны.
+    if (!plan) throw new Error("Не удалось определить адрес второго сервера в туннеле (проверьте awg1.conf)");
+    // Конфиг в рабочий вид: Table = off, без DNS, без IPv6 при выключенном IPv6.
     const confFile = existingCascadeConf();
     if (confFile) {
         const before = readTextSafe(confFile);
-        const after = prepareCascadeConf(before, 'awg0');
-        if (after !== before) {
-            writeRootFile(confFile, after, '0600');
-            try { sh('sudo', ['systemctl', 'restart', 'awg-quick@awg1']); } catch (e) { /* ниже покажем ошибку */ }
-            try { sh('sleep', ['2']); } catch (e) { /* ignore */ }
-        }
+        const after = prepareCascadeConf(before, "awg0");
+        if (after !== before) writeRootFile(confFile, after, "0600");
     }
     const script = buildRoutingScript(ifaces, extraRuNets, plan);
-    writeRootFile(ROUTING_SCRIPT, script, '0755');
-    writeRootFile('/etc/systemd/system/awg-routing.service', ROUTING_SERVICE, '0644');
-    writeRootFile('/etc/systemd/system/awg-routing.timer', ROUTING_TIMER, '0644');
-    sh('sudo', ['systemctl', 'daemon-reload']);
-    sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
+    writeRootFile(ROUTING_SCRIPT, script, "0755");
+    writeRootFile("/etc/systemd/system/awg-routing.service", ROUTING_SERVICE, "0644");
+    writeRootFile("/etc/systemd/system/awg-routing.timer", ROUTING_TIMER, "0644");
+    sh("sudo", ["systemctl", "daemon-reload"]);
     try {
-        try { sh('sleep', ['2']); } catch (e) { /* ignore */ }
-        // Сначала выполняем скрипт напрямую: только так видна причина сбоя.
-        const out = sh('sudo', [ROUTING_SCRIPT], { timeout: 180000 });
-        sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
-        try { sh('sudo', ['systemctl', 'start', 'awg-routing.service']); } catch (e) {
-            // Скрипт уже отработал; systemctl может ругаться на таймер —
-            // это не повод считать каскад нерабочим.
-        }
+        // 1. Сначала маршруты: скрипт добавляет маршрут до второй стороны через
+        //    WAN. Без него awg-quick не довезёт рукопожатие (внутренний адрес
+        //    уходит в туннель) и падает.
+        const out = sh("sudo", [ROUTING_SCRIPT], { timeout: 180000 });
+        // 2. Теперь поднимаем туннель и включаем таймер.
+        sh("sudo", ["systemctl", "enable", "--now", "awg-quick@awg1"]);
+        try { sh("sleep", ["2"]); } catch (e) { /* ignore */ }
+        sh("sudo", ["systemctl", "enable", "--now", "awg-routing.timer"]);
+        try { sh("sudo", ["systemctl", "start", "awg-routing.service"]); } catch (e) { /* уже применено */ }
         return { script, out, endpoint: plan };
     } catch (e) {
-        // Не оставляем каскад в полунастроенном виде: правила маркировки без
-        // рабочих маршрутов лишают клиентов интернета.
-        try { sh('sudo', ['systemctl', 'stop', 'awg-quick@awg1']); } catch (err) { /* ignore */ }
-        const detail = ((e.stdout || '') + (e.stderr || '') || e.message || '').trim();
-        let status = '';
-        try { status = sh('sudo', ['bash', '-c', 'systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 15']); } catch (err) { /* ignore */ }
-        throw new Error((detail || 'awg-routing не запустился') + (status ? '\n\n' + status.trim() : '') +
-            '\n\nТуннель awg1 остановлен, правила каскада не применены.');
+        try { sh("sudo", ["systemctl", "stop", "awg-quick@awg1"]); } catch (err) { /* ignore */ }
+        const detail = ((e.stdout || "") + (e.stderr || "") || e.message || "").trim();
+        let status = "";
+        try { status = sh("sudo", ["bash", "-c", "systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 15"]); } catch (err) { /* ignore */ }
+        throw new Error((detail || "awg-routing не запустился") + (status ? "\n\n" + status.trim() : "") +
+            "\n\nТуннель awg1 остановлен, правила каскада не применены.");
     }
 }
 
