@@ -2314,16 +2314,19 @@ function cascadeDetails() {
     if (TEST_MODE) {
         // В тестах не трогаем systemd/iptables и не шумим ошибками sudo
         return {
-            configured: !!conf, confPath: conf || CASCADE_CONF, tunnelActive: false, timerActive: false,
-            endpoint: '', ifaces: [], ipsetCount: 0, ruleExists: false, tableRoute: '', handshakeAgo: null, lastRun: null
+            configured: !!conf, confPath: conf || CASCADE_CONF, role: cascadeRole(),
+            tunnelActive: false, timerActive: false,
+            endpoint: '', endpointSource: '', ifaces: [], ipsetCount: 0, ruleExists: false, tableRoute: '', handshakeAgo: null, lastRun: null
         };
     }
     const out = {
         configured: !!conf,
         confPath: conf || CASCADE_CONF,
+        role: cascadeRole(),
         tunnelActive: isActive('awg-quick@awg1') === 'active',
         timerActive: isActive('awg-routing.timer') === 'active',
         endpoint: '',
+        endpointSource: '',
         ifaces: [],
         ipsetCount: 0,
         ruleExists: false,
@@ -2340,11 +2343,14 @@ function cascadeDetails() {
             if (ts > 0) out.handshakeAgo = Math.floor(Date.now() / 1000) - ts;
         }
     } catch (e) { /* ignore */ }
-    // Endpoint из awg1.conf
+    // Endpoint из awg1.conf: на RU дополнительно показываем, какой адрес
+    // реально используется в правилах (внутренний ли публичный).
     try {
         if (conf) {
             const ini = parseIni(fs.readFileSync(conf, 'utf8'));
             if (ini.Peer && ini.Peer.Endpoint) out.endpoint = ini.Peer.Endpoint;
+            const plan = cascadeEndpointPlan();
+            if (plan) { out.endpointSource = plan.source; out.effectiveEndpoint = plan.raw; }
         }
     } catch (e) { /* ignore */ }
     // Маршрутизация: интерфейсы, ipset, ip rule, таблица
@@ -2358,6 +2364,17 @@ function cascadeDetails() {
         out.ipsetCount = parseInt(cnt, 10) || 0;
     } catch (e) { /* ignore */ }
     try { out.ruleExists = sh('ip', ['rule', 'show']).includes('fwmark 0x1'); } catch (e) { /* ignore */ }
+    // Почему туннель не поднялся: без журнала в интерфейсе видно только
+    // «не активен», а причина (неверный Endpoint) остаётся в systemctl.
+    if (conf && !out.tunnelActive) {
+        out.tunnelState = isActive('awg-quick@awg1');
+        out.routeState = isActive('awg-routing.service');
+        try {
+            out.tunnelError = shTry('sudo', ['bash', '-c',
+                'systemctl status awg-quick@awg1 --no-pager -l 2>&1 | grep -iE "error|ошибка|fail|resolve|unreachable|endpoint" | tail -n 3'
+            ]).trim().slice(0, 500);
+        } catch (e) { /* ignore */ }
+    }
     try { out.tableRoute = shTry('ip', ['route', 'show', 'table', '100']).trim().split('\n')[0] || ''; } catch (e) { /* ignore */ }
     try {
         if (fs.existsSync(ROUTING_SCRIPT)) out.lastRun = fs.statSync(ROUTING_SCRIPT).mtime.toISOString();
@@ -2819,21 +2836,98 @@ app.post('/api/tools/dns', checkAuth, (req, res) => {
 // ---------------------------------------------------------------------------
 // Каскад: генерация скрипта маршрутизации (по CASCADE.md от bivlked)
 // ---------------------------------------------------------------------------
-function cascadeEndpoint() {
-    const conf = existingCascadeConf();
-    if (!conf) return null;
-    try {
-        const ini = parseIni(fs.readFileSync(conf, 'utf8'));
-        const ep = ini.Peer && ini.Peer.Endpoint;
-        if (!ep) return null;
-        const m = String(ep).match(/^([A-Za-z0-9.\-]+):(\d{1,5})$/);
-        if (!m || !isIpOrHost(m[1]) || !isPort(m[2])) return null;
-        return { host: m[1], port: m[2], raw: `${m[1]}:${m[2]}` };
-    } catch (e) { return null; }
+// Роль сервера в каскаде:
+//   RU (вход)  — есть awg0.conf со слушающим портом: сюда подключаются клиенты,
+//                туннель awg1 идёт в EU;
+//   EU (выход) — awg0 нет (или это только туннель): сюда приходит RU, а
+//                клиентские конфиги RU создаются через manage_amneziawg.sh.
+function cascadeRole() {
+    if (TEST_MODE) return 'ru';
+    for (const name of ['awg0', 'amn0']) {
+        const file = path.join(AWG_CONF_DIR, name + '.conf');
+        if (!fileExists(file)) continue;
+        const ini = parseIni(readTextSafe(file));
+        // У настоящего входа есть ListenPort и один или несколько клиентов.
+        if (ini.Interface && isPort(ini.Interface.ListenPort)) return 'ru';
+    }
+    return 'eu';
 }
 
-function buildRoutingScript(ifaces, extraRuNets) {
-    const ep = cascadeEndpoint();
+function firstIpv4(value) {
+    const m = String(value || '').match(/\b((?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})\b/);
+    return m ? m[1] : '';
+}
+
+// Endpoint для awg1 с учётом роли:
+//   * на RU нужен ВНУТРЕННИЙ адрес EU в туннеле (10.9.9.3) — публичный IP
+//     внутри туннеля недоступен, и awg-quick падал;
+//   * на EU нужен публичный адрес RU.
+function cascadeEndpointPlan() {
+    const conf = existingCascadeConf();
+    if (!conf) return null;
+    let ini;
+    try { ini = parseIni(readTextSafe(conf)); } catch (e) { return null; }
+    const peer = ini.Peer || {};
+    const listenPort = isPort(ini.Interface && ini.Interface.ListenPort) ? String(ini.Interface.ListenPort) : '';
+    if (cascadeRole() === 'ru') {
+        const tunnelIp = firstIpv4(peer.AllowedIPs);
+        if (!tunnelIp || !listenPort) return null;
+        return { host: tunnelIp, port: listenPort, raw: `${tunnelIp}:${listenPort}`, source: 'tunnel' };
+    }
+    const m = String(peer.Endpoint || '').match(/^([A-Za-z0-9.\-]+):(\d{1,5})$/);
+    if (!m || !isIpOrHost(m[1]) || !isPort(m[2])) return null;
+    return { host: m[1], port: m[2], raw: `${m[1]}:${m[2]}`, source: 'public' };
+}
+
+function cascadeEndpoint() {
+    const plan = cascadeEndpointPlan();
+    return plan ? { host: plan.host, port: plan.port, raw: plan.raw } : null;
+}
+
+// Приводит конфиг к виду, который требует CASCADE.md: без DNS и с
+// Table = off. Таблицу выключения маршрутов проверяем в обоих регистрах.
+function normalizeCascadeConf(text) {
+    const lines = String(text || '').split(/\r?\n/)
+        .filter(l => !/^\s*DNS\s*=/i.test(l))
+        .filter(l => !/^\s*Table\s*=/i.test(l));
+    const idx = lines.findIndex(l => /^\s*\[Interface\]\s*$/i.test(l));
+    if (idx >= 0) lines.splice(idx + 1, 0, 'Table = off');
+    return lines.join('\n').trim() + '\n';
+}
+
+function installRouting(ifaces, extraRuNets) {
+    const plan = cascadeEndpointPlan();
+    if (!plan) throw new Error('Не удалось определить адрес второго сервера в туннеле (проверьте awg1.conf)');
+    const script = buildRoutingScript(ifaces, extraRuNets, plan);
+    writeRootFile(ROUTING_SCRIPT, script, '0755');
+    writeRootFile('/etc/systemd/system/awg-routing.service', ROUTING_SERVICE, '0644');
+    writeRootFile('/etc/systemd/system/awg-routing.timer', ROUTING_TIMER, '0644');
+    sh('sudo', ['systemctl', 'daemon-reload']);
+    sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
+    sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
+    try {
+        const out = sh('sudo', ['systemctl', 'start', 'awg-routing.service']);
+        return { script, out, endpoint: plan };
+    } catch (e) {
+        // Не оставляем каскад в полунастроенном виде: правила маркировки без
+        // рабочих маршрутов лишают клиентов интернета.
+        try { sh('sudo', ['systemctl', 'stop', 'awg-quick@awg1']); } catch (err) { /* ignore */ }
+        let extra = '';
+        try { extra = sh('sudo', ['bash', '-c', 'systemctl status awg-routing.service --no-pager -l | tail -n 20']); } catch (err) { /* ignore */ }
+        let journal = '';
+        try { journal = sh('sudo', ['bash', '-c', 'journalctl -u awg-routing.service -n 30 --no-pager']); } catch (err) { /* ignore */ }
+        const err = new Error(
+            (e.stderr || e.message || 'awg-routing не запустился').trim() +
+            (extra ? '\n\n' + extra.trim() : '') +
+            (journal ? '\n\n' + journal.trim() : '') +
+            '\n\nТуннель awg1 остановлен, правила каскада не применены.'
+        );
+        throw err;
+    }
+}
+
+function buildRoutingScript(ifaces, extraRuNets, endpoint) {
+    const ep = endpoint || cascadeEndpoint();
     if (!ep) throw new Error('Не удалось определить Endpoint туннеля awg1 (проверьте awg1.conf)');
     const extra = (extraRuNets || []).join('\n');
     return `#!/bin/bash
@@ -2858,7 +2952,19 @@ trap 'rm -f "$RU_ZONE.tmp"' EXIT
 EP_ROUTE="$(ip -4 route get "$AWG1_ENDPOINT" 2>/dev/null | head -1)"
 WAN_IF="$(printf '%s' "$EP_ROUTE" | grep -oP '\\bdev \\K\\S+' || true)"
 WAN_GW="$(printf '%s' "$EP_ROUTE" | grep -oP '\\bvia \\K\\S+' || true)"
-[ -n "$WAN_IF" ] || { echo "Не удалось определить внешний интерфейс"; exit 1; }
+
+# Туннель должен существовать, а Endpoint — маршрутизироваться не через awg1.
+# Иначе правила маркировки уведут трафик в пустоту и оставят клиентов без сети.
+if ! ip link show "$AWG1_IF" >/dev/null 2>&1; then
+    echo "ERROR: интерфейс $AWG1_IF не поднят. Проверьте awg1.conf и awg-quick@awg1."
+    exit 1
+fi
+if [ -z "$WAN_IF" ] || [ "$WAN_IF" = "$AWG1_IF" ]; then
+    echo "ERROR: Endpoint $AWG1_ENDPOINT недоступен напрямую (маршрут через $AWG1_IF)."
+    echo "В awg1.conf в [Peer] нужен внутренний адрес второго сервера в туннеле,"
+    echo "а не публичный IP: RU -> 10.9.9.3:3977, EU -> публичный IP RU."
+    exit 1
+fi
 
 fetch_ru_zone() {
     curl -fsS --retry 2 --connect-timeout 10 --max-time 60 -o "$RU_ZONE.tmp" "$1" || return 1
@@ -2890,19 +2996,25 @@ ip route replace default dev "$AWG1_IF" table "$TABLE_ID"
 ip rule del fwmark "$FWMARK" table "$TABLE_ID" 2>/dev/null || true
 ip rule add fwmark "$FWMARK" table "$TABLE_ID" priority "$RULE_PRIO"
 
-# Маршрут до EU-сервера — всегда через основной шлюз (иначе туннель зациклится)
-if [ -n "$WAN_GW" ]; then
+# Маршрут до второго сервера нужен только для публичного адреса (на EU это
+# IP RU): он должен идти через основной шлюз, иначе пакеты уйдут в туннель
+# и зациклятся. Внутренний адрес (RU -> 10.9.9.3) уже идёт через awg1.
+if [ -n "$WAN_GW" ] && ! printf '%s' "$AWG1_ENDPOINT" | grep -qE '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)'; then
     ip route replace "$AWG1_ENDPOINT" via "$WAN_GW" dev "$WAN_IF" onlink 2>/dev/null || \\
         ip route replace "$AWG1_ENDPOINT" via "$WAN_GW" dev "$WAN_IF"
-else
-    ip route replace "$AWG1_ENDPOINT" dev "$WAN_IF"
 fi
 
-# Правила для каждого клиентского интерфейса:
-#   - трафик к российским сетям -> напрямую (RETURN), остальной -> в туннель (MARK)
+# Правила для клиентских интерфейсов: трафик к российским сетям — напрямую
+# (RETURN), остальной — в туннель (MARK). Если ни у одного интерфейса нет
+# IPv4, выходим с ошибкой: без правил каскад «настроен», но не работает.
+COUNT=0
 for IFACE in "\${CASC_IFACES[@]}"; do
     SUBNET=$(ip -o -f inet addr show "$IFACE" 2>/dev/null | awk '{print $4}' | head -n 1 || true)
-    [ -n "$SUBNET" ] || continue
+    if [ -z "$SUBNET" ]; then
+        echo "WARNING: у интерфейса $IFACE нет IPv4 — пропускаем."
+        continue
+    fi
+    COUNT=$((COUNT + 1))
     iptables -w 5 -t mangle -D PREROUTING -i "$IFACE" -s "$SUBNET" -m set --match-set ru dst -j RETURN 2>/dev/null || true
     iptables -w 5 -t mangle -D PREROUTING -i "$IFACE" -s "$SUBNET" -j MARK --set-xmark "$FWMARK" 2>/dev/null || true
     iptables -w 5 -t nat -D POSTROUTING -s "$SUBNET" -o "$AWG1_IF" -j MASQUERADE 2>/dev/null || true
@@ -2910,44 +3022,15 @@ for IFACE in "\${CASC_IFACES[@]}"; do
     iptables -w 5 -t mangle -A PREROUTING -i "$IFACE" -s "$SUBNET" -j MARK --set-xmark "$FWMARK"
     iptables -w 5 -t nat -A POSTROUTING -s "$SUBNET" -o "$AWG1_IF" -j MASQUERADE
 done
+if [ "$COUNT" -eq 0 ]; then
+    echo "ERROR: ни у одного из интерфейсов (\${CASC_IFACES[*]}) нет IPv4-адреса."
+    echo "Проверьте, что AWG поднят: systemctl status awg-quick@awg0"
+    exit 1
+fi
 
 sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
 echo "ОК: маршруты каскада применены ($(date '+%Y-%m-%d %H:%M:%S'))"
 `;
-}
-
-const ROUTING_SERVICE = `[Unit]
-Description=AmneziaWG cascade routing (RU -> EU)
-After=network-online.target awg-quick@awg1.service
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/root/awg/awg-routing.sh
-RemainAfterExit=no
-`;
-const ROUTING_TIMER = `[Unit]
-Description=Refresh AmneziaWG cascade routing
-
-[Timer]
-OnBootSec=30s
-OnUnitActiveSec=300s
-AccuracySec=10s
-
-[Install]
-WantedBy=timers.target
-`;
-
-function installRouting(ifaces, extraRuNets) {
-    const script = buildRoutingScript(ifaces, extraRuNets);
-    writeRootFile(ROUTING_SCRIPT, script, '0755');
-    writeRootFile('/etc/systemd/system/awg-routing.service', ROUTING_SERVICE, '0644');
-    writeRootFile('/etc/systemd/system/awg-routing.timer', ROUTING_TIMER, '0644');
-    sh('sudo', ['systemctl', 'daemon-reload']);
-    sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
-    sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
-    const out = sh('sudo', ['systemctl', 'start', 'awg-routing.service']);
-    return { script, out };
 }
 
 function teardownRouting() {
@@ -2989,17 +3072,17 @@ app.post('/api/cascade/setup', checkAuth, (req, res) => {
     if (!ini.Peer.PublicKey) return res.status(400).json({ error: 'В [Peer] нет PublicKey' });
     const epm = String(ini.Peer.Endpoint || '').match(/^([A-Za-z0-9.\-]+):(\d{1,5})$/);
     if (!epm || !isIpOrHost(epm[1]) || !isPort(epm[2])) return res.status(400).json({ error: 'Некорректный Endpoint в [Peer]' });
+    // На RU (вход) в туннеле нужен внутренний адрес второй стороны.
+    if (cascadeRole() === 'ru' && !firstIpv4(ini.Peer.AllowedIPs)) {
+        return res.status(400).json({ error: 'В [Peer] нет AllowedIPs с внутренним адресом сервера каскада' });
+    }
     if (!validIfaces(ifaces)) return res.status(400).json({ error: 'Выберите клиентские интерфейсы (обычно awg0)' });
     const extra = parseCidrList(extraRuNets);
     if (extra === null) return res.status(400).json({ error: 'Некорректная подсеть в «дополнительных сетях РФ»' });
 
     try {
-        // Готовим awg1.conf по CASCADE.md: без DNS, с Table = off
-        const lines = conf.split(/\r?\n/).filter(l => !/^\s*DNS\s*=/i.test(l) && !/^\s*Table\s*=/i.test(l));
-        const idx = lines.findIndex(l => /^\s*\[Interface\]\s*$/i.test(l));
-        lines.splice(idx + 1, 0, 'Table = off');
-        const cleanConf = lines.join('\n').trim() + '\n';
-
+        // Готовим awg1.conf по CASCADE.md: без DNS и с Table = off.
+        const cleanConf = normalizeCascadeConf(conf);
         writeRootFile(CASCADE_CONF, cleanConf, '0600');
         // Убираем старый файл, если он мешал
         if (CASCADE_CONF_LEGACY !== CASCADE_CONF && fs.existsSync(CASCADE_CONF_LEGACY)) {
@@ -3010,8 +3093,16 @@ app.post('/api/cascade/setup', checkAuth, (req, res) => {
         // Небольшая задержка на поднятие интерфейса
         try { sh('sleep', ['2']); } catch (e) { /* ignore */ }
         const r = installRouting(ifaces, extra);
-        auditLog(req, `Каскад настроен: awg1 -> ${epm[1]}:${epm[2]}, интерфейсы: ${ifaces.join(', ')}`);
-        res.json({ success: true, endpoint: `${epm[1]}:${epm[2]}`, output: r.out, details: cascadeDetails() });
+        const ep = r.endpoint;
+        auditLog(req, `Каскад настроен (${cascadeRole().toUpperCase()}): awg1 -> ${ep.raw}, интерфейсы: ${ifaces.join(', ')}`);
+        res.json({
+            success: true,
+            endpoint: ep.raw,
+            endpointSource: ep.source,
+            role: cascadeRole(),
+            output: r.out,
+            details: cascadeDetails()
+        });
     } catch (e) {
         res.status(500).json({ error: 'Ошибка настройки каскада: ' + e.message });
     }
@@ -3025,6 +3116,39 @@ app.post('/api/cascade/refresh', checkAuth, (req, res) => {
         res.json({ success: true, output: out });
     } catch (e) {
         res.status(500).json({ error: 'Ошибка обновления: ' + (e.stdout || e.message) });
+    }
+});
+
+// Починка каскада: ставит Table = off, пересобирает awg1 и маршруты.
+// Нужна, если каскад настраивали вручную или старой версией панели.
+app.post('/api/cascade/repair', checkAuth, requireAdmin, (req, res) => {
+    const conf = existingCascadeConf();
+    if (!conf) return res.status(400).json({ error: 'Туннель не настроен: сначала вставьте конфиг клиента с другого сервера' });
+    try {
+        const normalized = normalizeCascadeConf(readTextSafe(conf));
+        if (normalized !== readTextSafe(conf)) writeRootFile(conf, normalized, '0600');
+        const plan = cascadeEndpointPlan();
+        if (!plan) {
+            return res.status(400).json({
+                error: cascadeRole() === 'ru'
+                    ? 'В awg1.conf нет ListenPort/AllowedIPs: нужен клиентский конфиг с EU-сервера (внутренний адрес 10.9.9.x:порт).'
+                    : 'В awg1.conf не указан корректный Endpoint публичного адреса RU.'
+            });
+        }
+        sh('sudo', ['systemctl', 'restart', 'awg-quick@awg1']);
+        try { sh('sleep', ['2']); } catch (e) { /* ignore */ }
+        // Интерфейсы: берём сохранённые правила, иначе awg0 — стандартный вход.
+        let ifaces = [];
+        try {
+            const mangle = rootShTry('iptables', ['-t', 'mangle', '-S', 'PREROUTING']);
+            ifaces = [...new Set([...mangle.matchAll(/-A PREROUTING.*?-i\s+(\S+).*?(?:--set-xmark|--set-mark)\s+0x1/g)].map(m => m[1]))];
+        } catch (e) { /* ignore */ }
+        if (!ifaces.length) ifaces = ['awg0'];
+        const r = installRouting(ifaces, []);
+        auditLog(req, `Каскад пересобран (${plan.source}): awg1 -> ${plan.raw}, интерфейсы: ${ifaces.join(', ')}`);
+        res.json({ success: true, endpoint: plan.raw, endpointSource: plan.source, role: cascadeRole(), ifaces, output: r.out });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось пересобрать каскад: ' + (e.stderr || e.message) });
     }
 });
 
@@ -7408,7 +7532,8 @@ module.exports._internals = {
     isApiRequest, isBindHost, isHttpUrl, normalizeMetricsSettings, readAppSettings,
     installEnv, proxyUserPatch, proxyUsername,
     writeAppSettings, metricsSnapshot, prometheusMetrics, startMetricsServer, stopMetricsServer,
-    metricsRuntimeInfo, apkInfo, resolveApkFile, APP_SETTINGS_FILE, APP_APK_DIR
+    metricsRuntimeInfo, apkInfo, resolveApkFile, APP_SETTINGS_FILE, APP_APK_DIR,
+    normalizeCascadeConf, firstIpv4, buildRoutingScript, cascadeRole, cascadeEndpointPlan
 };
 
 

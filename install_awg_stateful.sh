@@ -72,6 +72,57 @@ ufw_open 2233 tcp
 ufw_open 4443 tcp
 [ -n "${AWG_PORT:-}" ] && ufw_open "$AWG_PORT" udp
 
+
+# --- Каскад: проверка и починка -------------------------------------------
+# Сценарий RU из панели оставлял awg1 с Endpoint = публичный IP EU. Внутри
+# туннеля этот адрес недоступен, awg-quick@awg1 падал, awg-routing не
+# стартовал. Проверяем и чиним сразу после настройки.
+cascade_audit() {
+    local conf="/etc/amnezia/amneziawg/awg1.conf"
+    local ok=1
+    if [ ! -f "$conf" ]; then
+        echo "Туннель awg1.conf не найден"
+        return 1
+    fi
+    grep -qiE "^[[:space:]]*Table[[:space:]]*=[[:space:]]*off" "$conf" || sed -i "/^\[Interface\]/a Table = off" "$conf"
+    if ! systemctl is-active --quiet awg-quick@awg1; then
+        ok=0
+        echo "awg-quick@awg1 не запущен:"
+        systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 5 || true
+    fi
+    systemctl status awg-routing.service --no-pager -l 2>&1 | tail -n 3 || true
+    if [ -x /root/awg/awg-routing.sh ]; then
+        if bash /root/awg/awg-routing.sh; then
+            echo "Маршруты каскада применены."
+        else
+            echo "WARNING: awg-routing.sh завершился с ошибкой — см. вывод выше."
+            ok=0
+        fi
+    fi
+    [ "$ok" = "1" ]
+}
+
+# На RU в туннель нужен внутренний адрес EU (10.9.9.3), а не публичный IP.
+cascade_fix_endpoint_ru() {
+    local conf="/etc/amnezia/amneziawg/awg1.conf"
+    [ -f "$conf" ] || return 1
+    local inner port
+    inner="$(awk '/^[[:space:]]*AllowedIPs/{print $3; exit}' "$conf" | cut -d/ -f1)"
+    port="$(awk '/^[[:space:]]*ListenPort/{print $3; exit}' "$conf")"
+    if [ -z "$inner" ] || [ -z "$port" ]; then
+        echo "В awg1.conf нет AllowedIPs с внутренним адресом EU или ListenPort"
+        return 1
+    fi
+    if grep -qE "^[[:space:]]*Endpoint[[:space:]]*=" "$conf"; then
+        sed -i "s|^[[:space:]]*Endpoint[[:space:]]*=.*|Endpoint = $inner:$port|" "$conf"
+    else
+        echo "В awg1.conf нет строки Endpoint"
+        return 1
+    fi
+    echo "Endpoint awg1: $inner:$port (внутренний адрес EU)"
+    systemctl restart awg-quick@awg1 >/dev/null 2>&1 || true
+    return 0
+}
 echo "Скачиваем оригинальный скрипт AmneziaWG..."
 curl -fsSL "$INSTALLER_URL" -o /root/install_amneziawg.sh
 chmod +x /root/install_amneziawg.sh
@@ -227,6 +278,8 @@ EOF
             systemctl enable awg-quick@awg1 awg-routing
             systemctl enable --now awg-routing.timer
             systemctl restart awg-routing || true
+            cascade_fix_endpoint_ru || true
+            cascade_audit || echo "WARNING: каскад настроен с ошибками, см. вывод выше."
 
         else
             # Локальный - ВЫХОД (EU), Удаленный - ВХОД (RU)

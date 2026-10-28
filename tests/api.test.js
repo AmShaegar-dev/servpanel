@@ -1215,6 +1215,30 @@ test('Удаление панели из консоли: меню и режим�
     assert.match(pkg.scripts.check, /install\.sh/);
 });
 
+test('Каскад: конфиг нормализуется (Table = off, без DNS)', () => {
+    const out = internals.normalizeCascadeConf('[Interface]\nPrivateKey = abc\nDNS = 1.1.1.1\ntable = on\n\n[Peer]\nPublicKey = def\nAllowedIPs = 10.9.9.3/32\n');
+    assert.match(out, /^\[Interface\]\nTable = off\n/m);
+    assert.ok(!/^DNS\s*=/m.test(out), 'DNS удалён');
+    assert.ok(!/^table\s*=/m.test(out), 'старый Table удалён');
+    // Повторная нормализация идемпотентна.
+    assert.equal(internals.normalizeCascadeConf(out), out);
+});
+
+test('Каскад: внутренний адрес берётся из AllowedIPs', () => {
+    assert.equal(internals.firstIpv4('10.9.9.3/32, fddd:2c4:2c4:ffff::a09:903/128'), '10.9.9.3');
+    assert.equal(internals.firstIpv4(''), '');
+    assert.equal(internals.firstIpv4('no ip here'), '');
+});
+
+test('Каскад: скрипт маршрутизации проверяет туннель и Endpoint', () => {
+    const script = internals.buildRoutingScript(['awg0'], [], { raw: '10.9.9.3:3977' });
+    assert.match(script, /AWG1_ENDPOINT="10\.9\.9\.3:3977"/);
+    assert.match(script, /интерфейс \$AWG1_IF не поднят/);
+    assert.match(script, /недоступен напрямую/);
+    assert.match(script, /COUNT/);
+    assert.match(script, /exit 1/);
+});
+
 test('выход закрывает доступ', async () => {
     await request('/api/logout', { method: 'POST' });
     const r = await request('/api/stats');

@@ -1506,8 +1506,12 @@ async function loadCascadeStatus(manual) {
                 <div>Записей GeoIP (ipset ru): <b>${d.ipsetCount || 0}</b></div>
                 <div>Правило fwmark 0x1: ${yes(d.ruleExists)}</div>
                 <div>Маршрут таблицы 100: <code>${(d.tableRoute || '—').replace(/</g, '&lt;')}</code></div>
-                <div>Endpoint EU: <code>${(d.endpoint || '—').replace(/</g, '&lt;')}</code></div>
-            </div>`;
+                <div>Роль сервера: <b>${d.role === 'ru' ? 'RU (вход)' : 'EU (выход)'}</b></div>
+                <div>Endpoint в awg1.conf: <code>${(d.endpoint || '—').replace(/</g, '&lt;')}</code></div>
+                <div>Адрес в маршрутах: <code>${(d.effectiveEndpoint || d.endpoint || '—').replace(/</g, '&lt;')}</code></div>
+            </div>
+            ${d.tunnelError ? `<div class="wizard-note" style="margin-top:10px; color:var(--danger); font-size:12px; white-space:pre-wrap;">${esc(d.tunnelError)}</div>` : ''}
+            ${d.configured && !d.tunnelActive ? '<div class="controls-row" style="margin-top:12px; margin-bottom:0;"><button class="btn btn-primary" onclick="repairCascade(this)">🔧 Пересобрать каскад</button><span style="color:var(--text-muted);font-size:12px;">Table = off и правильный адрес второй стороны</span></div>' : ''}`;
         if (manual && !d.configured) {
             box.innerHTML += '<div style="margin-top:10px; color:var(--text-muted); font-size:12px;">Заполните форму ниже, чтобы включить каскад.</div>';
         }
@@ -1553,12 +1557,32 @@ async function setupCascade(btn) {
         });
         const d = await res.json().catch(() => ({}));
         if (res.ok) {
-            alert('Каскад настроен. Endpoint: ' + (d.endpoint || '—'));
+            const role = d.role === 'ru' ? 'RU (вход)' : 'EU (выход)';
+            const src = d.endpointSource === 'tunnel' ? 'внутренний адрес в туннеле' : 'публичный адрес';
+            alert('Каскад настроен. Роль: ' + role + '. Адрес второй стороны: ' + (d.endpoint || '—') + ' (' + src + ').');
             loadCascadeStatus(true);
             loadCascadeSetup();
         } else alert(d.error || 'Ошибка настройки каскада');
     } catch (e) { alert('Сетевая ошибка'); }
     finally { if (btn) { btn.disabled = false; btn.innerText = '✅ Настроить каскад'; } }
+}
+
+// Пересборка каскада: нормализует awg1.conf (Table = off), берёт правильный
+// адрес второй стороны по роли сервера и заново применяет маршруты.
+async function repairCascade(btn) {
+    if (!confirm('Пересобрать каскад? Туннель awg1 перезапустится на пару секунд.')) return;
+    if (btn) { btn.disabled = true; btn.innerText = 'Пересборка...'; }
+    try {
+        const res = await fetch('/api/cascade/repair', { method: 'POST' });
+        const d = await res.json().catch(() => ({}));
+        if (res.ok) {
+            alert('Готово. Адрес второй стороны: ' + (d.endpoint || '—') + ', интерфейсы: ' + ((d.ifaces || []).join(', ') || '—') + '.');
+        } else {
+            alert(d.error || 'Не удалось пересобрать каскад');
+        }
+        loadCascadeStatus(true);
+    } catch (e) { alert('Сетевая ошибка: ' + e.message); }
+    finally { if (btn) { btn.disabled = false; btn.innerText = '🔧 Пересобрать каскад'; } }
 }
 
 async function refreshCascade() {
@@ -3884,8 +3908,13 @@ async function executeCascadeWizard() {
     };
     await startInstall('awg', '/var/log/awg_install.log', options);
     return {
-        html: wizardSuccess('Установка каскада запущена', 'Панель настраивает оба сервера. Прогресс виден в разделе «Установка».',
+        html: wizardSuccess('Установка каскада запущена',
+            (d.role === 'ru'
+                ? 'Панель ставит AmneziaWG здесь (вход RU) и на сервере EU, затем поднимет туннель. '
+                : 'Панель ставит AmneziaWG здесь (выход EU) и свяжет его со входом RU. ') +
+            'Если шаг связывания завершится ошибкой, на вкладке «Каскад» появится кнопка «Пересобрать каскад» с точной причиной.',
             resultButton('Показать прогресс', 'showInstallProgress()', true) +
+            resultButton('Вкладка «Каскад»', "closeWizard(); openCascadeTab()") +
             resultButton('Закрыть', 'closeWizard()')
         ),
         toast: 'Установка каскада запущена',
