@@ -1235,8 +1235,9 @@ test('Каскад: внутренний адрес берётся из AllowedI
 test('Каскад: скрипт маршрутизации безопасен для разных серверов', () => {
     const script = internals.buildRoutingScript(['awg0'], [], { raw: '10.9.9.3:3977' });
     assert.match(script, /AWG1_ENDPOINT="10\.9\.9\.3:3977"/);
-    // Маршруты ставятся раньше туннеля: проверки «интерфейс поднят» нет.
-    assert.ok(!/ip link show "\$AWG1_IF"/.test(script));
+    // На входе маршруты ставятся раньше туннеля: общей проверки нет,
+    // но для выхода (без клиентских интерфейсов) она остаётся.
+    assert.match(script, /выход EU/);
     // GNU grep понимает \b как backspace — такой шаблон не сработает.
     assert.ok(!/grep -oP '\\b/.test(script), 'в шаблоне не должно быть \\b');
     assert.match(script, /COUNT/);

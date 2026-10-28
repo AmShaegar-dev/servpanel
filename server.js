@@ -3265,6 +3265,17 @@ function buildRoutingScript(ifaces, extraRuNets, endpoint) {
     return `#!/bin/bash
 # Каскад RU -> EU. Сгенерировано панелью (схема: bivlked/amneziawg-installer/CASCADE.md)
 set -euo pipefail
+
+# Состав клиентских интерфейсов различает роль: на выходе (EU) их нет.
+if [ "\${#CASC_IFACES[@]}" -eq 0 ]; then
+    # Выход: маршруты не нужны, туннель уже поднят awg-quick.
+    if ! ip link show "$AWG1_IF" >/dev/null 2>&1; then
+        echo "ERROR: интерфейс $AWG1_IF не поднят (выход EU). Проверьте awg1.conf."
+        exit 1
+    fi
+    echo "OK: выход EU, маршруты не требуются."
+    exit 0
+fi
 CASC_IFACES=(${ifaces.join(' ')})
 AWG1_IF="awg1"
 AWG1_ENDPOINT="${ep.raw}"
