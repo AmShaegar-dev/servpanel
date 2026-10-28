@@ -3659,8 +3659,8 @@ app.post('/api/cascade/auto', checkAuth, requireAdmin, async (req, res) => {
         const confFile = existingCascadeConf();
         const ownConf = confFile ? readTextSafe(confFile) : '';
         const forced = role === 'ru'
-            ? await remote.post('/api/cascade/setup', { config: ownConf, ifaces: [], peerClient })
-            : await remote.post('/api/cascade/setup', { config: ownConf, ifaces: [], peerClient });
+            ? await remote.post('/api/cascade/setup', { config: ownConf, ifaces: [], peerClient }, 300000)
+            : await remote.post('/api/cascade/setup', { config: ownConf, ifaces: [], peerClient }, 300000);
         if (forced.status !== 200) {
             throw new Error('Вторая панель не смогла настроить туннель: ' + ((forced.json && forced.json.error) || 'HTTP ' + forced.status));
         }
