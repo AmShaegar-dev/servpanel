@@ -3269,7 +3269,9 @@ exec 9>"$AWG_DIR/awg-routing.lock"
 flock -w 300 9 || exit 1
 trap 'rm -f "$RU_ZONE.tmp"' EXIT
 
-EP_ROUTE="$(ip -4 route get "$AWG1_ENDPOINT" 2>/dev/null | head -1)"
+# В ip route get нужен адрес без порта: "host:port" даёт пустой результат.
+EP_HOST="\${AWG1_ENDPOINT%%:*}"
+EP_ROUTE="$(ip -4 route get "$EP_HOST" 2>/dev/null | head -1)"
 WAN_IF="$(printf '%s' "$EP_ROUTE" | grep -oP '(^| )dev \\K\\S+' || true)"
 WAN_GW="$(printf '%s' "$EP_ROUTE" | grep -oP '(^| )via \\K\\S+' || true)"
 
