@@ -1244,12 +1244,12 @@ test('Каскад: скрипт маршрутизации безопасен �
 });
 
 test('Каскад: роль определяется по содержимому конфига', () => {
-    // Вход (RU): интерфейс сервера 10.9.9.1/24 и клиент .2/32.
+    // Вход (RU): интерфейс 10.9.9.1/24 и клиент .2/32.
     const ru = '[Interface]\nPrivateKey = a\nAddress = 10.9.9.1/24\nListenPort = 3977\n\n[Peer]\nPublicKey = b\nAllowedIPs = 10.9.9.2/32\n';
-    // Выход (EU): интерфейс 10.9.9.3/32 и адрес пира в туннеле.
-    const eu = '[Interface]\nPrivateKey = c\nAddress = 10.9.9.3/32\nTable = off\n\n[Peer]\nPublicKey = d\nAllowedIPs = 10.9.9.1/32\nEndpoint = 10.9.9.1:3977\n';
-    // Конфиг клиента панели: 0.0.0.0/0 — это вход.
-    const client = '[Interface]\nPrivateKey = e\nAddress = 10.9.9.4/32\n\n[Peer]\nPublicKey = f\nAllowedIPs = 0.0.0.0/0\n';
+    // Выход (EU): интерфейс 10.9.9.1/32 и адрес входа в туннеле.
+    const eu = '[Interface]\nPrivateKey = c\nAddress = 10.9.9.1/32\nTable = off\n\n[Peer]\nPublicKey = d\nAllowedIPs = 10.9.9.4/32\nEndpoint = 45.9.16.77:3977\n';
+    // Клиентский конфиг: адрес /32, без ListenPort.
+    const client = '[Interface]\nPrivateKey = e\nAddress = 10.9.9.2/32\n\n[Peer]\nPublicKey = f\nAllowedIPs = 0.0.0.0/0\n';
     assert.equal(internals.cascadeRoleFrom(ru), 'ru');
     assert.equal(internals.cascadeRoleFrom(eu), 'eu');
     assert.equal(internals.cascadeRoleFrom(client), 'ru');

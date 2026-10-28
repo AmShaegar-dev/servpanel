@@ -275,7 +275,11 @@ function isDnsTarget(v) {
     if (!IPV4_RE.test(parts[0])) return false;
     return parts[1] === undefined || isPort(parts[1]);
 }
-function existingIfaces() { return Object.keys(os.networkInterfaces()); }
+// Служебные интерфейсы каскада не годятся как клиентские.
+const CASCADE_IFACE_RE = /^(awg1|amn1|awg-eu)$/;
+function existingIfaces() {
+    return Object.keys(os.networkInterfaces()).filter(name => !CASCADE_IFACE_RE.test(name));
+}
 function validIfaces(arr) {
     return Array.isArray(arr) && arr.length > 0 &&
         arr.every(i => typeof i === 'string' && IFACE_RE.test(i) && existingIfaces().includes(i));
@@ -2885,10 +2889,15 @@ function cascadeRoleFrom(confText) {
     const firstAddr = String(iface.Address || "").split(",")[0].trim();
     const peerNets = String(peer.AllowedIPs || "").split(",").map(s => s.trim()).filter(Boolean);
     if (!/^10\.9\.9\.\d+\/\d{1,2}$/.test(firstAddr)) return "";
-    if (iface.ListenPort) return "ru";
-    if (peerNets.length === 1 && /^10\.9\.9\.\d+\/32$/.test(peerNets[0])) return "eu";
-    return "ru";
+    // Интерфейс сервера-входа: адрес подсети и ListenPort.
+    if (/^10\.9\.9\.\d+\/(2[4-9]|30)$/.test(firstAddr) && iface.ListenPort) return "ru";
+    // Интерфейс выхода: адрес сервера .1/32 и ровно один пир .x/32.
+    if (/^10\.9\.9\.1\/32$/.test(firstAddr) && peerNets.length === 1 && /^10\.9\.9\.\d+\/32$/.test(peerNets[0])) return "eu";
+    // Клиентский конфиг (адрес /32 без ListenPort) ставят на входе.
+    if (!iface.ListenPort) return "ru";
+    return "";
 }
+
 
 
 
