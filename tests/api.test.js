@@ -1232,11 +1232,13 @@ test('Каскад: внутренний адрес берётся из AllowedI
     assert.equal(internals.firstIpv4('no ip here'), '');
 });
 
-test('Каскад: скрипт маршрутизации проверяет туннель и Endpoint', () => {
+test('Каскад: скрипт маршрутизации безопасен для разных серверов', () => {
     const script = internals.buildRoutingScript(['awg0'], [], { raw: '10.9.9.3:3977' });
     assert.match(script, /AWG1_ENDPOINT="10\.9\.9\.3:3977"/);
-    assert.match(script, /интерфейс \$AWG1_IF не поднят/);
-    assert.match(script, /недоступен напрямую/);
+    // Маршруты ставятся раньше туннеля: проверки «интерфейс поднят» нет.
+    assert.ok(!/ip link show "\$AWG1_IF"/.test(script));
+    // GNU grep понимает \b как backspace — такой шаблон не сработает.
+    assert.ok(!/grep -oP '\\b/.test(script), 'в шаблоне не должно быть \\b');
     assert.match(script, /COUNT/);
     assert.match(script, /exit 1/);
 });

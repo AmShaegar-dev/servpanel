@@ -3271,15 +3271,10 @@ flock -w 300 9 || exit 1
 trap 'rm -f "$RU_ZONE.tmp"' EXIT
 
 EP_ROUTE="$(ip -4 route get "$AWG1_ENDPOINT" 2>/dev/null | head -1)"
-WAN_IF="$(printf '%s' "$EP_ROUTE" | grep -oP '\\bdev \\K\\S+' || true)"
-WAN_GW="$(printf '%s' "$EP_ROUTE" | grep -oP '\\bvia \\K\\S+' || true)"
+WAN_IF="$(printf '%s' "$EP_ROUTE" | grep -oP '(^| )dev \\K\\S+' || true)"
+WAN_GW="$(printf '%s' "$EP_ROUTE" | grep -oP '(^| )via \\K\\S+' || true)"
 
-# Туннель должен существовать, а Endpoint — маршрутизироваться не через awg1.
-# Иначе правила маркировки уведут трафик в пустоту и оставят клиентов без сети.
-if ! ip link show "$AWG1_IF" >/dev/null 2>&1; then
-    echo "ERROR: интерфейс $AWG1_IF не поднят. Проверьте awg1.conf и awg-quick@awg1."
-    exit 1
-fi
+# Интерфейс awg1 может ещё не быть поднят: маршруты ставятся до него.
 if [ -z "$WAN_IF" ] || [ "$WAN_IF" = "$AWG1_IF" ]; then
     echo "ERROR: Endpoint $AWG1_ENDPOINT недоступен напрямую (маршрут через $AWG1_IF)."
     echo "В awg1.conf в [Peer] нужен внутренний адрес второго сервера в туннеле,"
