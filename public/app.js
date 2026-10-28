@@ -277,6 +277,7 @@ function switchTab(tabId, el) {
     if (tabId === 'tab-install') loadModules();
     else if (agInterval) { clearInterval(agInterval); agInterval = null; }
     if (tabId === 'tab-cascade') { loadCascadeSetup(); loadCascadeStatus(true); loadCascadeHealth(); }
+    if (tabId === 'tab-cascade' && typeof autoCascadeRoleHint === 'function') autoCascadeRoleHint();
     if (tabId === 'tab-obf') { loadObfCurrent(); loadObfProfiles(); }
     if (tabId === 'tab-update') loadUpdatePanel();
     if (tabId === 'tab-admin') loadAdminPanel();
@@ -1547,14 +1548,23 @@ async function setupCascade(btn) {
     const config = document.getElementById('cascadeSetupConf').value;
     const ifaces = Array.from(document.querySelectorAll('.casc-setup-check:checked')).map(c => c.value);
     const extraRuNets = document.getElementById('cascadeExtraNets').value;
-    if (!config.trim()) return alert('Вставьте конфиг клиента с EU-сервера');
+    const peerHost = (document.getElementById('cascadePeerHost') || {}).value || '';
+    const peerUser = (document.getElementById('cascadePeerUser') || {}).value || '';
+    const peerPass = (document.getElementById('cascadePeerPass') || {}).value || '';
+    const peerClient = (document.getElementById('cascadePeerClient') || {}).value || 'ru_host';
+    if (!config.trim() && !(peerHost.trim() && peerUser.trim())) {
+        return alert('Вставьте конфиг второй стороны или заполните адрес и логин панели второй стороны');
+    }
     if (!ifaces.length) return alert('Выберите хотя бы один клиентский интерфейс');
     if (!confirm('Настроить каскад? Будут созданы awg1.conf, правила маршрутизации и systemd-таймер.')) return;
     if (btn) { btn.disabled = true; btn.innerText = 'Настройка...'; }
     try {
         const res = await fetch('/api/cascade/setup', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ config, ifaces, extraRuNets })
+            body: JSON.stringify({
+                config, ifaces, extraRuNets,
+                peerHost: peerHost.trim(), peerUser: peerUser.trim(), peerPass, peerClient: peerClient.trim()
+            })
         });
         const d = await res.json().catch(() => ({}));
         if (res.ok) {
@@ -1566,6 +1576,70 @@ async function setupCascade(btn) {
         } else alert(d.error || 'Ошибка настройки каскада');
     } catch (e) { alert('Сетевая ошибка'); }
     finally { if (btn) { btn.disabled = false; btn.innerText = '✅ Настроить каскад'; } }
+}
+
+// Автоматическая сборка каскада: роль, версия, вторая панель — и всё.
+function autoCascadeRoleHint() {
+    const role = (document.getElementById('autoCascadeRole') || {}).value || 'ru';
+    const hint = document.getElementById('autoCascadeHint');
+    if (!hint) return;
+    hint.style.display = 'block';
+    hint.innerHTML = role === 'ru'
+        ? 'Этот сервер станет <b>входом</b>: панель создаст клиента на выходе, заберёт его конфиг и поднимет туннель. Клиенты подключаются сюда.'
+        : 'Этот сервер станет <b>выходом</b>: панель создаст здесь клиента для входа и поднимет туннель. На входе каскад тоже появится автоматически.';
+}
+
+async function checkAutoCascadePeer(btn) {
+    const host = ((document.getElementById('autoCascadePeer') || {}).value || '').trim();
+    const user = ((document.getElementById('autoCascadeUser') || {}).value || '').trim();
+    const pass = (document.getElementById('autoCascadePass') || {}).value || '';
+    const hint = document.getElementById('autoCascadeHint');
+    if (!host || !user || !pass) return alert('Укажите адрес, логин и пароль второй панели');
+    if (btn) { btn.disabled = true; btn.innerText = 'Проверка...'; }
+    try {
+        const d = await apiJson('/api/cascade/peer-info', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ host, user, pass })
+        });
+        if (hint) {
+            hint.style.display = 'block';
+            hint.innerHTML = 'Вторая панель отвечает: роль <b>' + (d.role === 'ru' ? 'вход (RU)' : d.role === 'eu' ? 'выход (EU)' : 'не определена') +
+                '</b>, AmneziaWG ' + (d.hasAwg ? 'установлен' : '<b>не установлен</b> (панель поставит сама)') +
+                ', версия ' + (d.version || '—') + ', адрес ' + (d.publicHost || '—') + '.';
+        }
+    } catch (e) {
+        if (hint) { hint.style.display = 'block'; hint.style.color = 'var(--danger)'; hint.innerText = 'Вторая панель недоступна: ' + e.message; }
+    } finally { if (btn) { btn.disabled = false; btn.innerText = 'Проверить доступ'; } }
+}
+
+async function runAutoCascade(btn) {
+    const role = ((document.getElementById('autoCascadeRole') || {}).value) || 'ru';
+    const version = ((document.getElementById('autoCascadeVersion') || {}).value) || '2.0';
+    const peerHost = ((document.getElementById('autoCascadePeer') || {}).value || '').trim();
+    const peerUser = ((document.getElementById('autoCascadeUser') || {}).value || '').trim();
+    const peerPass = (document.getElementById('autoCascadePass') || {}).value || '';
+    const peerClient = ((document.getElementById('peerClientName') || {}).value) || 'ru_host';
+    const log = document.getElementById('autoCascadeLog');
+    if (!peerHost || !peerUser || !peerPass) return alert('Укажите адрес, логин и пароль второй панели');
+    if (!confirm('Построить каскад автоматически?\n\nРоль: ' + (role === 'ru' ? 'вход (RU)' : 'выход (EU)') +
+        ', версия AmneziaWG ' + version + '.\nВторая панель: ' + peerHost + '\n\nПанель может установить AmneziaWG на второй стороне — это займёт несколько минут.')) return;
+    if (btn) { btn.disabled = true; btn.innerText = 'Строим каскад…'; }
+    if (log) { log.style.display = 'block'; log.innerHTML = '<div class="wizard-summary-row"><span>Запускаем…</span></div>'; }
+    try {
+        const res = await apiJson('/api/cascade/auto', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role, version, peerHost, peerUser, peerPass, peerClient })
+        });
+        if (log && Array.isArray(res.steps)) {
+            log.innerHTML = res.steps.map(s => '<div class="wizard-summary-row"><span>' + esc(s.title) + '</span><b>' + esc(s.text) + '</b></div>').join('');
+        }
+        const hs = res.handshakeAgo === null || res.handshakeAgo === undefined ? 'рукопожатие ожидается' : (res.handshakeAgo + ' сек. назад');
+        toast('Каскад построен', 'success', 'Связь: ' + hs);
+        loadCascadeStatus(true);
+    } catch (e) {
+        if (log) log.innerHTML += '<div class="wizard-summary-row"><span style="color:var(--danger)">Ошибка</span><b>' + esc(e.message) + '</b></div>';
+        toast('Каскад не собрался', 'error', e.message);
+    } finally { if (btn) { btn.disabled = false; btn.innerText = '⚡ Построить каскад'; } }
 }
 
 // Пересборка каскада: нормализует awg1.conf (Table = off), берёт правильный

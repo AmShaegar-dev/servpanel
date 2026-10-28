@@ -26,6 +26,8 @@ const zlib = require('zlib');
 const dns = require('dns');
 const updater = require('./lib/updater');
 const proxyUsers = require('./lib/proxy-users');
+const { Panel } = require('./lib/cascade-setup');
+const { ensureAwg } = require('./lib/cascade-remote');
 const { createProxyBot } = require('./lib/proxy-bot');
 
 const app = express();
@@ -1513,7 +1515,21 @@ app.post('/api/logout', (req, res) => {
     } catch (e) { done(); }
 });
 
+// Внутренний токен панели: её собственный код (сборка каскада) вызывает API
+// от имени администратора без сессии. Токен живёт в памяти процесса.
+const LOCAL_ADMIN_TOKEN = crypto.randomBytes(24).toString('hex');
+function isLocalAdmin(req) {
+    return String(req.headers['x-panel-local'] || '') === LOCAL_ADMIN_TOKEN;
+}
+
 const checkAuth = (req, res, next) => {
+    if (isLocalAdmin(req)) {
+        req.session = req.session || {};
+        req.session.loggedIn = true;
+        req.session.role = 'admin';
+        req.session.user = 'admin';
+        return next();
+    }
     if (req.session && req.session.loggedIn) {
         // Совместимость с сессиями, созданными до появления ролей
         if (!req.session.role) req.session.role = 'admin';
@@ -2950,13 +2966,12 @@ function cascadeEndpointPlan() {
         const localIps = localTunnelIps();
         const epMatch = String(peer.Endpoint || "").match(/^([A-Za-z0-9.\-]+):(\d{1,5})$/);
         if (!epMatch || !isPort(epMatch[2])) return null;
+        const port = String(epMatch[2]);
+        // Публичный адрес второй стороны: на сервере с публичным IP он
+        // маршрутизируется через WAN, tunnelIp (внутренний) — нет.
         const resolved = resolveHostSync(epMatch[1]);
         if (resolved && isPublicAddress(resolved, localIps)) {
-            return { host: resolved, port: String(epMatch[2]), raw: resolved + ":" + epMatch[2], source: "public" };
-        }
-        const tunnelIp = firstTunnelIp(peer.AllowedIPs);
-        if (tunnelIp && !localIps.has(tunnelIp)) {
-            return { host: tunnelIp, port: String(epMatch[2]), raw: tunnelIp + ":" + epMatch[2], source: "tunnel" };
+            return { host: resolved, port, raw: resolved + ":" + port, source: "public" };
         }
         return null;
     }
@@ -3070,18 +3085,130 @@ AccuracySec=10s
 WantedBy=timers.target
 `;
 
+const CASCADE_MARKER = '/root/awg/.cascade-managed';
+
+// ---------------------------------------------------------------------------
+// Подготовка каскада без участия пользователя
+// ---------------------------------------------------------------------------
+// Роль берём по awg0.conf. Публичный адрес — из настроек панели (домен или
+// IP), иначе узнаём внешний IP у api.ipify.org.
+async function cascadePublicHost() {
+    try {
+        const s = readAppSettings();
+        const d = (s && s.server && s.server.domain) ? String(s.server.domain).trim() : '';
+        if (d && HOST_RE.test(d)) return d;
+    } catch (e) { /* ignore */ }
+    try {
+        const r = await fetch('https://api.ipify.org', { signal: AbortSignal.timeout(5000) });
+        const ip = String(await r.text()).trim();
+        if (IPV4_RE.test(ip)) return ip;
+    } catch (e) { /* ignore */ }
+    return '';
+}
+
+// Приводим конфиг каскада к рабочему виду: без DNS, с Table = off, без IPv6
+// при выключенном IPv6 и с параметрами обфускации этой стороны, если в
+// конфиге их нет (иначе рукопожатие не проходит).
+function prepareCascadeConf(text, ownIface) {
+    const lines = String(text || '').split(/\r?\n/)
+        .filter(l => !/^\s*DNS\s*=/i.test(l))
+        .filter(l => !/^\s*Table\s*=/i.test(l));
+    const idx = lines.findIndex(l => /^\s*\[Interface\]\s*$/i.test(l));
+    if (idx < 0) return String(text || '').trim() + '\n';
+    const iface = parseIni(readTextSafe(path.join(AWG_CONF_DIR, (ownIface || 'awg0') + '.conf'))).Interface || {};
+    const end = lines.findIndex((l, i) => i > idx && /^\s*\[/.test(l));
+    const block = lines.slice(idx + 1, end < 0 ? lines.length : end);
+    const has = (k) => block.some(l => new RegExp('^\\s*' + k + '\\s*=', 'i').test(l));
+    const add = ['Table = off'];
+    for (const k of ['Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5']) {
+        if (!has(k) && iface[k]) add.push(k + ' = ' + iface[k]);
+    }
+    lines.splice(idx + 1, 0, ...add);
+    return lines.join('\n').trim() + '\n';
+}
+
+// Создаёт на ЭТОМ сервере клиента для второй стороны и возвращает его конфиг.
+// Используется, когда панель настроена как выход (EU): входу нужен конфиг,
+// созданный именно здесь.
+function createCascadePeerClient(name) {
+    const safe = String(name || 'cascade-peer').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'cascade-peer';
+    try {
+        sh('sudo', ['bash', MANAGE, 'add', safe, '--json'], { timeout: 60000 });
+    } catch (e) {
+        // Уже существует — это не ошибка, конфиг всё равно читаем ниже.
+    }
+    let conf = '';
+    try { conf = sh('sudo', ['cat', path.join(AWG_DIR, safe + '.conf')]); } catch (e) { conf = ''; }
+    if (!/\[Interface\]/i.test(conf)) return null;
+    return { name: safe, conf };
+}
+
+// Конфиг клиента с другой панели (только чтение): логин, затем скачивание.
+async function fetchRemoteClientConf(url, user, pass, name) {
+    const base = String(url || '').replace(/\/+$/, '');
+    if (!base) return null;
+    let jar = '';
+    const login = await fetch(base + '/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'User-Agent': 'servpanel-cascade' },
+        body: JSON.stringify({ username: user, password: pass }),
+        signal: AbortSignal.timeout(15000)
+    }).catch(() => null);
+    if (!login || !login.ok) return null;
+    const raw = login.headers.getSetCookie ? login.headers.getSetCookie() : [];
+    jar = raw.map(c => c.split(';')[0]).join('; ');
+    const res = await fetch(base + '/api/download/' + encodeURIComponent(name), {
+        headers: { Cookie: jar, 'User-Agent': 'servpanel-cascade' },
+        signal: AbortSignal.timeout(20000)
+    }).catch(() => null);
+    if (!res || !res.ok) return null;
+    const conf = await res.text();
+    return /\[Interface\]/i.test(conf) ? conf : null;
+}
+
+// Конфиг клиента с ДРУГОЙ панели: логин, затем скачивание конфига.
+async function fetchPeerClientConf(url, user, pass, name) {
+    const base = String(url || "").replace(/\/+$/, "");
+    if (!base || !user) return null;
+    const login = await fetch(base + "/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": "servpanel-cascade" },
+        body: JSON.stringify({ username: user, password: pass }),
+        signal: AbortSignal.timeout(15000)
+    }).catch(() => null);
+    if (!login || !login.ok) return null;
+    const raw = login.headers.getSetCookie ? login.headers.getSetCookie() : [];
+    const jar = raw.map(c => c.split(";")[0]).join("; ");
+    const res = await fetch(base + "/api/download/" + encodeURIComponent(name), {
+        headers: { Cookie: jar, "User-Agent": "servpanel-cascade" },
+        signal: AbortSignal.timeout(20000)
+    }).catch(() => null);
+    if (!res || !res.ok) return null;
+    const conf = await res.text();
+    return /\[Interface\]/i.test(conf) ? conf : null;
+}
+
+// Создаёт на этом сервере клиента для второй стороны (для выхода EU).
+function createPeerClient(name) {
+    const safe = String(name || "cascade-peer").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40) || "cascade-peer";
+    try { sh("sudo", ["bash", MANAGE, "add", safe, "--json"], { timeout: 60000 }); } catch (e) { /* уже есть */ }
+    let conf = "";
+    try { conf = sh("sudo", ["cat", path.join(AWG_DIR, safe + ".conf")]); } catch (e) { conf = ""; }
+    return /\[Interface\]/i.test(conf) ? { name: safe, conf } : null;
+}
+
 async function installRouting(ifaces, extraRuNets) {
     const plan = await cascadeEndpointPlanAsync();
     if (!plan) throw new Error('Не удалось определить адрес второго сервера в туннеле (проверьте awg1.conf)');
-    // Приводим конфиг к рабочему виду: без IPv6 при выключенном IPv6 и с
-    // Table = off. Без этого awg-quick@awg1 падает на самой первой строке.
+    // Приводим конфиг к рабочему виду до запуска службы: Table = off, без DNS,
+    // без IPv6 при выключенном IPv6, с параметрами обфускации этой стороны.
     const confFile = existingCascadeConf();
     if (confFile) {
         const before = readTextSafe(confFile);
-        const after = normalizeCascadeConf(before);
+        const after = prepareCascadeConf(before, 'awg0');
         if (after !== before) {
             writeRootFile(confFile, after, '0600');
-            try { sh('sudo', ['systemctl', 'restart', 'awg-quick@awg1']); } catch (e) { /* ниже даст ошибку */ }
+            try { sh('sudo', ['systemctl', 'restart', 'awg-quick@awg1']); } catch (e) { /* ниже покажем ошибку */ }
             try { sh('sleep', ['2']); } catch (e) { /* ignore */ }
         }
     }
@@ -3099,19 +3226,20 @@ async function installRouting(ifaces, extraRuNets) {
         // Не оставляем каскад в полунастроенном виде: правила маркировки без
         // рабочих маршрутов лишают клиентов интернета.
         try { sh('sudo', ['systemctl', 'stop', 'awg-quick@awg1']); } catch (err) { /* ignore */ }
-        let extra = '';
-        try { extra = sh('sudo', ['bash', '-c', 'systemctl status awg-routing.service --no-pager -l | tail -n 20']); } catch (err) { /* ignore */ }
+        let status = '';
         let journal = '';
-        try { journal = sh('sudo', ['bash', '-c', 'journalctl -u awg-routing.service -n 30 --no-pager']); } catch (err) { /* ignore */ }
+        try { status = sh('sudo', ['bash', '-c', 'systemctl status awg-quick@awg1 awg-routing.service --no-pager -l 2>&1 | tail -n 25']); } catch (err) { /* ignore */ }
+        try { journal = sh('sudo', ['bash', '-c', 'journalctl -u awg-quick@awg1 -u awg-routing.service -n 30 --no-pager 2>&1']); } catch (err) { /* ignore */ }
         const err = new Error(
             (e.stderr || e.message || 'awg-routing не запустился').trim() +
-            (extra ? '\n\n' + extra.trim() : '') +
+            (status ? '\n\n' + status.trim() : '') +
             (journal ? '\n\n' + journal.trim() : '') +
             '\n\nТуннель awg1 остановлен, правила каскада не применены.'
         );
         throw err;
     }
 }
+
 
 function buildRoutingScript(ifaces, extraRuNets, endpoint) {
     const ep = endpoint || cascadeEndpoint();
@@ -3249,49 +3377,100 @@ function teardownRouting() {
 // Настройка каскада из клиентского конфига EU-сервера (вставка в панель)
 app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
     const { config, ifaces, extraRuNets } = req.body || {};
-    const conf = String(config || '');
-    if (conf.length > 64 * 1024) return res.status(400).json({ error: 'Конфиг слишком большой' });
-    if (!conf.trim()) return res.status(400).json({ error: 'Вставьте конфиг клиента с EU-сервера' });
-
-    const ini = parseIni(conf);
-    if (!ini.Interface || !ini.Peer) return res.status(400).json({ error: 'В конфиге должны быть секции [Interface] и [Peer]' });
-    if (!ini.Interface.PrivateKey) return res.status(400).json({ error: 'В [Interface] нет PrivateKey' });
-    if (!ini.Peer.PublicKey) return res.status(400).json({ error: 'В [Peer] нет PublicKey' });
-    const epm = String(ini.Peer.Endpoint || '').match(/^([A-Za-z0-9.\-]+):(\d{1,5})$/);
-    if (!epm || !isIpOrHost(epm[1]) || !isPort(epm[2])) return res.status(400).json({ error: 'Некорректный Endpoint в [Peer]' });
-    // На RU (вход) в туннеле нужен внутренний адрес второй стороны.
-    if (cascadeRole() === 'ru' && !firstIpv4(ini.Peer.AllowedIPs)) {
-        return res.status(400).json({ error: 'В [Peer] нет AllowedIPs с внутренним адресом сервера каскада' });
+    const role = cascadeRole();
+    const isExit = role === 'eu';
+    // На выходе (EU) клиентских интерфейсов нет — маршруты строятся только
+    // на входе (RU), поэтому интерфейсы там необязательны.
+    if (!isExit && !validIfaces(ifaces)) {
+        return res.status(400).json({ error: 'Выберите клиентские интерфейсы (обычно awg0)' });
     }
-    if (!validIfaces(ifaces)) return res.status(400).json({ error: 'Выберите клиентские интерфейсы (обычно awg0)' });
     const extra = parseCidrList(extraRuNets);
     if (extra === null) return res.status(400).json({ error: 'Некорректная подсеть в «дополнительных сетях РФ»' });
 
+    let text = String(config || '').trim();
+
+    // Вход (RU) умеет поднять каскад без вставки конфига: берём клиента с
+    // панели на другом сервере, где включён каскад.
+    if (!text && role === 'ru') {
+        const peerHost = String((req.body || {}).peerHost || '').trim();
+        const peerUser = String((req.body || {}).peerUser || '').trim();
+        const peerPass = String((req.body || {}).peerPass || '');
+        const peerName = String((req.body || {}).peerClient || 'ru_host').trim();
+        if (!peerHost || !peerUser) {
+            return res.status(400).json({
+                error: 'Вставьте конфиг клиента со второй стороны либо укажите адрес панели EU, логин и пароль — панель заберёт конфиг сама.'
+            });
+        }
+        const scheme = /^https?:\/\//i.test(peerHost) ? '' : 'https://';
+        const peerUrl = scheme + peerHost;
+        const remote = await fetchPeerClientConf(peerUrl, peerUser, peerPass, peerName);
+        if (!remote) {
+            return res.status(502).json({
+                error: 'Не удалось получить конфиг ' + peerName + ' с ' + peerUrl +
+                    '. Проверьте адрес, логин, пароль и имя клиента (на сервере выхода он должен существовать).'
+            });
+        }
+        text = remote;
+    }
+
+    // Выход (EU): второй стороне нужен клиент, созданный здесь. Панель
+    // создаёт его сама. Для входа (RU) подойдёт и чужой конфиг.
+    if (!text && isExit) {
+        const peerName = String((req.body || {}).peerClient || 'ru_host').trim() || 'ru_host';
+        const created = createPeerClient(peerName);
+        if (!created) return res.status(500).json({ error: 'Не удалось создать клиента для входа на этом сервере' });
+        text = created.conf;
+    }
+
+    // Выход (EU): второй стороне нужен клиент, созданный здесь. Панель
+    // создаёт его сама; для входа (RU) подойдёт и готовый конфиг.
+    if (!text && isExit) {
+        const peerName = String((req.body || {}).peerClient || 'ru_host').trim() || 'ru_host';
+        const created = createPeerClient(peerName);
+        if (!created) return res.status(500).json({ error: 'Не удалось создать клиента для входа на этом сервере' });
+        text = created.conf;
+    }
+
+    if (!text) return res.status(400).json({ error: 'Вставьте конфиг клиента со второй стороны каскада' });
+    if (text.length > 64 * 1024) return res.status(400).json({ error: 'Конфиг слишком большой' });
+
+    const ini = parseIni(text);
+    if (!ini.Interface || !ini.Peer) return res.status(400).json({ error: 'В конфиге должны быть секции [Interface] и [Peer]' });
+    if (!ini.Interface.PrivateKey) return res.status(400).json({ error: 'В [Interface] нет PrivateKey' });
+    if (!ini.Peer.PublicKey) return res.status(400).json({ error: 'В [Peer] нет PublicKey' });
+
     try {
-        // Готовим awg1.conf по CASCADE.md: без DNS и с Table = off.
-        const cleanConf = normalizeCascadeConf(conf);
+        // Готовим awg1.conf: без DNS, с Table = off, без IPv6 при выключенном
+        // IPv6 и с параметрами обфускации этой стороны.
+        const cleanConf = stripIpv6Address(prepareCascadeConf(text, 'awg0'));
         writeRootFile(CASCADE_CONF, cleanConf, '0600');
-        // Убираем старый файл, если он мешал
         if (CASCADE_CONF_LEGACY !== CASCADE_CONF && fs.existsSync(CASCADE_CONF_LEGACY)) {
             try { sh('sudo', ['rm', '-f', CASCADE_CONF_LEGACY]); } catch (e) { /* ignore */ }
         }
+        writeRootFile(CASCADE_MARKER, String(Date.now()), '0600');
 
         sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
-        // Небольшая задержка на поднятие интерфейса
         try { sh('sleep', ['2']); } catch (e) { /* ignore */ }
-        const r = await installRouting(ifaces, extra);
-        const ep = r.endpoint;
-        auditLog(req, `Каскад настроен (${cascadeRole().toUpperCase()}): awg1 -> ${ep.raw}, интерфейсы: ${ifaces.join(', ')}`);
+        let r;
+        if (isExit) {
+            // На выходе маршруты не нужны: awg1 только принимает туннель.
+            try { sh('sudo', ['systemctl', 'disable', '--now', 'awg-routing.timer', 'awg-routing.service']); } catch (e) { /* ignore */ }
+            r = { endpoint: cascadeEndpointPlan(), out: 'маршруты на выходе не требуются' };
+        } else {
+            r = await installRouting(ifaces, extra);
+        }
+        const ep = r.endpoint || { raw: '—', source: '' };
+        auditLog(req, 'Каскад настроен (' + role.toUpperCase() + '): awg1 -> ' + ep.raw + ', интерфейсы: ' + (ifaces || []).join(', '));
         res.json({
             success: true,
+            role,
             endpoint: ep.raw,
             endpointSource: ep.source,
-            role: cascadeRole(),
             output: r.out,
             details: cascadeDetails()
         });
     } catch (e) {
-        res.status(500).json({ error: 'Ошибка настройки каскада: ' + e.message });
+        res.status(500).json({ error: 'Ошибка настройки каскада: ' + (e.message || 'неизвестно') });
     }
 });
 
@@ -3310,21 +3489,50 @@ app.post('/api/cascade/refresh', checkAuth, (req, res) => {
 // Нужна, если каскад настраивали вручную или старой версией панели.
 app.post('/api/cascade/repair', checkAuth, requireAdmin, async (req, res) => {
     const conf = existingCascadeConf();
-    if (!conf) return res.status(400).json({ error: 'Туннель не настроен: сначала вставьте конфиг клиента с другого сервера' });
+    if (!conf) return res.status(400).json({ error: 'Туннель не настроен: сначала нажмите «Настроить каскад»' });
+    const role = cascadeRole();
     try {
-        const normalized = normalizeCascadeConf(readTextSafe(conf));
-        if (normalized !== readTextSafe(conf)) writeRootFile(conf, normalized, '0600');
+        // 1. Чистим конфиг: Table = off, без DNS и IPv6, параметры обфускации.
+        const before = readTextSafe(conf);
+        const after = stripIpv6Address(prepareCascadeConf(before, 'awg0'));
+        if (after !== before) writeRootFile(conf, after, '0600');
+
+        // 2. Выход (EU), а в конфиге лежит чужой вход — пересобираем правильный
+        //    конфиг EU: свой адрес /24, пир — адрес входа, публичный Endpoint.
+        if (role === 'eu' && cascadeRoleFrom(after) === 'ru') {
+            const own = parseIni(readTextSafe(path.join(AWG_CONF_DIR, 'awg0.conf'))).Interface || {};
+            const peerIni = parseIni(after).Peer || {};
+            const addr = String(own.Address || '').split(',')[0].trim();
+            const peerIp = (String((parseIni(after).Interface || {}).Address || '').match(/10\.9\.9\.(\d{1,3})/) || [])[1];
+            const pub = await cascadePublicHost();
+            if (!pub || !own.ListenPort || !peerIp || !addr) {
+                return res.status(400).json({ error: 'Не удалось собрать конфиг выхода: нет awg0.conf, адреса входа или публичного адреса сервера' });
+            }
+            const euConf = [
+                '[Interface]',
+                'PrivateKey = ' + own.PrivateKey,
+                'Address = ' + addr,
+                'MTU = 1280',
+                'Table = off',
+                '',
+                '[Peer]',
+                'PublicKey = ' + String(peerIni.PublicKey || ''),
+                'AllowedIPs = 10.9.9.' + peerIp + '/32',
+                'Endpoint = ' + pub + ':' + String(own.ListenPort),
+                'PersistentKeepalive = 33'
+            ].join('\n') + '\n';
+            writeRootFile(conf, euConf, '0600');
+        }
+
+        // 3. Пересобираем туннель и маршруты.
         const plan = cascadeEndpointPlan();
         if (!plan) {
-            return res.status(400).json({
-                error: cascadeRole() === 'ru'
-                    ? 'В awg1.conf нет ListenPort/AllowedIPs: нужен клиентский конфиг с EU-сервера (внутренний адрес 10.9.9.x:порт).'
-                    : 'В awg1.conf не указан корректный Endpoint публичного адреса RU.'
-            });
+            return res.status(400).json({ error: role === 'ru'
+                ? 'В awg1.conf нет адреса выхода. Нажмите «Настроить каскад» — панель заберёт конфиг с другой стороны.'
+                : 'В awg1.conf нет публичного адреса входа.' });
         }
         sh('sudo', ['systemctl', 'restart', 'awg-quick@awg1']);
         try { sh('sleep', ['2']); } catch (e) { /* ignore */ }
-        // Интерфейсы: берём сохранённые правила, иначе awg0 — стандартный вход.
         let ifaces = [];
         try {
             const mangle = rootShTry('iptables', ['-t', 'mangle', '-S', 'PREROUTING']);
@@ -3332,22 +3540,130 @@ app.post('/api/cascade/repair', checkAuth, requireAdmin, async (req, res) => {
         } catch (e) { /* ignore */ }
         if (!ifaces.length) ifaces = ['awg0'];
         const r = await installRouting(ifaces, []);
-        auditLog(req, `Каскад пересобран (${plan.source}): awg1 -> ${plan.raw}, интерфейсы: ${ifaces.join(', ')}`);
-        res.json({ success: true, endpoint: plan.raw, endpointSource: plan.source, role: cascadeRole(), ifaces, output: r.out });
+        auditLog(req, 'Каскад пересобран (' + plan.source + '): awg1 -> ' + plan.raw);
+        res.json({ success: true, role, endpoint: plan.raw, endpointSource: plan.source, ifaces, output: r.out, details: cascadeDetails() });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось пересобрать каскад: ' + (e.stderr || e.message) });
+        res.status(500).json({ error: 'Не удалось пересобрать каскад: ' + (e.message || 'неизвестно') });
+    }
+});// Конфиг транзитного туннеля (awg1.conf) — чтение/запись
+// Состояние второй панели для мастера: версия, AWG, адрес.
+app.post('/api/cascade/peer-info', checkAuth, requireAdmin, async (req, res) => {
+    const { host, user, pass } = req.body || {};
+    if (!host || !user || !pass) return res.status(400).json({ error: 'Нужны адрес, логин и пароль второй панели' });
+    const remote = new Panel(String(host), String(user), String(pass));
+    const l = await remote.login();
+    if (!l.ok) return res.status(502).json({ error: 'Не удалось войти во вторую панель: ' + l.error });
+    const ifaces = await remote.get('/api/interfaces');
+    const ready = await remote.get('/api/cascade/ready');
+    const st = await remote.get('/api/cascade/status');
+    const pkg = await remote.get('/api/panel/version');
+    res.json({
+        ok: true,
+        host: Panel ? String(host) : '',
+        interfaces: Array.isArray(ifaces.json) ? ifaces.json : [],
+        hasAwg: (Array.isArray(ifaces.json) ? ifaces.json : []).some(i => i === 'awg0' || i === 'amn0'),
+        role: (ready.json && ready.json.role) || '',
+        publicHost: (ready.json && ready.json.publicHost) || '',
+        tunnel: !!(st.json && st.json.tunnelActive),
+        version: (pkg.json && pkg.json.version) || ''
+    });
+});
+
+// Автоматическая сборка каскада с двух сторон (панель все сделает сама).
+app.post('/api/cascade/auto', checkAuth, requireAdmin, async (req, res) => {
+    const data = req.body || {};
+    const role = ['ru', 'eu'].includes(String(data.role)) ? String(data.role) : cascadeRole();
+    const version = ['3.1', '2.0', '1.5'].includes(String(data.version)) ? String(data.version) : '2.0';
+    const host = String(data.peerHost || '').trim();
+    const user = String(data.peerUser || '').trim();
+    const pass = String(data.peerPass || '');
+    const peerClient = String(data.peerClient || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'ru_host';
+    if (!host || !user) return res.status(400).json({ error: 'Укажите адрес и логин второй панели' });
+    const steps = [];
+    const log = (title, text) => steps.push({ title, text, at: new Date().toISOString() });
+    try {
+        const remote = new Panel(host, user, pass);
+        const login = await remote.login();
+        if (!login.ok) throw new Error('Не удалось войти во вторую панель: ' + login.error);
+        log('Проверка второй панели', 'вход выполнен');
+        await ensureAwg(remote, role === 'ru' ? 'eu' : 'ru', version, log);
+
+        // Клиент каскада создаём там, где стоит выход (EU).
+        let conf = '';
+        if (role === 'ru') {
+            const created = await remote.post('/api/cascade/peer', { name: peerClient });
+            if (created.status !== 200 || !created.json || !created.json.conf) {
+                throw new Error('Вторая панель не создала клиента ' + peerClient + ': ' + ((created.json && created.json.error) || 'HTTP ' + created.status));
+            }
+            conf = created.json.conf;
+            log('Клиент для каскада', 'создан на выходе: ' + peerClient);
+        } else {
+            const created = createPeerClient(peerClient);
+            if (!created) throw new Error('Не удалось создать клиента ' + peerClient + ' на этом сервере');
+            log('Клиент для каскада', 'создан здесь: ' + peerClient);
+        }
+
+        // Настраиваем СВОЮ сторону через локальный API.
+        const local = await localPost('/api/cascade/setup', {
+            config: conf, ifaces: data.ifaces, extraRuNets: data.extraRuNets, peerClient
+        });
+        if (!local || local.error) throw new Error((local && local.error) || 'не удалось настроить эту сторону');
+        log('Туннель и маршруты', role === 'ru' ? 'каскад поднят на входе' : 'туннель поднят на выходе');
+
+        // Вторая сторона: забирает конфиг этой стороны и поднимает у себя.
+        const confFile = existingCascadeConf();
+        const ownConf = confFile ? readTextSafe(confFile) : '';
+        const forced = role === 'ru'
+            ? await remote.post('/api/cascade/setup', { config: ownConf, ifaces: [], peerClient })
+            : await remote.post('/api/cascade/setup', { config: ownConf, ifaces: [], peerClient });
+        if (forced.status !== 200) {
+            throw new Error('Вторая панель не смогла настроить туннель: ' + ((forced.json && forced.json.error) || 'HTTP ' + forced.status));
+        }
+        log('Вторая сторона', role === 'ru' ? 'выход подключён' : 'вход подключён');
+
+        // Ждём рукопожатие на этой стороне.
+        let handshake = null;
+        for (let i = 0; i < 12; i++) {
+            await new Promise(r => setTimeout(r, 2500));
+            const st = cascadeDetails();
+            handshake = st.handshakeAgo;
+            if (st.tunnelActive && handshake !== null) break;
+        }
+        auditLog(req, 'Каскад собран автоматически (' + role.toUpperCase() + '): ' + host);
+        res.json({ success: true, role, steps, handshakeAgo: handshake, details: cascadeDetails() });
+    } catch (e) {
+        res.status(500).json({ error: e.message || 'неизвестная ошибка', steps });
+    }
+});// Создать на этом сервере клиента для второй стороны каскада (выход EU).
+app.post('/api/cascade/peer', checkAuth, requireAdmin, (req, res) => {
+    const name = String((req.body && req.body.name) || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'ru_host';
+    if (DEMO_MODE) return res.json({ success: true, name, conf: '', publicHost: '' });
+    try {
+        const peer = createPeerClient(name);
+        if (!peer) return res.status(500).json({ error: 'Клиент создан, но конфиг не найден в /root/awg' });
+        auditLog(req, 'Создан клиент каскада ' + peer.name);
+        res.json({ success: true, name: peer.name, conf: peer.conf });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось создать клиента: ' + (e.stderr || e.message) });
     }
 });
 
-app.post('/api/cascade/remove', checkAuth, (req, res) => {
+// Готовность каскада: роль, публичный адрес и что уже настроено.
+app.get('/api/cascade/ready', checkAuth, async (req, res) => {
     try {
-        teardownRouting();
-        auditLog(req, 'Каскад отключён');
-        res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: 'Ошибка отключения каскада' }); }
+        const own = parseIni(readTextSafe(path.join(AWG_CONF_DIR, 'awg0.conf'))).Interface || {};
+        const conf = existingCascadeConf();
+        res.json({
+            role: cascadeRole(),
+            ownPort: own.ListenPort || '',
+            ownAddress: own.Address || '',
+            publicHost: await cascadePublicHost(),
+            configured: !!conf,
+            confRole: conf ? cascadeRoleFrom(readTextSafe(conf)) : ''
+        });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Конфиг транзитного туннеля (awg1.conf) — чтение/запись
 app.get('/api/cascade/config', checkAuth, (req, res) => {
     const conf = existingCascadeConf();
     if (!conf) return res.status(404).json({ error: 'Конфиг туннеля не найден' });
@@ -6593,6 +6909,29 @@ app.post('/api/install/module', checkAuth, requireAdmin, (req, res) => {
     }
 });
 
+// Вызов собственного API панели из кода: каскад настраивает «свою» сторону
+// тем же маршрутом, что и вторая панель, поэтому поведение одинаковое.
+// Адрес, на котором панель слушает: заполняется при старте.
+let localApi = null;
+function setLocalApi(v) { localApi = v; }
+function localApiTarget() {
+    if (localApi) return localApi;
+    const host = (!PANEL_HOST || PANEL_HOST === '0.0.0.0' || PANEL_HOST === '::') ? '127.0.0.1' : PANEL_HOST;
+    return { host, port: PANEL_PORT };
+}
+
+// Вызов собственного API панели: каскад настраивает «свою» сторону тем же
+// маршрутом, что и вторая панель, поэтому поведение одинаковое.
+async function localPost(apiPath, body) {
+    const target = localApiTarget();
+    const r = await fetch('http://' + target.host + ':' + target.port + apiPath, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Panel-Local': LOCAL_ADMIN_TOKEN },
+        body: JSON.stringify(body || {}),
+        signal: AbortSignal.timeout(180000)
+    }).catch(e => ({ json: async () => ({ error: e.message }) }));
+    try { return await r.json(); } catch (e) { return { error: 'HTTP ' + r.status }; }
+}
 function readLogTail(logFile, bytes = 262144) {
     const size = fs.statSync(logFile).size;
     const start = Math.max(0, size - bytes);
@@ -7621,6 +7960,7 @@ if (require.main === module) {
             const addr = srv.address();
             const actual = addr && typeof addr === 'object' ? addr.port : port;
             console.log(`${label}: ${scheme}://${host}:${actual}`);
+            if (label === 'Servpanel') setLocalApi({ host, port: actual });
         });
         return srv;
     };
