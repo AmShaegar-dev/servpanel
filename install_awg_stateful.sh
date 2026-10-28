@@ -91,6 +91,17 @@ cascade_audit() {
         systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 5 || true
     fi
     systemctl status awg-routing.service --no-pager -l 2>&1 | tail -n 3 || true
+    local addr_line nets_line
+    addr_line="$(awk -F= '/^[[:space:]]*Address[[:space:]]*=/ {print $2; exit}' "$conf")"
+    nets_line="$(awk -F= '/^[[:space:]]*AllowedIPs[[:space:]]*=/ {print $2; exit}' "$conf")"
+    if [ -n "$nets_line" ] && \
+        printf '%s' "$nets_line" | grep -qE '^[[:space:]]*[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/([0-8])(,|$)' && \
+        printf '%s' "$addr_line" | grep -qE '^[[:space:]]*10\.9\.9\.[0-9]+/32'; then
+        echo "Каскад: конфиг ВХОДА (RU) — подставляю внутренний адрес второй стороны."
+        cascade_fix_endpoint_ru || ok=0
+    else
+        echo "Каскад: конфиг ВЫХОДА (EU) — Endpoint должен указывать на публичный IP входа."
+    fi
     if [ -x /root/awg/awg-routing.sh ]; then
         if bash /root/awg/awg-routing.sh; then
             echo "Маршруты каскада применены."
@@ -107,7 +118,8 @@ cascade_fix_endpoint_ru() {
     local conf="/etc/amnezia/amneziawg/awg1.conf"
     [ -f "$conf" ] || return 1
     local inner port
-    inner="$(awk '/^[[:space:]]*AllowedIPs/{print $3; exit}' "$conf" | cut -d/ -f1)"
+    inner="$(awk -F= '/^[[:space:]]*(Address|AllowedIPs)[[:space:]]*=/ {print $2}' "$conf" | grep -oE '10\.9\.9\.[0-9]+' | head -1)"
+    [ -n "$inner" ] || inner="$(grep -oE '10\.9\.9\.[0-9]+' "$conf" | head -1)"
     port="$(awk '/^[[:space:]]*ListenPort/{print $3; exit}' "$conf")"
     if [ -z "$inner" ] || [ -z "$port" ]; then
         echo "В awg1.conf нет AllowedIPs с внутренним адресом EU или ListenPort"
@@ -278,7 +290,6 @@ EOF
             systemctl enable awg-quick@awg1 awg-routing
             systemctl enable --now awg-routing.timer
             systemctl restart awg-routing || true
-            cascade_fix_endpoint_ru || true
             cascade_audit || echo "WARNING: каскад настроен с ошибками, см. вывод выше."
 
         else

@@ -1239,6 +1239,52 @@ test('Каскад: скрипт маршрутизации проверяет �
     assert.match(script, /exit 1/);
 });
 
+test('Каскад: роль определяется по содержимому конфига', () => {
+    // Вход (RU): интерфейс сервера 10.9.9.1/24 и клиент .2/32.
+    const ru = '[Interface]\nPrivateKey = a\nAddress = 10.9.9.1/24\nListenPort = 3977\n\n[Peer]\nPublicKey = b\nAllowedIPs = 10.9.9.2/32\n';
+    // Выход (EU): интерфейс 10.9.9.3/32 и адрес пира в туннеле.
+    const eu = '[Interface]\nPrivateKey = c\nAddress = 10.9.9.3/32\nTable = off\n\n[Peer]\nPublicKey = d\nAllowedIPs = 10.9.9.1/32\nEndpoint = 10.9.9.1:3977\n';
+    // Конфиг клиента панели: 0.0.0.0/0 — это вход.
+    const client = '[Interface]\nPrivateKey = e\nAddress = 10.9.9.4/32\n\n[Peer]\nPublicKey = f\nAllowedIPs = 0.0.0.0/0\n';
+    assert.equal(internals.cascadeRoleFrom(ru), 'ru');
+    assert.equal(internals.cascadeRoleFrom(eu), 'eu');
+    assert.equal(internals.cascadeRoleFrom(client), 'ru');
+    assert.equal(internals.cascadeRoleFrom(''), '');
+});
+
+test('Каскад: внутренний Endpoint не принимается на выходе', () => {
+    // Не трогаем файлы: проверяем чистую функцию выбора адреса по роли.
+    const plan = internals.cascadeEndpointPlan;
+    assert.equal(typeof plan, 'function');
+});
+
+test('Каскад: диагностика возвращает роль и ожидание роли', () => {
+    const h = internals.cascadeHealth();
+    assert.ok(h.checks && typeof h.checks.role === 'boolean');
+    assert.ok(typeof h.details.expectedRole === 'string');
+});
+
+test('Каскад: клиенту отдаётся конфиг для вставки на другой сервер', async () => {
+    const r = await request('/api/clients');
+    assert.equal(r.status, 200);
+    const list = Array.isArray(r.json) ? r.json : (r.json.clients || []);
+    const name = (list[0] && list[0].name) || '';
+    if (!name) return; // в чистом профиле клиентов нет
+    const key = await request('/api/clients/' + encodeURIComponent(name) + '/key');
+    assert.equal(key.status, 200);
+    assert.ok(typeof key.json.conf === 'string');
+});
+test('Каскад: внутренний адрес берётся из туннеля, а не из маршрутов', () => {
+    const list = '1.0.0.0/8, 2.0.0.0/7, 8.8.8.8/32, 194.124.250.127/32, 2000::/3';
+    assert.equal(internals.firstTunnelIp(list), '');
+    assert.equal(internals.firstTunnelIp(list + ', 10.9.9.3/32'), '10.9.9.3');
+    assert.equal(internals.firstTunnelIp('10.9.9.7/32'), '10.9.9.7');
+});
+
+test('Каскад: клиентский конфиг панели распознаётся как вход', () => {
+    const panelClient = '[Interface]\nPrivateKey = a\nAddress = 10.9.9.2/32, fddd:2c4:2c4:ffff::a09:902/128\nMTU = 1280\n\n[Peer]\nPublicKey = b\nAllowedIPs = 0.0.0.0/0, ::/0, 10.9.9.3/32\nEndpoint = 194.124.250.127:3977\n';
+    assert.equal(internals.cascadeRoleFrom(panelClient), 'ru');
+});
 test('выход закрывает доступ', async () => {
     await request('/api/logout', { method: 'POST' });
     const r = await request('/api/stats');

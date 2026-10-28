@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="2.8.7">
+    <meta name="panel-version" content="2.8.8">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1106,7 +1106,7 @@
                     <div class="hero-actions" style="margin-top:0;">
                         <button class="btn btn-primary" onclick="openWizard('cascade')">Настроить каскад</button>
                         <button class="btn btn-soft" onclick="loadCascadeStatus(true); loadCascadeHealth()">Проверить сейчас</button>
-                        <button class="btn btn-ghost" onclick="openCascadeEditorForPaste()">Вставить конфиг EU</button>
+                        <button class="btn btn-ghost" onclick="openCascadeEditorForPaste()">Вставить конфиг второй стороны</button>
                     </div>
                 </div>
 
@@ -1131,13 +1131,18 @@
                 </div>
 
                 <div class="card advanced-only" style="margin-bottom: 20px;">
-                    <h3 style="margin-top:0;">Шаг 1. Конфиг EU-сервера</h3>
+                    <h3 style="margin-top:0;">Шаг 1. Конфиг второй стороны</h3>
                     <p style="color:var(--text-muted); font-size:13px; margin-top:0;">
-                        На <b>выходном (EU)</b> сервере создайте клиента командой
-                        <code style="background:rgba(0,0,0,.35); padding:2px 6px; border-radius:4px;">manage_amneziawg.sh add ru_host</code>
-                        и вставьте сюда содержимое <code>ru_host.conf</code>. Панель сама добавит <code>Table = off</code> и уберёт DNS —
-                        это требование <a href="https://github.com/bivlked/amneziawg-installer/blob/main/CASCADE.md" target="_blank" rel="noopener" style="color:#58a6ff;">CASCADE.md</a>.
+                        Вставьте конфиг клиента, созданного на <b>другом</b> сервере каскада. Панель сама добавит
+                        <code>Table = off</code> и уберёт DNS — это требование
+                        <a href="https://github.com/bivlked/amneziawg-installer/blob/main/CASCADE.md" target="_blank" rel="noopener" style="color:#58a6ff;">CASCADE.md</a>.
                     </p>
+                    <div style="font-size:12.5px; color:var(--text-muted); margin:0 0 10px;">
+                        <b>На выходе (EU):</b> «Новый клиент» → скопируйте конфиг (кнопка ниже или
+                        <code>manage_amneziawg.sh add ru_host</code>) → вставьте здесь на входе (RU).<br>
+                        <b>На входе (RU):</b> «Новый клиент» → скопируйте его конфиг → вставьте во вкладке «Каскад» на выходе (EU).
+                    </div>
+                    <div id="cascadeClientsBox" style="margin-bottom:10px; color:var(--text-muted); font-size:12px;">Загрузка клиентов...</div>
                     <textarea id="cascadeSetupConf" rows="10" spellcheck="false" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = EU_IP:PORT&#10;AllowedIPs = 0.0.0.0/0, ::/0" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:13px; background:rgba(0,0,0,.3); color:#c9d1d9; border:1px solid var(--border); border-radius:6px; padding:10px; resize:vertical;"></textarea>
                 </div>
 

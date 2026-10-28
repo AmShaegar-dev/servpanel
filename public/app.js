@@ -1532,6 +1532,7 @@ async function loadCascadeSetup() {
                 <input type="checkbox" class="casc-setup-check" value="${i}" ${/^(awg0|amn0)$/.test(i) ? 'checked' : ''}> ${i}
             </label>`).join('');
     } catch (e) { box.innerText = 'Ошибка загрузки интерфейсов'; }
+    if (typeof loadCascadeClients === 'function') loadCascadeClients();
     try {
         const res = await fetch('/api/cascade/config');
         if (res.ok) {
@@ -1616,6 +1617,44 @@ async function saveCascadeConf() {
         if (res.ok) { alert('Сохранено'); loadCascadeStatus(true); }
         else alert('Ошибка сохранения');
     } catch (e) { alert('Сетевая ошибка'); }
+}
+
+// Клиентские конфиги с этого сервера (выход EU): то, что нужно вставить во
+// вкладку «Каскад» на сервере-входе RU.
+let cascadeClientsCache = [];
+
+async function loadCascadeClients() {
+    const box = document.getElementById('cascadeClientsBox');
+    if (!box) return;
+    try {
+        const data = await apiJson('/api/clients');
+        const list = (Array.isArray(data) ? data : (data && data.clients) || [])
+            .map(c => (typeof c === 'string' ? { name: c } : c))
+            .filter(c => c && c.name);
+        cascadeClientsCache = list;
+        box.innerHTML = list.length
+            ? list.map(c => `<div class="wizard-summary-row" style="align-items:center;gap:10px;flex-wrap:wrap;">
+                    <span class="mono">${esc(c.name)}</span>
+                    <button class="btn btn-ghost btn-sm" onclick="copyCascadeClient('${esc(c.name)}')">Скопировать конфиг</button>
+                </div>`).join('')
+            : '<div style="color:var(--text-muted);font-size:12px;">Клиентов нет. Создайте клиента для входа RU через мастер «Новый клиент».</div>';
+    } catch (e) {
+        box.innerHTML = `<div style="color:var(--danger);font-size:12px;">Не удалось получить клиентов: ${esc(e.message)}</div>`;
+    }
+}
+
+async function copyCascadeClient(name) {
+    try {
+        // В /key отдаются uri и qr; текст конфига берём из загрузки файла.
+        const res = await fetch('/api/download/' + encodeURIComponent(name), { credentials: 'same-origin' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const conf = await res.text();
+        if (!/\[Interface\]/i.test(conf)) throw new Error('сервер отдал не конфиг');
+        copyText(conf);
+        toast('Конфиг скопирован', 'success', 'Вставьте его на вкладке «Каскад» на другом сервере');
+    } catch (e) {
+        toast('Не удалось получить конфиг', 'error', e.message);
+    }
 }
 
 // ===========================================================================

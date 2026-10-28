@@ -2060,20 +2060,41 @@ function cascadeHealth() {
         timer: d.timerActive,
         rule: !!d.ruleExists,
         table: !!d.tableRoute,
-        ipset: d.ipsetCount > 100
+        ipset: d.ipsetCount > 100,
+        // Роль должна соответствовать машине: если awg0.conf есть, это вход.
+        role: true,
+        // Endpoint должен быть доступен не через awg1 (для RU это внутренний
+        // адрес, для EU — публичный адрес RU).
+        endpoint: true
     };
-    const critical = [checks.config, checks.tunnel, checks.handshake];
+    const details = {
+        endpoint: d.endpoint,
+        effectiveEndpoint: d.effectiveEndpoint || d.endpoint,
+        endpointSource: d.endpointSource || '',
+        handshakeAgo: d.handshakeAgo,
+        ifaces: d.ifaces,
+        ipsetCount: d.ipsetCount,
+        tableRoute: d.tableRoute,
+        lastRun: d.lastRun,
+        role: d.role || '',
+        expectedRole: cascadeRole()
+    };
+    if (d.configured) {
+        const confFile = existingCascadeConf();
+        details.configRole = confFile ? (cascadeRoleFrom(readTextSafe(confFile)) || 'не определена') : 'не определена';
+        checks.role = details.configRole === 'не определена' ? true : details.configRole === details.expectedRole;
+        if (!checks.role) {
+            details.roleHint = (details.configRole === 'ru'
+                ? 'В awg1.conf лежит клиент с маршрутом 0.0.0.0/0 — это конфиг ВХОДА (RU). '
+                : 'В awg1.conf клиент без маршрута 0.0.0.0/0 — это конфиг ВЫХОДА (EU). ') +
+                'На этой машине ожидается роль ' + details.expectedRole.toUpperCase() + '.';
+        }
+    }
+    const critical = [checks.config, checks.tunnel, checks.handshake, checks.role];
     return {
         ok: critical.every(Boolean),
         checks,
-        details: {
-            endpoint: d.endpoint,
-            handshakeAgo: d.handshakeAgo,
-            ifaces: d.ifaces,
-            ipsetCount: d.ipsetCount,
-            tableRoute: d.tableRoute,
-            lastRun: d.lastRun
-        },
+        details,
         checkedAt: new Date().toISOString()
     };
 }
@@ -2841,20 +2862,53 @@ app.post('/api/tools/dns', checkAuth, (req, res) => {
 //                туннель awg1 идёт в EU;
 //   EU (выход) — awg0 нет (или это только туннель): сюда приходит RU, а
 //                клиентские конфиги RU создаются через manage_amneziawg.sh.
+function cascadeRoleFrom(confText) {
+    const ini = parseIni(confText);
+    const iface = ini.Interface || {};
+    const peer = ini.Peer || {};
+    const firstAddr = String(iface.Address || '').split(',')[0].trim();
+    const peerNets = String(peer.AllowedIPs || '').split(',').map(s => s.trim()).filter(Boolean);
+    // Панель может записать вместо 0.0.0.0/0 весь список адресов — это тот же
+    // «весь трафик»: ищем сеть с префиксом ≤ 8, покрывающую публичные адреса.
+    const coversAll = peerNets.some(n => {
+        const m = n.match(/^(\d{1,3})\.\d{1,3}\.\d{1,3}\.\d{1,3}\/(\d{1,2})$/);
+        return !!m && Number(m[2]) <= 8;
+    });
+    // Интерфейс сервера-входа: адрес подсети /24 и ListenPort.
+    if (/^10\.9\.9\.\d+\/(2[4-9]|30)$/.test(firstAddr) && iface.ListenPort) return 'ru';
+    // Интерфейс сервера-выхода: свой адрес /32, у пира только адрес в туннеле.
+    if (/^10\.9\.9\.\d+\/32$/.test(firstAddr) && peerNets.length && peerNets.every(n => /^10\.9\.9\.\d+\/32$/.test(n))) return 'eu';
+    // Клиентский конфиг со всем трафиком — его подставляют на вход (RU).
+    if (/^10\.9\.9\.\d+\/32$/.test(firstAddr) && !iface.ListenPort && coversAll) return 'ru';
+    return '';
+}
+
+
+
+// Роль сервера определяем по awg0.conf: у входа клиенты с 0.0.0.0/0, у выхода
+// awg0 либо нет, либо это переставленный конфиг входа.
 function cascadeRole() {
     if (TEST_MODE) return 'ru';
-    for (const name of ['awg0', 'amn0']) {
-        const file = path.join(AWG_CONF_DIR, name + '.conf');
-        if (!fileExists(file)) continue;
-        const ini = parseIni(readTextSafe(file));
-        // У настоящего входа есть ListenPort и один или несколько клиентов.
-        if (ini.Interface && isPort(ini.Interface.ListenPort)) return 'ru';
-    }
-    return 'eu';
+    const listenConf = [
+        path.join(AWG_CONF_DIR, 'awg0.conf'),
+        path.join(AWG_CONF_DIR, 'amn0.conf')
+    ].filter(fileExists)[0];
+    if (!listenConf) return 'eu';
+    const text = readTextSafe(listenConf);
+    const byContent = cascadeRoleFrom(text);
+    if (byContent) return byContent;
+    return /^[ \t]*ListenPort[ \t]*=/m.test(text) ? 'ru' : 'eu';
 }
 
 function firstIpv4(value) {
     const m = String(value || '').match(/\b((?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})\b/);
+    return m ? m[1] : '';
+}
+
+// Адрес второй стороны ВНУТРИ туннеля (10.9.9.x). Первый адрес из AllowedIPs
+// брать нельзя: клиенты панели записывают туда список маршрутов (1.0.0.0/8 …).
+function firstTunnelIp(value) {
+    const m = String(value || '').match(/\b(10\.9\.9\.(?:\d{1,3}))\b/);
     return m ? m[1] : '';
 }
 
@@ -2869,8 +2923,13 @@ function cascadeEndpointPlan() {
     try { ini = parseIni(readTextSafe(conf)); } catch (e) { return null; }
     const peer = ini.Peer || {};
     const listenPort = isPort(ini.Interface && ini.Interface.ListenPort) ? String(ini.Interface.ListenPort) : '';
-    if (cascadeRole() === 'ru') {
-        const tunnelIp = firstIpv4(peer.AllowedIPs);
+    const role = cascadeRole();
+    if (role === 'eu' && /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(peer.Endpoint || '')) {
+        // Внутренний адрес в Endpoint на выходе означает чужой конфиг.
+        return null;
+    }
+    if (role === 'ru') {
+        const tunnelIp = firstTunnelIp(peer.AllowedIPs);
         if (!tunnelIp || !listenPort) return null;
         return { host: tunnelIp, port: listenPort, raw: `${tunnelIp}:${listenPort}`, source: 'tunnel' };
     }
@@ -3708,8 +3767,11 @@ app.get('/api/clients/:name/key', checkAuth, async (req, res) => {
             if (fs.existsSync(pngPath)) qr = 'data:image/png;base64,' + sh('sudo', ['base64', '-w', '0', pngPath]).trim();
         } catch (e) { /* ignore */ }
         if (!qr) qr = await qrDataUrl(uri);
+        // Конфиг нужен для каскада: на сервере-выходе его копируют на вход.
+        let conf = '';
+        try { conf = sh('sudo', ['cat', path.join(AWG_DIR, name + '.conf')]); } catch (e) { conf = ''; }
         auditLog(req, `Просмотр ключа клиента ${name}`);
-        res.json({ name, uri, qr });
+        res.json({ name, uri, qr, conf });
     } catch (e) { res.status(500).json({ error: 'Ошибка чтения ключа' }); }
 });
 
@@ -7533,7 +7595,8 @@ module.exports._internals = {
     installEnv, proxyUserPatch, proxyUsername,
     writeAppSettings, metricsSnapshot, prometheusMetrics, startMetricsServer, stopMetricsServer,
     metricsRuntimeInfo, apkInfo, resolveApkFile, APP_SETTINGS_FILE, APP_APK_DIR,
-    normalizeCascadeConf, firstIpv4, buildRoutingScript, cascadeRole, cascadeEndpointPlan
+    normalizeCascadeConf, firstIpv4, firstTunnelIp, buildRoutingScript, cascadeRole,
+    cascadeEndpointPlan, cascadeRoleFrom, cascadeHealth
 };
 
 
