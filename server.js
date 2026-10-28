@@ -3381,8 +3381,15 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
     const isExit = role === 'eu';
     // На выходе (EU) клиентских интерфейсов нет — маршруты строятся только
     // на входе (RU), поэтому интерфейсы там необязательны.
-    if (!isExit && !validIfaces(ifaces)) {
-        return res.status(400).json({ error: 'Выберите клиентские интерфейсы (обычно awg0)' });
+    let useIfaces = Array.isArray(ifaces) ? ifaces.filter(Boolean) : [];
+    if (!isExit && !validIfaces(useIfaces)) {
+        // Автоматическая сборка присылает пустой список: выбираем awg0.
+        const available = DEMO_MODE ? ['awg0'] : existingIfaces();
+        const guess = available.find(i => i === 'awg0') || available.find(i => /^(awg|amn)/.test(i)) || '';
+        useIfaces = guess ? [guess] : [];
+    }
+    if (!isExit && !validIfaces(useIfaces)) {
+        return res.status(400).json({ error: 'Нет клиентского интерфейса awg0: сначала установите AmneziaWG на этом сервере' });
     }
     const extra = parseCidrList(extraRuNets);
     if (extra === null) return res.status(400).json({ error: 'Некорректная подсеть в «дополнительных сетях РФ»' });
@@ -3457,10 +3464,10 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
             try { sh('sudo', ['systemctl', 'disable', '--now', 'awg-routing.timer', 'awg-routing.service']); } catch (e) { /* ignore */ }
             r = { endpoint: cascadeEndpointPlan(), out: 'маршруты на выходе не требуются' };
         } else {
-            r = await installRouting(ifaces, extra);
+            r = await installRouting(useIfaces, extra);
         }
         const ep = r.endpoint || { raw: '—', source: '' };
-        auditLog(req, 'Каскад настроен (' + role.toUpperCase() + '): awg1 -> ' + ep.raw + ', интерфейсы: ' + (ifaces || []).join(', '));
+        auditLog(req, 'Каскад настроен (' + role.toUpperCase() + '): awg1 -> ' + ep.raw + ', интерфейсы: ' + (useIfaces || []).join(', '));
         res.json({
             success: true,
             role,
