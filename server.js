@@ -3501,6 +3501,11 @@ app.get('/api/cascade/diag', checkAuth, requireAdmin, async (req, res) => {
         result.routing = fs.existsSync(ROUTING_SCRIPT)
             ? run(ROUTING_SCRIPT)
             : { ok: false, out: 'скрипта маршрутов нет' };
+        // Трассировка: видно строку, на которой скрипт остановился.
+        if (!result.routing.ok && fs.existsSync(ROUTING_SCRIPT)) {
+            result.trace = run('bash', ['-x', ROUTING_SCRIPT]);
+        }
+        result.scriptPath = ROUTING_SCRIPT;
     }
     res.json(result);
 });
