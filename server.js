@@ -3233,7 +3233,19 @@ async function installRouting(ifaces, extraRuNets) {
     sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
     sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
     try {
-        const out = sh('sudo', ['systemctl', 'start', 'awg-routing.service']);
+        let out = '';
+        try {
+            out = sh('sudo', ['systemctl', 'start', 'awg-routing.service']);
+        } catch (e) {
+            // Выполняем скрипт напрямую: journald может не отдать вывод, а
+            // пользователю нужна строка, на которой всё встало.
+            let direct = '';
+            try { direct = sh('sudo', [ROUTING_SCRIPT]); } catch (err) { direct = (err.stdout || '') + (err.stderr || ''); }
+            const detail = String(direct || '').trim();
+            const err = new Error((detail || e.stderr || e.message || 'awg-routing не запустился').trim());
+            err.routingOutput = detail;
+            throw err;
+        }
         return { script, out, endpoint: plan };
     } catch (e) {
         // Не оставляем каскад в полунастроенном виде: правила маркировки без
@@ -3327,7 +3339,7 @@ ip rule add fwmark "$FWMARK" table "$TABLE_ID" priority "$RULE_PRIO"
 # Маршрут до второго сервера нужен только для публичного адреса (на EU это
 # IP RU): он должен идти через основной шлюз, иначе пакеты уйдут в туннель
 # и зациклятся. Внутренний адрес (RU -> 10.9.9.3) уже идёт через awg1.
-if [ -n "$WAN_GW" ] && ! printf '%s' "$AWG1_ENDPOINT" | grep -qE '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)'; then
+if [ -n "$WAN_GW" ]; then
     ip route replace "$AWG1_ENDPOINT" via "$WAN_GW" dev "$WAN_IF" onlink 2>/dev/null || \\
         ip route replace "$AWG1_ENDPOINT" via "$WAN_GW" dev "$WAN_IF"
 fi
