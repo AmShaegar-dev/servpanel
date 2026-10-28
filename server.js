@@ -3109,6 +3109,19 @@ async function cascadePublicHost() {
 // Приводим конфиг каскада к рабочему виду: без DNS, с Table = off, без IPv6
 // при выключенном IPv6 и с параметрами обфускации этой стороны, если в
 // конфиге их нет (иначе рукопожатие не проходит).
+// IPv6-адрес из Address убираем, если IPv6 выключен в ядре: иначе awg-quick
+// падает с «IPv6 is disabled on this device» и туннель не поднимается.
+function stripIpv6Address(text) {
+    if (ipv6Enabled()) return text;
+    return String(text || '').split(/\r?\n/).map(l => {
+        const m = l.match(/^(\s*Address\s*=\s*)(.*)$/i);
+        if (!m) return l;
+        const keep = m[2].split(',').map(s => s.trim()).filter(Boolean)
+            .filter(a => /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(a));
+        return keep.length ? m[1] + keep.join(', ') : '';
+    }).filter(Boolean).join('\n');
+}
+
 function prepareCascadeConf(text, ownIface) {
     const lines = String(text || '').split(/\r?\n/)
         .filter(l => !/^\s*DNS\s*=/i.test(l))
