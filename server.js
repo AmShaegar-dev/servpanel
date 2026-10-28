@@ -3231,37 +3231,25 @@ async function installRouting(ifaces, extraRuNets) {
     writeRootFile('/etc/systemd/system/awg-routing.timer', ROUTING_TIMER, '0644');
     sh('sudo', ['systemctl', 'daemon-reload']);
     sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
-    sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
     try {
-        let out = '';
-        try {
-            out = sh('sudo', ['systemctl', 'start', 'awg-routing.service']);
-        } catch (e) {
-            // Выполняем скрипт напрямую: journald может не отдать вывод, а
-            // пользователю нужна строка, на которой всё встало.
-            let direct = '';
-            try { direct = sh('sudo', [ROUTING_SCRIPT]); } catch (err) { direct = (err.stdout || '') + (err.stderr || ''); }
-            const detail = String(direct || '').trim();
-            const err = new Error((detail || e.stderr || e.message || 'awg-routing не запустился').trim());
-            err.routingOutput = detail;
-            throw err;
+        try { sh('sleep', ['2']); } catch (e) { /* ignore */ }
+        // Сначала выполняем скрипт напрямую: только так видна причина сбоя.
+        const out = sh('sudo', [ROUTING_SCRIPT], { timeout: 180000 });
+        sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
+        try { sh('sudo', ['systemctl', 'start', 'awg-routing.service']); } catch (e) {
+            // Скрипт уже отработал; systemctl может ругаться на таймер —
+            // это не повод считать каскад нерабочим.
         }
         return { script, out, endpoint: plan };
     } catch (e) {
         // Не оставляем каскад в полунастроенном виде: правила маркировки без
         // рабочих маршрутов лишают клиентов интернета.
         try { sh('sudo', ['systemctl', 'stop', 'awg-quick@awg1']); } catch (err) { /* ignore */ }
+        const detail = ((e.stdout || '') + (e.stderr || '') || e.message || '').trim();
         let status = '';
-        let journal = '';
-        try { status = sh('sudo', ['bash', '-c', 'systemctl status awg-quick@awg1 awg-routing.service --no-pager -l 2>&1 | tail -n 25']); } catch (err) { /* ignore */ }
-        try { journal = sh('sudo', ['bash', '-c', 'journalctl -u awg-quick@awg1 -u awg-routing.service -n 30 --no-pager 2>&1']); } catch (err) { /* ignore */ }
-        const err = new Error(
-            (e.stderr || e.message || 'awg-routing не запустился').trim() +
-            (status ? '\n\n' + status.trim() : '') +
-            (journal ? '\n\n' + journal.trim() : '') +
-            '\n\nТуннель awg1 остановлен, правила каскада не применены.'
-        );
-        throw err;
+        try { status = sh('sudo', ['bash', '-c', 'systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 15']); } catch (err) { /* ignore */ }
+        throw new Error((detail || 'awg-routing не запустился') + (status ? '\n\n' + status.trim() : '') +
+            '\n\nТуннель awg1 остановлен, правила каскада не применены.');
     }
 }
 
