@@ -3487,6 +3487,30 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
     }
 });
 
+// Диагностика каскада: что именно ломается — по шагам.
+app.get('/api/cascade/diag', checkAuth, requireAdmin, async (req, res) => {
+    const run = (cmd, args) => {
+        try { return { ok: true, out: String(sh('sudo', [cmd, ...(args || [])], { timeout: 120000 }) || '') }; }
+        catch (e) { return { ok: false, out: String((e.stdout || '') + (e.stderr || '') || e.message || '').trim() }; }
+    };
+    const conf = existingCascadeConf();
+    const result = {
+        role: cascadeRole(),
+        configured: !!conf,
+        confRole: conf ? cascadeRoleFrom(readTextSafe(conf)) : '',
+        endpoint: conf ? ((parseIni(readTextSafe(conf)).Peer || {}).Endpoint || '') : ''
+    };
+    if (conf) {
+        const host = String(result.endpoint).replace(/:[0-9]+$/, '');
+        result.route = run('ip', ['-4', 'route', 'get', host]).out;
+        result.tunnel = run('systemctl', ['is-active', 'awg-quick@awg1']).out;
+        result.routing = fs.existsSync(ROUTING_SCRIPT)
+            ? run(ROUTING_SCRIPT)
+            : { ok: false, out: 'скрипта маршрутов нет' };
+    }
+    res.json(result);
+});
+
 app.post('/api/cascade/refresh', checkAuth, (req, res) => {
     try {
         if (!fs.existsSync(ROUTING_SCRIPT)) return res.status(400).json({ error: 'Каскад ещё не настроен' });
