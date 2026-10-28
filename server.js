@@ -3313,13 +3313,20 @@ ip route replace default dev "$AWG1_IF" table "$TABLE_ID"
 ip rule del fwmark "$FWMARK" table "$TABLE_ID" 2>/dev/null || true
 ip rule add fwmark "$FWMARK" table "$TABLE_ID" priority "$RULE_PRIO"
 
+# Пакеты к самому Endpoint не должны идти в туннель: правило fwmark 0x0
+# исключает их из таблицы 100 даже до того, как поднят awg1.
+ip rule del fwmark 0x0 table main priority 90 2>/dev/null || true
+ip rule add fwmark 0x0 table main priority 90 2>/dev/null || true
+
 # Маршрут до второго сервера нужен только для публичного адреса (на EU это
 # IP RU): он должен идти через основной шлюз, иначе пакеты уйдут в туннель
 # и зациклятся. Внутренний адрес (RU -> 10.9.9.3) уже идёт через awg1.
 if [ -n "$WAN_GW" ]; then
-    ip route replace "$AWG1_ENDPOINT" via "$WAN_GW" dev "$WAN_IF" onlink 2>/dev/null || \\
-        ip route replace "$AWG1_ENDPOINT" via "$WAN_GW" dev "$WAN_IF"
+    ip route replace "$EP_HOST" via "$WAN_GW" dev "$WAN_IF" onlink 2>/dev/null || \\
+        ip route replace "$EP_HOST" via "$WAN_GW" dev "$WAN_IF"
 fi
+# В таблице 100 тоже: маркированный трафик к Endpoint идёт в WAN, а не в туннель.
+ip route replace "$EP_HOST" via "$WAN_GW" dev "$WAN_IF" table "$TABLE_ID" 2>/dev/null || true
 
 # Правила для клиентских интерфейсов: трафик к российским сетям — напрямую
 # (RETURN), остальной — в туннель (MARK). Если ни у одного интерфейса нет
