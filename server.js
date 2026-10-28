@@ -3238,10 +3238,9 @@ async function installRouting(ifaces, extraRuNets) {
         return { script, out, endpoint: plan };
     } catch (e) {
         try { sh("sudo", ["systemctl", "stop", "awg-quick@awg1"]); } catch (err) { /* ignore */ }
-        const detail = ((e.stdout || "") + (e.stderr || "") || e.message || "").trim();
-        let status = "";
-        try { status = sh("sudo", ["bash", "-c", "systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 15"]); } catch (err) { /* ignore */ }
-        throw new Error((detail || "awg-routing не запустился") + (status ? "\n\n" + status.trim() : "") +
+        // child_process кладёт текст скрипта в stdout/stderr, message — общий.
+        const detail = [e.stdout, e.stderr, e.message].map(x => String(x || "").trim()).filter(Boolean).join("\n").trim();
+        throw new Error((detail || "awg-routing не запустился") +
             "\n\nТуннель awg1 остановлен, правила каскада не применены.");
     }
 }
