@@ -3019,18 +3019,72 @@ async function cascadeEndpointPlanAsync() {
 
 // Приводит конфиг к виду, который требует CASCADE.md: без DNS и с
 // Table = off. Таблицу выключения маршрутов проверяем в обоих регистрах.
+function ipv6Enabled() {
+    if (TEST_MODE) return false;
+    try {
+        const all = parseInt(String(readTextSafe('/proc/sys/net/ipv6/conf/all/disable_ipv6')).trim(), 10);
+        return all === 0;
+    } catch (e) { return false; }
+}
+
 function normalizeCascadeConf(text) {
     const lines = String(text || '').split(/\r?\n/)
         .filter(l => !/^\s*DNS\s*=/i.test(l))
-        .filter(l => !/^\s*Table\s*=/i.test(l));
+        .filter(l => !/^\s*Table\s*=/i.test(l))
+        // awg-quick падает с "IPv6 is disabled on this device", если в Address
+        // остался IPv6-адрес, а в ядре IPv6 выключен.
+        .map(l => {
+            if (ipv6Enabled()) return l;
+            const m = l.match(/^(\s*Address\s*=\s*)(.*)$/i);
+            if (!m) return l;
+            const keep = m[2].split(',').map(s => s.trim()).filter(Boolean)
+                .filter(a => /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(a));
+            return m[1] + keep.join(', ');
+        })
+        .filter(l => !/^\s*Address\s*=\s*$/i.test(l));
     const idx = lines.findIndex(l => /^\s*\[Interface\]\s*$/i.test(l));
     if (idx >= 0) lines.splice(idx + 1, 0, 'Table = off');
     return lines.join('\n').trim() + '\n';
 }
 
+const ROUTING_SERVICE = `[Unit]
+Description=AmneziaWG cascade routing (RU -> EU)
+After=network-online.target awg-quick@awg1.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/root/awg/awg-routing.sh
+RemainAfterExit=no
+`;
+
+const ROUTING_TIMER = `[Unit]
+Description=Refresh AmneziaWG cascade routing
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=300s
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
+`;
+
 async function installRouting(ifaces, extraRuNets) {
     const plan = await cascadeEndpointPlanAsync();
     if (!plan) throw new Error('Не удалось определить адрес второго сервера в туннеле (проверьте awg1.conf)');
+    // Приводим конфиг к рабочему виду: без IPv6 при выключенном IPv6 и с
+    // Table = off. Без этого awg-quick@awg1 падает на самой первой строке.
+    const confFile = existingCascadeConf();
+    if (confFile) {
+        const before = readTextSafe(confFile);
+        const after = normalizeCascadeConf(before);
+        if (after !== before) {
+            writeRootFile(confFile, after, '0600');
+            try { sh('sudo', ['systemctl', 'restart', 'awg-quick@awg1']); } catch (e) { /* ниже даст ошибку */ }
+            try { sh('sleep', ['2']); } catch (e) { /* ignore */ }
+        }
+    }
     const script = buildRoutingScript(ifaces, extraRuNets, plan);
     writeRootFile(ROUTING_SCRIPT, script, '0755');
     writeRootFile('/etc/systemd/system/awg-routing.service', ROUTING_SERVICE, '0644');

@@ -1216,8 +1216,10 @@ test('Удаление панели из консоли: меню и режим�
 });
 
 test('Каскад: конфиг нормализуется (Table = off, без DNS)', () => {
-    const out = internals.normalizeCascadeConf('[Interface]\nPrivateKey = abc\nDNS = 1.1.1.1\ntable = on\n\n[Peer]\nPublicKey = def\nAllowedIPs = 10.9.9.3/32\n');
+    const out = internals.normalizeCascadeConf('[Interface]\nPrivateKey = abc\nAddress = 10.9.9.3/32, fddd:2c4:2c4:ffff::a09:903/128\nDNS = 1.1.1.1\ntable = on\n\n[Peer]\nPublicKey = def\nAllowedIPs = 10.9.9.3/32\n');
     assert.match(out, /^\[Interface\]\nTable = off\n/m);
+    // IPv6-адрес убирается (на серверах с disable_ipv6 awg-quick падал).
+    assert.ok(!/fddd:/.test(out), 'IPv6-адрес удалён');
     assert.ok(!/^DNS\s*=/m.test(out), 'DNS удалён');
     assert.ok(!/^table\s*=/m.test(out), 'старый Table удалён');
     // Повторная нормализация идемпотентна.
@@ -1295,6 +1297,19 @@ test('Каскад: адрес второй стороны — публичны�
         const isPublic = internals.isPublicAddress ? internals.isPublicAddress(ip, new Set(local)) : !isLocal;
         assert.ok(!isPublic, 'внутренний адрес ' + ip + ' не публичный');
     }
+});
+test('Каскад: все используемые константы юнитов определены', () => {
+    // Ловим регрессию из 2.8.10: installRouting ссылался на ROUTING_SERVICE,
+    // а само определение случайно удалили — панель отвечала
+    // 'ROUTING_SERVICE is not defined'.
+    const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+    for (const name of ['ROUTING_SERVICE', 'ROUTING_TIMER', 'ROUTING_SCRIPT']) {
+        assert.match(src, new RegExp('const ' + name + '\\s*='), 'нет определения ' + name);
+        const uses = (src.match(new RegExp('\\b' + name + '\\b', 'g')) || []).length;
+        assert.ok(uses >= 2, name + ' объявлена, но не используется');
+    }
+    assert.match(src, /\[Timer\]/);
+    assert.match(src, /ExecStart=\/root\/awg\/awg-routing\.sh/);
 });
 test('выход закрывает доступ', async () => {
     await request('/api/logout', { method: 'POST' });
