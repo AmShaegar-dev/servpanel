@@ -3829,13 +3829,13 @@ app.post('/api/cascade/auto', checkAuth, requireAdmin, async (req, res) => {
 
         // 1. Настраиваем ВЫХОД: туннель без маршрутов (клиентских сетей там нет).
         if (role === 'ru') {
-            const exitSetup = await remote.post('/api/cascade/setup', { config: '', ifaces: [], peerClient, role: 'eu' }, 300000);
+            const exitSetup = await remote.post('/api/cascade/setup', { config: conf, ifaces: [], peerClient, role: 'eu' }, 300000);
             if (exitSetup.status !== 200) {
                 throw new Error('Выход не настроился: ' + ((exitSetup.json && exitSetup.json.error) || 'HTTP ' + exitSetup.status));
             }
             log('Выход', 'туннель поднят');
         } else {
-            const exitSetup = await localPost('/api/cascade/setup', { config: '', ifaces: [], peerClient, role: 'eu' });
+            const exitSetup = await localPost('/api/cascade/setup', { config: conf, ifaces: [], peerClient, role: 'eu' });
             if (!exitSetup || exitSetup.error) throw new Error('Выход не настроился: ' + ((exitSetup && exitSetup.error) || 'ошибка'));
             log('Выход', 'туннель поднят здесь');
         }
