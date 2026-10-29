@@ -3511,9 +3511,13 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
     if (text.length > 64 * 1024) return res.status(400).json({ error: 'Конфиг слишком большой' });
 
     const ini = parseIni(text);
-    if (!ini.Interface || !ini.Peer) return res.status(400).json({ error: 'В конфиге должны быть секции [Interface] и [Peer]' });
-    if (!ini.Interface.PrivateKey) return res.status(400).json({ error: 'В [Interface] нет PrivateKey' });
+    if (!ini.Interface || !ini.Peer) {
+        return res.status(400).json({ error: 'В конфиге должны быть секции [Interface] и [Peer]' });
+    }
     if (!ini.Peer.PublicKey) return res.status(400).json({ error: 'В [Peer] нет PublicKey' });
+    // На входе нужен ещё и PrivateKey из конфига клиента; на выходе конфиг
+    // строится из локального awg0, PrivateKey берётся оттуда.
+    if (!isExit && !ini.Interface.PrivateKey) return res.status(400).json({ error: 'В [Interface] нет PrivateKey' });
 
     try {
         // Готовим awg1.conf: без DNS, с Table = off, без IPv6 при выключенном
