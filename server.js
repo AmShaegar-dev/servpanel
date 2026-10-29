@@ -2363,7 +2363,7 @@ function cascadeDetails() {
     const out = {
         configured: !!conf,
         confPath: conf || CASCADE_CONF,
-        role: cascadeRole(),
+        role: (conf ? cascadeRoleFrom(readTextSafe(conf)) : '') || cascadeRole(),
         tunnelActive: isActive('awg-quick@awg1') === 'active',
         timerActive: isActive('awg-routing.timer') === 'active',
         endpoint: '',
