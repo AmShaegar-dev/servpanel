@@ -1237,7 +1237,10 @@ test('Каскад: скрипт маршрутизации безопасен �
     assert.match(script, /AWG1_ENDPOINT="10\.9\.9\.3:3977"/);
     // На входе маршруты ставятся раньше туннеля: общей проверки нет,
     // но для выхода (без клиентских интерфейсов) она остаётся.
-    assert.match(script, /выход EU/);
+    // Выход (без клиентских интерфейсов) обрабатывается отдельно.
+    const exitScript = internals.buildRoutingScript([], [], { raw: '45.9.16.77:3977' });
+    assert.match(exitScript, /CASC_IFACES=\(\)/);
+    assert.match(exitScript, /маршруты не требуются/);
     // GNU grep понимает \b как backspace — такой шаблон не сработает.
     assert.ok(!/grep -oP '\\b/.test(script), 'в шаблоне не должно быть \\b');
     assert.match(script, /COUNT/);
@@ -1309,6 +1312,20 @@ test('Каскад: все используемые константы юнит�
     }
     assert.match(src, /\[Timer\]/);
     assert.match(src, /ExecStart=\/root\/awg\/awg-routing\.sh/);
+});
+test('Каскад: маршруты удаления есть и защищены правами админа', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+    assert.match(src, /app\.post\('\/api\/cascade\/teardown', checkAuth, requireAdmin/);
+    assert.match(src, /app\.post\('\/api\/cascade\/cleanup', checkAuth, requireAdmin/);
+    for (const part of ['ipset', 'destroy', 'awg-routing.timer', 'fwmark', 'awg-quick@awg1']) {
+        assert.ok(src.includes(part), 'удаление должно убирать ' + part);
+    }
+});
+
+test('Каскад: роль берётся из мастера, а не угадывается', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+    assert.match(src, /const role = data\.role === 'eu' \? 'eu' : 'ru';/);
+    assert.match(src, /if \(!isExit && !validIfaces\(useIfaces\)\)/);
 });
 test('выход закрывает доступ', async () => {
     await request('/api/logout', { method: 'POST' });

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="2.8.27">
+    <meta name="panel-version" content="2.9.0">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1169,6 +1169,11 @@
     <div id="autoCascadeLog" class="wizard-summary" style="display:none; margin-top:12px;"></div>
     <div class="controls-row" style="margin-top:14px; margin-bottom:0;">
         <button class="btn btn-primary" id="autoCascadeBtn" onclick="runAutoCascade(this)">⚡ Построить каскад</button>
+        <button class="btn btn-danger" id="autoCascadeDeleteBtn" onclick="cleanupCascade(this)">🗑 Удалить каскад</button>
+    </div>
+    <div class="wizard-note" style="margin-top:10px;">
+        «Удалить каскад» убирает службы, скрипт маршрутов, правила iptables/ipset, туннель <code>awg1</code> и клиента каскада.
+        Если заполнены адрес и логин второй панели — то же самое сделает и там.
     </div>
 </div>
 <div class="card advanced-only" style="margin-bottom: 20px;">

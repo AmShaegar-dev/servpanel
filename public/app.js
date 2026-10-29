@@ -1612,6 +1612,33 @@ async function checkAutoCascadePeer(btn) {
     } finally { if (btn) { btn.disabled = false; btn.innerText = 'Проверить доступ'; } }
 }
 
+// Удаление каскада: службы, правила, скрипты, туннель на этой стороне,
+// а при заполненных данных второй панели — и там.
+async function cleanupCascade(btn) {
+    const peerHost = ((document.getElementById('autoCascadePeer') || {}).value || '').trim();
+    const peerUser = ((document.getElementById('autoCascadeUser') || {}).value || '').trim();
+    const peerPass = (document.getElementById('autoCascadePass') || {}).value || '';
+    const peerClient = ((document.getElementById('peerClientName') || {}).value) || 'ru_host';
+    const log = document.getElementById('autoCascadeLog');
+    const target = peerHost && peerUser ? 'на этом сервере и на ' + peerHost : 'только на этом сервере';
+    if (!confirm('Удалить каскад ' + target + '?\n\nБудут удалены: службы awg-routing, туннель awg1, правило fwmark, ipset ru, правила iptables, клиент ' + peerClient + '.\nКлиенты VPN на этом сервере не пострадают.')) return;
+    if (btn) { btn.disabled = true; btn.innerText = 'Удаление…'; }
+    if (log) { log.style.display = 'block'; log.innerHTML = '<div class="wizard-summary-row"><span>Удаляем…</span></div>'; }
+    try {
+        const res = await apiJson('/api/cascade/cleanup', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ peerHost, peerUser, peerPass, peerClient })
+        });
+        if (log && Array.isArray(res.steps)) {
+            log.innerHTML = res.steps.map(s => '<div class="wizard-summary-row"><span>' + esc(s.title) + '</span><b>' + esc(s.text) + '</b></div>').join('');
+        }
+        toast('Каскад удалён', 'success', '');
+        loadCascadeStatus(true);
+    } catch (e) {
+        toast('Не удалось удалить каскад', 'error', e.message);
+    } finally { if (btn) { btn.disabled = false; btn.innerText = '🗑 Удалить каскад'; } }
+}
+
 async function runAutoCascade(btn) {
     const role = ((document.getElementById('autoCascadeRole') || {}).value) || 'ru';
     const version = ((document.getElementById('autoCascadeVersion') || {}).value) || '2.0';

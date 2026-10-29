@@ -3262,21 +3262,12 @@ function buildRoutingScript(ifaces, extraRuNets, endpoint) {
     const ep = endpoint || cascadeEndpoint();
     if (!ep) throw new Error('Не удалось определить Endpoint туннеля awg1 (проверьте awg1.conf)');
     const extra = (extraRuNets || []).join('\n');
+    const list = (ifaces || []).filter(Boolean).join(' ');
     return `#!/bin/bash
 # Каскад RU -> EU. Сгенерировано панелью (схема: bivlked/amneziawg-installer/CASCADE.md)
 set -euo pipefail
 
-# Состав клиентских интерфейсов различает роль: на выходе (EU) их нет.
-if [ "\${#CASC_IFACES[@]}" -eq 0 ]; then
-    # Выход: маршруты не нужны, туннель уже поднят awg-quick.
-    if ! ip link show "$AWG1_IF" >/dev/null 2>&1; then
-        echo "ERROR: интерфейс $AWG1_IF не поднят (выход EU). Проверьте awg1.conf."
-        exit 1
-    fi
-    echo "OK: выход EU, маршруты не требуются."
-    exit 0
-fi
-CASC_IFACES=(${ifaces.join(' ')})
+CASC_IFACES=(${list})
 AWG1_IF="awg1"
 AWG1_ENDPOINT="${ep.raw}"
 TABLE_ID=100
@@ -3292,24 +3283,30 @@ exec 9>"$AWG_DIR/awg-routing.lock"
 flock -w 300 9 || exit 1
 trap 'rm -f "$RU_ZONE.tmp"' EXIT
 
-# В ip route get нужен адрес без порта: "host:port" даёт пустой результат.
+# Выход (EU): клиентских интерфейсов нет, маршруты не нужны.
+if [ "\${#CASC_IFACES[@]}" -eq 0 ]; then
+    if ! ip link show "$AWG1_IF" >/dev/null 2>&1; then
+        echo "ERROR: интерфейс $AWG1_IF не поднят (выход). Проверьте awg1.conf."
+        exit 1
+    fi
+    echo "OK: выход каскада, маршруты не требуются."
+    exit 0
+fi
+
+# Адрес второй стороны без порта: ip route порт не принимает.
 EP_HOST="\${AWG1_ENDPOINT%%:*}"
 EP_ROUTE="$(ip -4 route get "$EP_HOST" 2>/dev/null | head -1)"
 WAN_IF="$(printf '%s' "$EP_ROUTE" | grep -oP '(^| )dev \\K\\S+' || true)"
 WAN_GW="$(printf '%s' "$EP_ROUTE" | grep -oP '(^| )via \\K\\S+' || true)"
-
-# Интерфейс awg1 может ещё не быть поднят: маршруты ставятся до него.
 if [ -z "$WAN_IF" ] || [ "$WAN_IF" = "$AWG1_IF" ]; then
-    echo "ERROR: Endpoint $AWG1_ENDPOINT недоступен напрямую (маршрут через $AWG1_IF)."
-    echo "В awg1.conf в [Peer] нужен внутренний адрес второго сервера в туннеле,"
-    echo "а не публичный IP: RU -> 10.9.9.3:3977, EU -> публичный IP RU."
+    echo "ERROR: адрес второй стороны $AWG1_ENDPOINT недоступен напрямую (через $AWG1_IF)."
     exit 1
 fi
 
 fetch_ru_zone() {
     curl -fsS --retry 2 --connect-timeout 10 --max-time 60 -o "$RU_ZONE.tmp" "$1" || return 1
     local valid
-    valid=$(grep -cE '^[0-9]{1,3}(\\.[0-9]{1,3}){3}(/[0-9]{1,2})?$' "$RU_ZONE.tmp" || true)
+    valid=$(grep -cE '^[0-9]{1,3}([.][0-9]{1,3}){3}(/[0-9]{1,2})?$' "$RU_ZONE.tmp" || true)
     [ "$valid" -ge 1000 ]
 }
 if fetch_ru_zone "$RU_ZONE_URL"; then
@@ -3319,7 +3316,7 @@ elif fetch_ru_zone "$RU_ZONE_FALLBACK_URL"; then
 fi
 
 # Список российских сетей
-if [ -f "$RU_ZONE" ] && [ -s "$RU_ZONE" ]; then
+if [ -s "$RU_ZONE" ]; then
     ipset create ru hash:net -exist
     ipset create ru_tmp hash:net -exist
     ipset flush ru_tmp
@@ -3331,29 +3328,19 @@ if [ -f "$RU_ZONE" ] && [ -s "$RU_ZONE" ]; then
     ipset destroy ru_tmp
 fi
 
-# Отдельная таблица маршрутизации для помеченного трафика -> в туннель
+# Таблица 100 — для трафика, помеченного fwmark.
 ip route replace default dev "$AWG1_IF" table "$TABLE_ID"
 ip rule del fwmark "$FWMARK" table "$TABLE_ID" 2>/dev/null || true
 ip rule add fwmark "$FWMARK" table "$TABLE_ID" priority "$RULE_PRIO"
 
-# Пакеты к самому Endpoint не должны идти в туннель: правило fwmark 0x0
-# исключает их из таблицы 100 даже до того, как поднят awg1.
-ip rule del fwmark 0x0 table main priority 90 2>/dev/null || true
-ip rule add fwmark 0x0 table main priority 90 2>/dev/null || true
-
-# Маршрут до второго сервера нужен только для публичного адреса (на EU это
-# IP RU): он должен идти через основной шлюз, иначе пакеты уйдут в туннель
-# и зациклятся. Внутренний адрес (RU -> 10.9.9.3) уже идёт через awg1.
+# Маршрут до второй стороны — всегда через WAN: иначе пакеты уйдут в туннель.
 if [ -n "$WAN_GW" ]; then
     ip route replace "$EP_HOST" via "$WAN_GW" dev "$WAN_IF" onlink 2>/dev/null || \\
         ip route replace "$EP_HOST" via "$WAN_GW" dev "$WAN_IF"
+    ip route replace "$EP_HOST" via "$WAN_GW" dev "$WAN_IF" table "$TABLE_ID" 2>/dev/null || true
 fi
-# В таблице 100 тоже: маркированный трафик к Endpoint идёт в WAN, а не в туннель.
-ip route replace "$EP_HOST" via "$WAN_GW" dev "$WAN_IF" table "$TABLE_ID" 2>/dev/null || true
 
-# Правила для клиентских интерфейсов: трафик к российским сетям — напрямую
-# (RETURN), остальной — в туннель (MARK). Если ни у одного интерфейса нет
-# IPv4, выходим с ошибкой: без правил каскад «настроен», но не работает.
+# Правила: RU-сети — напрямую, остальное — в туннель.
 COUNT=0
 for IFACE in "\${CASC_IFACES[@]}"; do
     SUBNET=$(ip -o -f inet addr show "$IFACE" 2>/dev/null | awk '{print $4}' | head -n 1 || true)
@@ -3370,16 +3357,15 @@ for IFACE in "\${CASC_IFACES[@]}"; do
     iptables -w 5 -t nat -A POSTROUTING -s "$SUBNET" -o "$AWG1_IF" -j MASQUERADE
 done
 if [ "$COUNT" -eq 0 ]; then
-    echo "ERROR: ни у одного из интерфейсов (\${CASC_IFACES[*]}) нет IPv4-адреса."
-    echo "Проверьте, что AWG поднят: systemctl status awg-quick@awg0"
+    echo "ERROR: ни у одного интерфейса (\${CASC_IFACES[*]}) нет IPv4."
+    echo "Проверьте: systemctl status awg-quick@awg0"
     exit 1
 fi
 
 sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
-echo "ОК: маршруты каскада применены ($(date '+%Y-%m-%d %H:%M:%S'))"
+echo "OK: маршруты каскада применены ($(date '+%Y-%m-%d %H:%M:%S'))"
 `;
 }
-
 function teardownRouting() {
     try { sh('sudo', ['systemctl', 'stop', 'awg-routing.timer', 'awg-routing.service']); } catch (e) { /* ignore */ }
     try { sh('sudo', ['systemctl', 'disable', 'awg-routing.timer']); } catch (e) { /* ignore */ }
@@ -3487,6 +3473,35 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
             try { sh('sudo', ['rm', '-f', CASCADE_CONF_LEGACY]); } catch (e) { /* ignore */ }
         }
         writeRootFile(CASCADE_MARKER, String(Date.now()), '0600');
+
+        // Выход (EU): свой конфиг. Адрес — интерфейс сервера (10.9.9.1/32),
+        // пир — адрес входа из переданного конфига, Endpoint — публичный адрес входа.
+        if (isExit) {
+            const own = parseIni(readTextSafe(path.join(AWG_CONF_DIR, 'awg0.conf'))).Interface || {};
+            const given = parseIni(text).Peer || {};
+            const entryIp = (String((parseIni(text).Interface || {}).Address || '').match(/10\.9\.9\.(\d{1,3})/) || [])[1] || '';
+            const pub = await cascadePublicHost();
+            const ownAddr = String(own.Address || '10.9.9.1/24').split(',')[0].trim();
+            const exitIp = ownAddr.replace(/\/\d+$/, '');
+            const epMatch = String(given.Endpoint || '').match(/^([^:]+):(\d{1,5})$/);
+            if (!entryIp || !own.PrivateKey || !given.PublicKey) {
+                return res.status(400).json({ error: 'Для выхода нужен клиентский конфиг с адресом входа в туннеле' });
+            }
+            const exitConf = [
+                '[Interface]',
+                'PrivateKey = ' + own.PrivateKey,
+                'Address = ' + exitIp + '/32',
+                'MTU = 1280',
+                'Table = off',
+                '',
+                '[Peer]',
+                'PublicKey = ' + given.PublicKey,
+                'AllowedIPs = 10.9.9.' + entryIp + '/32',
+                'Endpoint = ' + (epMatch ? epMatch[1] + ':' + epMatch[2] : pub + ':' + (own.ListenPort || '3977')),
+                'PersistentKeepalive = 33'
+            ].join('\n') + '\n';
+            writeRootFile(CASCADE_CONF, stripIpv6Address(prepareCascadeConf(exitConf, 'awg0')), '0600');
+        }
 
         sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
         try { sh('sleep', ['2']); } catch (e) { /* ignore */ }
@@ -3638,9 +3653,90 @@ app.post('/api/cascade/peer-info', checkAuth, requireAdmin, async (req, res) => 
 });
 
 // Автоматическая сборка каскада с двух сторон (панель все сделает сама).
+// Полное удаление каскада на этой стороне: службы, правила, скрипты, клиент.
+// Удаление каскада на ОБЕИХ сторонах из панели: правила, скрипты, туннель.
+app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
+    const data = req.body || {};
+    const peerClient = String(data.peerClient || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '') || 'ru_host';
+    const steps = [];
+    const log = (title, text) => steps.push({ title, text });
+    const local = await localPost('/api/cascade/teardown', { peerClient, removeTunnel: true, removeClient: true });
+    log('Этот сервер', (local && local.removed ? local.removed.join('; ') : (local && local.error) || 'готово'));
+    const host = String(data.peerHost || '').trim();
+    const user = String(data.peerUser || '').trim();
+    const pass = String(data.peerPass || '');
+    if (host && user) {
+        const remote = new Panel(host, user, pass);
+        const login = await remote.login();
+        if (!login.ok) {
+            log('Вторая панель', 'не удалось войти: ' + login.error);
+        } else {
+            const r = await remote.post('/api/cascade/teardown', { peerClient, removeTunnel: true, removeClient: true }, 120000);
+            log('Вторая панель', (r.json && r.json.removed ? r.json.removed.join('; ') : (r.json && r.json.error) || 'готово'));
+        }
+    } else {
+        log('Вторая панель', 'не указана — почистите её так же из своей панели');
+    }
+    auditLog(req, 'Каскад удалён' + (host ? ' (и на ' + host + ')' : ''));
+    res.json({ success: true, steps });
+});
+
+app.post('/api/cascade/teardown', checkAuth, requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const removed = [];
+    for (const unit of ['awg-routing.timer', 'awg-routing.service', 'awg-quick@awg1']) {
+        try { sh('sudo', ['systemctl', 'stop', unit]); } catch (e) { /* не запущена */ }
+        try { sh('sudo', ['systemctl', 'disable', unit]); } catch (e) { /* ignore */ }
+    }
+    removed.push('остановлены awg-routing и awg1');
+    const safe = (args) => { try { sh('sudo', args); return true; } catch (e) { return false; } };
+    safe(['ip', 'rule', 'del', 'fwmark', '0x1', 'table', '100']);
+    safe(['ip', 'rule', 'del', 'fwmark', '0x0', 'table', 'main', 'priority', '90']);
+    safe(['ip', 'route', 'flush', 'table', '100']);
+    safe(['ipset', 'destroy', 'ru']);
+    safe(['ipset', 'destroy', 'ru_tmp']);
+    const strip = (table, chain, match) => {
+        let out = '';
+        try { out = rootShTry('iptables', ['-t', table, '-S', chain]); } catch (e) { return; }
+        out.split('\n').forEach(rule => {
+            if (!rule.startsWith('-A ' + chain)) return;
+            if (!match(rule)) return;
+            const args = rule.replace(new RegExp('^-A ' + chain + ' '), '').split(/\s+/).filter(Boolean);
+            try { sh('sudo', ['iptables', '-t', table, '-D', chain, ...args]); } catch (e) { /* ignore */ }
+        });
+    };
+    strip('mangle', 'PREROUTING', r => /--set-xmark 0x1|--set-mark 0x1|match-set ru dst/.test(r));
+    strip('nat', 'POSTROUTING', r => /-o awg1 .*MASQUERADE/.test(r));
+    removed.push('удалены правила fwmark, ipset и iptables');
+    for (const f of [ROUTING_SCRIPT, '/etc/systemd/system/awg-routing.service', '/etc/systemd/system/awg-routing.timer', CASCADE_MARKER]) {
+        try { fs.unlinkSync(f); } catch (e) { /* нет файла */ }
+    }
+    removed.push('удалены скрипт маршрутов и юниты');
+    try { sh('sudo', ['systemctl', 'daemon-reload']); } catch (e) { /* ignore */ }
+    if (body.removeClient !== false) {
+        const name = String(body.peerClient || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '');
+        if (name) {
+            for (const ext of ['.conf', '.png', '.vpnuri', '.vpnuri.png', '.ovpn']) {
+                try { sh('sudo', ['rm', '-f', path.join(AWG_DIR, name + ext)]); } catch (e) { /* ignore */ }
+            }
+            removed.push('удалён клиент ' + name);
+        }
+    }
+    if (body.removeTunnel !== false) {
+        const conf = existingCascadeConf();
+        if (conf) { try { sh('sudo', ['rm', '-f', conf]); removed.push('удалён awg1.conf'); } catch (e) { /* ignore */ } }
+        try { sh('sudo', ['ip', 'link', 'delete', 'awg1']); } catch (e) { /* уже нет */ }
+    }
+    try { fs.unlinkSync(path.join(AWG_DIR, 'ru.zone')); } catch (e) { /* ignore */ }
+    auditLog(req, 'Каскад удалён: ' + removed.join('; '));
+    res.json({ success: true, removed });
+});
+
 app.post('/api/cascade/auto', checkAuth, requireAdmin, async (req, res) => {
     const data = req.body || {};
-    const role = ['ru', 'eu'].includes(String(data.role)) ? String(data.role) : cascadeRole();
+    // Роль берём ИЗ МАСТЕРА, а не угадываем по конфигам: серверы часто
+    // остаются с чужими конфигами после переноса.
+    const role = data.role === 'eu' ? 'eu' : 'ru';
     const version = ['3.1', '2.0', '1.5'].includes(String(data.version)) ? String(data.version) : '2.0';
     const host = String(data.peerHost || '').trim();
     const user = String(data.peerUser || '').trim();
@@ -3656,7 +3752,7 @@ app.post('/api/cascade/auto', checkAuth, requireAdmin, async (req, res) => {
         log('Проверка второй панели', 'вход выполнен');
         await ensureAwg(remote, role === 'ru' ? 'eu' : 'ru', version, log);
 
-        // Клиент каскада создаём там, где стоит выход (EU).
+        // Клиент каскада создаём на ВЫХОДЕ и переносим на вход.
         let conf = '';
         if (role === 'ru') {
             const created = await remote.post('/api/cascade/peer', { name: peerClient });
@@ -3668,55 +3764,50 @@ app.post('/api/cascade/auto', checkAuth, requireAdmin, async (req, res) => {
         } else {
             const created = createPeerClient(peerClient);
             if (!created) throw new Error('Не удалось создать клиента ' + peerClient + ' на этом сервере');
+            conf = created.conf;
             log('Клиент для каскада', 'создан здесь: ' + peerClient);
         }
 
-        // Настраиваем СВОЮ сторону через локальный API.
-        const local = await localPost('/api/cascade/setup', {
-            config: conf, ifaces: data.ifaces, extraRuNets: data.extraRuNets, peerClient
-        });
-        if (!local || local.error) throw new Error((local && local.error) || 'не удалось настроить эту сторону');
-        log('Туннель и маршруты', role === 'ru' ? 'каскад поднят на входе' : 'туннель поднят на выходе');
-
-        // Вторая сторона: забирает конфиг этой стороны и поднимает у себя.
-        const confFile = existingCascadeConf();
-        const ownConf = confFile ? readTextSafe(confFile) : '';
-        const forced = role === 'ru'
-            ? await remote.post('/api/cascade/setup', { config: ownConf, ifaces: [], peerClient }, 300000)
-            : await remote.post('/api/cascade/setup', { config: ownConf, ifaces: [], peerClient }, 300000);
-        if (forced.status !== 200) {
-            throw new Error('Вторая панель не смогла настроить туннель: ' + ((forced.json && forced.json.error) || 'HTTP ' + forced.status));
+        // 1. Настраиваем ВЫХОД: туннель без маршрутов (клиентских сетей там нет).
+        if (role === 'ru') {
+            const exitSetup = await remote.post('/api/cascade/setup', { config: '', ifaces: [], peerClient, role: 'eu' }, 300000);
+            if (exitSetup.status !== 200) {
+                throw new Error('Выход не настроился: ' + ((exitSetup.json && exitSetup.json.error) || 'HTTP ' + exitSetup.status));
+            }
+            log('Выход', 'туннель поднят');
+        } else {
+            const exitSetup = await localPost('/api/cascade/setup', { config: '', ifaces: [], peerClient, role: 'eu' });
+            if (!exitSetup || exitSetup.error) throw new Error('Выход не настроился: ' + ((exitSetup && exitSetup.error) || 'ошибка'));
+            log('Выход', 'туннель поднят здесь');
         }
-        log('Вторая сторона', role === 'ru' ? 'выход подключён' : 'вход подключён');
 
-        // Ждём рукопожатие на этой стороне.
+        // 2. Вход: конфиг выхода + маршруты к нему.
+        const entryBody = { config: conf, ifaces: data.ifaces, extraRuNets: data.extraRuNets, peerClient, role: 'ru' };
+        const entrySetup = role === 'ru'
+            ? await localPost('/api/cascade/setup', entryBody)
+            : await remote.post('/api/cascade/setup', entryBody, 300000);
+        if (role === 'ru') {
+            if (!entrySetup || entrySetup.error) throw new Error('Вход не настроился: ' + ((entrySetup && entrySetup.error) || 'ошибка'));
+            log('Вход', 'туннель и маршруты подняты здесь');
+        } else {
+            if (entrySetup.status !== 200) throw new Error('Вход не настроился: ' + ((entrySetup.json && entrySetup.json.error) || 'HTTP ' + entrySetup.status));
+            log('Вход', 'туннель и маршруты подняты на второй панели');
+        }
+
+        // 3. Ждём рукопожатие.
         let handshake = null;
         for (let i = 0; i < 12; i++) {
             await new Promise(r => setTimeout(r, 2500));
             const st = cascadeDetails();
             handshake = st.handshakeAgo;
-            if (st.tunnelActive && handshake !== null) break;
+            if (st.handshakeAgo !== null) break;
         }
         auditLog(req, 'Каскад собран автоматически (' + role.toUpperCase() + '): ' + host);
         res.json({ success: true, role, steps, handshakeAgo: handshake, details: cascadeDetails() });
     } catch (e) {
         res.status(500).json({ error: e.message || 'неизвестная ошибка', steps });
     }
-});// Создать на этом сервере клиента для второй стороны каскада (выход EU).
-app.post('/api/cascade/peer', checkAuth, requireAdmin, (req, res) => {
-    const name = String((req.body && req.body.name) || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'ru_host';
-    if (DEMO_MODE) return res.json({ success: true, name, conf: '', publicHost: '' });
-    try {
-        const peer = createPeerClient(name);
-        if (!peer) return res.status(500).json({ error: 'Клиент создан, но конфиг не найден в /root/awg' });
-        auditLog(req, 'Создан клиент каскада ' + peer.name);
-        res.json({ success: true, name: peer.name, conf: peer.conf });
-    } catch (e) {
-        res.status(500).json({ error: 'Не удалось создать клиента: ' + (e.stderr || e.message) });
-    }
-});
-
-// Готовность каскада: роль, публичный адрес и что уже настроено.
+});// Готовность каскада: роль, публичный адрес и что уже настроено.
 app.get('/api/cascade/ready', checkAuth, async (req, res) => {
     try {
         const own = parseIni(readTextSafe(path.join(AWG_CONF_DIR, 'awg0.conf'))).Interface || {};
