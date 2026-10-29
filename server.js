@@ -27,6 +27,8 @@ const dns = require('dns');
 const updater = require('./lib/updater');
 const proxyUsers = require('./lib/proxy-users');
 const { Panel } = require('./lib/cascade-setup');
+const sshBuild = require('./lib/cascade-ssh-build');
+const sshRunner = require('./lib/cascade-ssh');
 const { ensureAwg } = require('./lib/cascade-remote');
 const { createProxyBot } = require('./lib/proxy-bot');
 
@@ -2890,11 +2892,11 @@ function cascadeRoleFrom(confText) {
     if (!/^10\.9\.9\.\d+\/\d{1,2}$/.test(firstAddr)) return "";
     // Интерфейс сервера-входа: адрес подсети и ListenPort.
     if (/^10\.9\.9\.\d+\/(2[4-9]|30)$/.test(firstAddr) && iface.ListenPort) return "ru";
-    // Выход: адрес сервера .1/32 и ровно один пир .x/32.
+    // Выход: адрес сервера .1/32 (по инструкции awg1 на выходе — .1/32).
     if (/^10\.9\.9\.1\/32$/.test(firstAddr)) return "eu";
-    // Иначе — клиентский конфиг, его ставят на входе.
     return "ru";
 }
+
 
 
 
@@ -2907,17 +2909,21 @@ function cascadeRoleFrom(confText) {
 // Роль сервера определяем по awg0.conf: у входа клиенты с 0.0.0.0/0, у выхода
 // awg0 либо нет, либо это переставленный конфиг входа.
 function cascadeRole() {
-    if (TEST_MODE) return 'ru';
-    const listenConf = [
-        path.join(AWG_CONF_DIR, 'awg0.conf'),
-        path.join(AWG_CONF_DIR, 'amn0.conf')
-    ].filter(fileExists)[0];
-    if (!listenConf) return 'eu';
-    const text = readTextSafe(listenConf);
-    const byContent = cascadeRoleFrom(text);
-    if (byContent) return byContent;
-    return /^[ \t]*ListenPort[ \t]*=/m.test(text) ? 'ru' : 'eu';
+    if (TEST_MODE) return "ru";
+    // Настоящий вход — сервер с клиентами: awg0 с ListenPort и подсетью /24.
+    for (const name of ["awg0.conf", "amn0.conf"]) {
+        const file = path.join(AWG_CONF_DIR, name);
+        if (!fileExists(file)) continue;
+        const ini = parseIni(readTextSafe(file));
+        const iface = ini.Interface || {};
+        const peers = Object.keys(ini).filter(k => k === "Peer").length;
+        const clientPeers = (readTextSafe(file).match(/^\[Peer\]/gm) || []).length;
+        if (iface.ListenPort && clientPeers > 0) return "ru";
+        void peers;
+    }
+    return "eu";
 }
+
 
 function firstIpv4(value) {
     const m = String(value || '').match(/\b((?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})\b/);
@@ -3692,28 +3698,36 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
     const peerClient = String(data.peerClient || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '') || 'ru_host';
     const steps = [];
     const log = (title, text) => steps.push({ title, text });
+    // 1. Своя сторона: службы, правила, туннель, клиент.
     const local = await localPost('/api/cascade/teardown', { peerClient, removeTunnel: true, removeClient: true });
     log('Этот сервер', (local && local.removed ? local.removed.join('; ') : (local && local.error) || 'готово'));
-    const host = String(data.peerHost || '').trim();
-    const user = String(data.peerUser || '').trim();
+
+    // 2. Вторая сторона по SSH: те же действия + удаление клиента ru_host.
+    const host = String(data.peerHost || '').replace(/^https?:\/\//i, '').replace(/[:/].*$/, '').trim();
     const pass = String(data.peerPass || '');
-    if (host && user) {
-        const remote = new Panel(host, user, pass);
-        const login = await remote.login();
-        if (!login.ok) {
-            log('Вторая панель', 'не удалось войти: ' + login.error);
-        } else {
-            const r = await remote.post('/api/cascade/teardown', { peerClient, removeTunnel: true, removeClient: true }, 120000);
-            log('Вторая панель', (r.json && r.json.removed ? r.json.removed.join('; ') : (r.json && r.json.error) || 'готово'));
-        }
+    if (host && pass) {
+        const remote = { host, port: Number(data.peerPort) || 22, user: String(data.peerUser || 'root'), pass };
+        const cmd = [
+            'systemctl stop awg-routing.timer awg-routing.service awg-quick@awg1 2>/dev/null || true',
+            'systemctl disable awg-routing.timer awg-quick@awg1 2>/dev/null || true',
+            'ip rule del fwmark 0x1 table 100 2>/dev/null || true',
+            "ip route flush table 100 2>/dev/null || true",
+            "ipset destroy ru 2>/dev/null || true",
+            "iptables -t mangle -S PREROUTING 2>/dev/null | grep -E 'set-mark 0x1|match-set ru dst' | sed 's/^-A /-D /' | xargs -r -L1 iptables -t mangle 2>/dev/null || true",
+            "iptables -t nat -S POSTROUTING 2>/dev/null | grep -- '-o awg1' | grep MASQUERADE | sed 's/^-A /-D /' | xargs -r -L1 iptables -t nat 2>/dev/null || true",
+            'rm -f /etc/amnezia/amneziawg/awg1.conf /root/awg/awg-routing.sh /etc/systemd/system/awg-routing.service /etc/systemd/system/awg-routing.timer',
+            `rm -f /root/awg/${peerClient}.conf /root/awg/${peerClient}.png /root/awg/${peerClient}.vpnuri /root/awg/${peerClient}.vpnuri.png`,
+            'systemctl daemon-reload',
+            'echo cleaned'
+        ].join('; ');
+        const r = await sshRunner.run(remote, cmd, 120000);
+        log('Вторая сторона ' + host, r.code === 0 ? 'каскад и клиент ' + peerClient + ' удалены' : String(r.out).trim().slice(0, 300));
     } else {
-        log('Вторая панель', 'не указана — почистите её так же из своей панели');
+        log('Вторая сторона', 'не указана — почистите её так же из своей панели');
     }
     auditLog(req, 'Каскад удалён' + (host ? ' (и на ' + host + ')' : ''));
     res.json({ success: true, steps });
-});
-
-// Клиент для второй стороны каскада: создаётся на этой панели (выход EU).
+});// Клиент для второй стороны каскада: создаётся на этой панели (выход EU).
 app.post('/api/cascade/peer', checkAuth, requireAdmin, async (req, res) => {
     const name = String((req.body && req.body.name) || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'ru_host';
     if (DEMO_MODE) return res.json({ success: true, name, conf: '' });
@@ -3743,6 +3757,96 @@ app.post('/api/cascade/peer', checkAuth, requireAdmin, async (req, res) => {
         res.json({ success: true, name: peer.name, conf: peer.conf });
     } catch (e) {
         res.status(500).json({ error: 'Не удалось создать клиента: ' + (e.stderr || e.message) });
+    }
+});
+
+// Каскад по SSH: панель накатывает EU, создаёт ru_host и поднимает вход.
+app.post('/api/cascade/ssh-install', checkAuth, requireAdmin, async (req, res) => {
+    const data = req.body || {};
+    const role = data.role === 'eu' ? 'eu' : 'ru';
+    const version = ['3.1', '2.0', '1.5'].includes(String(data.version)) ? String(data.version) : '2.0';
+    const host = String(data.peerHost || '').replace(/^https?:\/\//i, '').replace(/[:/].*$/, '').trim();
+    const port = Number(data.peerPort) || 22;
+    const user = String(data.peerUser || 'root').trim() || 'root';
+    const pass = String(data.peerPass || '');
+    if (!host || !pass) return res.status(400).json({ error: 'Нужны IP второй стороны и пароль root' });
+    if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) return res.status(400).json({ error: 'Вторая сторона задаётся по IP' });
+    const steps = [];
+    const log = (title, text) => { steps.push({ title, text, at: new Date().toISOString() }); };
+    const remote = { host, port, user, pass };
+    try {
+        const ping = await sshRunner.run(remote, 'hostname && ip -4 -o addr show scope global', 30000);
+        if (ping.code !== 0) throw new Error('SSH до ' + host + ' не работает: ' + String(ping.out).trim().slice(0, 300));
+        log('SSH', host + ' доступен');
+        const ipMatch = String(ping.out).match(/(\d{1,3}\.){3}\d{1,3}\//);
+        const euHost = ipMatch ? ipMatch[0].replace(/\/$/, '') : host;
+
+        let info = await sshBuild.awgInfo(remote);
+        if (!info.installed) {
+            await sshBuild.installAwg(remote, { version, subnet: sshBuild.SUBNET_EU, onLog: (m) => log('EU', m) });
+            info = await sshBuild.awgInfo(remote);
+        }
+        if (!info.installed) throw new Error('На ' + host + ' не установился AmneziaWG');
+        log('EU', 'AmneziaWG готов, порт ' + (info.listenPort || '—'));
+
+        const ruHost = await sshBuild.createRuHost(remote, (m) => log('EU', m));
+
+        let local = await sshBuild.awgInfo({ host: '127.0.0.1' });
+        if (!local.installed) {
+            log('RU', 'AmneziaWG не установлен — запускаю установку');
+            const start = await localPost('/api/install/module', {
+                module: 'awg', version, route: 'all', ipv6: 'disallow', port: '443', awgMode: 'single'
+            });
+            if (!start || start.error) throw new Error('Установка AWG на входе: ' + ((start && start.error) || 'ошибка'));
+            for (let i = 0; i < 120; i++) {
+                await new Promise(r => setTimeout(r, 5000));
+                local = await sshBuild.awgInfo({ host: '127.0.0.1' });
+                if (local.installed) break;
+            }
+            if (!local.installed) throw new Error('AmneziaWG на входе не установился');
+        }
+        log('RU', 'AmneziaWG готов, порт ' + (local.listenPort || '—'));
+
+        const conf = sshBuild.cascadeConfig(ruHost.conf);
+        writeRootFile(sshBuild.AWG_CONF, conf, '0600');
+        writeRootFile(CASCADE_MARKER, String(Date.now()), '0600');
+        log('RU', 'awg1.conf: ' + ((conf.match(/^Address\s*=.*$/m) || [])[0] || '').trim() + ', ' + ((conf.match(/^Endpoint\s*=.*$/m) || [])[0] || '').trim());
+
+        const script = sshBuild.routingScript(euHost);
+        writeRootFile(ROUTING_SCRIPT, script, '0755');
+        writeRootFile('/etc/systemd/system/awg-routing.service', ROUTING_SERVICE, '0644');
+        writeRootFile('/etc/systemd/system/awg-routing.timer', ROUTING_TIMER, '0644');
+        sh('sudo', ['systemctl', 'daemon-reload']);
+        const routeRun = await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
+        if (routeRun.code !== 0) throw new Error('Маршруты не применились: ' + String(routeRun.out).trim().slice(0, 500));
+        log('RU', 'маршруты и фильтрация применены');
+        sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
+        try { sh('sleep', ['3']); } catch (e) { /* ignore */ }
+        sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
+
+        let euHs = null;
+        let ruHs = null;
+        for (let i = 0; i < 12; i++) {
+            const hsEu = await sshRunner.run(remote, "awg show awg0 latest-handshakes | awk '{print $2}' | sort -nr | head -1", 20000);
+            const tsEu = parseInt(String(hsEu.out).trim(), 10) || 0;
+            const hsRu = await sshRunner.run({ host: '127.0.0.1' }, "awg show awg1 latest-handshakes | awk '{print $2}' | sort -nr | head -1", 20000);
+            const tsRu = parseInt(String(hsRu.out).trim(), 10) || 0;
+            const now = Math.floor(Date.now() / 1000);
+            euHs = tsEu ? now - tsEu : null;
+            ruHs = tsRu ? now - tsRu : null;
+            if (euHs !== null && ruHs !== null) break;
+            await new Promise(r => setTimeout(r, 5000));
+        }
+        log('Проверка', 'EU: ' + (euHs === null ? 'нет рукопожатия' : euHs + ' сек. назад') + ', RU: ' + (ruHs === null ? 'нет рукопожатия' : ruHs + ' сек. назад'));
+        if (euHs === null || ruHs === null) {
+            return res.status(500).json({ error: 'Каскад поднят, но нет рукопожатия. Проверьте UDP ' + (local.listenPort || '39743') + ' на EU в облачном firewall.', steps });
+        }
+        const traffic = Number(sh('sudo', ['bash', '-c', "awg show awg1 transfer 2>/dev/null | awk '{s+=$2+$3} END {print s+0}'"]).trim()) || 0;
+        log('Трафик', 'через awg1: ' + traffic + ' байт');
+        auditLog(req, 'Каскад собран по SSH: RU -> ' + euHost);
+        res.json({ success: true, role, endpoint: euHost + ':' + (local.listenPort || ''), steps, euHandshakeAgo: euHs, ruHandshakeAgo: ruHs, traffic, details: cascadeDetails() });
+    } catch (e) {
+        res.status(500).json({ error: e.message || 'неизвестная ошибка', steps });
     }
 });
 

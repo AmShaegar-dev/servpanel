@@ -1616,18 +1616,19 @@ async function checkAutoCascadePeer(btn) {
 // а при заполненных данных второй панели — и там.
 async function cleanupCascade(btn) {
     const peerHost = ((document.getElementById('autoCascadePeer') || {}).value || '').trim();
-    const peerUser = ((document.getElementById('autoCascadeUser') || {}).value || '').trim();
+    const peerPort = ((document.getElementById('autoCascadePeerPort') || {}).value || '22');
+    const peerUser = ((document.getElementById('autoCascadeUser') || {}).value || 'root');
     const peerPass = (document.getElementById('autoCascadePass') || {}).value || '';
     const peerClient = ((document.getElementById('peerClientName') || {}).value) || 'ru_host';
     const log = document.getElementById('autoCascadeLog');
-    const target = peerHost && peerUser ? 'на этом сервере и на ' + peerHost : 'только на этом сервере';
-    if (!confirm('Удалить каскад ' + target + '?\n\nБудут удалены: службы awg-routing, туннель awg1, правило fwmark, ipset ru, правила iptables, клиент ' + peerClient + '.\nКлиенты VPN на этом сервере не пострадают.')) return;
+    const target = peerHost && peerPass ? 'на этом сервере и на ' + peerHost : 'только на этом сервере';
+    if (!confirm('Удалить каскад ' + target + '?\n\nБудут убраны: awg-routing, туннель awg1, маршруты, ipset, правила iptables, клиент ' + peerClient + '.\nКлиенты VPN не пострадают.')) return;
     if (btn) { btn.disabled = true; btn.innerText = 'Удаление…'; }
     if (log) { log.style.display = 'block'; log.innerHTML = '<div class="wizard-summary-row"><span>Удаляем…</span></div>'; }
     try {
         const res = await apiJson('/api/cascade/cleanup', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ peerHost, peerUser, peerPass, peerClient })
+            body: JSON.stringify({ peerHost, peerPort, peerUser, peerPass, peerClient })
         });
         if (log && Array.isArray(res.steps)) {
             log.innerHTML = res.steps.map(s => '<div class="wizard-summary-row"><span>' + esc(s.title) + '</span><b>' + esc(s.text) + '</b></div>').join('');
@@ -1643,25 +1644,26 @@ async function runAutoCascade(btn) {
     const role = ((document.getElementById('autoCascadeRole') || {}).value) || 'ru';
     const version = ((document.getElementById('autoCascadeVersion') || {}).value) || '2.0';
     const peerHost = ((document.getElementById('autoCascadePeer') || {}).value || '').trim();
-    const peerUser = ((document.getElementById('autoCascadeUser') || {}).value || '').trim();
+    const peerPort = ((document.getElementById('autoCascadePeerPort') || {}).value || '22');
+    const peerUser = ((document.getElementById('autoCascadeUser') || {}).value || 'root');
     const peerPass = (document.getElementById('autoCascadePass') || {}).value || '';
-    const peerClient = ((document.getElementById('peerClientName') || {}).value) || 'ru_host';
     const log = document.getElementById('autoCascadeLog');
-    if (!peerHost || !peerUser || !peerPass) return alert('Укажите адрес, логин и пароль второй панели');
-    if (!confirm('Построить каскад автоматически?\n\nРоль: ' + (role === 'ru' ? 'вход (RU)' : 'выход (EU)') +
-        ', версия AmneziaWG ' + version + '.\nВторая панель: ' + peerHost + '\n\nПанель может установить AmneziaWG на второй стороне — это займёт несколько минут.')) return;
+    if (!peerHost || !peerPass) return alert('Укажите IP второй стороны и пароль root');
+    if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(peerHost)) return alert('Вторая сторона задаётся по IP, не по домену');
+    if (!confirm('Построить каскад?\n\nРоль этого сервера: ' + (role === 'ru' ? 'вход (RU)' : 'выход (EU)') +
+        '\nВерсия AmneziaWG: ' + version + '\nВторая сторона: ' + peerHost + ':' + peerPort + '\n\n' +
+        'Панель по SSH поставит там AmneziaWG (если нужно), создаст клиента ru_host и поднимет туннель. Это займёт несколько минут.')) return;
     if (btn) { btn.disabled = true; btn.innerText = 'Строим каскад…'; }
-    if (log) { log.style.display = 'block'; log.innerHTML = '<div class="wizard-summary-row"><span>Запускаем…</span></div>'; }
+    if (log) { log.style.display = 'block'; log.innerHTML = '<div class="wizard-summary-row"><span>Подключаемся по SSH…</span></div>'; }
     try {
-        const res = await apiJson('/api/cascade/auto', {
+        const res = await apiJson('/api/cascade/ssh-install', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role, version, peerHost, peerUser, peerPass, peerClient })
+            body: JSON.stringify({ role, version, peerHost, peerPort, peerUser, peerPass })
         });
         if (log && Array.isArray(res.steps)) {
             log.innerHTML = res.steps.map(s => '<div class="wizard-summary-row"><span>' + esc(s.title) + '</span><b>' + esc(s.text) + '</b></div>').join('');
         }
-        const hs = res.handshakeAgo === null || res.handshakeAgo === undefined ? 'рукопожатие ожидается' : (res.handshakeAgo + ' сек. назад');
-        toast('Каскад построен', 'success', 'Связь: ' + hs);
+        toast('Каскад настроен', 'success', 'Рукопожатие: EU ' + res.euHandshakeAgo + ' сек., RU ' + res.ruHandshakeAgo + ' сек.');
         loadCascadeStatus(true);
     } catch (e) {
         if (log) log.innerHTML += '<div class="wizard-summary-row"><span style="color:var(--danger)">Ошибка</span><b>' + esc(e.message) + '</b></div>';
