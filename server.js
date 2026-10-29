@@ -3469,12 +3469,16 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
         text = remote;
     }
 
-    if (!text) return res.status(400).json({ error: 'Нет конфига для настройки каскада' });
+    if (!isExit && !text) return res.status(400).json({ error: 'Нет конфига входа для настройки каскада' });
     if (text.length > 64 * 1024) return res.status(400).json({ error: 'Конфиг слишком большой' });
 
     const ini = parseIni(text);
-    if (!ini.Peer || !ini.Peer.PublicKey) return res.status(400).json({ error: 'В конфиге нет [Peer] с PublicKey' });
-    if (!isExit && (!ini.Interface || !ini.Interface.PrivateKey)) {
+    // На выходе конфига может не быть: там нужен только адрес входа, а ключ
+    // и адрес берутся из собственного awg0 и из клиентского конфига.
+    if (!isExit && (!ini.Peer || !ini.Peer.PublicKey)) {
+        return res.status(400).json({ error: 'В конфиге нет [Peer] с PublicKey' });
+    }
+    if (!isExit && text && (!ini.Interface || !ini.Interface.PrivateKey)) {
         return res.status(400).json({ error: 'В конфиге входа нет [Interface] с PrivateKey' });
     }
 
@@ -3501,8 +3505,9 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
             const entryIp = (String(givenIface.Address || '').match(/10\.9\.9\.(\d{1,3})/) || [])[1] || '';
             const ownAddr = String(own.Address || '10.9.9.1/24').split(',')[0].trim().replace(/\/\d+$/, '');
             const epMatch = String(ini.Peer.Endpoint || '').match(/^([^:]+):(\d{1,5})$/);
-            const entryKey = ini.Peer.PublicKey;
-            if (!entryIp) return res.status(400).json({ error: 'В конфиге входа нет адреса 10.9.9.x — невозможно связать стороны' });
+            const entryKey = (ini.Peer && ini.Peer.PublicKey) || '';
+            if (!entryIp) return res.status(400).json({ error: 'В конфиге входа нет адреса 10.9.9.x' });
+            if (!entryKey) return res.status(400).json({ error: 'В конфиге входа нет PublicKey' });
             cleanConf = [
                 '[Interface]',
                 'PrivateKey = ' + own.PrivateKey,
