@@ -3521,6 +3521,17 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
             cleanConf = stripIpv6Address(prepareCascadeConf(cleanConf, 'awg0'));
         } else {
             cleanConf = stripIpv6Address(prepareCascadeConf(text, 'awg0'));
+            // Адрес пира (выхода) должен быть в AllowedIPs. Если там 0.0.0.0/0,
+            // значит конфиг пришёл не с той стороны — берём адрес из Address.
+            const eIni = parseIni(cleanConf);
+            const ePeer = eIni.Peer || {};
+            const eIface = eIni.Interface || {};
+            const peerNets = String(ePeer.AllowedIPs || '').split(',').map(s => s.trim()).filter(Boolean);
+            if (peerNets.length && peerNets.every(n => n === '0.0.0.0/0' || n === '::/0')) {
+                const myIp = (String(eIface.Address || '').match(/10\.9\.9\.(\d{1,3})/) || [])[1] || '';
+                const other = myIp === '4' ? '1' : '4';
+                cleanConf = cleanConf.replace(/^AllowedIPs\s*=.*$/m, 'AllowedIPs = 10.9.9.' + other + '/32');
+            }
         }
 
         writeRootFile(CASCADE_CONF, cleanConf, '0600');
