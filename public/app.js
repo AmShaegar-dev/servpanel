@@ -1591,25 +1591,27 @@ function autoCascadeRoleHint() {
 
 async function checkAutoCascadePeer(btn) {
     const host = ((document.getElementById('autoCascadePeer') || {}).value || '').trim();
-    const user = ((document.getElementById('autoCascadeUser') || {}).value || '').trim();
+    const port = ((document.getElementById('autoCascadePeerPort') || {}).value || '22');
+    const user = ((document.getElementById('autoCascadeUser') || {}).value || 'root');
     const pass = (document.getElementById('autoCascadePass') || {}).value || '';
     const hint = document.getElementById('autoCascadeHint');
-    if (!host || !user || !pass) return alert('Укажите адрес, логин и пароль второй панели');
-    if (btn) { btn.disabled = true; btn.innerText = 'Проверка...'; }
+    if (!host || !pass) return alert('Укажите IP второй стороны и пароль root');
+    if (btn) { btn.disabled = true; btn.innerText = 'Проверка…'; }
     try {
-        const d = await apiJson('/api/cascade/peer-info', {
+        const d = await apiJson('/api/cascade/ssh-check', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ host, user, pass })
+            body: JSON.stringify({ peerHost: host, peerPort: port, peerUser: user, peerPass: pass })
         });
         if (hint) {
             hint.style.display = 'block';
-            hint.innerHTML = 'Вторая панель отвечает: роль <b>' + (d.role === 'ru' ? 'вход (RU)' : d.role === 'eu' ? 'выход (EU)' : 'не определена') +
-                '</b>, AmneziaWG ' + (d.hasAwg ? 'установлен' : '<b>не установлен</b> (панель поставит сама)') +
-                ', версия ' + (d.version || '—') + ', адрес ' + (d.publicHost || '—') + '.';
+            hint.style.color = d.ok ? 'var(--text-muted)' : 'var(--danger)';
+            hint.innerHTML = d.ok
+                ? 'SSH до <b>' + esc(d.host) + '</b> работает. AmneziaWG: ' + (d.hasAwg ? 'установлен' : '<b>нет — панель поставит</b>') + '.'
+                : 'SSH не работает: ' + esc(d.reason || 'нет ответа') + '.<br><span style="font-size:11px;">' + esc(d.output || '') + '</span>';
         }
     } catch (e) {
-        if (hint) { hint.style.display = 'block'; hint.style.color = 'var(--danger)'; hint.innerText = 'Вторая панель недоступна: ' + e.message; }
-    } finally { if (btn) { btn.disabled = false; btn.innerText = 'Проверить доступ'; } }
+        if (hint) { hint.style.display = 'block'; hint.style.color = 'var(--danger)'; hint.innerText = 'Ошибка проверки: ' + e.message; }
+    } finally { if (btn) { btn.disabled = false; btn.innerText = 'Проверить SSH'; } }
 }
 
 // Удаление каскада: службы, правила, скрипты, туннель на этой стороне,

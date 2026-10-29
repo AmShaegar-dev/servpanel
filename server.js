@@ -3761,6 +3761,27 @@ app.post('/api/cascade/peer', checkAuth, requireAdmin, async (req, res) => {
 });
 
 // Каскад по SSH: панель накатывает EU, создаёт ru_host и поднимает вход.
+// Проверка SSH до второй стороны до запуска сборки: понятная причина.
+app.post('/api/cascade/ssh-check', checkAuth, requireAdmin, async (req, res) => {
+    const data = req.body || {};
+    const host = String(data.peerHost || '').replace(/^https?:\/\//i, '').replace(/[:/].*$/, '').trim();
+    const pass = String(data.peerPass || '');
+    if (!host || !pass) return res.status(400).json({ error: 'Нужны IP и пароль root второй стороны' });
+    const conn = { host, port: Number(data.peerPort) || 22, user: String(data.peerUser || 'root'), pass };
+    const r = await sshRunner.run(conn, 'hostname; command -v awg >/dev/null && echo awg=yes || echo awg=no; test -f /etc/amnezia/amneziawg/awg0.conf && echo awg0=yes || echo awg0=no', 30000);
+    const out = String(r.out || '');
+    const denied = /Permission denied|Access denied|authentication failed/i.test(out);
+    const timeout = /timed out|Connection refused|No route to host/i.test(out);
+    res.json({
+        ok: r.code === 0 && !denied && !timeout,
+        host,
+        reason: denied ? 'неверный пароль root' : timeout ? 'SSH недоступен с этого сервера' : r.code === 0 ? '' : out.trim().slice(0, 200),
+        output: out.trim().slice(0, 400),
+        hasAwg: out.includes('awg=yes'),
+        hasAwg0: out.includes('awg0=yes')
+    });
+});
+
 app.post('/api/cascade/ssh-install', checkAuth, requireAdmin, async (req, res) => {
     const data = req.body || {};
     const role = data.role === 'eu' ? 'eu' : 'ru';
