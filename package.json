@@ -1,6 +1,6 @@
 {
   "name": "servpanel",
-  "version": "2.9.4",
+  "version": "2.9.5",
   "description": "Servpanel — web panel for AmneziaWG, RU->EU cascade, AdGuard Home, MTProto proxies, clients, security and backups",
   "main": "server.js",
   "scripts": {

@@ -3214,13 +3214,30 @@ async function fetchPeerClientConf(url, user, pass, name) {
 }
 
 // Создаёт на этом сервере клиента для второй стороны (для выхода EU).
+// Возвращает клиента из awg0.conf (имя пира), его конфиг с сервера.
+function clientFromAwg0(name) {
+    const text = readTextSafe(path.join(AWG_CONF_DIR, "awg0.conf"));
+    if (!text) return null;
+    const blocks = text.split(/^\[Peer\]\s*$/m).slice(1);
+    for (const block of blocks) {
+        const nameMatch = block.match(/^\s*#_Name\s*=\s*(\S+)\s*$/m);
+        if (!nameMatch || nameMatch[1] !== name) continue;
+        const pub = (block.match(/^\s*PublicKey\s*=\s*(\S+)\s*$/m) || [])[1];
+        const ips = (block.match(/^\s*AllowedIPs\s*=\s*(.+)$/m) || [])[1] || "";
+        const iface = parseIni(text).Interface || {};
+        if (!pub || !iface.PrivateKey) return null;
+        return { publicKey: pub, allowedIps: ips.trim(), address: iface.Address || "", privateKey: iface.PrivateKey, listenPort: iface.ListenPort || "" };
+    }
+    return null;
+}
+
 function createPeerClient(name) {
     const safe = String(name || "cascade-peer").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40) || "cascade-peer";
     const out = { name: safe, conf: "", file: "", error: "" };
     try {
         sh("sudo", ["bash", MANAGE, "add", safe, "--json"], { timeout: 60000 });
     } catch (e) {
-        out.error = String((e.stdout || "") + (e.stderr || "") || e.message || "").trim().slice(0, 400);
+        out.error = String((e.stdout || "") + (e.stderr || "") || e.message || "").trim().slice(0, 300);
     }
     const candidates = [
         path.join(AWG_DIR, safe + ".conf"),
@@ -3232,8 +3249,27 @@ function createPeerClient(name) {
         try { conf = sh("sudo", ["cat", f]); } catch (e) { conf = ""; }
         if (/\[Interface\]/i.test(conf)) { out.conf = conf; out.file = f; return out; }
     }
+    // Файла нет, но клиент мог быть создан раньше: собираем конфиг из awg0.
+    const peer = clientFromAwg0(safe);
+    if (peer) {
+        const addr = String(peer.allowedIps).split(",")[0].trim() || "10.9.9.4/32";
+        const conf = [
+            "[Interface]",
+            "PrivateKey = " + peer.privateKey,
+            "Address = " + addr,
+            "MTU = 1280",
+            "",
+            "[Peer]",
+            "PublicKey = " + peer.publicKey,
+            "AllowedIPs = 0.0.0.0/0, ::/0",
+            "Endpoint = 127.0.0.1:" + (peer.listenPort || "3977")
+        ].join("\n") + "\n";
+        out.conf = conf;
+        out.file = "awg0.conf";
+    }
     return out;
 }
+
 
 
 
