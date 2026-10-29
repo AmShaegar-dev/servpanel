@@ -3445,14 +3445,42 @@ function teardownRouting() {
 
 // Настройка каскада из клиентского конфига EU-сервера (вставка в панель)
 app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
-    const { config, ifaces, extraRuNets } = req.body || {};
-    const role = cascadeRole();
+    const body = req.body || {};
+    const config = String(body.config || '').trim();
+    const ifaces = body.ifaces;
+    const extraRuNets = body.extraRuNets;
+    // Роль из запроса всегда важнее догадки по конфигам.
+    const requested = String(body.role || '');
+    const role = ['ru', 'eu'].includes(requested) ? requested : cascadeRole();
     const isExit = role === 'eu';
-    // На выходе (EU) клиентских интерфейсов нет — маршруты строятся только
-    // на входе (RU), поэтому интерфейсы там необязательны.
+    let text = config;
+
+    // Вход: клиентский конфиг с выхода (или можно забрать его с его панели).
+    if (!text && !isExit) {
+        const peerHost = String(body.peerHost || '').trim();
+        const peerUser = String(body.peerUser || '').trim();
+        const peerName = String(body.peerClient || 'ru_host').trim();
+        if (!peerHost || !peerUser) {
+            return res.status(400).json({ error: 'Вставьте конфиг клиента со второй стороны либо укажите адрес панели EU и логин' });
+        }
+        const scheme = /^https?:\/\//i.test(peerHost) ? '' : 'https://';
+        const remote = await fetchPeerClientConf(scheme + peerHost, peerUser, String(body.peerPass || ''), peerName);
+        if (!remote) return res.status(502).json({ error: 'Не удалось забрать конфиг ' + peerName + ' с ' + peerHost });
+        text = remote;
+    }
+
+    if (!text) return res.status(400).json({ error: 'Нет конфига для настройки каскада' });
+    if (text.length > 64 * 1024) return res.status(400).json({ error: 'Конфиг слишком большой' });
+
+    const ini = parseIni(text);
+    if (!ini.Peer || !ini.Peer.PublicKey) return res.status(400).json({ error: 'В конфиге нет [Peer] с PublicKey' });
+    if (!isExit && (!ini.Interface || !ini.Interface.PrivateKey)) {
+        return res.status(400).json({ error: 'В конфиге входа нет [Interface] с PrivateKey' });
+    }
+
+    // На входе нужен клиентский интерфейс (awg0), на выходе — нет.
     let useIfaces = Array.isArray(ifaces) ? ifaces.filter(Boolean) : [];
     if (!isExit && !validIfaces(useIfaces)) {
-        // Автоматическая сборка присылает пустой список: выбираем awg0.
         const available = DEMO_MODE ? ['awg0'] : existingIfaces();
         const guess = available.find(i => i === 'awg0') || available.find(i => /^(awg|amn)/.test(i)) || '';
         useIfaces = guess ? [guess] : [];
@@ -3463,127 +3491,58 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
     const extra = parseCidrList(extraRuNets);
     if (extra === null) return res.status(400).json({ error: 'Некорректная подсеть в «дополнительных сетях РФ»' });
 
-    let text = String(config || '').trim();
-
-    // Вход (RU) умеет поднять каскад без вставки конфига: берём клиента с
-    // панели на другом сервере, где включён каскад.
-    if (!text && role === 'ru') {
-        const peerHost = String((req.body || {}).peerHost || '').trim();
-        const peerUser = String((req.body || {}).peerUser || '').trim();
-        const peerPass = String((req.body || {}).peerPass || '');
-        const peerName = String((req.body || {}).peerClient || 'ru_host').trim();
-        if (!peerHost || !peerUser) {
-            return res.status(400).json({
-                error: 'Вставьте конфиг клиента со второй стороны либо укажите адрес панели EU, логин и пароль — панель заберёт конфиг сама.'
-            });
-        }
-        const scheme = /^https?:\/\//i.test(peerHost) ? '' : 'https://';
-        const peerUrl = scheme + peerHost;
-        const remote = await fetchPeerClientConf(peerUrl, peerUser, peerPass, peerName);
-        if (!remote) {
-            return res.status(502).json({
-                error: 'Не удалось получить конфиг ' + peerName + ' с ' + peerUrl +
-                    '. Проверьте адрес, логин, пароль и имя клиента (на сервере выхода он должен существовать).'
-            });
-        }
-        text = remote;
-    }
-
-    // Выход (EU): второй стороне нужен клиент, созданный здесь. Панель
-    // создаёт его сама. Для входа (RU) подойдёт и чужой конфиг.
-    if (!text && isExit) {
-        const peerName = String((req.body || {}).peerClient || 'ru_host').trim() || 'ru_host';
-        const created = createPeerClient(peerName);
-        if (!created) return res.status(500).json({ error: 'Не удалось создать клиента для входа на этом сервере' });
-        text = created.conf;
-    }
-
-    // Выход (EU): второй стороне нужен клиент, созданный здесь. Панель
-    // создаёт его сама; для входа (RU) подойдёт и готовый конфиг.
-    if (!text && isExit) {
-        const peerName = String((req.body || {}).peerClient || 'ru_host').trim() || 'ru_host';
-        const created = createPeerClient(peerName);
-        if (!created) return res.status(500).json({ error: 'Не удалось создать клиента для входа на этом сервере' });
-        text = created.conf;
-    }
-
-    if (!text) return res.status(400).json({ error: 'Вставьте конфиг клиента со второй стороны каскада' });
-    if (text.length > 64 * 1024) return res.status(400).json({ error: 'Конфиг слишком большой' });
-
-    const ini = parseIni(text);
-    if (!ini.Interface || !ini.Peer) {
-        return res.status(400).json({ error: 'В конфиге должны быть секции [Interface] и [Peer]' });
-    }
-    if (!ini.Peer.PublicKey) return res.status(400).json({ error: 'В [Peer] нет PublicKey' });
-    // На входе нужен ещё и PrivateKey из конфига клиента; на выходе конфиг
-    // строится из локального awg0, PrivateKey берётся оттуда.
-    if (!isExit && !ini.Interface.PrivateKey) return res.status(400).json({ error: 'В [Interface] нет PrivateKey' });
-
     try {
-        // Готовим awg1.conf: без DNS, с Table = off, без IPv6 при выключенном
-        // IPv6 и с параметрами обфускации этой стороны.
-        const cleanConf = stripIpv6Address(prepareCascadeConf(text, 'awg0'));
+        let cleanConf;
+        if (isExit) {
+            // Выход: свой конфиг из локального awg0 + адрес входа из конфига.
+            const own = parseIni(readTextSafe(path.join(AWG_CONF_DIR, 'awg0.conf'))).Interface || {};
+            if (!own.PrivateKey) return res.status(400).json({ error: 'На этом сервере нет awg0.conf — установите AmneziaWG' });
+            const givenIface = ini.Interface || {};
+            const entryIp = (String(givenIface.Address || '').match(/10\.9\.9\.(\d{1,3})/) || [])[1] || '';
+            const ownAddr = String(own.Address || '10.9.9.1/24').split(',')[0].trim().replace(/\/\d+$/, '');
+            const epMatch = String(ini.Peer.Endpoint || '').match(/^([^:]+):(\d{1,5})$/);
+            const entryKey = ini.Peer.PublicKey;
+            if (!entryIp) return res.status(400).json({ error: 'В конфиге входа нет адреса 10.9.9.x — невозможно связать стороны' });
+            cleanConf = [
+                '[Interface]',
+                'PrivateKey = ' + own.PrivateKey,
+                'Address = ' + ownAddr + '/32',
+                'MTU = 1280',
+                'Table = off',
+                '',
+                '[Peer]',
+                'PublicKey = ' + entryKey,
+                'AllowedIPs = 10.9.9.' + entryIp + '/32',
+                'Endpoint = ' + (epMatch ? epMatch[1] + ':' + epMatch[2] : String(own.ListenPort || '3977')),
+                'PersistentKeepalive = 33'
+            ].join('\n') + '\n';
+            cleanConf = stripIpv6Address(prepareCascadeConf(cleanConf, 'awg0'));
+        } else {
+            cleanConf = stripIpv6Address(prepareCascadeConf(text, 'awg0'));
+        }
+
         writeRootFile(CASCADE_CONF, cleanConf, '0600');
         if (CASCADE_CONF_LEGACY !== CASCADE_CONF && fs.existsSync(CASCADE_CONF_LEGACY)) {
             try { sh('sudo', ['rm', '-f', CASCADE_CONF_LEGACY]); } catch (e) { /* ignore */ }
         }
         writeRootFile(CASCADE_MARKER, String(Date.now()), '0600');
 
-        // Выход (EU): свой конфиг. Адрес — интерфейс сервера (10.9.9.1/32),
-        // пир — адрес входа из переданного конфига, Endpoint — публичный адрес входа.
-        if (isExit) {
-            const own = parseIni(readTextSafe(path.join(AWG_CONF_DIR, 'awg0.conf'))).Interface || {};
-            const given = parseIni(text).Peer || {};
-            const entryIp = (String((parseIni(text).Interface || {}).Address || '').match(/10\.9\.9\.(\d{1,3})/) || [])[1] || '';
-            const pub = await cascadePublicHost();
-            const ownAddr = String(own.Address || '10.9.9.1/24').split(',')[0].trim();
-            const exitIp = ownAddr.replace(/\/\d+$/, '');
-            const epMatch = String(given.Endpoint || '').match(/^([^:]+):(\d{1,5})$/);
-            if (!entryIp || !own.PrivateKey || !given.PublicKey) {
-                return res.status(400).json({ error: 'Для выхода нужен клиентский конфиг с адресом входа в туннеле' });
-            }
-            const exitConf = [
-                '[Interface]',
-                'PrivateKey = ' + own.PrivateKey,
-                'Address = ' + exitIp + '/32',
-                'MTU = 1280',
-                'Table = off',
-                '',
-                '[Peer]',
-                'PublicKey = ' + given.PublicKey,
-                'AllowedIPs = 10.9.9.' + entryIp + '/32',
-                'Endpoint = ' + (epMatch ? epMatch[1] + ':' + epMatch[2] : pub + ':' + (own.ListenPort || '3977')),
-                'PersistentKeepalive = 33'
-            ].join('\n') + '\n';
-            writeRootFile(CASCADE_CONF, stripIpv6Address(prepareCascadeConf(exitConf, 'awg0')), '0600');
-        }
-
         sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
         try { sh('sleep', ['2']); } catch (e) { /* ignore */ }
         let r;
         if (isExit) {
-            // На выходе маршруты не нужны: awg1 только принимает туннель.
             try { sh('sudo', ['systemctl', 'disable', '--now', 'awg-routing.timer', 'awg-routing.service']); } catch (e) { /* ignore */ }
             r = { endpoint: cascadeEndpointPlan(), out: 'маршруты на выходе не требуются' };
         } else {
             r = await installRouting(useIfaces, extra);
         }
-        const ep = r.endpoint || { raw: '—', source: '' };
-        auditLog(req, 'Каскад настроен (' + role.toUpperCase() + '): awg1 -> ' + ep.raw + ', интерфейсы: ' + (useIfaces || []).join(', '));
-        res.json({
-            success: true,
-            role,
-            endpoint: ep.raw,
-            endpointSource: ep.source,
-            output: r.out,
-            details: cascadeDetails()
-        });
+        const ep = r.endpoint || { raw: '-', source: '' };
+        auditLog(req, 'Каскад настроен (' + role.toUpperCase() + '): awg1 -> ' + ep.raw);
+        res.json({ success: true, role, endpoint: ep.raw, endpointSource: ep.source, output: r.out, details: cascadeDetails() });
     } catch (e) {
         res.status(500).json({ error: 'Ошибка настройки каскада: ' + (e.message || 'неизвестно') });
     }
-});
-
-// Диагностика каскада: что именно ломается — по шагам.
+});// Диагностика каскада: что именно ломается — по шагам.
 app.get('/api/cascade/diag', checkAuth, requireAdmin, async (req, res) => {
     const run = (cmd, args) => {
         try { return { ok: true, out: String(sh('sudo', [cmd, ...(args || [])], { timeout: 120000 }) || '') }; }
