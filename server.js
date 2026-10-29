@@ -3546,10 +3546,17 @@ app.get('/api/cascade/diag', checkAuth, requireAdmin, async (req, res) => {
     const conf = existingCascadeConf();
     const result = {
         role: cascadeRole(),
+        files: {},
+        awg0: null,
         configured: !!conf,
         confRole: conf ? cascadeRoleFrom(readTextSafe(conf)) : '',
         endpoint: conf ? ((parseIni(readTextSafe(conf)).Peer || {}).Endpoint || '') : ''
     };
+    for (const dir of [AWG_DIR, AWG_CONF_DIR, '/root']) {
+        try { result.files[dir] = fs.readdirSync(dir).filter(n => /\.conf$/.test(n)).slice(0, 40); }
+        catch (e) { result.files[dir] = 'нет каталога'; }
+    }
+    try { result.awg0 = readTextSafe(path.join(AWG_CONF_DIR, 'awg0.conf')).slice(0, 400); } catch (e) { result.awg0 = ''; }
     if (conf) {
         const host = String(result.endpoint).replace(/:[0-9]+$/, '');
         result.route = run('ip', ['-4', 'route', 'get', host]).out;
