@@ -2389,7 +2389,7 @@ function cascadeDetails() {
     try {
         if (conf) {
             const ini = parseIni(fs.readFileSync(conf, 'utf8'));
-            if (ini.Peer && ini.Peer.Endpoint) out.endpoint = ini.Peer.Endpoint;
+            if (ini.Peer && (ini.Peer || {}).Endpoint) out.endpoint = (ini.Peer || {}).Endpoint;
             const plan = cascadeEndpointPlan();
             if (plan) { out.endpointSource = plan.source; out.effectiveEndpoint = plan.raw; }
         }
@@ -3504,7 +3504,7 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
             const givenIface = ini.Interface || {};
             const entryIp = (String(givenIface.Address || '').match(/10\.9\.9\.(\d{1,3})/) || [])[1] || '';
             const ownAddr = String(own.Address || '10.9.9.1/24').split(',')[0].trim().replace(/\/\d+$/, '');
-            const epMatch = String(ini.Peer.Endpoint || '').match(/^([^:]+):(\d{1,5})$/);
+            const epMatch = String((ini.Peer || {}).Endpoint || '').match(/^([^:]+):(\d{1,5})$/);
             const entryKey = (ini.Peer && ini.Peer.PublicKey) || '';
             if (!entryIp) return res.status(400).json({ error: 'В конфиге входа нет адреса 10.9.9.x' });
             if (!entryKey) return res.status(400).json({ error: 'В конфиге входа нет PublicKey' });
@@ -5486,12 +5486,12 @@ app.get('/api/obf/export', checkAuth, (req, res) => {
 
     if (format === 'json') {
         // Совместимо с импортом сайта-архитектора (Amnezia VpnConfig)
-        const body = { ...obf, last_config: JSON.stringify({ ...obf, hostName: (ini.Peer && ini.Peer.Endpoint || '').split(':')[0] }) };
+        const body = { ...obf, last_config: JSON.stringify({ ...obf, hostName: (ini.Peer && (ini.Peer || {}).Endpoint || '').split(':')[0] }) };
         const cfg = {
             containers: [{ container: 'amnezia-awg', awg: body }],
             defaultContainer: 'amnezia-awg',
             description: 'Servpanel obfuscation export',
-            hostName: (ini.Peer && ini.Peer.Endpoint || '').split(':')[0] || ''
+            hostName: (ini.Peer && (ini.Peer || {}).Endpoint || '').split(':')[0] || ''
         };
         res.setHeader('Content-Disposition', 'attachment; filename="obfuscation.json"');
         return res.type('application/json').send(JSON.stringify(cfg, null, 4));
