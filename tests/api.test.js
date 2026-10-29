@@ -1247,13 +1247,16 @@ test('Каскад: скрипт маршрутизации безопасен �
     assert.match(script, /exit 1/);
 });
 
-test('Каскад: роль определяется по содержимому конфига', () => {
-    const ru = '[Interface]\nPrivateKey = a\nAddress = 10.9.9.1/24\nListenPort = 3977\n\n[Peer]\nPublicKey = b\nAllowedIPs = 10.9.9.2/32\n';
-    const eu = '[Interface]\nPrivateKey = c\nAddress = 10.9.9.4/32\nTable = off\n\n[Peer]\nPublicKey = d\nAllowedIPs = 10.9.9.1/32\nEndpoint = 45.9.16.77:3977\n';
-    const client = '[Interface]\nPrivateKey = e\nAddress = 10.9.9.2/32\n\n[Peer]\nPublicKey = f\nAllowedIPs = 0.0.0.0/0\n';
-    assert.equal(internals.cascadeRoleFrom(ru), 'ru');
-    assert.equal(internals.cascadeRoleFrom(eu), 'eu');
-    assert.equal(internals.cascadeRoleFrom(client), 'ru');
+test('Каскад: роль определяется по адресу интерфейса', () => {
+    // Вход: клиентский адрес 10.9.9.4/32 (его выдаёт панель выхода).
+    const entry = '[Interface]\nPrivateKey = a\nAddress = 10.9.9.4/32\n\n[Peer]\nPublicKey = b\nAllowedIPs = 10.9.9.1/32\nEndpoint = 45.9.16.77:3977\n';
+    // Выход: адрес сервера 10.9.9.1/32.
+    const exit = '[Interface]\nPrivateKey = c\nAddress = 10.9.9.1/32\nTable = off\n\n[Peer]\nPublicKey = d\nAllowedIPs = 10.9.9.4/32\n';
+    // Интерфейс сервера-входа с клиентами.
+    const server = '[Interface]\nPrivateKey = e\nAddress = 10.9.9.1/24\nListenPort = 3977\n\n[Peer]\nPublicKey = f\nAllowedIPs = 10.9.9.2/32\n';
+    assert.equal(internals.cascadeRoleFrom(entry), 'ru');
+    assert.equal(internals.cascadeRoleFrom(exit), 'eu');
+    assert.equal(internals.cascadeRoleFrom(server), 'ru');
     assert.equal(internals.cascadeRoleFrom(''), '');
 });
 

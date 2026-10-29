@@ -2887,17 +2887,15 @@ function cascadeRoleFrom(confText) {
     const iface = ini.Interface || {};
     const peer = ini.Peer || {};
     const firstAddr = String(iface.Address || "").split(",")[0].trim();
-    const peerNets = String(peer.AllowedIPs || "").split(",").map(s => s.trim()).filter(Boolean);
     if (!/^10\.9\.9\.\d+\/\d{1,2}$/.test(firstAddr)) return "";
     // Интерфейс сервера-входа: адрес подсети и ListenPort.
     if (/^10\.9\.9\.\d+\/(2[4-9]|30)$/.test(firstAddr) && iface.ListenPort) return "ru";
-    // Выход (EU): ровно один пир — адрес входа в туннеле (/32).
-    const onePeer = peerNets.length === 1 && /^10\.9\.9\.\d+\/32$/.test(peerNets[0]);
-    if (onePeer) return "eu";
-    // Клиентский конфиг панели со списком маршрутов — ставят на входе.
-    if (!iface.ListenPort) return "ru";
+    // Выход: адрес сервера .1/32 и ровно один пир .x/32.
+    if (/^10\.9\.9\.1\/32$/.test(firstAddr)) return "eu";
+    // Иначе — клиентский конфиг, его ставят на входе.
     return "ru";
 }
+
 
 
 
