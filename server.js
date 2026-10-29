@@ -3216,7 +3216,12 @@ async function fetchPeerClientConf(url, user, pass, name) {
 // Создаёт на этом сервере клиента для второй стороны (для выхода EU).
 function createPeerClient(name) {
     const safe = String(name || "cascade-peer").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40) || "cascade-peer";
-    try { sh("sudo", ["bash", MANAGE, "add", safe, "--json"], { timeout: 60000 }); } catch (e) { /* уже есть */ }
+    const out = { name: safe, conf: "", file: "", error: "" };
+    try {
+        sh("sudo", ["bash", MANAGE, "add", safe, "--json"], { timeout: 60000 });
+    } catch (e) {
+        out.error = String((e.stdout || "") + (e.stderr || "") || e.message || "").trim().slice(0, 400);
+    }
     const candidates = [
         path.join(AWG_DIR, safe + ".conf"),
         path.join(AWG_CONF_DIR, safe + ".conf"),
@@ -3225,10 +3230,11 @@ function createPeerClient(name) {
     for (const f of candidates) {
         let conf = "";
         try { conf = sh("sudo", ["cat", f]); } catch (e) { conf = ""; }
-        if (/\[Interface\]/i.test(conf)) return { name: safe, conf, file: f };
+        if (/\[Interface\]/i.test(conf)) { out.conf = conf; out.file = f; return out; }
     }
-    return null;
+    return out;
 }
+
 
 
 async function installRouting(ifaces, extraRuNets) {
@@ -3707,7 +3713,11 @@ app.post('/api/cascade/peer', checkAuth, requireAdmin, async (req, res) => {
             return res.status(400).json({ error: 'На этом сервере нет awg0.conf — сначала установите AmneziaWG' });
         }
         const peer = createPeerClient(name);
-        if (!peer) return res.status(500).json({ error: 'Клиент создан, но конфиг не найден в /root/awg' });
+        if (!peer.conf) {
+            return res.status(500).json({
+                error: 'Клиент ' + name + ' создан, но файл не найден. ' + (peer.error ? 'Менеджер ответил: ' + peer.error : 'Проверьте /root/awg.')
+            });
+        }
         // Endpoint в конфиге клиента — публичный адрес этого сервера.
         const epMatch = String((parseIni(peer.conf).Peer || {}).Endpoint || '').match(/^([^:]+):/);
         const hostPart = epMatch ? epMatch[1] : '';
