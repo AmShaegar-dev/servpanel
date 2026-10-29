@@ -3217,10 +3217,19 @@ async function fetchPeerClientConf(url, user, pass, name) {
 function createPeerClient(name) {
     const safe = String(name || "cascade-peer").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40) || "cascade-peer";
     try { sh("sudo", ["bash", MANAGE, "add", safe, "--json"], { timeout: 60000 }); } catch (e) { /* уже есть */ }
-    let conf = "";
-    try { conf = sh("sudo", ["cat", path.join(AWG_DIR, safe + ".conf")]); } catch (e) { conf = ""; }
-    return /\[Interface\]/i.test(conf) ? { name: safe, conf } : null;
+    const candidates = [
+        path.join(AWG_DIR, safe + ".conf"),
+        path.join(AWG_CONF_DIR, safe + ".conf"),
+        path.join("/root", safe + ".conf")
+    ];
+    for (const f of candidates) {
+        let conf = "";
+        try { conf = sh("sudo", ["cat", f]); } catch (e) { conf = ""; }
+        if (/\[Interface\]/i.test(conf)) return { name: safe, conf, file: f };
+    }
+    return null;
 }
+
 
 async function installRouting(ifaces, extraRuNets) {
     const plan = await cascadeEndpointPlanAsync();
