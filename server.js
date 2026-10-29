@@ -2970,27 +2970,23 @@ function cascadeEndpointPlan() {
     let ini;
     try { ini = parseIni(readTextSafe(conf)); } catch (e) { return null; }
     const peer = ini.Peer || {};
-    const listenPort = isPort(ini.Interface && ini.Interface.ListenPort) ? String(ini.Interface.ListenPort) : "";
-    const role = cascadeRole();
-    // На выходе внутренний адрес в Endpoint означает чужой конфиг.
-    if (role === "eu" && /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(String(peer.Endpoint || ""))) return null;
-    if (role === "ru") {
-        const localIps = localTunnelIps();
-        const epMatch = String(peer.Endpoint || "").match(/^([A-Za-z0-9.\-]+):(\d{1,5})$/);
-        if (!epMatch || !isPort(epMatch[2])) return null;
-        const port = String(epMatch[2]);
-        // Публичный адрес второй стороны: на сервере с публичным IP он
-        // маршрутизируется через WAN, tunnelIp (внутренний) — нет.
-        const resolved = resolveHostSync(epMatch[1]);
-        if (resolved && isPublicAddress(resolved, localIps)) {
-            return { host: resolved, port, raw: resolved + ":" + port, source: "public" };
-        }
-        return null;
+    // Роль определяем по самому awg1.conf: он точнее роли сервера.
+    const role = cascadeRoleFrom(readTextSafe(conf)) || cascadeRole();
+    // Выход: нужен адрес входа в туннеле.
+    if (role === "eu") {
+        const peerIp = String(peer.AllowedIPs || "").split(",")[0].trim().replace(/\/\d+$/, "");
+        if (!peerIp) return null;
+        return { host: peerIp, port: "", raw: peerIp, source: "peer" };
     }
-    const m = String(peer.Endpoint || "").match(/^([A-Za-z0-9.\-]+):(\d{1,5})$/);
-    if (!m || !isIpOrHost(m[1]) || !isPort(m[2])) return null;
-    return { host: m[1], port: m[2], raw: m[1] + ":" + m[2], source: "public" };
+    // Вход: адрес выхода — первый 10.9.9.x из AllowedIPs клиента.
+    const inner = String(peer.AllowedIPs || "").match(/\b(10\.9\.9\.\d{1,3})\b/);
+    const epMatch = String(peer.Endpoint || "").match(/^([A-Za-z0-9.\-]+):(\d{1,5})$/);
+    const port = epMatch ? epMatch[2] : "";
+    if (inner) return { host: inner[1], port, raw: inner[1] + (port ? ":" + port : ""), source: "tunnel" };
+    if (epMatch) return { host: epMatch[1], port, raw: epMatch[1] + ":" + port, source: "public" };
+    return null;
 }
+
 
 
 function cascadeEndpoint() {
