@@ -3681,6 +3681,35 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
     res.json({ success: true, steps });
 });
 
+// Клиент для второй стороны каскада: создаётся на этой панели (выход EU).
+app.post('/api/cascade/peer', checkAuth, requireAdmin, async (req, res) => {
+    const name = String((req.body && req.body.name) || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'ru_host';
+    if (DEMO_MODE) return res.json({ success: true, name, conf: '' });
+    try {
+        const own = parseIni(readTextSafe(path.join(AWG_CONF_DIR, 'awg0.conf'))).Interface || {};
+        if (!own.ListenPort || !own.PrivateKey) {
+            return res.status(400).json({ error: 'На этом сервере нет awg0.conf — сначала установите AmneziaWG' });
+        }
+        const peer = createPeerClient(name);
+        if (!peer) return res.status(500).json({ error: 'Клиент создан, но конфиг не найден в /root/awg' });
+        // Endpoint в конфиге клиента — публичный адрес этого сервера.
+        const epMatch = String((parseIni(peer.conf).Peer || {}).Endpoint || '').match(/^([^:]+):/);
+        const hostPart = epMatch ? epMatch[1] : '';
+        if (!hostPart || hostPart === '127.0.0.1' || hostPart === '10.9.9.1') {
+            const pub = await cascadePublicHost();
+            if (pub) {
+                const fixed = peer.conf.replace(/^Endpoint\s*=.*$/m, 'Endpoint = ' + pub + ':' + (own.ListenPort || '3977'));
+                writeRootFile(path.join(AWG_DIR, name + '.conf'), fixed, '0600');
+                peer.conf = fixed;
+            }
+        }
+        auditLog(req, 'Создан клиент каскада ' + peer.name);
+        res.json({ success: true, name: peer.name, conf: peer.conf });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось создать клиента: ' + (e.stderr || e.message) });
+    }
+});
+
 app.post('/api/cascade/teardown', checkAuth, requireAdmin, async (req, res) => {
     const body = req.body || {};
     const removed = [];
