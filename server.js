@@ -3499,6 +3499,7 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
             if (!own.PrivateKey) return res.status(400).json({ error: 'На этом сервере нет awg0.conf — установите AmneziaWG' });
             const givenIface = ini.Interface || {};
             const entryIp = (String(givenIface.Address || '').match(/10\.9\.9\.(\d{1,3})/) || [])[1] || '';
+            // Awg0 выхода слушает 10.9.9.1/24; адрес входа — 10.9.9.4.
             const ownAddr = String(own.Address || '10.9.9.1/24').split(',')[0].trim().replace(/\/\d+$/, '');
             const epMatch = String((ini.Peer || {}).Endpoint || '').match(/^([^:]+):(\d{1,5})$/);
             const entryKey = (ini.Peer && ini.Peer.PublicKey) || '';
@@ -3514,7 +3515,7 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
                 '[Peer]',
                 'PublicKey = ' + entryKey,
                 'AllowedIPs = 10.9.9.' + entryIp + '/32',
-                'Endpoint = ' + (epMatch ? epMatch[1] + ':' + epMatch[2] : String(own.ListenPort || '3977')),
+                'Endpoint = ' + (epMatch ? epMatch[1] + ':' + (own.ListenPort || epMatch[2]) : String(own.ListenPort || '3977')),
                 'PersistentKeepalive = 33'
             ].join('\n') + '\n';
             cleanConf = stripIpv6Address(prepareCascadeConf(cleanConf, 'awg0'));
