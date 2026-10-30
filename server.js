@@ -5904,6 +5904,19 @@ function regenClientsSafe() {
     return { regenerated: data.regenerated, simulated: false };
 }
 
+// manage_amneziawg.sh сверяет server_hpk.key с awg0.conf. После смены
+// HeaderProtectionKey (обфускация/SNI) файл нужно обновить, иначе regen
+// отказывается работать: «ключ не совпадает».
+function syncServerHpk(confText) {
+    const hpkPath = path.join(AWG_DIR, 'server_hpk.key');
+    const m = String(confText || '').match(/HeaderProtectionKey\s*=\s*([^\r\n]+)/);
+    if (m && m[1].trim()) {
+        writeRootFile(hpkPath, m[1].trim() + '\n', '0600');
+        return;
+    }
+    try { fs.unlinkSync(hpkPath); } catch (e) { /* ключа нет — и не надо */ }
+}
+
 function applyObfParams(req, res, paramsIn, options = {}) {
     const opts = typeof options === 'boolean' ? { regenClients: options } : options;
     const regenClients = !!opts.regenClients;
@@ -5929,12 +5942,14 @@ function applyObfParams(req, res, paramsIn, options = {}) {
 
         const updated = applyObfToConf(original, params, { removeMissing });
         writeRootFile(confPath, updated, '0600');
+        syncServerHpk(updated);
 
         const iface = path.basename(confPath, '.conf');
         const restart = reloadAwgInterface(iface);
         if (!restart.ok) {
             // Не оставляем сервер с конфигом, который не поднимается.
             writeRootFile(confPath, original, '0600');
+            syncServerHpk(original);
             reloadAwgInterface(iface);
             return res.status(500).json({
                 error: 'Интерфейс не поднялся после применения параметров — изменения откатены. ' +
@@ -5951,6 +5966,7 @@ function applyObfParams(req, res, paramsIn, options = {}) {
             } catch (e) {
                 // Клиенты остались бы со старыми параметрами и потеряли связь.
                 writeRootFile(confPath, original, '0600');
+                syncServerHpk(original);
                 reloadAwgInterface(iface);
                 try { regenClientsSafe(); } catch (e2) { /* ignore */ }
                 return res.status(500).json({
@@ -5984,6 +6000,7 @@ function applyObfParams(req, res, paramsIn, options = {}) {
         try {
             if (original) {
                 writeRootFile(confPath, original, '0600');
+                syncServerHpk(original);
                 reloadAwgInterface(path.basename(confPath, '.conf'));
             }
         } catch (e2) { /* ignore */ }
@@ -6005,6 +6022,25 @@ app.post('/api/obf/apply', checkAuth, (req, res) => {
         regenClients: !!body.regenClients,
         removeMissing: body.removeMissing !== false
     });
+});
+
+// Чинит рассинхрон после ручной правки/неудачного restore: берём
+// HeaderProtectionKey из действующего awg0.conf и записываем в server_hpk.key.
+app.post('/api/obf/sync-hpk', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const confPath = serverConfPath();
+        if (!confPath) return res.status(404).json({ error: 'Конфиг сервера не найден' });
+        const text = fs.readFileSync(confPath, 'utf8');
+        const m = text.match(/HeaderProtectionKey\s*=\s*([^\r\n]+)/);
+        if (!m || !m[1].trim()) {
+            return res.status(400).json({ error: 'В конфиге нет HeaderProtectionKey' });
+        }
+        syncServerHpk(text);
+        auditLog(req, 'Синхронизирован server_hpk.key с awg0.conf');
+        res.json({ success: true, file: confPath });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось синхронизировать ключ: ' + e.message });
+    }
 });
 
 // ---------------------------------------------------------------------------

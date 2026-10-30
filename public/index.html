@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.42">
+    <meta name="panel-version" content="3.0.43">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1460,6 +1460,7 @@
                     <div class="hero-actions" style="margin-top:0;">
                         <button class="btn btn-primary" onclick="openWizard('obf')">✦ Усилить обфускацию</button>
                         <button class="btn btn-soft" onclick="openObfTab(); loadObfCurrent()">Перепроверить</button>
+                        <button class="btn btn-soft" onclick="syncAwgHpk()">Синхронизировать server_hpk.key</button>
                         <button class="btn btn-ghost" onclick="setExpert(true); setTimeout(()=>document.getElementById('obfImportText')?.scrollIntoView({behavior:'smooth',block:'center'}),150)">Импорт из Архитектора</button>
                     </div>
                 </div>

@@ -2226,6 +2226,17 @@ async function loadObfCurrent() {
     } catch (e) { el.innerText = 'Сетевая ошибка'; }
 }
 
+async function syncAwgHpk() {
+    if (!confirm('Записать HeaderProtectionKey из действующего awg0.conf в /root/awg/server_hpk.key?\n\nЭто чинит рассинхрон после ручной правки или неудачного restore.')) return;
+    try {
+        await apiJson('/api/obf/sync-hpk', { method: 'POST' });
+        toast('server_hpk.key синхронизирован', 'success');
+        loadObfCurrent();
+    } catch (e) {
+        toast('Не удалось синхронизировать ключ', 'error', e.message);
+    }
+}
+
 function renderObfPreview(d) {
     const out = document.getElementById('obfPreview');
     if (!out) return;
