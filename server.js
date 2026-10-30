@@ -8329,6 +8329,13 @@ fi
 if [ ! -f "$SNAP/limits.conf" ] && [ ! -f "$SNAP/limits.absent" ]; then
   if [ -f /etc/systemd/system/telemt.service.d/limits.conf ]; then cp -a /etc/systemd/system/telemt.service.d/limits.conf "$SNAP/limits.conf"; else : > "$SNAP/limits.absent"; fi
 fi
+if [ ! -f "$SNAP/sysctl.values" ]; then
+  : > "$SNAP/sysctl.values"
+  for k in net.ipv4.tcp_fastopen net.core.somaxconn net.ipv4.tcp_max_syn_backlog net.core.netdev_max_backlog fs.file-max net.core.default_qdisc net.ipv4.tcp_congestion_control net.ipv4.tcp_keepalive_time net.ipv4.tcp_keepalive_intvl net.ipv4.tcp_keepalive_probes; do
+    v=$(sysctl -n "$k" 2>/dev/null || true)
+    [ -n "$v" ] && printf '%s=%s\n' "$k" "$v" >> "$SNAP/sysctl.values"
+  done
+fi
 CFG="__CFG__"
 if [ -f "$CFG" ] && [ ! -f "$SNAP/telemt.toml" ]; then
   cp -a "$CFG" "$SNAP/telemt.toml"
@@ -8378,6 +8385,11 @@ if [ -f "$SNAP/telemt.toml" ] && [ -f "$SNAP/telemt.path" ]; then
     cp -a "$SNAP/telemt.toml" "$CFG" 2>/dev/null || true
     systemctl restart telemt >/dev/null 2>&1 || true
   fi
+fi
+if [ -f "$SNAP/sysctl.values" ]; then
+  while IFS='=' read -r k v; do
+    [ -n "$k" ] && [ -n "$v" ] && sysctl -w "$k=$v" >/dev/null 2>&1 || true
+  done < "$SNAP/sysctl.values"
 fi
 rm -rf "$SNAP"
 sysctl --system >/dev/null 2>&1 || true
@@ -9121,6 +9133,11 @@ fi
 if [ -f "$SNAP/telemt.toml" ] && [ -f "$SNAP/telemt.path" ]; then
   cfg="$(cat "$SNAP/telemt.path" 2>/dev/null || true)"
   [ -n "$cfg" ] && [ -f "$cfg" ] && cp -a "$SNAP/telemt.toml" "$cfg" 2>/dev/null || true
+fi
+if [ -f "$SNAP/sysctl.values" ]; then
+  while IFS='=' read -r k v; do
+    [ -n "$k" ] && [ -n "$v" ] && sysctl -w "$k=$v" >/dev/null 2>&1 || true
+  done < "$SNAP/sysctl.values"
 fi
 sysctl --system >/dev/null 2>&1 || true
 systemctl daemon-reload >/dev/null 2>&1 || true
