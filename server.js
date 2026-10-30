@@ -5139,7 +5139,7 @@ app.get('/api/clients/:name/key', checkAuth, async (req, res) => {
         try { if (fs.existsSync(confPath)) conf = sh('sudo', ['cat', confPath]); } catch (e) { conf = ''; }
         if (conf) {
             const domain = domainInfo().domain;
-            const useDomain = fs.existsSync('/root/awg_domain.txt') && domain;
+            const useDomain = !!domain;
             conf = rewriteConfEndpoint(conf, useDomain ? domain : '');
             uri = buildVpnUriFromConf(name, conf);
         }
@@ -5294,8 +5294,12 @@ app.get('/api/download/:name', checkAuth, (req, res) => {
         return res.attachment(`Serv_${name}.conf`).type('text/plain').send(demoClientConf(name, c.ip));
     }
     const filePath = path.join(AWG_DIR, `${name}.conf`);
-    if (fs.existsSync(filePath)) res.download(filePath, `Serv_${name}.conf`);
-    else res.status(404).send('Конфиг не найден');
+    if (fs.existsSync(filePath)) {
+        let content = fs.readFileSync(filePath, 'utf8');
+        const domain = domainInfo().domain;
+        if (domain) content = rewriteConfEndpoint(content, domain);
+        res.attachment(`Serv_${name}.conf`).type('text/plain').send(content);
+    } else res.status(404).send('Конфиг не найден');
 });
 
 app.delete('/api/delete/:name', checkAuth, (req, res) => {
