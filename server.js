@@ -3957,7 +3957,8 @@ async function runCascadeBuild(job, remote, opts) {
     log('SSH', 'Подключаюсь к ' + remote.host + '...');
     const ping = await sshRunner.run(remote, 'hostname; ip -4 route get 1.1.1.1 2>/dev/null | grep -oP "src \\K\\S+" | head -1', 40000);
     if (ping.code !== 0) {
-        throw new Error('SSH до ' + remote.host + ' не работает: ' + String(ping.out || '').trim().slice(0, 300));
+        const online = await sshRunner.waitOnline(remote, 5 * 60 * 1000);
+        if (!online) throw new Error('SSH до ' + remote.host + ' не работает: ' + String(ping.out || '').trim().slice(0, 300));
     }
     const euHost = (String(ping.out).match(/^\s*(\d{1,3}(?:\.\d{1,3}){3})\s*$/m) || [])[1] || remote.host;
     log('SSH', 'Вторая сторона доступна: ' + euHost);
