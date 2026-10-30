@@ -277,7 +277,7 @@ function switchTab(tabId, el) {
     if (tabId === 'tab-install') loadModules();
     else if (agInterval) { clearInterval(agInterval); agInterval = null; }
     if (tabId === 'tab-cascade') { loadCascadeSetup(); loadCascadeStatus(true); loadCascadeHealth(); }
-    if (tabId === 'tab-cascade' && typeof autoCascadeRoleHint === 'function') autoCascadeRoleHint();
+    if (tabId === 'tab-cascade') loadCascadeSshDefaults();
     if (tabId === 'tab-obf') { loadObfCurrent(); loadObfProfiles(); }
     if (tabId === 'tab-update') loadUpdatePanel();
     if (tabId === 'tab-admin') loadAdminPanel();
@@ -1579,6 +1579,17 @@ async function setupCascade(btn) {
 }
 
 // Автоматическая сборка каскада: роль, версия, вторая панель — и всё.
+async function loadCascadeSshDefaults() {
+    const peer = document.getElementById('autoCascadePeer');
+    if (peer && !peer.value) {
+        try {
+            const st = await apiJson('/api/cascade/ready');
+            if (st && st.publicHost && !peer.value) peer.placeholder = st.publicHost;
+        } catch (e) { /* ignore */ }
+    }
+    autoCascadeRoleHint();
+}
+
 function autoCascadeRoleHint() {
     const role = (document.getElementById('autoCascadeRole') || {}).value || 'ru';
     const hint = document.getElementById('autoCascadeHint');

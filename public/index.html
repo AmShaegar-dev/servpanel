@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.1">
+    <meta name="panel-version" content="3.0.2">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1134,9 +1134,9 @@
     <div class="card-head">
         <div>
             <h3>Собрать каскад автоматически</h3>
-            <p>Панель сама проверит вторую сторону, при необходимости установит AmneziaWG, создаст клиента, поднимет туннель и включит маршруты. Второй сервер тоже покажет каскад как «работает».</p>
+            <p>Панель подключится ко второй стороне по SSH: поставит там AmneziaWG, создаст клиента ru_host, заберёт его конфиг и поднимет туннель здесь.</p>
         </div>
-        <span class="badge badge-good">в один клик</span>
+        <span class="badge badge-good">по SSH</span>
     </div>
     <div class="wizard-grid">
         <label class="field"><span>Роль этого сервера</span>
@@ -1147,34 +1147,36 @@
         </label>
         <label class="field"><span>Версия AmneziaWG</span>
             <select id="autoCascadeVersion">
-                <option value="2.0" selected>2.0 (стабильная, совместима с AmneziaVPN)</option>
+                <option value="2.0" selected>2.0 (стабильная)</option>
                 <option value="3.1">3.1 (новейшая)</option>
                 <option value="1.5">1.5 (legacy)</option>
             </select>
         </label>
-        <label class="field"><span>Адрес панели второй стороны</span>
-            <input id="autoCascadePeer" placeholder="https://panel.example.com:4444" autocomplete="off">
+        <label class="field"><span>IP второй стороны (SSH)</span>
+            <input id="autoCascadePeer" placeholder="45.9.16.77" autocomplete="off">
         </label>
-        <label class="field"><span>Логин второй панели</span>
-            <input id="autoCascadeUser" placeholder="admin" autocomplete="username">
+        <label class="field"><span>SSH-порт</span>
+            <input id="autoCascadePeerPort" type="number" value="22" placeholder="22">
         </label>
-        <label class="field"><span>Пароль второй панели</span>
+        <label class="field"><span>Пользователь SSH</span>
+            <input id="autoCascadeUser" value="root" placeholder="root" autocomplete="username">
+        </label>
+        <label class="field"><span>Пароль root</span>
             <input id="autoCascadePass" type="password" autocomplete="current-password">
-        </label>
-        <label class="field"><span>Проверить вторую панель</span>
-            <button class="btn btn-dark" style="width:100%;" onclick="checkAutoCascadePeer(this)">Проверить SSH</button>
         </label>
     </div>
     <div id="autoCascadeHint" class="wizard-note" style="display:none;"></div>
     <div id="autoCascadeLog" class="wizard-summary" style="display:none; margin-top:12px;"></div>
     <div class="controls-row" style="margin-top:14px; margin-bottom:0;">
-        <button class="btn btn-primary" id="autoCascadeBtn" onclick="runAutoCascade(this)">⚡ Построить каскад</button>
-        <button class="btn btn-danger" id="autoCascadeDeleteBtn" onclick="cleanupCascade(this)">🗑 Удалить каскад</button>
+        <button class="btn btn-dark" id="cascadeSshCheckBtn" type="button" onclick="checkAutoCascadePeer(this)">🔌 Проверить SSH</button>
+        <button class="btn btn-primary" id="autoCascadeBtn" type="button" onclick="runAutoCascade(this)">⚡ Построить каскад</button>
+        <button class="btn btn-danger" id="autoCascadeDeleteBtn" type="button" onclick="cleanupCascade(this)">🗑 Удалить каскад</button>
     </div>
     <div class="wizard-note" style="margin-top:10px;">
-        «Удалить каскад» убирает службы, скрипт маршрутов, правила iptables/ipset, туннель <code>awg1</code> и клиента каскада.
-        Если заполнены IP и пароль второй стороны — то же самое сделает и там по SSH.
+        «Проверить SSH» показывает, доступен ли сервер, тот ли пароль и есть ли там AmneziaWG.
+        «Удалить каскад» убирает службы, маршруты, ipset, правила iptables, туннель awg1 и клиента ru_host — и здесь, и на второй стороне, если указан пароль.
     </div>
+</div>
 </div>
 <div class="card advanced-only" style="margin-bottom: 20px;">
                     <h3 style="margin-top:0;">Шаг 1. Конфиг второй стороны</h3>
