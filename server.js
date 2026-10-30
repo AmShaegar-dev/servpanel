@@ -3835,7 +3835,24 @@ app.post('/api/cascade/ssh-check', checkAuth, requireAdmin, async (req, res) => 
 let cascadeBuildJob = null;
 
 function cascadeJobSnapshot() {
-    if (!cascadeBuildJob) return { running: false, done: false, steps: [] };
+    if (!cascadeBuildJob) {
+        const saved = loadCascadeJob();
+        if (saved && !saved.running && Array.isArray(saved.steps) && saved.steps.length) {
+            return {
+                running: false,
+                done: true,
+                last: true,
+                startedAt: saved.startedAt || '',
+                finishedAt: saved.finishedAt || '',
+                role: saved.role || '',
+                peer: saved.peer || '',
+                steps: saved.steps.slice(-300),
+                error: saved.error || '',
+                result: saved.result || null
+            };
+        }
+        return { running: false, done: false, steps: [] };
+    }
     return {
         running: cascadeBuildJob.running,
         done: !cascadeBuildJob.running,
@@ -3917,8 +3934,9 @@ function finishCascadeJob(job, result, error) {
     job.finishedAt = new Date().toISOString();
     if (error) job.error = error;
     else job.result = result;
-    saveCascadeJob(job);
-    clearCascadeJob();
+    // Оставляем последнюю сборку для чек-листа после перезагрузки панели,
+    // но без пароля и параметров подключения.
+    saveCascadeJob({ ...job, params: null, opts: null });
 }
 
 function resumeCascadeJob() {
