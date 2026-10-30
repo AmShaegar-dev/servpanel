@@ -182,6 +182,8 @@ apply_telemt_extras() {
     if [ -f "$cfg" ]; then
         chown root:telemt "$cfg" 2>/dev/null || true
         chmod 660 "$cfg" 2>/dev/null || true
+        say "Telemt: $(stat -c '%U:%G %a %n' "$cfg" 2>/dev/null || ls -l "$cfg" 2>/dev/null)"
+        say "Telemt unit: user=$(systemctl show -p User --value telemt 2>/dev/null) group=$(systemctl show -p Group --value telemt 2>/dev/null) protect=$(systemctl show -p ProtectSystem --value telemt 2>/dev/null) rw=$(systemctl show -p ReadWritePaths --value telemt 2>/dev/null)"
     fi
 }
 
