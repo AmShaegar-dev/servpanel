@@ -5769,6 +5769,7 @@ async function loadProxyTab(force) {
         const data = await apiJson('/api/proxy/users');
         proxyState.users = Array.isArray(data.users) ? data.users : [];
         renderProxyUsers(proxyState.users);
+        if (proxyState.status) renderProxyStatus(proxyState.status);
         const badge = document.getElementById('navProxyBadge');
         if (badge) {
             badge.innerText = String(proxyState.users.length);

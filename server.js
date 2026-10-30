@@ -8040,6 +8040,13 @@ app.post('/api/proxy/settings', checkAuth, requireAdmin, async (req, res) => {
                     return res.status(500).json({ error: 'Порт изменён, но служба не перезапустилась: ' + e.message });
                 }
                 try { sh('ufw', ['allow', `${port}/tcp`], { timeout: 15000 }); } catch (e) { /* ignore */ }
+                for (let i = 0; i < 8; i++) {
+                    await new Promise(resolve => setTimeout(resolve, 800));
+                    try {
+                        const ready = await proxyUsers.detect(true);
+                        if (ready.backend === 'telemt' && !ready.reason) break;
+                    } catch (e) { /* ещё поднимается */ }
+                }
                 changedPort = true;
             }
         }
