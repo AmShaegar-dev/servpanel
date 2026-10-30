@@ -8082,6 +8082,10 @@ function setTelemtConfigSni(text, sni) {
     return lines.join('\n');
 }
 
+function stripAnsiText(value) {
+    return String(value || '').replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '');
+}
+
 function proxyFixStatus() {
     const run = (cmd) => {
         try { return String(sh('bash', ['-c', cmd], { timeout: 15000 }) || ''); }
@@ -8265,11 +8269,11 @@ app.post('/api/proxy/fix', checkAuth, requireAdmin, async (req, res) => {
     try {
         const out = sh('bash', ['-c', cmd], { timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
         auditLog(req, `Прокси: фикс ${type} на порт ${port}`);
-        res.json({ success: true, type, port, output: String(out || '').slice(-4000), status: proxyFixStatus() });
+        res.json({ success: true, type, port, output: stripAnsiText(out).slice(-4000), status: proxyFixStatus() });
     } catch (e) {
         res.status(500).json({
             error: 'Не удалось установить фикс: ' + e.message,
-            output: String((e && (e.stdout || e.message)) || '').slice(-4000)
+            output: stripAnsiText((e && (e.stdout || e.message)) || '').slice(-4000)
         });
     }
 });
