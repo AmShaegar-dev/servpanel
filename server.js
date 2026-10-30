@@ -48,6 +48,7 @@ const TEST_MODE = process.env.SERVEPANEL_TEST === '1';
 // трогает systemd/AmneziaWG. Нужен только для скриншотов и локального показа.
 const DEMO_MODE = (process.env.SERVEPANEL_DEMO === '1' || process.env.SERVPANEL_DEMO === '1');
 const AWG_DIR = '/root/awg';
+const AWG_SERVER_NAME_FILE = path.join(DATA_DIR, '.awg_server_name');
 const MANAGE = path.join(AWG_DIR, 'manage_amneziawg.sh');
 const AWG_CONF_DIR = '/etc/amnezia/amneziawg';
 const ROUTING_SCRIPT = path.join(AWG_DIR, 'awg-routing.sh');
@@ -5031,7 +5032,7 @@ app.post('/api/create', checkAuth, (req, res) => {
         const ip = '10.8.1.' + (10 + demoClients.length);
         demoClients.push({ name, ip, status: 'Активен', status_code: 'active', rx: 0, tx: 0, last_handshake: Math.floor(Date.now() / 1000) });
         auditLog(req, `[DEMO] Создан клиент ${name}`);
-        return res.attachment(`Serv_${name}.conf`).type('text/plain').send(demoClientConf(name, ip));
+        return res.attachment(`${serverFileBase()}_${name}.conf`).type('text/plain').send(demoClientConf(name, ip));
     }
     const args = ['add', name];
     if (expires && /^[0-9]+[hdw]$/.test(expires)) args.push(`--expires=${expires}`);
@@ -5044,7 +5045,7 @@ app.post('/api/create', checkAuth, (req, res) => {
             if (epType === 'domain') replaceEndpointWithDomain(r.conf, epDomain);
             else if (!epType) replaceEndpointWithDomain(r.conf);
             auditLog(req, `Создан клиент ${name}`);
-            res.download(r.conf, `Serv_${name}.conf`);
+            res.download(r.conf, `${serverFileBase()}_${name}.conf`);
         } catch (e) { res.status(500).json({ error: 'Ошибка обработки' }); }
     });
 });
@@ -5180,7 +5181,7 @@ app.get('/api/clients/:name/export', checkAuth, requireAdmin, async (req, res) =
         if (!qr) qr = await qrDataUrl(uri);
 
         if (String(req.query.format || '') === 'txt') {
-            res.setHeader('Content-Disposition', `attachment; filename="Serv_${name}.txt"`);
+            res.setHeader('Content-Disposition', `attachment; filename="${serverFileBase()}_${name}.txt"`);
             return res.type('text/plain').send(
                 `Клиент: ${name}\n\nСсылка для AmneziaVPN:\n${uri}\n\nКонфигурация:\n${conf}\n`
             );
@@ -5213,7 +5214,7 @@ ${qr ? `<img src="${qr}" alt="QR-код подключения">` : '<p class="m
 <textarea id="conf" readonly rows="10">${safeConf}</textarea>
 <div class="warn">Не передавайте этот файл посторонним: он даёт доступ к вашему VPN. При утечке удалите клиента в панели и создайте нового.</div>
 </div></body></html>`;
-        res.setHeader('Content-Disposition', `attachment; filename="Serv_${name}.html"`);
+        res.setHeader('Content-Disposition', `attachment; filename="${serverFileBase()}_${name}.html"`);
         res.type('text/html').send(html);
         auditLog(req, `Экспорт клиента ${name} в один файл`);
     } catch (e) {
@@ -5292,14 +5293,14 @@ app.get('/api/download/:name', checkAuth, (req, res) => {
     if (DEMO_MODE) {
         const c = demoClients.find(x => x.name === name);
         if (!c) return res.status(404).send('Конфиг не найден');
-        return res.attachment(`Serv_${name}.conf`).type('text/plain').send(demoClientConf(name, c.ip));
+        return res.attachment(`${serverFileBase()}_${name}.conf`).type('text/plain').send(demoClientConf(name, c.ip));
     }
     const filePath = path.join(AWG_DIR, `${name}.conf`);
     if (fs.existsSync(filePath)) {
         let content = fs.readFileSync(filePath, 'utf8');
         const domain = domainInfo().domain;
         if (domain) content = rewriteConfEndpoint(content, domain);
-        res.attachment(`Serv_${name}.conf`).type('text/plain').send(content);
+        res.attachment(`${serverFileBase()}_${name}.conf`).type('text/plain').send(content);
     } else res.status(404).send('Конфиг не найден');
 });
 
@@ -6330,6 +6331,24 @@ app.get('/api/obf/export', checkAuth, (req, res) => {
 // ---------------------------------------------------------------------------
 // Конфиг AmneziaWG
 // ---------------------------------------------------------------------------
+app.get('/api/awg/server-name', checkAuth, (req, res) => {
+    res.json({ name: serverDisplayName(), fileBase: serverFileBase() });
+});
+
+app.post('/api/awg/server-name', checkAuth, requireAdmin, (req, res) => {
+    const name = String((req.body && req.body.name) || '').trim();
+    if (!name || name.length > 64 || /[\r\n\t]/.test(name)) {
+        return res.status(400).json({ error: 'Имя сервера: 1–64 символа, без переводов строк' });
+    }
+    try {
+        fs.writeFileSync(AWG_SERVER_NAME_FILE, name + '\n', { mode: 0o600 });
+        auditLog(req, `Имя сервера AWG: ${name}`);
+        res.json({ success: true, name, fileBase: serverFileBase() });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось сохранить имя сервера: ' + e.message });
+    }
+});
+
 app.get('/api/awg/config', checkAuth, (req, res) => {
     try {
         let confPath = null;
@@ -9523,6 +9542,22 @@ function vpnDecode(str) {
     catch (e) { return JSON.parse(b.toString('utf8')); }
 }
 
+function serverDisplayName() {
+    try {
+        const name = fs.readFileSync(AWG_SERVER_NAME_FILE, 'utf8').trim();
+        if (name) return name;
+    } catch (e) { /* ещё не задано */ }
+    return 'Servpanel';
+}
+
+function serverFileBase() {
+    return String(serverDisplayName())
+        .replace(/[\\/:*?"<>|\r\n]+/g, ' ')
+        .replace(/\s+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 60) || 'Servpanel';
+}
+
 function rewriteConfEndpoint(confText, host) {
     const h = String(host || '').trim();
     if (!h || !HOST_RE.test(h)) return String(confText || '');
@@ -9570,7 +9605,7 @@ function buildVpnUriFromConf(name, confText, options = {}) {
     return vpnEncode({
         containers: [{ container: 'amnezia-awg', awg }],
         defaultContainer: 'amnezia-awg',
-        description: name,
+        description: options.serverName || serverDisplayName(),
         hostName: hostOverride || host
     });
 }

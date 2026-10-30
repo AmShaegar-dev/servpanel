@@ -276,6 +276,7 @@ function switchTab(tabId, el) {
     if (tabId === 'tab-services') { loadServices(); connectAdGuard(false); loadAdGuardFull(); loadWarpStatus(); }
     if (tabId === 'tab-install') loadModules();
     else if (agInterval) { clearInterval(agInterval); agInterval = null; }
+    if (tabId === 'tab-clients') loadAwgServerName();
     if (tabId === 'tab-cascade') { loadCascadeSetup(); loadCascadeStatus(true); loadCascadeHealth(); loadCascadeIfaces(); loadCascadeProxy(); renderCascadeParams(); watchCascadeJob(); }
     if (tabId === 'tab-cascade') loadCascadeSshDefaults();
     if (tabId === 'tab-obf') { loadObfCurrent(); loadObfProfiles(); }
@@ -1216,6 +1217,48 @@ async function restoreBackup(event) {
     reader.readAsDataURL(file);
 }
 
+function serverFileBaseClient() {
+    return String(window.awgServerName || 'Servpanel')
+        .replace(/[\\/:*?"<>|\r\n]+/g, ' ')
+        .replace(/\s+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 60) || 'Servpanel';
+}
+
+async function loadAwgServerName() {
+    const input = document.getElementById('awgServerName');
+    const result = document.getElementById('awgServerNameResult');
+    try {
+        const d = await apiJson('/api/awg/server-name');
+        window.awgServerName = d.name || 'Servpanel';
+        if (input) input.value = d.name || 'Servpanel';
+        if (result) result.innerText = 'В конфигах и файлах: ' + (d.fileBase || serverFileBaseClient());
+    } catch (e) {
+        if (result) result.innerText = e.message;
+    }
+}
+
+async function saveAwgServerName() {
+    const input = document.getElementById('awgServerName');
+    const result = document.getElementById('awgServerNameResult');
+    const name = input ? input.value.trim() : '';
+    if (!name) {
+        toast('Укажите имя сервера', 'error');
+        return;
+    }
+    try {
+        const d = await apiJson('/api/awg/server-name', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        window.awgServerName = d.name;
+        if (result) result.innerText = 'Сохранено. В конфигах и файлах: ' + d.fileBase;
+        toast('Имя сервера сохранено', 'success', d.name);
+    } catch (e) {
+        toast('Не удалось сохранить имя', 'error', e.message);
+    }
+}
+
 async function loadStats() {
     if (isFetching) return;
     isFetching = true;
@@ -1344,7 +1387,7 @@ async function createConfig() {
         if (res.ok) { 
             const a = document.createElement('a'); 
             a.href = window.URL.createObjectURL(await res.blob()); 
-            a.download = `Serv_${name}.conf`; 
+            a.download = `${serverFileBaseClient()}_${name}.conf`; 
             a.click(); 
             document.getElementById('clientName').value = ''; 
             loadStats(); 
@@ -1366,7 +1409,7 @@ async function createConfig() {
                             const blob = new Blob([conf.content], { type: 'text/plain' });
                             const a = document.createElement('a');
                             a.href = window.URL.createObjectURL(blob);
-                            a.download = `Serv_${conf.name}.conf`;
+                            a.download = `${serverFileBaseClient()}_${conf.name}.conf`;
                             document.body.appendChild(a);
                             a.click();
                             document.body.removeChild(a);

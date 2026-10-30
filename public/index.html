@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.46">
+    <meta name="panel-version" content="3.0.47">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -299,6 +299,22 @@
                         <button class="btn btn-ghost" onclick="openClientsRename()">Переименовать</button>
                         <button class="btn btn-ghost" onclick="loadStats()">↻ Обновить</button>
                     </div>
+                </div>
+
+                <div class="card" style="margin-bottom: 20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Имя сервера</h3>
+                            <p>Так сервер называется в Amnezia и в именах скачиваемых конфигов.</p>
+                        </div>
+                        <span class="badge badge-muted">vpn://</span>
+                    </div>
+                    <div class="controls-row" style="flex-wrap:wrap;">
+                        <input id="awgServerName" placeholder="Например, Servpanel RU" maxlength="64" style="max-width: 340px;">
+                        <button class="btn-primary" onclick="saveAwgServerName()">Сохранить</button>
+                        <button class="btn-dark" onclick="loadAwgServerName()">↻ Обновить</button>
+                    </div>
+                    <div id="awgServerNameResult" class="sub-text" style="margin-top:8px;"></div>
                 </div>
 
                 <div class="card advanced-only" style="margin-bottom: 20px;">
