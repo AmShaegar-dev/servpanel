@@ -1336,6 +1336,45 @@ test('Каскад: роль берётся из мастера, а не уга�
     assert.match(src, /const role = data\.role === 'eu' \? 'eu' : 'ru';/);
     assert.match(src, /if \(!isExit && !validIfaces\(useIfaces\)\)/);
 });
+
+test('Архитектор: генератор даёт параметры для всех версий AWG', () => {
+    const arch = require('../lib/awg-architect');
+    for (const v of ['1.0', '1.5', '2.0', '3.0', '3.1']) {
+        const r = arch.generate({ version: v, profile: 'quic', intensity: 'medium' });
+        assert.equal(r.version, v);
+        assert.ok(r.params.Jc && r.params.Jmin && r.params.Jmax, 'junk для ' + v);
+        assert.ok(r.params.H1 && r.params.S1, 'H/S для ' + v);
+        if (v === '1.0') {
+            assert.ok(!r.params.S3, 'в 1.0 нет S3');
+            assert.ok(!r.params.I1, 'в 1.0 нет I1');
+        }
+        if (v === '2.0') {
+            assert.ok(r.params.S3 && r.params.S4, 'в 2.0 есть S3/S4');
+            assert.ok(!r.params.HeaderProtectionKey, 'в 2.0 нет HPK');
+        }
+        if (v === '3.0' || v === '3.1') {
+            assert.ok(r.params.HeaderProtectionKey, 'в 3.x есть HPK');
+            assert.ok(r.params.ContentPaddingAddition, 'в 3.x есть CPA');
+        }
+    }
+});
+
+test('Каскад: маршрутизация по CASCADE.md и выбор интерфейсов', () => {
+    const build = require('../lib/cascade-ssh-build');
+    const script = build.routingScript('203.0.113.9', '172.16.17.0/24', ['awg0', 'awg2'], ['198.51.100.0/24']);
+    assert.match(script, /CLIENT_IFACES="awg0 awg2"/);
+    assert.match(script, /EXTRA_RU_NETS="198\.51\.100\.0\/24"/);
+    assert.match(script, /ipset swap ru_tmp ru/);
+    assert.match(script, /--retry-max-time 45/);
+    assert.match(script, /valid" -eq "\$total/);
+    assert.match(script, /for if in \$CLIENT_IFACES/);
+    assert.match(build.ROUTING_SERVICE, /Requires=awg-quick@awg0\.service awg-quick@awg1\.service/);
+    assert.match(build.ROUTING_SERVICE, /RemainAfterExit=no/);
+    assert.ok(!/TimeoutStartSec/.test(build.ROUTING_SERVICE), 'у oneshot нет таймаута');
+    assert.match(build.ROUTING_TIMER, /OnCalendar=\*-\*-\* 01:00:00/);
+    assert.match(build.ROUTING_TIMER, /Persistent=false/);
+});
+
 test('выход закрывает доступ', async () => {
     await request('/api/logout', { method: 'POST' });
     const r = await request('/api/stats');

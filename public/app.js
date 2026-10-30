@@ -276,7 +276,7 @@ function switchTab(tabId, el) {
     if (tabId === 'tab-services') { loadServices(); connectAdGuard(false); loadAdGuardFull(); loadWarpStatus(); }
     if (tabId === 'tab-install') loadModules();
     else if (agInterval) { clearInterval(agInterval); agInterval = null; }
-    if (tabId === 'tab-cascade') { loadCascadeSetup(); loadCascadeStatus(true); loadCascadeHealth(); }
+    if (tabId === 'tab-cascade') { loadCascadeSetup(); loadCascadeStatus(true); loadCascadeHealth(); loadCascadeIfaces(); }
     if (tabId === 'tab-cascade') loadCascadeSshDefaults();
     if (tabId === 'tab-obf') { loadObfCurrent(); loadObfProfiles(); }
     if (tabId === 'tab-update') loadUpdatePanel();
@@ -1672,11 +1672,22 @@ async function runAutoCascade(btn) {
     const peerPort = ((document.getElementById('autoCascadePeerPort') || {}).value || '22');
     const peerUser = ((document.getElementById('autoCascadeUser') || {}).value || 'root');
     const peerPass = (document.getElementById('autoCascadePass') || {}).value || '';
+    const obfMode = ((document.getElementById('autoCascadeObfMode') || {}).value) || 'installer';
+    const obfProfile = ((document.getElementById('autoCascadeObfProfile') || {}).value) || 'quic';
+    const obfIntensity = ((document.getElementById('autoCascadeObfIntensity') || {}).value) || 'medium';
+    const obfSource = ((document.getElementById('autoCascadeObfCustom') || {}).value || '').trim();
+    const extraRaw = ((document.getElementById('autoCascadeExtraRu') || {}).value || '').trim();
+    const ifaces = [...document.querySelectorAll('#cascadeIfacesList input[type=checkbox]:checked')]
+        .map(c => c.value).filter(Boolean);
     const log = document.getElementById('autoCascadeLog');
     if (!peerHost || !peerPass) return alert('Укажите IP второй стороны и пароль root');
     if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(peerHost)) return alert('Вторая сторона задаётся по IP, не по домену');
+    if (obfMode === 'custom' && !obfSource) return alert('Вставьте параметры обфускации из Архитектора или выберите «Сгенерировать»');
+    const obfLabel = obfMode === 'architect' ? 'Архитектор: ' + obfProfile + '/' + obfIntensity
+        : obfMode === 'custom' ? 'свои параметры' : 'как ставит установщик';
     if (!confirm('Построить каскад?\n\nРоль этого сервера: ' + (role === 'ru' ? 'вход (RU)' : 'выход (EU)') +
-        '\nВерсия AmneziaWG: ' + version + '\nВторая сторона: ' + peerHost + ':' + peerPort + '\n\n' +
+        '\nВерсия AmneziaWG: ' + version + '\nВторая сторона: ' + peerHost + ':' + peerPort +
+        '\nОбфускация: ' + obfLabel + '\n\n' +
         'Панель по SSH поставит там AmneziaWG (если нужно), создаст клиента ru_host и поднимет туннель. ' +
         'Установка занимает 5–15 минут: сервер второй стороны несколько раз перезагрузится.')) return;
     if (btn) { btn.disabled = true; btn.innerText = 'Строим каскад…'; }
@@ -1692,7 +1703,13 @@ async function runAutoCascade(btn) {
     try {
         await apiJson('/api/cascade/ssh-install', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role, version, peerHost, peerPort, peerUser, peerPass })
+            body: JSON.stringify({
+                role, version, peerHost, peerPort, peerUser, peerPass,
+                obfMode, obfProfile, obfIntensity,
+                obfSource: obfMode === 'custom' ? obfSource : '',
+                ifaces,
+                extraRuNets: extraRaw ? extraRaw.split(/[\s,]+/).filter(Boolean) : []
+            })
         });
         // Сборка идёт в фоне: опрашиваем прогресс, чтобы не ловить 504 и видеть шаги.
         let lastCount = -1;
@@ -1726,6 +1743,63 @@ async function runAutoCascade(btn) {
         if (log) log.innerHTML += '<div class="wizard-summary-row"><span style="color:var(--danger)">Ошибка</span><b>' + esc(e.message) + '</b></div>';
         toast('Каскад не собрался', 'error', e.message);
     } finally { if (btn) { btn.disabled = false; btn.innerText = '⚡ Построить каскад'; } }
+}
+
+function autoCascadeObfHint() {
+    const mode = ((document.getElementById('autoCascadeObfMode') || {}).value) || 'installer';
+    const profile = document.getElementById('autoCascadeObfProfileWrap');
+    const intensity = document.getElementById('autoCascadeObfIntensityWrap');
+    const custom = document.getElementById('autoCascadeObfCustomWrap');
+    const hint = document.getElementById('autoCascadeObfHint');
+    if (profile) profile.style.display = mode === 'architect' ? '' : 'none';
+    if (intensity) intensity.style.display = mode === 'architect' ? '' : 'none';
+    if (custom) custom.style.display = mode === 'custom' ? '' : 'none';
+    if (hint) {
+        hint.innerText = mode === 'architect'
+            ? 'Параметры сгенерирует панель по правилам Архитектора для выбранной версии AWG: H1–H4, S1–S4, Jc/Jmin/Jmax, CPS и, для 3.x, HeaderProtectionKey и таймеры.'
+            : mode === 'custom'
+                ? 'Вставьте JSON или .conf из Архитектора. Панель проверит параметры и оставит только те, что понимает выбранная версия AWG.'
+                : 'Оставьте параметры, которые сгенерирует установщик AmneziaWG. Для 2.0 это безопасный вариант по умолчанию.';
+    }
+}
+
+async function loadCascadeIfaces() {
+    const box = document.getElementById('cascadeIfacesList');
+    const res = document.getElementById('cascadeIfacesResult');
+    if (!box) return;
+    box.innerHTML = '<span class="sub-text">Загрузка…</span>';
+    try {
+        const d = await apiJson('/api/cascade/interfaces');
+        const sel = new Set(d.selected || []);
+        const list = [...new Set([...(d.available || []), ...sel])];
+        box.innerHTML = list.length
+            ? list.map(i => `<label class="form-check" style="gap:6px; margin:0;"><input type="checkbox" value="${esc(i)}" ${sel.has(i) ? 'checked' : ''}> <span class="mono">${esc(i)}</span></label>`).join('')
+            : '<span class="sub-text">Интерфейсы AWG не найдены</span>';
+        if (res) res.innerText = '';
+    } catch (e) {
+        box.innerHTML = '';
+        if (res) res.innerText = e.message;
+    }
+}
+
+async function saveCascadeIfaces() {
+    const ifaces = [...document.querySelectorAll('#cascadeIfacesList input[type=checkbox]:checked')]
+        .map(c => c.value).filter(Boolean);
+    if (!ifaces.length) return alert('Выберите хотя бы один интерфейс');
+    const res = document.getElementById('cascadeIfacesResult');
+    if (res) res.innerText = 'Применяю…';
+    try {
+        const d = await apiJson('/api/cascade/interfaces', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ interfaces: ifaces })
+        });
+        toast('Интерфейсы применены', 'success', ifaces.join(', '));
+        if (res) res.innerText = d.output || 'Готово';
+        loadCascadeStatus(true);
+    } catch (e) {
+        if (res) res.innerText = e.message;
+        toast('Не удалось применить интерфейсы', 'error', e.message);
+    }
 }
 
 // Пересборка каскада: нормализует awg1.conf (Table = off), берёт правильный

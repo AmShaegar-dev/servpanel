@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.6">
+    <meta name="panel-version" content="3.0.7">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1166,6 +1166,42 @@
             <input id="autoCascadePass" type="password" autocomplete="current-password">
         </label>
     </div>
+    <div class="wizard-grid" style="margin-top:12px;">
+        <label class="field"><span>Обфускация</span>
+            <select id="autoCascadeObfMode" onchange="autoCascadeObfHint()">
+                <option value="installer" selected>Как ставит установщик</option>
+                <option value="architect">Сгенерировать (Архитектор)</option>
+                <option value="custom">Свои параметры</option>
+            </select>
+        </label>
+        <label class="field" id="autoCascadeObfProfileWrap" style="display:none;"><span>Профиль мимикрии</span>
+            <select id="autoCascadeObfProfile">
+                <option value="quic" selected>QUIC</option>
+                <option value="tls">TLS 1.3</option>
+                <option value="dtls">DTLS 1.2</option>
+                <option value="dtls13">DTLS 1.3</option>
+                <option value="sip">SIP</option>
+                <option value="dns">DNS</option>
+                <option value="noise">Noise</option>
+            </select>
+        </label>
+        <label class="field" id="autoCascadeObfIntensityWrap" style="display:none;"><span>Интенсивность</span>
+            <select id="autoCascadeObfIntensity">
+                <option value="low">Низкая</option>
+                <option value="medium" selected>Средняя</option>
+                <option value="high">Высокая</option>
+            </select>
+        </label>
+    </div>
+    <div id="autoCascadeObfCustomWrap" style="display:none; margin-top:10px;">
+        <label class="field"><span>Параметры из Архитектора (JSON или .conf)</span>
+            <textarea id="autoCascadeObfCustom" rows="5" placeholder="H1 = ...&#10;S1 = ...&#10;HeaderProtectionKey = ..."></textarea>
+        </label>
+    </div>
+    <div id="autoCascadeObfHint" class="wizard-note" style="margin-top:8px;"></div>
+    <label class="field" style="margin-top:12px;"><span>Свои адреса через РФ (необязательно)</span>
+        <input id="autoCascadeExtraRu" placeholder="203.0.113.7 198.51.100.0/24">
+    </label>
     <div id="autoCascadeHint" class="wizard-note" style="display:none;"></div>
     <div id="autoCascadeLog" class="wizard-summary" style="display:none; margin-top:12px;"></div>
     <div class="controls-row" style="margin-top:14px; margin-bottom:0;">
@@ -1178,6 +1214,22 @@
         «Удалить каскад» убирает службы, маршруты, ipset, правила iptables, туннель awg1 и клиента ru_host — и здесь, и на второй стороне, если указан пароль.
     </div>
 </div>
+</div>
+<div class="card" style="margin-bottom:20px;" data-admin-only>
+    <div class="card-head" style="margin-bottom:8px;">
+        <div><h3 style="margin:0;">Интерфейсы маршрутизации</h3></div>
+        <span class="badge badge-muted">можно менять после установки</span>
+    </div>
+    <p style="color:var(--text-muted); font-size:13px; margin-top:0;">
+        Отметьте интерфейсы, трафик которых должен уходить через каскад. Подсеть каждого берётся
+        из его адреса, поэтому новые интерфейсы можно добавлять после сборки.
+    </p>
+    <div id="cascadeIfacesList" class="controls-row" style="flex-wrap:wrap; gap:12px; min-height:24px;"></div>
+    <div class="controls-row" style="margin-top:12px;">
+        <button class="btn btn-primary" onclick="saveCascadeIfaces()">Применить</button>
+        <button class="btn btn-dark" onclick="loadCascadeIfaces()">↻ Обновить</button>
+    </div>
+    <div id="cascadeIfacesResult" class="sub-text" style="margin-top:8px;"></div>
 </div>
 <div class="card advanced-only" style="margin-bottom: 20px;">
                     <h3 style="margin-top:0;">Шаг 1. Конфиг второй стороны</h3>

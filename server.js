@@ -28,6 +28,7 @@ const updater = require('./lib/updater');
 const proxyUsers = require('./lib/proxy-users');
 const { Panel } = require('./lib/cascade-setup');
 const sshBuild = require('./lib/cascade-ssh-build');
+const awgArchitect = require('./lib/awg-architect');
 const sshRunner = require('./lib/cascade-ssh');
 const { ensureAwg } = require('./lib/cascade-remote');
 const { createProxyBot } = require('./lib/proxy-bot');
@@ -3848,6 +3849,39 @@ function cascadeJobSnapshot() {
     };
 }
 
+// Параметры обфускации для каскада: из Архитектора, свои или из профиля.
+// Для выбранной версии AWG оставляем только те ключи, которые она понимает.
+function cascadeObfParams(data, version) {
+    let params = null;
+    if (data.obfMode === 'architect') {
+        const g = awgArchitect.generate({
+            version,
+            profile: data.obfProfile,
+            intensity: data.obfIntensity,
+            router: !!data.obfRouter,
+            randomTrailers: !!data.obfRandomTrailers,
+            disableCookies: !!data.obfDisableCookies
+        });
+        params = g.params;
+    } else if (data.obfSource) {
+        params = extractObfFromAny(data.obfSource);
+    } else if (data.obf && typeof data.obf === 'object') {
+        params = data.obf;
+    }
+    if (!params || !Object.keys(params).length) return null;
+    params = validateObf(params);
+    const allowed = version === '1.0'
+        ? ['Jc', 'Jmin', 'Jmax', 'H1', 'H2', 'H3', 'H4', 'S1', 'S2']
+        : version === '1.5'
+            ? ['Jc', 'Jmin', 'Jmax', 'H1', 'H2', 'H3', 'H4', 'S1', 'S2', 'I1', 'I2', 'I3', 'I4', 'I5']
+            : version === '2.0'
+                ? ['Jc', 'Jmin', 'Jmax', 'H1', 'H2', 'H3', 'H4', 'S1', 'S2', 'S3', 'S4', 'I1', 'I2', 'I3', 'I4', 'I5']
+                : OBF_ALL_KEYS;
+    const out = {};
+    for (const k of allowed) if (params[k] !== undefined) out[k] = params[k];
+    return Object.keys(out).length ? out : null;
+}
+
 async function runCascadeBuild(job, remote, opts) {
     const log = (title, text) => {
         job.steps.push({ title, text: String(text || ''), at: new Date().toISOString() });
@@ -3876,6 +3910,13 @@ async function runCascadeBuild(job, remote, opts) {
     if (!info.installed) throw new Error('На ' + remote.host + ' не установился AmneziaWG');
     log('EU', 'AmneziaWG готов: ' + (info.address || '') + ', порт ' + (info.listenPort || '—'));
 
+    // 2b. Обфускация на второй стороне — до создания ru_host, чтобы клиент
+    // получил те же H/S/HeaderProtectionKey, что и сервер.
+    if (opts.obf && Object.keys(opts.obf).length) {
+        log('EU', 'Применяю параметры обфускации...');
+        await sshBuild.applyObf(remote, opts.obf, (m) => log('EU', m));
+    }
+
     // 3. Клиент ru_host на второй стороне.
     const ruHost = await sshBuild.createRuHost(remote, (m) => log('EU', m));
     const innerMatch = String(ruHost.conf).match(/^\s*Address\s*=\s*([0-9.]+)/m);
@@ -3903,6 +3944,13 @@ async function runCascadeBuild(job, remote, opts) {
     await sshBuild.openUdp({ host: '127.0.0.1' }, local.listenPort);
     log('RU', 'AmneziaWG готов: ' + (local.address || '') + ', порт ' + (local.listenPort || '—'));
 
+    // 4b. Обфускация на входе. Клиенты входа получат новые параметры,
+    // поэтому перегенерируем их конфиги (manage regen внутри applyObf).
+    if (opts.obf && Object.keys(opts.obf).length) {
+        log('RU', 'Применяю параметры обфускации...');
+        await sshBuild.applyObf({ host: '127.0.0.1' }, opts.obf, (m) => log('RU', m));
+    }
+
     // 5. Конфиг туннеля: ru_host без DNS, Table = off.
     const conf = sshBuild.cascadeConfig(ruHost.conf);
     writeRootFile(sshBuild.AWG_CONF, conf, '0600');
@@ -3912,7 +3960,9 @@ async function runCascadeBuild(job, remote, opts) {
 
     // 6. Маршруты и фильтрация.
     const subnet = sshBuild.clientSubnet(local.address) || '10.9.9.0/24';
-    const script = sshBuild.routingScript(euHost, subnet);
+    const ifaces = Array.isArray(opts.ifaces) && opts.ifaces.length ? opts.ifaces : ['awg0'];
+    const extraRuNets = Array.isArray(opts.extraRuNets) ? opts.extraRuNets : [];
+    const script = sshBuild.routingScript(euHost, subnet, ifaces, extraRuNets);
     writeRootFile(ROUTING_SCRIPT, script, '0755');
     writeRootFile('/etc/systemd/system/awg-routing.service', sshBuild.ROUTING_SERVICE, '0644');
     writeRootFile('/etc/systemd/system/awg-routing.timer', sshBuild.ROUTING_TIMER, '0644');
@@ -3926,6 +3976,7 @@ async function runCascadeBuild(job, remote, opts) {
     // 7. Поднимаем туннель.
     sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
     try { sh('sleep', ['3']); } catch (e) { /* ignore */ }
+    sh('sudo', ['systemctl', 'enable', 'awg-routing']);
     sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
     const up = await sshRunner.run({ host: '127.0.0.1' }, 'systemctl is-active awg-quick@awg1', 20000);
     if (!/active/.test(String(up.out || ''))) {
@@ -3994,6 +4045,19 @@ app.post('/api/cascade/ssh-install', checkAuth, requireAdmin, (req, res) => {
         return res.status(409).json({ error: 'Сборка каскада уже идёт', steps: cascadeBuildJob.steps.slice(-50) });
     }
 
+    let obf = null;
+    try {
+        obf = cascadeObfParams(data, version);
+    } catch (e) {
+        return res.status(400).json({ error: 'Обфускация: ' + e.message });
+    }
+    const ifaces = Array.isArray(data.ifaces)
+        ? [...new Set(data.ifaces.filter(i => typeof i === 'string' && IFACE_RE.test(i) && !CASCADE_IFACE_RE.test(i)))].slice(0, 16)
+        : [];
+    const extraRuNets = Array.isArray(data.extraRuNets)
+        ? [...new Set(data.extraRuNets.map(String).filter(n => IPV4_RE.test(n) || CIDR_RE.test(n)))].slice(0, 200)
+        : [];
+
     cascadeBuildJob = {
         running: true,
         startedAt: new Date().toISOString(),
@@ -4007,7 +4071,7 @@ app.post('/api/cascade/ssh-install', checkAuth, requireAdmin, (req, res) => {
     const job = cascadeBuildJob;
     auditLog(req, 'Запущена сборка каскада по SSH: ' + host);
 
-    runCascadeBuild(job, { host, port, user, pass }, { version, role, euSubnet })
+    runCascadeBuild(job, { host, port, user, pass }, { version, role, euSubnet, obf, ifaces, extraRuNets })
         .then((result) => {
             job.result = result;
             job.running = false;
@@ -4024,6 +4088,43 @@ app.post('/api/cascade/ssh-install', checkAuth, requireAdmin, (req, res) => {
 
 app.get('/api/cascade/ssh-progress', checkAuth, requireAdmin, (req, res) => {
     res.json(cascadeJobSnapshot());
+});
+
+// Интерфейсы, трафик которых уходит в каскад. Список читается из скрипта
+// маршрутизации, поэтому его можно менять после установки без пересборки.
+app.get('/api/cascade/interfaces', checkAuth, requireAdmin, (req, res) => {
+    const script = readTextSafe(ROUTING_SCRIPT);
+    if (!script) return res.status(404).json({ error: 'Скрипт маршрутизации не найден — сначала постройте каскад' });
+    const m = script.match(/^CLIENT_IFACES="([^"]*)"/m);
+    const selected = m ? m[1].split(/\s+/).filter(Boolean) : ['awg0'];
+    const out = shTry('bash', ['-c',
+        "ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | cut -d@ -f1 | grep -E '^(awg|amn)[0-9]+$' || true"
+    ], { timeout: 10000 });
+    const available = [...new Set(String(out || '').split(/\s+/)
+        .filter(i => IFACE_RE.test(i) && !CASCADE_IFACE_RE.test(i)))];
+    res.json({ selected, available, script: ROUTING_SCRIPT });
+});
+
+app.post('/api/cascade/interfaces', checkAuth, requireAdmin, async (req, res) => {
+    const list = Array.isArray(req.body && req.body.interfaces) ? req.body.interfaces : [];
+    const ifaces = [...new Set(list
+        .filter(i => typeof i === 'string' && IFACE_RE.test(i) && !CASCADE_IFACE_RE.test(i)))];
+    if (!ifaces.length) return res.status(400).json({ error: 'Выберите хотя бы один интерфейс' });
+    const script = readTextSafe(ROUTING_SCRIPT);
+    if (!script) return res.status(404).json({ error: 'Сначала постройте каскад' });
+    if (!/^CLIENT_IFACES=/m.test(script)) return res.status(500).json({ error: 'В скрипте нет CLIENT_IFACES' });
+    const next = script.replace(/^CLIENT_IFACES="[^"]*"/m, `CLIENT_IFACES="${ifaces.join(' ')}"`);
+    try {
+        writeRootFile(ROUTING_SCRIPT, next, '0755');
+        const r = await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
+        if (r.code !== 0) {
+            return res.status(500).json({ error: 'Скрипт маршрутизации вернул ошибку', output: String(r.out || '').slice(-1200) });
+        }
+        auditLog(req, 'Каскад: интерфейсы маршрутизации ' + ifaces.join(', '));
+        res.json({ success: true, interfaces: ifaces, output: String(r.out || '').slice(-1200) });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось применить интерфейсы: ' + e.message });
+    }
 });
 
 app.post('/api/cascade/teardown', checkAuth, requireAdmin, async (req, res) => {
@@ -5684,7 +5785,31 @@ function generateObfProfile(preset) {
 
 app.post('/api/obf/generate', checkAuth, (req, res) => {
     try {
-        const preset = (req.body && req.body.preset) || 'balanced';
+        const body = req.body || {};
+        if (body.version) {
+            const g = awgArchitect.generate({
+                version: body.version,
+                profile: body.profile,
+                intensity: body.intensity,
+                router: !!body.router,
+                noHpk: !!body.noHpk,
+                noPadding: !!body.noPadding,
+                noTimers: !!body.noTimers,
+                randomTrailers: !!body.randomTrailers,
+                disableCookies: !!body.disableCookies
+            });
+            const params = validateObf(g.params);
+            return res.json({
+                engine: 'architect',
+                version: g.version,
+                profile: g.profile,
+                intensity: g.intensity,
+                params,
+                versionDetected: detectObfVersion(params),
+                audit: auditObf(params)
+            });
+        }
+        const preset = body.preset || 'balanced';
         const params = generateObfProfile(preset);
         res.json({
             preset: ['max', 'balanced', 'compat'].includes(preset) ? preset : 'balanced',
