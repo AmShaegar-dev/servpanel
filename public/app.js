@@ -1826,7 +1826,7 @@ function cascadeParamItems() {
         { name: 'SSH-порт', value: port, ok: portOk, desc: portOk ? '1–65535' : 'Некорректный порт' },
         { name: 'Пользователь SSH', value: user || '—', ok: !!user, desc: user ? '' : 'Укажите пользователя' },
         { name: 'Пароль root', value: pass ? 'задан' : '—', ok: !!pass, desc: pass ? '' : 'Нужен для SSH' },
-        { name: 'Версия AWG', value: version, ok: ['1.5', '2.0', '3.1'].includes(version), desc: 'Одна на обеих сторонах' },
+        { name: 'Версия AWG (сборка)', value: version, ok: ['1.5', '2.0', '3.1'].includes(version), desc: 'Параметр установки второй стороны, не текущая версия этого сервера' },
         { name: 'Порт EU', value: '3977', ok: true, desc: 'UDP на EU' },
         { name: 'Подсеть EU', value: '172.16.61.0/24', ok: true, desc: 'CASCADE.md' },
         { name: 'Подсеть RU', value: '172.16.17.0/24', ok: true, desc: 'CASCADE.md' },

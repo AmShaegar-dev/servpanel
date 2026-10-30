@@ -5133,27 +5133,19 @@ app.get('/api/clients/:name/key', checkAuth, async (req, res) => {
     const uriPath = path.join(AWG_DIR, name + '.vpnuri');
     const pngPath = path.join(AWG_DIR, name + '.vpnuri.png');
     try {
-        if (!fs.existsSync(uriPath)) {
-            // regen не меняет ключи и клиента, просто пересобирает qr/vpnuri
-            try { sh('sudo', ['bash', MANAGE, 'regen', name, '--json'], { maxBuffer: 16 * 1024 * 1024 }); } catch (e) { /* ignore */ }
-        }
         let uri = '';
-        if (fs.existsSync(uriPath)) uri = sh('sudo', ['cat', uriPath]).trim();
-        if (!uri) {
-            const confPath = path.join(AWG_DIR, name + '.conf');
-            if (fs.existsSync(confPath)) {
-                uri = buildVpnUriFromConf(name, sh('sudo', ['cat', confPath]));
-            }
-        }
-        if (!uri) return res.status(404).json({ error: 'Не удалось получить ключ (нет .conf/.vpnuri)' });
-        let qr = '';
-        try {
-            if (fs.existsSync(pngPath)) qr = 'data:image/png;base64,' + sh('sudo', ['base64', '-w', '0', pngPath]).trim();
-        } catch (e) { /* ignore */ }
-        if (!qr) qr = await qrDataUrl(uri);
-        // Конфиг нужен для каскада: на сервере-выходе его копируют на вход.
         let conf = '';
-        try { conf = sh('sudo', ['cat', path.join(AWG_DIR, name + '.conf')]); } catch (e) { conf = ''; }
+        const confPath = path.join(AWG_DIR, name + '.conf');
+        try { if (fs.existsSync(confPath)) conf = sh('sudo', ['cat', confPath]); } catch (e) { conf = ''; }
+        if (conf) {
+            const domain = domainInfo().domain;
+            const useDomain = fs.existsSync('/root/awg_domain.txt') && domain;
+            conf = rewriteConfEndpoint(conf, useDomain ? domain : '');
+            uri = buildVpnUriFromConf(name, conf);
+        }
+        if (!uri && fs.existsSync(uriPath)) uri = sh('sudo', ['cat', uriPath]).trim();
+        if (!uri) return res.status(404).json({ error: 'Не удалось получить ключ (нет .conf/.vpnuri)' });
+        const qr = await qrDataUrl(uri);
         auditLog(req, `Просмотр ключа клиента ${name}`);
         res.json({ name, uri, qr, conf });
     } catch (e) { res.status(500).json({ error: 'Ошибка чтения ключа' }); }
@@ -9493,23 +9485,35 @@ function vpnDecode(str) {
     catch (e) { return JSON.parse(b.toString('utf8')); }
 }
 
-function buildVpnUriFromConf(name, confText) {
-    const ini = parseIni(confText);
+function rewriteConfEndpoint(confText, host) {
+    const h = String(host || '').trim();
+    if (!h || !HOST_RE.test(h)) return String(confText || '');
+    return String(confText || '').replace(/^Endpoint\s*=\s*([^:\r\n]+)(:\d+)?\s*$/m, (m, oldHost, port) => `Endpoint = ${h}${port || ''}`);
+}
+
+function buildVpnUriFromConf(name, confText, options = {}) {
+    const hostOverride = String(options.host || '').trim();
+    let text = String(confText || '');
+    const ini = parseIni(text);
     const iface = ini.Interface || {};
     const peer = ini.Peer || {};
     const endpoint = String(peer.Endpoint || '');
     const m = endpoint.match(/^([^:]+):(\d+)$/);
     const host = m ? m[1] : endpoint;
     const port = m ? parseInt(m[2], 10) : 51820;
+    if (hostOverride && HOST_RE.test(hostOverride)) {
+        text = text.replace(/^Endpoint\s*=\s*.*$/m, `Endpoint = ${hostOverride}:${port}`);
+    }
     const obf = {};
     for (const k of OBF_ALL_KEYS) if (iface[k] !== undefined) obf[k] = iface[k];
+    const version = detectObfVersion(obf);
     const last = {
         allowed_ips: String(peer.AllowedIPs || '0.0.0.0/0').split(',').map(s => s.trim()),
         client_ip: String(iface.Address || '').split('/')[0],
         client_priv_key: iface.PrivateKey || '',
         client_pub_key: '',
-        config: confText,
-        hostName: host,
+        config: text,
+        hostName: hostOverride || host,
         mtu: iface.MTU || '1420',
         persistent_keep_alive: peer.PersistentKeepalive || '25',
         port,
@@ -9517,12 +9521,19 @@ function buildVpnUriFromConf(name, confText) {
         server_pub_key: peer.PublicKey || '',
         ...obf
     };
-    const awg = { ...obf, last_config: JSON.stringify(last), port: String(port), transport_proto: 'udp' };
+    const awg = {
+        ...obf,
+        last_config: JSON.stringify(last),
+        port: String(port),
+        transport_proto: 'udp',
+        isThirdPartyConfig: true,
+        protocol_version: version === '3.1' || version === '3.0' ? '3' : version === '2.0' ? '2' : '1'
+    };
     return vpnEncode({
         containers: [{ container: 'amnezia-awg', awg }],
         defaultContainer: 'amnezia-awg',
         description: name,
-        hostName: host
+        hostName: hostOverride || host
     });
 }
 
