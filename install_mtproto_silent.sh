@@ -128,8 +128,10 @@ telemt_config_path() {
 # Дописываем их сами тем же способом, что и оригинальный установщик.
 apply_telemt_extras() {
     [ "$KIND" = "telemt" ] || return 0
+    say "DEBUG: apply_telemt_extras start"
     local cfg
-    cfg=$(telemt_config_path) || return 0
+    cfg=$(telemt_config_path) || { say "DEBUG: telemt config not found"; return 0; }
+    say "DEBUG: telemt config $cfg"
     local changed=0
 
     if [ -n "$AD_TAG" ]; then
@@ -227,6 +229,7 @@ WEB_SECRET="${MTPROTO_WEB_SECRET:-}"
 NGINX="${MTPROTO_NGINX:-0}"
 
 say "=== СТАРТ УСТАНОВКИ MTPROTO / WEB ПРОКСИ (MEKO) ==="
+say "Версия установщика панели: 2026-10-30b"
 say "Дата: $(date -Is)"
 say "Вид: $KIND · домен: $DOMAIN · порт: $PORT · фикс: $FIX_TYPE/$FIX_PORT"
 
