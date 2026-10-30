@@ -3975,6 +3975,11 @@ async function runCascadeBuild(job, remote, opts) {
     } else {
         log('EU', 'AmneziaWG уже установлен, UDP-порт ' + (info.listenPort || '—'));
         await sshBuild.openUdp(remote, info.listenPort);
+        // Снимаем возможное автопродолжение прошлой установки: иначе после
+        // перезагрузки EU установщик снова попытается переустановить AWG.
+        await sshRunner.run(remote,
+            'rm -f /etc/cron.d/awg_resume /root/awg_installer_wrapper.sh /root/awg_install_params.env /root/awg/.resume_count',
+            30000);
     }
     if (!info.installed) throw new Error('На ' + remote.host + ' не установился AmneziaWG');
     log('EU', 'AmneziaWG готов: ' + (info.address || '') + ', порт ' + (info.listenPort || '—'));

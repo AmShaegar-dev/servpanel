@@ -200,7 +200,7 @@ echo "--- Вывод установщика ---"
 eval "$INSTALL_CMD"
 
 # Этот блок выполнится только когда установщик полностью закончит работу без ребутов
-if grep -q "Установка завершена" "$LOG_FILE" || grep -q "Installation complete" "$LOG_FILE"; then
+if grep -qE "Установка (полностью )?завершена" "$LOG_FILE" || grep -q "Installation complete" "$LOG_FILE"; then
     echo "=== INSTALLATION DONE ==="
     # Установка завершена — снимаем автопродолжение сразу, не дожидаясь конца
     # скрипта: иначе при сбое на следующих шагах cron снова запустит установку
