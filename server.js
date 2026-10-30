@@ -3963,6 +3963,14 @@ async function runCascadeBuild(job, remote, opts) {
     const euHost = (String(ping.out).match(/^\s*(\d{1,3}(?:\.\d{1,3}){3})\s*$/m) || [])[1] || remote.host;
     log('SSH', 'Вторая сторона доступна: ' + euHost);
 
+    // 1b. Снимаем cron @reboot прошлой установки: иначе EU перезагружается
+    // по кругу, и SSH пропадает посреди следующих шагов.
+    for (let i = 0; i < 3; i++) {
+        if (await sshBuild.stopResume(remote, (m) => log('EU', m))) break;
+        const back = await sshRunner.waitOnline(remote, 3 * 60 * 1000);
+        if (!back) break;
+    }
+
     // 2. AmneziaWG на второй стороне.
     let info = await sshBuild.awgInfo(remote);
     if (!info.installed) {
