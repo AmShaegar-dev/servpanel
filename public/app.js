@@ -5718,7 +5718,7 @@ async function regenerateMetricsToken() {
 /* --------------------------------------------------------------------------
    Прокси: пользователи MTProto (MTProxyL / telemt) и Telegram-бот
    -------------------------------------------------------------------------- */
-let proxyState = { status: null, users: [], bot: null };
+let proxyState = { status: null, users: [], bot: null, settings: null };
 
 function proxyArg(value) {
     return String(value == null ? '' : value)
@@ -5784,6 +5784,7 @@ async function loadProxyTab(force) {
         if (count) count.innerText = '0';
     }
     loadProxyBot();
+    loadProxySettings();
 }
 
 function renderProxyStatus(st) {
@@ -5810,6 +5811,10 @@ function renderProxyStatus(st) {
     if (!grid) return;
     if (!st || ['none', 'zig'].includes(st.backend)) {
         grid.innerHTML = appTile('Движок', proxyBackendLabel(st && st.backend), st && st.reason ? st.reason : 'установите MTProxyL или Telemt');
+        const keyBtn = document.getElementById('proxyRotateKeyBtn');
+        if (keyBtn) keyBtn.style.display = 'none';
+        const portField = document.getElementById('proxyPortField');
+        if (portField) portField.style.display = 'none';
         return;
     }
     const tiles = [
@@ -5820,6 +5825,74 @@ function renderProxyStatus(st) {
         appTile('Uptime', proxyFmtUptime(st.uptime || 0), 'без перезапуска')
     ];
     grid.innerHTML = tiles.join('');
+    const keyBtn = document.getElementById('proxyRotateKeyBtn');
+    if (keyBtn) keyBtn.style.display = st.backend === 'mtproxyl' ? '' : 'none';
+    const portField = document.getElementById('proxyPortField');
+    if (portField) portField.style.display = st.backend === 'telemt' ? '' : 'none';
+}
+
+function proxyLinkTypeChanged() {
+    const typeEl = document.getElementById('proxyLinkHostType');
+    const wrap = document.getElementById('proxyLinkDomainWrap');
+    const input = document.getElementById('proxyLinkDomain');
+    const hint = document.getElementById('proxyLinkHint');
+    const type = typeEl ? typeEl.value : 'ip';
+    if (wrap) wrap.style.display = type === 'domain' ? '' : 'none';
+    if (type === 'domain' && input && !input.value.trim() && proxyState.settings && proxyState.settings.detectedDomain) {
+        input.value = proxyState.settings.detectedDomain;
+    }
+    if (hint) {
+        hint.innerText = type === 'domain'
+            ? 'В ссылках будет домен. Убедитесь, что он указывает на этот сервер.'
+            : 'В ссылках будет IP сервера.';
+    }
+}
+
+async function loadProxySettings() {
+    try {
+        const s = await apiJson('/api/proxy/settings');
+        proxyState.settings = s;
+        const portEl = document.getElementById('proxyPortInput');
+        const typeEl = document.getElementById('proxyLinkHostType');
+        const domEl = document.getElementById('proxyLinkDomain');
+        if (portEl && s.port) portEl.value = s.port;
+        if (typeEl) typeEl.value = s.hostType || 'ip';
+        if (domEl) domEl.value = s.domain || s.detectedDomain || '';
+        const portField = document.getElementById('proxyPortField');
+        if (portField) portField.style.display = proxyState.status && proxyState.status.backend === 'telemt' ? '' : 'none';
+        proxyLinkTypeChanged();
+    } catch (e) { /* карточка настроек не критична */ }
+}
+
+async function saveProxySettings() {
+    const typeEl = document.getElementById('proxyLinkHostType');
+    const domEl = document.getElementById('proxyLinkDomain');
+    const portEl = document.getElementById('proxyPortInput');
+    const hostType = typeEl ? typeEl.value : 'ip';
+    const domain = domEl ? domEl.value.trim() : '';
+    if (hostType === 'domain' && !/^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/.test(domain)) {
+        toast('Укажите домен', 'error', 'Для ссылок выбран домен — введите его.');
+        return;
+    }
+    const body = { hostType, domain: hostType === 'domain' ? domain : '' };
+    const currentPort = Number(proxyState.settings && proxyState.settings.port) || 0;
+    const nextPort = portEl ? Number(portEl.value) : 0;
+    if (nextPort && nextPort !== currentPort) {
+        if (!confirm(`Сменить порт прокси на ${nextPort}? Служба Telemt будет перезапущена.`)) return;
+        body.port = nextPort;
+    }
+    try {
+        await apiJson('/api/proxy/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        toast('Настройки прокси применены', 'success');
+        await loadProxyTab(true);
+        await loadProxySettings();
+    } catch (e) {
+        toast('Не удалось применить настройки', 'error', e.message);
+    }
 }
 
 function proxyFmtUptime(seconds) {

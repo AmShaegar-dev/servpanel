@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.30">
+    <meta name="panel-version" content="3.0.31">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1280,8 +1280,36 @@
                         <button class="btn-primary" onclick="openProxyUserModal()">＋ Добавить пользователя</button>
                         <button class="btn-dark" onclick="loadProxyTab(true)">↻ Обновить</button>
                         <button class="btn-dark" onclick="proxyRestart()">⟳ Перезапустить прокси</button>
-                        <button class="btn-dark" onclick="proxyRotateKey()">🔑 Выдать ключ API</button>
+                        <button class="btn-dark" id="proxyRotateKeyBtn" onclick="proxyRotateKey()">🔑 Выдать ключ API</button>
                         <button class="btn-dark" onclick="proxyDiag()">🩺 Диагностика</button>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Подключение клиентов</h3>
+                            <p>Порт MTProto и адрес сервера в ссылках <code>tg://</code>: IP или домен.</p>
+                        </div>
+                    </div>
+                    <div class="wizard-grid">
+                        <label class="field" id="proxyPortField"><span>Порт прокси</span>
+                            <input id="proxyPortInput" type="number" min="1" max="65535" placeholder="443">
+                        </label>
+                        <label class="field"><span>Адрес в ссылках</span>
+                            <select id="proxyLinkHostType" onchange="proxyLinkTypeChanged()">
+                                <option value="ip">IP</option>
+                                <option value="domain">Домен</option>
+                            </select>
+                        </label>
+                        <label class="field" id="proxyLinkDomainWrap" style="display:none;"><span>Домен</span>
+                            <input id="proxyLinkDomain" placeholder="vpn.example.com" autocomplete="off">
+                        </label>
+                    </div>
+                    <div id="proxyLinkHint" class="sub-text" style="margin-top:8px;"></div>
+                    <div class="controls-row" style="flex-wrap:wrap; margin-top:12px;">
+                        <button class="btn-primary" onclick="saveProxySettings()">Применить</button>
+                        <button class="btn-dark" onclick="loadProxySettings()">↻ Обновить</button>
                     </div>
                 </div>
 

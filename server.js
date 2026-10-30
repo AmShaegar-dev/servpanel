@@ -7901,6 +7901,145 @@ app.get('/api/install/state', checkAuth, (req, res) => {
     } catch (e) { res.json({ active: false }); }
 });
 
+// Настройки ссылок MTProto: IP или домен, и порт Telemt.
+const PROXY_SETTINGS_FILE = path.join(DATA_DIR, '.proxy_settings.json');
+
+function readProxySettings() {
+    try {
+        const raw = JSON.parse(fs.readFileSync(PROXY_SETTINGS_FILE, 'utf8'));
+        return {
+            hostType: raw.hostType === 'domain' ? 'domain' : 'ip',
+            domain: typeof raw.domain === 'string' ? raw.domain.trim() : ''
+        };
+    } catch (e) {
+        return { hostType: 'ip', domain: '' };
+    }
+}
+
+function writeProxySettings(value) {
+    const data = {
+        hostType: value.hostType === 'domain' ? 'domain' : 'ip',
+        domain: String(value.domain || '').trim()
+    };
+    fs.writeFileSync(PROXY_SETTINGS_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+    return data;
+}
+
+function proxyLinkHost(settings) {
+    if (!settings || settings.hostType !== 'domain') return '';
+    const domain = String(settings.domain || '').trim() || domainInfo().domain;
+    return domain && HOST_RE.test(domain) ? domain : '';
+}
+
+function rewriteProxyLink(link, host) {
+    if (!host) return link;
+    return String(link).replace(/([?&]server=)[^&]*/i, `$1${encodeURIComponent(host)}`);
+}
+
+function rewriteProxyLinkPort(link, port) {
+    if (!port) return link;
+    return String(link).replace(/([?&]port=)\d+/i, `$1${port}`);
+}
+
+function rewriteProxyLinks(links, settings) {
+    const host = proxyLinkHost(settings);
+    return (Array.isArray(links) ? links : []).map(link => rewriteProxyLink(link, host));
+}
+
+function telemtConfigPort(text) {
+    let section = '';
+    for (const line of String(text || '').split(/\r?\n/)) {
+        const t = line.trim();
+        if (/^\[/.test(t)) { section = t.replace(/^\[|\]$/g, ''); continue; }
+        if (section === 'server') {
+            const m = t.match(/^port\s*=\s*(\d{1,5})/);
+            if (m) return Number(m[1]);
+        }
+    }
+    return null;
+}
+
+function setTelemtConfigPort(text, port) {
+    const lines = String(text || '').split(/\r?\n/);
+    let section = '';
+    let done = false;
+    for (let i = 0; i < lines.length; i++) {
+        const t = lines[i].trim();
+        if (/^\[/.test(t)) { section = t.replace(/^\[|\]$/g, ''); continue; }
+        if (section === 'server' && /^\s*port\s*=/.test(lines[i])) {
+            lines[i] = lines[i].replace(/^(\s*port\s*=\s*)\d+/, `$1${port}`);
+            done = true;
+            break;
+        }
+    }
+    if (!done) {
+        const idx = lines.findIndex(line => /^\s*\[server\]\s*$/.test(line));
+        if (idx >= 0) lines.splice(idx + 1, 0, `port = ${port}`);
+    }
+    return lines.join('\n');
+}
+
+app.get('/api/proxy/settings', checkAuth, (req, res) => {
+    const settings = readProxySettings();
+    const cfg = proxyUsers.configPath();
+    let port = null;
+    try { if (cfg) port = telemtConfigPort(fs.readFileSync(cfg, 'utf8')); } catch (e) { /* ignore */ }
+    const detected = domainInfo();
+    res.json({
+        ...settings,
+        port,
+        detectedDomain: detected.domain,
+        detectedSource: detected.source
+    });
+});
+
+app.post('/api/proxy/settings', checkAuth, requireAdmin, async (req, res) => {
+    const data = req.body || {};
+    const hostType = data.hostType === 'domain' ? 'domain' : 'ip';
+    const domain = String(data.domain || '').trim();
+    if (hostType === 'domain' && domain && !HOST_RE.test(domain)) {
+        return res.status(400).json({ error: 'Некорректный домен для ссылок' });
+    }
+    let port = null;
+    if (data.port !== undefined && data.port !== null && data.port !== '') {
+        port = Number(data.port);
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+            return res.status(400).json({ error: 'Некорректный порт' });
+        }
+    }
+    try {
+        let oldPort = null;
+        let changedPort = false;
+        if (port !== null) {
+            const detected = await proxyUsers.detect(true);
+            if (detected.backend !== 'telemt') {
+                return res.status(400).json({ error: 'Смена порта доступна только для Telemt' });
+            }
+            const cfg = proxyUsers.configPath();
+            if (!cfg) return res.status(400).json({ error: 'Конфиг telemt не найден' });
+            const text = fs.readFileSync(cfg, 'utf8');
+            oldPort = telemtConfigPort(text);
+            if (oldPort !== port) {
+                const next = setTelemtConfigPort(text, port);
+                if (next === text) return res.status(500).json({ error: 'Не удалось изменить порт в конфиге' });
+                fs.writeFileSync(cfg, next);
+                try {
+                    sh('systemctl', ['restart', 'telemt'], { timeout: 30000 });
+                } catch (e) {
+                    return res.status(500).json({ error: 'Порт изменён, но служба не перезапустилась: ' + e.message });
+                }
+                try { sh('ufw', ['allow', `${port}/tcp`], { timeout: 15000 }); } catch (e) { /* ignore */ }
+                changedPort = true;
+            }
+        }
+        const saved = writeProxySettings({ hostType, domain });
+        auditLog(req, `Прокси: настройки (${saved.hostType}${saved.domain ? ', ' + saved.domain : ''}${changedPort ? ', порт ' + port : ''})`);
+        res.json({ success: true, ...saved, port: port === null ? oldPort : port, changedPort });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось сохранить настройки: ' + e.message });
+    }
+});
+
 // Ссылки Telemt/MTPROTO, сохранённые установщиком MEKO.
 app.get('/api/mtproto/links', checkAuth, (req, res) => {
     const file = '/root/mtproto_links.txt';
@@ -7910,7 +8049,15 @@ app.get('/api/mtproto/links', checkAuth, (req, res) => {
             .split(/\r?\n/)
             .map(s => s.trim())
             .filter(s => /^(tg:\/\/|https:\/\/)/.test(s));
-        res.json({ links });
+        const settings = readProxySettings();
+        const cfg = proxyUsers.configPath();
+        let port = null;
+        try { if (cfg) port = telemtConfigPort(fs.readFileSync(cfg, 'utf8')); } catch (e) { /* ignore */ }
+        res.json({
+            links: rewriteProxyLinks(links, settings).map(link => rewriteProxyLinkPort(link, port)),
+            hostType: settings.hostType,
+            port
+        });
     } catch (e) {
         res.status(500).json({ error: 'Не удалось прочитать ссылки MTProto' });
     }
@@ -8124,12 +8271,16 @@ app.get('/api/proxy/users/:name/links', checkAuth, async (req, res) => {
                 if (item && item.link) flat.push(item.link);
             }
         }
-        const unique = [...new Set(flat.filter(Boolean))];
+        const unique = rewriteProxyLinks([...new Set(flat.filter(Boolean))], readProxySettings());
+        const cfg = proxyUsers.configPath();
+        let port = null;
+        try { if (cfg) port = telemtConfigPort(fs.readFileSync(cfg, 'utf8')); } catch (e) { /* ignore */ }
+        const linksWithPort = unique.map(link => rewriteProxyLinkPort(link, port));
         let qr = '';
-        if (unique.length) {
-            try { qr = await qrDataUrl(unique[0]); } catch (e) { qr = ''; }
+        if (linksWithPort.length) {
+            try { qr = await qrDataUrl(linksWithPort[0]); } catch (e) { qr = ''; }
         }
-        res.json({ username: name, links: unique, qr });
+        res.json({ username: name, links: linksWithPort, qr });
     } catch (e) { proxyError(res, e); }
 });
 
@@ -8145,6 +8296,12 @@ app.post('/api/proxy/restart', checkAuth, requireAdmin, async (req, res) => {
 // панель выдаёт новый ключ и сохраняет его у себя.
 app.post('/api/proxy/api-key', checkAuth, requireAdmin, async (req, res) => {
     try {
+        const detected = await proxyUsers.detect(true);
+        if (detected.backend !== 'mtproxyl') {
+            return res.status(400).json({
+                error: 'Ключ API нужен только для MTProxyL. Telemt работает через локальный API без ключа.'
+            });
+        }
         const result = proxyUsers.rotatePanelKey();
         auditLog(req, 'Прокси: выдан новый ключ API MTProxyL');
         res.json(result);
