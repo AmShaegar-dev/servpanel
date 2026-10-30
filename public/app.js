@@ -1507,7 +1507,24 @@ async function loadCascadeStatus(manual) {
         const yes = v => v ? '<span class="val-rx">да</span>' : '<span class="val-tx">нет</span>';
         const hs = d.handshakeAgo === null || d.handshakeAgo === undefined
             ? '<span class="val-tx">нет связи</span>'
-            : `<span class="${d.handshakeAgo < 150 ? 'val-rx' : 'val-tx'}">${d.handshakeAgo} сек. назад</span>`;
+            : `<span class="${d.handshakeAgo < 180 ? 'val-rx' : 'val-tx'}">${d.handshakeAgo} сек. назад</span>`;
+        if (d.mode === 'exit') {
+            box.innerHTML = `
+                <div style="font-size:15px; font-weight:bold; color:${d.color}; margin-bottom:12px;">${d.text}</div>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; font-size:13px;">
+                    <div>Пир <code>ru_host</code>: ${yes(d.configured)}</div>
+                    <div>Вход RU: <code>${esc(d.entryEndpoint || '—')}</code></div>
+                    <div>Рукопожатие с RU: ${hs}</div>
+                    <div>Трафик через EU: <b>${formatBytes(d.traffic || 0)}</b></div>
+                    <div>AllowedIPs: <code>${esc((d.entryPeer && d.entryPeer.allowedIps) || '—')}</code></div>
+                    <div>Роль сервера: <b>EU (выход)</b></div>
+                </div>
+                <div class="wizard-note" style="margin-top:10px; font-size:12px;">
+                    Каскад настраивается с сервера-входа (RU). Здесь показывается состояние пира <code>ru_host</code>:
+                    подключён ли вход и когда было последнее рукопожатие.
+                </div>`;
+            return;
+        }
         box.innerHTML = `
             <div style="font-size:15px; font-weight:bold; color:${d.color}; margin-bottom:12px;">${d.text}</div>
             <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; font-size:13px;">

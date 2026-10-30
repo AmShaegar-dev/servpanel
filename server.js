@@ -2123,6 +2123,33 @@ app.post('/api/notify/test', checkAuth, requireAdmin, async (req, res) => {
 // --- Здоровье каскада ---
 function cascadeHealth() {
     const d = cascadeDetails();
+    if (d.mode === 'exit') {
+        const handshake = d.handshakeAgo !== null && d.handshakeAgo < 180;
+        return {
+            ok: !!d.configured && handshake,
+            checks: {
+                config: !!d.configured,
+                tunnel: d.tunnelActive,
+                handshake,
+                timer: true,
+                rule: true,
+                table: true,
+                ipset: true,
+                role: true,
+                endpoint: true
+            },
+            details: {
+                role: 'eu',
+                expectedRole: 'eu',
+                endpoint: d.entryEndpoint || '',
+                handshakeAgo: d.handshakeAgo,
+                traffic: d.traffic || 0,
+                peer: d.entryPeer,
+                configPath: d.confPath
+            },
+            checkedAt: new Date().toISOString()
+        };
+    }
     const checks = {
         config: !!d.configured,
         tunnel: d.tunnelActive,
@@ -2400,7 +2427,76 @@ app.get('/api/backup/encrypted', checkAuth, requireAdmin, (req, res) => {
 // ---------------------------------------------------------------------------
 // Каскад: статус
 // ---------------------------------------------------------------------------
+// На EU каскад — это пир ru_host в awg0.conf, а не awg1. Ищем его по
+// комментарию #_Name = ru_host (его пишет manage_amneziawg.sh) или по
+// адресу 172.16.61.4/32.
+function euCascadePeer(confText) {
+    const blocks = String(confText || '').split(/^\s*\[Peer\]\s*$/mi).slice(1);
+    for (const block of blocks) {
+        const name = (block.match(/^#_Name\s*=\s*(.+)$/mi) || [])[1];
+        const pub = (block.match(/^PublicKey\s*=\s*(.+)$/mi) || [])[1];
+        const allowed = (block.match(/^AllowedIPs\s*=\s*(.+)$/mi) || [])[1];
+        if (!pub) continue;
+        const n = (name || '').trim();
+        const a = (allowed || '').trim();
+        if (n === 'ru_host' || /(^|,\s*)172\.16\.61\.4\/32($|,)/.test(a)) {
+            return { name: n || 'ru_host', publicKey: pub.trim(), allowedIps: a };
+        }
+    }
+    return null;
+}
+
+function cascadeDetailsEu() {
+    const confPath = path.join(AWG_CONF_DIR, 'awg0.conf');
+    const text = readTextSafe(confPath);
+    const peer = text ? euCascadePeer(text) : null;
+    const out = {
+        configured: !!peer,
+        mode: 'exit',
+        confPath,
+        role: 'eu',
+        entryPeer: peer,
+        entryEndpoint: '',
+        traffic: 0,
+        tunnelActive: false,
+        timerActive: false,
+        endpoint: '',
+        endpointSource: '',
+        ifaces: [],
+        ipsetCount: 0,
+        ruleExists: false,
+        tableRoute: '',
+        handshakeAgo: null,
+        lastRun: null
+    };
+    if (!peer) return out;
+    try {
+        const hs = shTry('sudo', ['awg', 'show', 'awg0', 'latest-handshakes']).trim();
+        const line = hs.split('\n').find(l => l.split('\t')[0] === peer.publicKey);
+        const ts = line ? parseInt(line.split('\t')[1] || '0', 10) : 0;
+        if (ts > 0) out.handshakeAgo = Math.floor(Date.now() / 1000) - ts;
+    } catch (e) { /* ignore */ }
+    try {
+        const ep = shTry('sudo', ['awg', 'show', 'awg0', 'endpoints']).trim();
+        const line = ep.split('\n').find(l => l.split('\t')[0] === peer.publicKey);
+        if (line) out.entryEndpoint = line.split('\t')[1] || '';
+    } catch (e) { /* ignore */ }
+    try {
+        const tr = shTry('sudo', ['awg', 'show', 'awg0', 'transfer']).trim();
+        const line = tr.split('\n').find(l => l.split('\t')[0] === peer.publicKey);
+        if (line) {
+            const parts = line.split('\t');
+            out.traffic = (parseInt(parts[1], 10) || 0) + (parseInt(parts[2], 10) || 0);
+        }
+    } catch (e) { /* ignore */ }
+    out.tunnelActive = out.handshakeAgo !== null && out.handshakeAgo < 180;
+    out.endpoint = out.entryEndpoint;
+    out.ifaces = ['ru_host'];
+    return out;
+}
+
 function cascadeDetails() {
+    if (cascadeRole() === 'eu') return cascadeDetailsEu();
     const conf = existingCascadeConf();
     if (TEST_MODE) {
         // В тестах не трогаем systemd/iptables и не шумим ошибками sudo
@@ -2476,6 +2572,21 @@ function cascadeDetails() {
 app.get('/api/cascade/status', checkAuth, (req, res) => {
     try {
         const d = cascadeDetails();
+        if (d.mode === 'exit') {
+            let text = 'Каскад не настроен: клиент ru_host на EU не найден';
+            let color = '#ff4c4c';
+            if (d.configured) {
+                if (d.handshakeAgo === null) { text = 'Каскад: вход RU не подключён (нет рукопожатия)'; color = '#ffa500'; }
+                else if (d.handshakeAgo < 180) { text = `Каскад: вход RU подключён (обмен ${d.handshakeAgo} сек. назад)`; color = '#4caf50'; }
+                else { text = `Каскад: вход RU потерян (${d.handshakeAgo} сек. назад)`; color = '#ff4c4c'; }
+            }
+            return res.json({
+                ...d,
+                active: d.configured && d.handshakeAgo !== null && d.handshakeAgo < 180,
+                text,
+                color
+            });
+        }
         let text = 'Туннель EU не настроен';
         let color = '#ff4c4c';
         if (d.configured) {
