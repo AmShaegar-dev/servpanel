@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.36">
+    <meta name="panel-version" content="3.0.37">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -72,15 +72,18 @@
                     </button>
                 </div>
                 <div class="nav-group">
+                    <div class="nav-label">Установка</div>
+                    <button class="nav-item" data-tab="tab-install" data-title="Установка" onclick="switchTab('tab-install', this)" id="navInstall">
+                        <span class="nav-ico">↓</span><span>Установка</span>
+                    </button>
+                </div>
+                <div class="nav-group">
                     <div class="nav-label">Подключение</div>
                     <button class="nav-item" data-tab="tab-network" data-title="Сеть и фаервол" onclick="switchTab('tab-network', this)" id="navNetwork">
                         <span class="nav-ico">⌁</span><span>Сеть и порты</span>
                     </button>
                     <button class="nav-item" data-tab="tab-cascade" data-title="Каскад" onclick="switchTab('tab-cascade', this)" id="navCascade">
                         <span class="nav-ico">⇄</span><span>Каскад RU → EU</span>
-                    </button>
-                    <button class="nav-item" data-tab="tab-install" data-title="AmneziaWG" onclick="switchTab('tab-install', this)" id="navInstall">
-                        <span class="nav-ico">↓</span><span>AmneziaWG</span>
                     </button>
                     <button class="nav-item" data-tab="tab-obf" data-title="Обфускация" onclick="switchTab('tab-obf', this)" id="navObf">
                         <span class="nav-ico">✦</span><span>Обфускация</span><span class="nav-dot" id="navObfDot"></span>
@@ -1060,19 +1063,6 @@
                         <div>
                             <h3>Компоненты</h3>
                             <p>Что установлено на сервере. Удаление доступно у каждого компонента — панель остановит службы, уберёт конфиги и закроет порты в UFW.</p>
-                        </div>
-                        <button class="btn btn-dark" onclick="loadModules(true)">↻ Проверить</button>
-                    </div>
-                    <div id="modulesGrid" class="stats-cards" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));">
-                        <div class="card" style="margin-bottom:0;"><div style="color:var(--text-muted);">Проверка компонентов…</div></div>
-                    </div>
-                </div>
-
-                <div class="card" style="margin-top: 20px;">
-                    <div class="card-head">
-                        <div>
-                            <h3>Компоненты</h3>
-                            <p>Что установлено на сервере. Удаление доступно у каждого компонента: панель остановит службы, уберёт конфиги и закроет порты в UFW.</p>
                         </div>
                         <button class="btn btn-dark" onclick="loadModules(true)">↻ Проверить</button>
                     </div>
