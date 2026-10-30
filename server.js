@@ -5136,6 +5136,7 @@ app.get('/api/clients/:name/key', checkAuth, async (req, res) => {
         let uri = '';
         let conf = '';
         const confPath = path.join(AWG_DIR, name + '.conf');
+        try { syncClient31Params(name); } catch (e) { /* ignore */ }
         try { if (fs.existsSync(confPath)) conf = sh('sudo', ['cat', confPath]); } catch (e) { conf = ''; }
         if (conf) {
             const domain = domainInfo().domain;
@@ -5891,12 +5892,45 @@ function reloadAwgInterface(iface) {
         : { ok: false, state, error: `интерфейс ${iface} не активен (${state})` };
 }
 
+function syncClient31Params(onlyName) {
+    const serverConf = serverConfPath();
+    if (!serverConf) return;
+    const text = readTextSafe(serverConf);
+    const keys = ['HeaderProtectionKey', 'ContentPaddingAddition', 'RekeyAfterTime', 'RekeyTimeout',
+        'RejectAfterTime', 'KeepaliveTimeout', 'MaxHandshakeAttempts', 'RandomTrailers', 'DisableCookies'];
+    const vals = {};
+    for (const key of keys) {
+        const m = text.match(new RegExp('^' + key + '\\s*=\\s*(.*)$', 'm'));
+        if (m && m[1].trim()) vals[key] = m[1].trim();
+    }
+    if (!Object.keys(vals).length) return;
+    let files = [];
+    try {
+        files = fs.readdirSync(AWG_DIR)
+            .filter(f => f.endsWith('.conf') && (!onlyName || f === onlyName + '.conf'))
+            .map(f => path.join(AWG_DIR, f));
+    } catch (e) { return; }
+    for (const file of files) {
+        try {
+            let conf = fs.readFileSync(file, 'utf8');
+            let changed = false;
+            for (const key of Object.keys(vals)) {
+                if (new RegExp('^' + key + '\\s*=', 'm').test(conf)) continue;
+                conf = conf.replace(/^\[Peer\]/m, `${key} = ${vals[key]}\n\n[Peer]`);
+                changed = true;
+            }
+            if (changed) fs.writeFileSync(file, conf, { mode: 0o600 });
+        } catch (e) { /* пропускаем клиента */ }
+    }
+}
+
 function regenClientsSafe() {
     if (DEMO_MODE || TEST_MODE || process.platform === 'win32') {
         return { regenerated: 3, simulated: true };
     }
     const out = sh('sudo', ['bash', MANAGE, 'regen', '--json'], { maxBuffer: 32 * 1024 * 1024 });
     const data = JSON.parse(out);
+    syncClient31Params();
     return { regenerated: data.regenerated, simulated: false };
 }
 
