@@ -524,7 +524,7 @@ curl https://panel.example.com:9101/health
 
 ## 📂 Где и как лежат файлы (Карта путей на сервере)
 
-### 1. Файлы Веб-панели (`FileManager 4.0`)
+### 1. Файлы веб-панели
 * `/root/servpanel/` — Корневая рабочая папка веб-панели.
 * `/root/servpanel/server.js` — Бэкенд-сервер на Node.js (Express).
 * `/root/servpanel/public/index.html` — Фронтенд панели (HTML/CSS/JS, графики Chart.js).
@@ -970,6 +970,5 @@ npm test
 ---
 
 ## 📄 Лицензия и Благодарности
-* Разработка панели и интеграция модулей: **FileManager 4.0**.
 * В основе серверного ядра используется модифицированный стек установщика [bivlked/amneziawg-installer](https://github.com/bivlked/amneziawg-installer) и протокол [AmneziaWG](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module).
 * Лицензия: **MIT**.
