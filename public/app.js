@@ -5845,6 +5845,8 @@ async function loadProxyTab(force) {
     }
     loadProxyBot();
     loadProxySettings();
+    loadProxyFix();
+    loadProxyChecklist();
 }
 
 function renderProxyStatus(st) {
@@ -5915,9 +5917,11 @@ async function loadProxySettings() {
         const portEl = document.getElementById('proxyPortInput');
         const typeEl = document.getElementById('proxyLinkHostType');
         const domEl = document.getElementById('proxyLinkDomain');
+        const sniEl = document.getElementById('proxySniInput');
         if (portEl && s.port) portEl.value = s.port;
         if (typeEl) typeEl.value = s.hostType || 'ip';
         if (domEl) domEl.value = s.domain || s.detectedDomain || '';
+        if (sniEl && s.sni) sniEl.value = s.sni;
         const portField = document.getElementById('proxyPortField');
         if (portField) portField.style.display = proxyState.status && proxyState.status.backend === 'telemt' ? '' : 'none';
         proxyLinkTypeChanged();
@@ -5928,10 +5932,16 @@ async function saveProxySettings() {
     const typeEl = document.getElementById('proxyLinkHostType');
     const domEl = document.getElementById('proxyLinkDomain');
     const portEl = document.getElementById('proxyPortInput');
+    const sniEl = document.getElementById('proxySniInput');
     const hostType = typeEl ? typeEl.value : 'ip';
     const domain = domEl ? domEl.value.trim() : '';
+    const sni = sniEl ? sniEl.value.trim() : '';
     if (hostType === 'domain' && !/^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/.test(domain)) {
         toast('Укажите домен', 'error', 'Для ссылок выбран домен — введите его.');
+        return;
+    }
+    if (sni && !/^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/.test(sni)) {
+        toast('Неверный SNI', 'error', 'SNI — домен, например ozon.ru.');
         return;
     }
     const body = { hostType, domain: hostType === 'domain' ? domain : '' };
@@ -5940,6 +5950,11 @@ async function saveProxySettings() {
     if (nextPort && nextPort !== currentPort) {
         if (!confirm(`Сменить порт прокси на ${nextPort}? Служба Telemt будет перезапущена.`)) return;
         body.port = nextPort;
+    }
+    const currentSni = String((proxyState.settings && proxyState.settings.sni) || '');
+    if (sni && sni !== currentSni) {
+        if (!confirm(`Сменить SNI на ${sni}? Служба Telemt будет перезапущена, ссылки пересоберутся.`)) return;
+        body.sni = sni;
     }
     try {
         await apiJson('/api/proxy/settings', {
@@ -5952,6 +5967,82 @@ async function saveProxySettings() {
         await loadProxySettings();
     } catch (e) {
         toast('Не удалось применить настройки', 'error', e.message);
+    }
+}
+
+async function loadProxyFix() {
+    const badge = document.getElementById('proxyFixBadge');
+    const info = document.getElementById('proxyFixInfo');
+    const typeEl = document.getElementById('proxyFixType');
+    const portEl = document.getElementById('proxyFixPort');
+    const labels = {
+        v3: 'v3 iptables', v2: 'v2 iptables',
+        'v3-nft': 'v3 nftables', 'v2-nft': 'v2 nftables',
+        v4: 'v4 Zapret2', iptables: 'iptables', none: 'не установлен'
+    };
+    try {
+        const d = await apiJson('/api/proxy/fix');
+        proxyState.fix = d;
+        if (badge) {
+            badge.className = 'badge ' + (d.installed ? 'badge-good' : 'badge-muted');
+            badge.innerText = labels[d.type] || d.type || 'не установлен';
+        }
+        if (info) {
+            const services = d.services || {};
+            const active = [services.synfix && 'mtpr-synfix', services.nftSynfix && 'mtpr-nft-synfix', services.zapret2 && 'mtpr-zapret2'].filter(Boolean);
+            info.innerText = d.installed
+                ? 'Тип: ' + (labels[d.type] || d.type) + (d.port ? ' · порт ' + d.port : '') + (active.length ? ' · ' + active.join(', ') : '')
+                : 'Фикс не найден. Установите MEKO-фикс или выберите тип ниже.';
+        }
+        if (typeEl) {
+            const map = { v3: 'v3', v2: 'v2', 'v3-nft': 'nft', 'v2-nft': 'nft', v4: 'v4' };
+            if (map[d.type]) typeEl.value = map[d.type];
+        }
+        if (portEl && !portEl.value) portEl.value = d.port || (proxyState.settings && proxyState.settings.port) || 443;
+    } catch (e) {
+        if (info) info.innerText = e.message;
+    }
+}
+
+async function installProxyFix() {
+    const typeEl = document.getElementById('proxyFixType');
+    const portEl = document.getElementById('proxyFixPort');
+    const result = document.getElementById('proxyFixResult');
+    const type = typeEl ? typeEl.value : 'v3';
+    const port = portEl ? Number(portEl.value) : 0;
+    const labels = { v3: 'v3 iptables', v2: 'v2 iptables', nft: 'v3 nftables', v4: 'v4 Zapret2' };
+    if (!confirm(`Установить фикс ${labels[type] || type}${port ? ' на порт ' + port : ''}? Правила файрвола будут изменены.`)) return;
+    if (result) result.innerText = 'Устанавливаю… это может занять минуту.';
+    try {
+        const d = await apiJson('/api/proxy/fix', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type, port })
+        });
+        if (result) result.innerText = d.output || 'Готово';
+        toast('Фикс установлен', 'success', labels[type] || type);
+        await loadProxyFix();
+        await loadProxyChecklist();
+    } catch (e) {
+        if (result) result.innerText = e.message + (e.data && e.data.output ? '\n' + e.data.output : '');
+        toast('Не удалось установить фикс', 'error', e.message);
+    }
+}
+
+async function loadProxyChecklist() {
+    const box = document.getElementById('proxyChecklist');
+    if (!box) return;
+    try {
+        const d = await apiJson('/api/proxy/checklist');
+        const steps = Array.isArray(d.steps) ? d.steps : [];
+        box.innerHTML = steps.length
+            ? steps.map(s => `<div class="checklist-item">
+                <span class="checklist-ico ${s.ok ? 'checklist-ok' : 'checklist-err'}">${s.ok ? '✓' : '✗'}</span>
+                <div><b class="${s.ok ? 'checklist-ok' : 'checklist-err'}">${esc(s.title)}</b>
+                <div class="checklist-desc">${esc(s.detail || '')}</div></div>
+            </div>`).join('')
+            : '<div class="checklist-item checklist-muted"><span class="checklist-ico">○</span><div>Нет данных</div></div>';
+    } catch (e) {
+        box.innerHTML = `<div class="checklist-item checklist-err"><span class="checklist-ico">✗</span><div>${esc(e.message)}</div></div>`;
     }
 }
 

@@ -8048,6 +8048,73 @@ function telemtConfigPort(text) {
     return null;
 }
 
+function telemtConfigSni(text) {
+    let section = '';
+    for (const line of String(text || '').split(/\r?\n/)) {
+        const t = line.trim();
+        if (/^\[/.test(t)) { section = t.replace(/^\[|\]$/g, ''); continue; }
+        if (section === 'censorship') {
+            const m = t.match(/^tls_domain\s*=\s*"([^"]+)"/);
+            if (m) return m[1];
+        }
+    }
+    return '';
+}
+
+function setTelemtConfigSni(text, sni) {
+    const lines = String(text || '').split(/\r?\n/);
+    let section = '';
+    let done = false;
+    for (let i = 0; i < lines.length; i++) {
+        const t = lines[i].trim();
+        if (/^\[/.test(t)) { section = t.replace(/^\[|\]$/g, ''); continue; }
+        if (section === 'censorship' && /^\s*tls_domain\s*=/.test(lines[i])) {
+            lines[i] = `tls_domain = "${sni}"`;
+            done = true;
+            break;
+        }
+    }
+    if (!done) {
+        const idx = lines.findIndex(line => /^\s*\[censorship\]\s*$/.test(line));
+        if (idx >= 0) lines.splice(idx + 1, 0, `tls_domain = "${sni}"`);
+        else lines.push('', '[censorship]', `tls_domain = "${sni}"`);
+    }
+    return lines.join('\n');
+}
+
+function proxyFixStatus() {
+    const run = (cmd) => {
+        try { return String(sh('bash', ['-c', cmd], { timeout: 15000 }) || ''); }
+        catch (e) { return ''; }
+    };
+    const activeSyn = run('systemctl is-active mtpr-synfix.service 2>/dev/null').trim() === 'active';
+    const activeNft = run('systemctl is-active mtpr-nft-synfix.service 2>/dev/null').trim() === 'active';
+    const activeZapret = run('systemctl is-active mtpr-zapret2.service 2>/dev/null').trim() === 'active';
+    const chain = run('iptables -S MTPR_SYNFIX 2>/dev/null');
+    const nft = run('nft list table inet mtpr_synfix 2>/dev/null');
+    const zapretNft = run('nft list table ip MTProto 2>/dev/null');
+    const settings = readTextSafe('/opt/mtpr-simple/settings.conf');
+    let type = 'none';
+    if (activeZapret || zapretNft || /ZAPRET2_APPLIED='true'/.test(settings)) type = 'v4';
+    else if (nft && /ios_accept/.test(nft)) type = 'v3-nft';
+    else if (nft && /classic_drop/.test(nft)) type = 'v2-nft';
+    else if (chain && /0x400/.test(chain)) type = 'v3';
+    else if (chain && /(ttl|length)/.test(chain)) type = 'v2';
+    else if (chain || activeSyn) type = 'iptables';
+    const port = readTextSafe('/opt/mtpr-simple/port').trim() || '';
+    return {
+        installed: type !== 'none',
+        type,
+        active: activeSyn || activeNft || activeZapret,
+        services: {
+            synfix: activeSyn,
+            nftSynfix: activeNft,
+            zapret2: activeZapret
+        },
+        port
+    };
+}
+
 function setTelemtConfigPort(text, port) {
     const lines = String(text || '').split(/\r?\n/);
     let section = '';
@@ -8072,11 +8139,19 @@ app.get('/api/proxy/settings', checkAuth, (req, res) => {
     const settings = readProxySettings();
     const cfg = proxyUsers.configPath();
     let port = null;
-    try { if (cfg) port = telemtConfigPort(fs.readFileSync(cfg, 'utf8')); } catch (e) { /* ignore */ }
+    let sni = '';
+    try {
+        if (cfg) {
+            const text = fs.readFileSync(cfg, 'utf8');
+            port = telemtConfigPort(text);
+            sni = telemtConfigSni(text);
+        }
+    } catch (e) { /* ignore */ }
     const detected = domainInfo();
     res.json({
         ...settings,
         port,
+        sni,
         detectedDomain: detected.domain,
         detectedSource: detected.source
     });
@@ -8096,28 +8171,44 @@ app.post('/api/proxy/settings', checkAuth, requireAdmin, async (req, res) => {
             return res.status(400).json({ error: 'Некорректный порт' });
         }
     }
+    const sni = String(data.sni || '').trim();
+    if (sni && !HOST_RE.test(sni)) {
+        return res.status(400).json({ error: 'Некорректный SNI-домен' });
+    }
     try {
         let oldPort = null;
+        let oldSni = '';
         let changedPort = false;
-        if (port !== null) {
+        let changedSni = false;
+        if (port !== null || sni) {
             const detected = await proxyUsers.detect(true);
             if (detected.backend !== 'telemt') {
-                return res.status(400).json({ error: 'Смена порта доступна только для Telemt' });
+                return res.status(400).json({ error: 'Порт и SNI меняются только для Telemt' });
             }
             const cfg = proxyUsers.configPath();
             if (!cfg) return res.status(400).json({ error: 'Конфиг telemt не найден' });
             const text = fs.readFileSync(cfg, 'utf8');
             oldPort = telemtConfigPort(text);
-            if (oldPort !== port) {
-                const next = setTelemtConfigPort(text, port);
-                if (next === text) return res.status(500).json({ error: 'Не удалось изменить порт в конфиге' });
+            oldSni = telemtConfigSni(text);
+            let next = text;
+            if (port !== null && oldPort !== port) {
+                next = setTelemtConfigPort(next, port);
+                changedPort = true;
+            }
+            if (sni && oldSni !== sni) {
+                next = setTelemtConfigSni(next, sni);
+                changedSni = true;
+            }
+            if (next !== text) {
                 fs.writeFileSync(cfg, next);
                 try {
                     sh('systemctl', ['restart', 'telemt'], { timeout: 30000 });
                 } catch (e) {
-                    return res.status(500).json({ error: 'Порт изменён, но служба не перезапустилась: ' + e.message });
+                    return res.status(500).json({ error: 'Настройки изменены, но служба не перезапустилась: ' + e.message });
                 }
-                try { sh('ufw', ['allow', `${port}/tcp`], { timeout: 15000 }); } catch (e) { /* ignore */ }
+                if (changedPort) {
+                    try { sh('ufw', ['allow', `${port}/tcp`], { timeout: 15000 }); } catch (e) { /* ignore */ }
+                }
                 for (let i = 0; i < 8; i++) {
                     await new Promise(resolve => setTimeout(resolve, 800));
                     try {
@@ -8125,26 +8216,139 @@ app.post('/api/proxy/settings', checkAuth, requireAdmin, async (req, res) => {
                         if (ready.backend === 'telemt' && !ready.reason) break;
                     } catch (e) { /* ещё поднимается */ }
                 }
-                changedPort = true;
             }
         }
         const saved = writeProxySettings({ hostType, domain });
-        auditLog(req, `Прокси: настройки (${saved.hostType}${saved.domain ? ', ' + saved.domain : ''}${changedPort ? ', порт ' + port : ''})`);
-        res.json({ success: true, ...saved, port: port === null ? oldPort : port, changedPort });
+        auditLog(req, `Прокси: настройки (${saved.hostType}${saved.domain ? ', ' + saved.domain : ''}${changedPort ? ', порт ' + port : ''}${changedSni ? ', SNI ' + sni : ''})`);
+        res.json({
+            success: true,
+            ...saved,
+            port: port === null ? oldPort : port,
+            sni: sni || oldSni,
+            changedPort,
+            changedSni
+        });
     } catch (e) {
         res.status(500).json({ error: 'Не удалось сохранить настройки: ' + e.message });
     }
 });
 
-// Ссылки Telemt/MTPROTO, сохранённые установщиком MEKO.
-app.get('/api/mtproto/links', checkAuth, (req, res) => {
+app.get('/api/proxy/fix', checkAuth, (req, res) => {
+    try { res.json(proxyFixStatus()); }
+    catch (e) { res.status(500).json({ error: 'Не удалось проверить фикс: ' + e.message }); }
+});
+
+app.post('/api/proxy/fix', checkAuth, requireAdmin, async (req, res) => {
+    const type = String((req.body && req.body.type) || '');
+    if (!['v2', 'v3', 'v4', 'nft'].includes(type)) {
+        return res.status(400).json({ error: 'Неизвестный тип фикса' });
+    }
+    const cfg = proxyUsers.configPath();
+    let port = req.body && req.body.port;
+    if (!isPort(port)) {
+        try { port = cfg ? telemtConfigPort(fs.readFileSync(cfg, 'utf8')) : null; }
+        catch (e) { port = null; }
+    }
+    port = port || 443;
+    const rules = '/opt/mtpr-simple/data/rules.sh';
+    if (!fs.existsSync(rules)) {
+        return res.status(400).json({ error: 'MEKO не установлен — фикс ставится через MEKO' });
+    }
+    let cmd;
+    if (type === 'v4') {
+        const zapret = '/opt/mtpr-simple/data/zapret2_fix.sh';
+        if (!fs.existsSync(zapret)) return res.status(400).json({ error: 'zapret2_fix.sh не найден' });
+        cmd = `source ${rules}; source ${zapret}; install_syn_fix -auto_install -port ${port} -type v4`;
+    } else {
+        cmd = `bash ${rules} -auto_install -port ${port} -type ${type}`;
+    }
+    try {
+        const out = sh('bash', ['-c', cmd], { timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
+        auditLog(req, `Прокси: фикс ${type} на порт ${port}`);
+        res.json({ success: true, type, port, output: String(out || '').slice(-4000), status: proxyFixStatus() });
+    } catch (e) {
+        res.status(500).json({
+            error: 'Не удалось установить фикс: ' + e.message,
+            output: String((e && (e.stdout || e.message)) || '').slice(-4000)
+        });
+    }
+});
+
+app.get('/api/proxy/checklist', checkAuth, async (req, res) => {
+    try {
+        const st = await proxyUsers.status().catch(e => ({ backend: 'none', error: e.message }));
+        const diag = await proxyUsers.diagnose().catch(() => ({ checks: [] }));
+        const fix = proxyFixStatus();
+        let users = [];
+        try { users = await proxyUsers.listUsers(); } catch (e) { /* нет API */ }
+        const cfg = proxyUsers.configPath();
+        const text = cfg ? readTextSafe(cfg) : '';
+        const port = telemtConfigPort(text);
+        const sni = telemtConfigSni(text);
+        let linkCount = 0;
+        if (users.length) {
+            const l = await proxyUsers.userLinks(users[0].username).catch(() => null);
+            if (l) {
+                for (const key of ['tls', 'secure', 'classic', 'web']) {
+                    if (Array.isArray(l[key])) linkCount += l[key].length;
+                }
+            }
+        }
+        const apiCheck = (diag.checks || []).find(c => /API/.test(c.name));
+        const steps = [
+            { key: 'engine', title: 'Движок', ok: !!st.backend && st.backend !== 'none', detail: st.backend || 'не найден' },
+            { key: 'service', title: 'Служба', ok: !!st.running, detail: st.running ? 'запущена' : 'не запущена' },
+            { key: 'port', title: 'Порт', ok: !!(port || st.port), detail: String(port || st.port || '—') },
+            { key: 'api', title: 'API движка', ok: !!(apiCheck && apiCheck.ok), detail: apiCheck ? apiCheck.detail : 'нет данных' },
+            { key: 'users', title: 'Пользователи', ok: users.length > 0, detail: String(users.length) },
+            { key: 'links', title: 'Ссылки', ok: linkCount > 0, detail: String(linkCount) },
+            { key: 'fix', title: 'Фикс', ok: fix.installed, detail: fix.installed ? fix.type : 'не установлен' }
+        ];
+        if (st.backend === 'mtproxyl') {
+            const keyFile = '/etc/mtproxyl-api/servpanel.key';
+            steps.splice(4, 0, {
+                key: 'key', title: 'Ключ API', ok: fs.existsSync(keyFile),
+                detail: fs.existsSync(keyFile) ? keyFile : 'не выдан'
+            });
+        }
+        if (st.backend === 'telemt' || sni) {
+            steps.push({ key: 'sni', title: 'SNI (FakeTLS)', ok: !!sni, detail: sni || 'не задан' });
+        }
+        res.json({ backend: st.backend, steps });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось собрать чек-лист: ' + e.message });
+    }
+});
+
+// Ссылки Telemt/MTPROTO: сначала живые из API движка, затем файл установщика.
+app.get('/api/mtproto/links', checkAuth, async (req, res) => {
     const file = '/root/mtproto_links.txt';
     try {
-        if (!fs.existsSync(file)) return res.json({ links: [] });
-        const links = fs.readFileSync(file, 'utf8')
-            .split(/\r?\n/)
-            .map(s => s.trim())
-            .filter(s => /^(tg:\/\/|https:\/\/)/.test(s));
+        let links = [];
+        try {
+            const detected = await proxyUsers.detect(true);
+            if (['telemt', 'mtproxyl', 'demo'].includes(detected.backend)) {
+                const users = await proxyUsers.listUsers();
+                const flat = [];
+                for (const user of users) {
+                    const l = await proxyUsers.userLinks(user.username).catch(() => null);
+                    if (!l) continue;
+                    for (const key of ['tls', 'secure', 'classic', 'web']) {
+                        if (Array.isArray(l[key])) flat.push(...l[key]);
+                    }
+                    if (Array.isArray(l.tls_domains)) {
+                        for (const item of l.tls_domains) if (item && item.link) flat.push(item.link);
+                    }
+                }
+                links = [...new Set(flat.filter(Boolean))];
+            }
+        } catch (e) { /* останется файл */ }
+        if (!links.length && fs.existsSync(file)) {
+            links = fs.readFileSync(file, 'utf8')
+                .split(/\r?\n/)
+                .map(s => s.trim())
+                .filter(s => /^(tg:\/\/|https:\/\/)/.test(s));
+        }
         const settings = readProxySettings();
         const cfg = proxyUsers.configPath();
         let port = null;

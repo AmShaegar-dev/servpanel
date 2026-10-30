@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.34">
+    <meta name="panel-version" content="3.0.35">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1302,6 +1302,8 @@
                     <div id="proxyStatusGrid" class="stats-cards" style="margin-bottom:14px;"></div>
                     <div id="proxyNotice" class="wizard-note info" style="display:none; margin-bottom:14px;"></div>
                     <div class="controls-row" style="flex-wrap:wrap;">
+                        <button class="btn-primary" onclick="openWizard('mtproto')">Установить MTProto (MEKO)</button>
+                        <button class="btn-dark" onclick="openMtproxylWizard()">Установить MTProxyL</button>
                         <button class="btn-primary" onclick="openProxyUserModal()">＋ Добавить пользователя</button>
                         <button class="btn-dark" onclick="loadProxyTab(true)">↻ Обновить</button>
                         <button class="btn-dark" onclick="proxyRestart()">⟳ Перезапустить прокси</button>
@@ -1330,12 +1332,55 @@
                         <label class="field" id="proxyLinkDomainWrap" style="display:none;"><span>Домен</span>
                             <input id="proxyLinkDomain" placeholder="vpn.example.com" autocomplete="off">
                         </label>
+                        <label class="field"><span>SNI (FakeTLS)</span>
+                            <input id="proxySniInput" placeholder="ozon.ru" autocomplete="off">
+                        </label>
                     </div>
                     <div id="proxyLinkHint" class="sub-text" style="margin-top:8px;"></div>
                     <div class="controls-row" style="flex-wrap:wrap; margin-top:12px;">
                         <button class="btn-primary" onclick="saveProxySettings()">Применить</button>
                         <button class="btn-dark" onclick="loadProxySettings()">↻ Обновить</button>
                     </div>
+                </div>
+
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Фикс MTProto</h3>
+                            <p>SYN-фикс MEKO: v3/v2 iptables, nftables или Zapret2. Панель покажет, что установлено, и даст сменить.</p>
+                        </div>
+                        <span id="proxyFixBadge" class="badge badge-muted">проверка…</span>
+                    </div>
+                    <div id="proxyFixInfo" class="sub-text" style="margin-bottom:10px;"></div>
+                    <div class="wizard-grid">
+                        <label class="field"><span>Тип фикса</span>
+                            <select id="proxyFixType">
+                                <option value="v3">v3 iptables (рекомендуется)</option>
+                                <option value="v2">v2 iptables</option>
+                                <option value="nft">v3 nftables</option>
+                                <option value="v4">v4 Zapret2</option>
+                            </select>
+                        </label>
+                        <label class="field"><span>Порт фикса</span>
+                            <input id="proxyFixPort" type="number" min="1" max="65535" placeholder="443">
+                        </label>
+                    </div>
+                    <div class="controls-row" style="flex-wrap:wrap; margin-top:12px;">
+                        <button class="btn-primary" onclick="installProxyFix()">Установить / сменить фикс</button>
+                        <button class="btn-dark" onclick="loadProxyFix()">↻ Обновить</button>
+                    </div>
+                    <div id="proxyFixResult" class="sub-text" style="margin-top:8px;"></div>
+                </div>
+
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Чек-лист MTProto</h3>
+                            <p>MEKO/Telemt и MTProxyL: движок, служба, API, пользователи, ссылки, фикс и SNI.</p>
+                        </div>
+                        <button class="btn-dark" onclick="loadProxyChecklist()">↻ Обновить</button>
+                    </div>
+                    <div id="proxyChecklist" class="checklist"><div class="checklist-item checklist-muted"><span class="checklist-ico">○</span><div>Загрузка…</div></div></div>
                 </div>
 
                 <div class="card">
