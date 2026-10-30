@@ -8104,26 +8104,43 @@ function proxyFixStatus() {
     const activeSyn = run('systemctl is-active mtpr-synfix.service 2>/dev/null').trim() === 'active';
     const activeNft = run('systemctl is-active mtpr-nft-synfix.service 2>/dev/null').trim() === 'active';
     const activeZapret = run('systemctl is-active mtpr-zapret2.service 2>/dev/null').trim() === 'active';
+    const activeMplSyn = run('systemctl is-active mtproxyl-syn-limit.service 2>/dev/null').trim() === 'active';
+    const activeMplZapret = run('systemctl is-active mtproxyl-zapret2.service 2>/dev/null').trim() === 'active';
     const chain = run('iptables -S MTPR_SYNFIX 2>/dev/null');
     const nft = run('nft list table inet mtpr_synfix 2>/dev/null');
     const zapretNft = run('nft list table ip MTProto 2>/dev/null');
+    const mplNft = run('nft list table inet mtproxyl_limit 2>/dev/null');
+    const mplZapretNft = run('nft list table ip MTProtoL 2>/dev/null');
+    const mplIos2 = run('nft list table inet mtproxyl_ios2 2>/dev/null');
     const settings = readTextSafe('/opt/mtpr-simple/settings.conf');
+    const mplSettings = readTextSafe('/opt/mtproxyl/nft-rules.conf');
     let type = 'none';
-    if (activeZapret || zapretNft || /ZAPRET2_APPLIED='true'/.test(settings)) type = 'v4';
+    if (activeZapret || zapretNft || /ZAPRET2_APPLIED='true'/.test(settings) ||
+        activeMplZapret || mplZapretNft || /ZAPRET2_APPLIED='true'/.test(mplSettings)) type = 'v4';
     else if (nft && /ios_accept/.test(nft)) type = 'v3-nft';
     else if (nft && /classic_drop/.test(nft)) type = 'v2-nft';
+    else if (mplNft || activeMplSyn || mplIos2 || /NFT_ENABLED='true'/.test(mplSettings)) type = 'nft';
     else if (chain && /0x400/.test(chain)) type = 'v3';
     else if (chain && /(ttl|length)/.test(chain)) type = 'v2';
     else if (chain || activeSyn) type = 'iptables';
-    const port = readTextSafe('/opt/mtpr-simple/port').trim() || '';
+    let port = readTextSafe('/opt/mtpr-simple/port').trim() || '';
+    if (!port) {
+        try {
+            const cfg = proxyUsers.configPath();
+            if (cfg) port = String(telemtConfigPort(readTextSafe(cfg)) || '');
+        } catch (e) { /* ignore */ }
+    }
     return {
         installed: type !== 'none',
         type,
-        active: activeSyn || activeNft || activeZapret,
+        active: activeSyn || activeNft || activeZapret || activeMplSyn || activeMplZapret,
         services: {
             synfix: activeSyn,
             nftSynfix: activeNft,
-            zapret2: activeZapret
+            zapret2: activeZapret,
+            mtproxylSyn: activeMplSyn,
+            mtproxylZapret2: activeMplZapret,
+            ios2: !!mplIos2
         },
         port
     };
@@ -8266,6 +8283,11 @@ app.post('/api/proxy/fix', checkAuth, requireAdmin, async (req, res) => {
     port = port || 443;
     const rules = '/opt/mtpr-simple/data/rules.sh';
     if (!fs.existsSync(rules)) {
+        let backend = '';
+        try { backend = (await proxyUsers.detect(true)).backend; } catch (e) { /* ignore */ }
+        if (backend === 'mtproxyl') {
+            return res.status(400).json({ error: 'У MTProxyL свой фикс: управляйте им через mtproxyl nft (Zapret2 / SYN limiter)' });
+        }
         return res.status(400).json({ error: 'MEKO не установлен — фикс ставится через MEKO' });
     }
     let cmd;
@@ -8294,9 +8316,12 @@ function proxyOptimizationStatus() {
         catch (e) { return ''; }
     };
     return {
-        applied: fs.existsSync('/etc/sysctl.d/99-custom.conf') || fs.existsSync('/etc/systemd/system/telemt.service.d/limits.conf'),
+        applied: fs.existsSync('/etc/sysctl.d/99-custom.conf') ||
+            fs.existsSync('/etc/systemd/system/telemt.service.d/limits.conf') ||
+            fs.existsSync('/etc/sysctl.d/99-mtproxyl-meko-opt.conf'),
         sysctl: fs.existsSync('/etc/sysctl.d/99-custom.conf'),
         limits: fs.existsSync('/etc/systemd/system/telemt.service.d/limits.conf'),
+        mtproxyl: fs.existsSync('/etc/sysctl.d/99-mtproxyl-meko-opt.conf'),
         snapshot: fs.existsSync('/opt/mtpr-simple/opt-snapshot'),
         congestion: get('net.ipv4.tcp_congestion_control'),
         qdisc: get('net.core.default_qdisc'),
@@ -8315,8 +8340,8 @@ app.post('/api/proxy/optimization', checkAuth, requireAdmin, async (req, res) =>
     if (!['apply', 'remove'].includes(action)) {
         return res.status(400).json({ error: 'Неизвестное действие' });
     }
-    if (!fs.existsSync('/opt/mtpr-simple') && !fs.existsSync('/usr/local/bin/mekopr')) {
-        return res.status(400).json({ error: 'MEKO не установлен — оптимизация доступна после установки MEKO' });
+    if (!fs.existsSync('/opt/mtpr-simple') && !fs.existsSync('/usr/local/bin/mekopr') && !proxyUsers.configPath()) {
+        return res.status(400).json({ error: 'Telemt не установлен — оптимизация доступна после установки MEKO или MTProxyL' });
     }
     const cfg = proxyUsers.configPath() || '/etc/telemt/telemt.toml';
     const applyScript = String.raw`
@@ -8390,6 +8415,24 @@ if [ -f "$SNAP/sysctl.values" ]; then
   while IFS='=' read -r k v; do
     [ -n "$k" ] && [ -n "$v" ] && sysctl -w "$k=$v" >/dev/null 2>&1 || true
   done < "$SNAP/sysctl.values"
+fi
+if [ -f /etc/sysctl.d/99-mtproxyl-meko-opt.conf ]; then
+  if [ -f /opt/mtproxyl/nft-rules.conf ]; then
+    set +u
+    . /opt/mtproxyl/nft-rules.conf 2>/dev/null || true
+    [ -n "$MEKO_ORIG_KEEPALIVE_TIME" ] && sysctl -w "net.ipv4.tcp_keepalive_time=$MEKO_ORIG_KEEPALIVE_TIME" >/dev/null 2>&1 || true
+    [ -n "$MEKO_ORIG_KEEPALIVE_INTVL" ] && sysctl -w "net.ipv4.tcp_keepalive_intvl=$MEKO_ORIG_KEEPALIVE_INTVL" >/dev/null 2>&1 || true
+    [ -n "$MEKO_ORIG_KEEPALIVE_PROBES" ] && sysctl -w "net.ipv4.tcp_keepalive_probes=$MEKO_ORIG_KEEPALIVE_PROBES" >/dev/null 2>&1 || true
+    [ -n "$MEKO_ORIG_SOMAXCONN" ] && sysctl -w "net.core.somaxconn=$MEKO_ORIG_SOMAXCONN" >/dev/null 2>&1 || true
+    [ -n "$MEKO_ORIG_TCP_MAX_SYN_BACKLOG" ] && sysctl -w "net.ipv4.tcp_max_syn_backlog=$MEKO_ORIG_TCP_MAX_SYN_BACKLOG" >/dev/null 2>&1 || true
+    [ -n "$MEKO_ORIG_NETDEV_MAX_BACKLOG" ] && sysctl -w "net.core.netdev_max_backlog=$MEKO_ORIG_NETDEV_MAX_BACKLOG" >/dev/null 2>&1 || true
+    [ -n "$MEKO_ORIG_TCP_FASTOPEN" ] && sysctl -w "net.ipv4.tcp_fastopen=$MEKO_ORIG_TCP_FASTOPEN" >/dev/null 2>&1 || true
+    [ -n "$MEKO_ORIG_FILE_MAX" ] && sysctl -w "fs.file-max=$MEKO_ORIG_FILE_MAX" >/dev/null 2>&1 || true
+    [ -n "$MEKO_ORIG_DEFAULT_QDISC" ] && sysctl -w "net.core.default_qdisc=$MEKO_ORIG_DEFAULT_QDISC" >/dev/null 2>&1 || true
+    [ -n "$MEKO_ORIG_TCP_CONGESTION" ] && sysctl -w "net.ipv4.tcp_congestion_control=$MEKO_ORIG_TCP_CONGESTION" >/dev/null 2>&1 || true
+    set -u
+  fi
+  rm -f /etc/sysctl.d/99-mtproxyl-meko-opt.conf
 fi
 rm -rf "$SNAP"
 sysctl --system >/dev/null 2>&1 || true
@@ -9152,7 +9195,9 @@ elif [ -x /opt/mtpr-simple/main.sh ]; then
 fi
 
 # 3. Добиваем остатки, если MEKO не смог
-for unit in mtpr-zapret2-watch mtpr-zapret2 mtpr-nft-synfix mtpr-synfix mtproxyl-api mtproxyl mtproto.zig mtproto-zig mtg telemt mtproto; do
+for unit in mtpr-zapret2-watch mtpr-zapret2 mtpr-nft-synfix mtpr-synfix \
+            mtproxyl-bridge-watch mtproxyl-zapret2 mtproxyl-syn-limit mtproxyl-telemt mtproxyl \
+            mtproxyl-api mtproto.zig mtproto-zig mtg telemt mtproto; do
   if systemctl list-unit-files 2>/dev/null | grep -q "^\${unit}\.service"; then
     echo "Останавливаем \${unit}.service"
     systemctl stop "$unit" >/dev/null 2>&1 || true
@@ -9180,18 +9225,22 @@ nft delete table inet mtpr_synfix 2>/dev/null || true
 nft delete table ip MTProto 2>/dev/null || true
 nft delete table inet telemt_limit 2>/dev/null || true
 nft delete table ip mtpr_ios2_fix 2>/dev/null || true
+nft delete table inet mtproxyl_limit 2>/dev/null || true
+nft delete table ip MTProtoL 2>/dev/null || true
+nft delete table inet mtproxyl_ios2 2>/dev/null || true
 
 # Файлы и службы
 rm -rf /opt/mtpr-simple /opt/zapret2 /etc/zapret2 /etc/telemt /opt/telemt \
-       /etc/mtproxyl /opt/mtproxyl /etc/mtproxyl-api /opt/mtproto.zig /etc/mtproto.zig
+       /etc/mtproxyl /opt/mtproxyl /etc/mtproxyl-api /opt/mtproto.zig /etc/mtproto.zig \
+       /opt/mtproxyl-zapret2 /etc/mtproxyl-zapret2
 rm -f /etc/systemd/system/mtpr-*.service /etc/systemd/system/telemt.service \
       /etc/systemd/system/mtproxyl*.service /etc/systemd/system/mtproto*.service \
       /etc/sudoers.d/mtproxyl-api
-rm -f /usr/local/sbin/mtpr-* /usr/local/bin/mekopr /usr/local/bin/meko /usr/local/bin/mekomanager \
+rm -f /usr/local/sbin/mtpr-* /usr/local/sbin/mtproxyl-* /usr/local/bin/mekopr /usr/local/bin/meko /usr/local/bin/mekomanager \
       /usr/local/bin/telemt /usr/local/bin/mtproxyl /usr/local/bin/mtproxyl-api \
       /usr/local/bin/mtg /usr/local/bin/mtproto.zig
-rm -f /etc/sysctl.d/99-custom.conf /etc/cron.daily/xt_geoip \
-      /etc/cron.d/mtpr* /etc/cron.d/telemt* /etc/cron.d/mtproto*
+rm -f /etc/sysctl.d/99-custom.conf /etc/sysctl.d/99-mtproxyl-*.conf /etc/cron.daily/xt_geoip \
+      /etc/cron.d/mtpr* /etc/cron.d/telemt* /etc/cron.d/mtproto* /etc/cron.d/mtproxyl*
 rm -f /root/mtproto_links.txt /root/mtproto_links.mtproxyl.txt /root/mtproxyl-links.txt
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl reset-failed >/dev/null 2>&1 || true

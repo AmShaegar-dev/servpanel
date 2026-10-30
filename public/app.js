@@ -5991,22 +5991,35 @@ async function loadProxyFix() {
     const labels = {
         v3: 'v3 iptables', v2: 'v2 iptables',
         'v3-nft': 'v3 nftables', 'v2-nft': 'v2 nftables',
-        v4: 'v4 Zapret2', iptables: 'iptables', none: 'не установлен'
+        v4: 'v4 Zapret2', iptables: 'iptables', nft: 'nft limiter', none: 'не установлен'
     };
     try {
         const d = await apiJson('/api/proxy/fix');
         proxyState.fix = d;
+        const isMpl = proxyState.status && proxyState.status.backend === 'mtproxyl';
         if (badge) {
             badge.className = 'badge ' + (d.installed ? 'badge-good' : 'badge-muted');
             badge.innerText = labels[d.type] || d.type || 'не установлен';
         }
         if (info) {
             const services = d.services || {};
-            const active = [services.synfix && 'mtpr-synfix', services.nftSynfix && 'mtpr-nft-synfix', services.zapret2 && 'mtpr-zapret2'].filter(Boolean);
-            info.innerText = d.installed
-                ? 'Тип: ' + (labels[d.type] || d.type) + (d.port ? ' · порт ' + d.port : '') + (active.length ? ' · ' + active.join(', ') : '')
-                : 'Фикс не найден. Установите MEKO-фикс или выберите тип ниже.';
+            const active = [
+                services.synfix && 'mtpr-synfix',
+                services.nftSynfix && 'mtpr-nft-synfix',
+                services.zapret2 && 'mtpr-zapret2',
+                services.mtproxylSyn && 'mtproxyl-syn-limit',
+                services.mtproxylZapret2 && 'mtproxyl-zapret2'
+            ].filter(Boolean);
+            info.innerText = isMpl
+                ? 'MTProxyL: ' + (d.installed ? (labels[d.type] || d.type) : 'фикс не найден') +
+                  '. Управление — mtproxyl nft (Zapret2 / SYN limiter).' +
+                  (active.length ? ' · ' + active.join(', ') : '')
+                : (d.installed
+                    ? 'Тип: ' + (labels[d.type] || d.type) + (d.port ? ' · порт ' + d.port : '') + (active.length ? ' · ' + active.join(', ') : '')
+                    : 'Фикс не найден. Установите MEKO-фикс или выберите тип ниже.');
         }
+        const installBtn = document.getElementById('proxyFixInstallBtn');
+        if (installBtn) installBtn.style.display = isMpl ? 'none' : '';
         if (typeEl) {
             const map = { v3: 'v3', v2: 'v2', 'v3-nft': 'nft', 'v2-nft': 'nft', v4: 'v4' };
             if (map[d.type]) typeEl.value = map[d.type];

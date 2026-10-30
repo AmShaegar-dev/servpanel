@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.40">
+    <meta name="panel-version" content="3.0.41">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1356,7 +1356,7 @@
                         </label>
                     </div>
                     <div class="controls-row" style="flex-wrap:wrap; margin-top:12px;">
-                        <button class="btn-primary" onclick="installProxyFix()">Установить / сменить фикс</button>
+                        <button class="btn-primary" id="proxyFixInstallBtn" onclick="installProxyFix()">Установить / сменить фикс</button>
                         <button class="btn-dark" onclick="loadProxyFix()">↻ Обновить</button>
                         <button class="btn-danger" onclick="uninstallModule('mtproto')">🗑 Полное удаление MTProto</button>
                     </div>
@@ -1366,8 +1366,8 @@
                 <div class="card" style="margin-bottom:20px;">
                     <div class="card-head">
                         <div>
-                            <h3>Оптимизация MEKO</h3>
-                            <p>BBR, fq, somaxconn, keepalive, лимиты Telemt и max_connections. Откат возвращает прежние значения.</p>
+                            <h3>Оптимизация MEKO / Telemt</h3>
+                            <p>BBR, fq, somaxconn, keepalive, лимиты Telemt и max_connections. Работает для MEKO и MTProxyL. Откат возвращает прежние значения.</p>
                         </div>
                         <span id="proxyOptBadge" class="badge badge-muted">проверка…</span>
                     </div>
