@@ -128,10 +128,8 @@ telemt_config_path() {
 # Дописываем их сами тем же способом, что и оригинальный установщик.
 apply_telemt_extras() {
     [ "$KIND" = "telemt" ] || return 0
-    say "DEBUG: apply_telemt_extras start"
     local cfg
-    cfg=$(telemt_config_path) || { say "DEBUG: telemt config not found"; return 0; }
-    say "DEBUG: telemt config $cfg"
+    cfg=$(telemt_config_path) || return 0
     local changed=0
 
     if [ -n "$AD_TAG" ]; then
@@ -178,14 +176,20 @@ apply_telemt_extras() {
     fi
 
     # Официальный установщик telemt оставляет конфиг root:telemt с правами 640.
-    # Служба работает под пользователем telemt, поэтому её API не может
-    # сохранить нового пользователя (failed to write config: Operation not
-    # permitted). Даём группе telemt право записи, не открывая файл всем.
+    # API пишет атомарно: создаёт временный файл и делает fchown на владельца
+    # конфига. Если владелец root, процесс telemt получает EPERM и панель не
+    # может создать пользователя. Владелец должен быть telemt.
     if [ -f "$cfg" ]; then
-        chown root:telemt "$cfg" 2>/dev/null || true
-        chmod 660 "$cfg" 2>/dev/null || true
-        say "Telemt: $(stat -c '%U:%G %a %n' "$cfg" 2>/dev/null || ls -l "$cfg" 2>/dev/null)"
-        say "Telemt unit: user=$(systemctl show -p User --value telemt 2>/dev/null) group=$(systemctl show -p Group --value telemt 2>/dev/null) protect=$(systemctl show -p ProtectSystem --value telemt 2>/dev/null) rw=$(systemctl show -p ReadWritePaths --value telemt 2>/dev/null)"
+        local conf_dir
+        conf_dir=$(dirname "$cfg")
+        chown telemt:telemt "$cfg" 2>/dev/null || true
+        chmod 600 "$cfg" 2>/dev/null || true
+        mkdir -p /etc/systemd/system/telemt.service.d
+        printf '[Service]\nReadWritePaths=%s\n' "$conf_dir" \
+            > /etc/systemd/system/telemt.service.d/90-panel-write.conf
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        systemctl restart telemt >/dev/null 2>&1 || true
+        say "Telemt: конфиг $cfg доступен API для записи"
     fi
 }
 
