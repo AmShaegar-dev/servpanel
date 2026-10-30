@@ -7492,7 +7492,7 @@ const MODULES = {
         title: 'AmneziaWG'
     },
     mtproto: {
-        url: 'https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install_mtproto_silent.sh',
+        url: 'https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install_mtproto_silent.sh?v=20261030',
         log: '/var/log/mtproto_install.log',
         title: 'MTProto'
     },
