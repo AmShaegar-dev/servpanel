@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.33">
+    <meta name="panel-version" content="3.0.34">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1255,6 +1255,31 @@
         <button class="btn btn-dark" onclick="loadCascadeIfaces()">↻ Обновить</button>
     </div>
     <div id="cascadeRoutingIfacesResult" class="sub-text" style="margin-top:8px;"></div>
+</div>
+<div class="card" data-admin-only style="margin-bottom:20px;">
+    <div class="card-head" style="margin-bottom:8px;">
+        <div>
+            <h3 style="margin:0;">MTProto-прокси через каскад</h3>
+            <p style="margin:4px 0 0; color:var(--text-muted); font-size:12.5px;">
+                Клиенты подключаются к RU, а исходящие соединения Telemt к Telegram идут через EU.
+            </p>
+        </div>
+        <span id="cascadeProxyBadge" class="badge badge-muted">выключено</span>
+    </div>
+    <label class="form-check" style="margin:4px 0 10px;">
+        <input type="checkbox" id="cascadeProxyEnabled" onchange="toggleCascadeProxy(this.checked)">
+        Пускать исходящие соединения Telemt через EU
+    </label>
+    <div class="wizard-note info" style="margin-bottom:12px;">
+        Порт не создаётся: панель помечает только новые исходящие соединения процесса <code>telemt</code>.
+        Ответы клиентам, которые подключились к RU, остаются напрямую. После включения Telemt
+        перезапускается, чтобы старые прямые соединения закрылись.
+    </div>
+    <div class="controls-row" style="margin-bottom:8px;">
+        <button class="btn btn-dark" onclick="testCascadeProxy()">Проверить выход прокси</button>
+        <button class="btn btn-dark" onclick="loadCascadeProxy()">↻ Обновить</button>
+    </div>
+    <div id="cascadeProxyResult" class="sub-text"></div>
 </div>
 <div class="card advanced-only">
                     <h3 style="margin-top:0;">awg1.conf на этом сервере</h3>

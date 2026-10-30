@@ -3258,6 +3258,8 @@ WantedBy=timers.target
 `;
 
 const CASCADE_MARKER = '/root/awg/.cascade-managed';
+const PROXY_CASCADE_UID_FILE = '/root/awg/proxy-cascade.uid';
+const PROXY_CASCADE_FLAG_FILE = '/root/awg/proxy-cascade.enabled';
 
 // ---------------------------------------------------------------------------
 // Подготовка каскада без участия пользователя
@@ -3572,6 +3574,8 @@ if [ "$COUNT" -eq 0 ]; then
     echo "Проверьте: systemctl status awg-quick@awg0"
     exit 1
 fi
+
+${sshBuild.PROXY_CASCADE_LINES.join('\n')}
 
 sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
 echo "OK: маршруты каскада применены ($(date '+%Y-%m-%d %H:%M:%S'))"
@@ -4328,6 +4332,80 @@ app.get('/api/cascade/interfaces', checkAuth, requireAdmin, (req, res) => {
     const available = [...new Set(String(out || '').split(/\s+/)
         .filter(i => IFACE_RE.test(i) && !CASCADE_IFACE_RE.test(i)))];
     res.json({ selected, available, applicable: true, script: ROUTING_SCRIPT });
+});
+
+function ensureProxyCascadeBlock(script) {
+    if (!script) return script;
+    if (script.includes('# --- MTProto-прокси через каскад (Servpanel) ---')) return script;
+    const block = sshBuild.PROXY_CASCADE_LINES.join('\n');
+    const marker = 'sysctl -w net.ipv4.ip_forward=1';
+    const idx = script.indexOf(marker);
+    if (idx < 0) return script.replace(/\s*$/, '') + '\n\n' + block + '\n';
+    return script.slice(0, idx) + block + '\n\n' + script.slice(idx);
+}
+
+app.get('/api/cascade/proxy', checkAuth, (req, res) => {
+    const user = readTextSafe(PROXY_CASCADE_UID_FILE).trim() || 'telemt';
+    let uid = '';
+    try { uid = String(sh('id', ['-u', user]) || '').trim(); } catch (e) { /* нет пользователя */ }
+    res.json({
+        enabled: fs.existsSync(PROXY_CASCADE_FLAG_FILE),
+        user,
+        uid,
+        available: !!uid,
+        script: fs.existsSync(ROUTING_SCRIPT)
+    });
+});
+
+app.post('/api/cascade/proxy', checkAuth, requireAdmin, async (req, res) => {
+    const enabled = !!(req.body && req.body.enabled);
+    if (!fs.existsSync(ROUTING_SCRIPT)) {
+        return res.status(404).json({ error: 'Сначала постройте каскад' });
+    }
+    const user = 'telemt';
+    let uid = '';
+    try { uid = String(sh('id', ['-u', user]) || '').trim(); } catch (e) { /* нет пользователя */ }
+    if (enabled && !uid) {
+        return res.status(400).json({ error: 'MTProto/Telemt не установлен — сначала установите прокси' });
+    }
+    try {
+        if (enabled) {
+            writeRootFile(PROXY_CASCADE_UID_FILE, user + '\n', '0600');
+            writeRootFile(PROXY_CASCADE_FLAG_FILE, '1\n', '0600');
+        } else {
+            try { fs.unlinkSync(PROXY_CASCADE_FLAG_FILE); } catch (e) { /* уже нет */ }
+            if (uid) writeRootFile(PROXY_CASCADE_UID_FILE, user + '\n', '0600');
+        }
+        const script = ensureProxyCascadeBlock(readTextSafe(ROUTING_SCRIPT));
+        if (!script) return res.status(404).json({ error: 'Скрипт маршрутизации не найден' });
+        writeRootFile(ROUTING_SCRIPT, script, '0755');
+        const r = await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
+        if (r.code !== 0) {
+            return res.status(500).json({ error: 'Скрипт маршрутизации вернул ошибку', output: String(r.out || '').slice(-1600) });
+        }
+        try { sh('systemctl', ['restart', 'telemt']); } catch (e) { /* прокси может быть не установлен */ }
+        auditLog(req, enabled ? 'Каскад: MTProto-прокси пущен через EU' : 'Каскад: MTProto-прокси возвращён напрямую');
+        res.json({ success: true, enabled, user, uid, output: String(r.out || '').slice(-1600) });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось переключить прокси: ' + e.message });
+    }
+});
+
+app.get('/api/cascade/proxy/test', checkAuth, requireAdmin, async (req, res) => {
+    const user = readTextSafe(PROXY_CASCADE_UID_FILE).trim() || 'telemt';
+    const run = (cmd) => {
+        try { return String(sh('bash', ['-c', cmd], { timeout: 30000 }) || '').trim(); }
+        catch (e) { return ''; }
+    };
+    const ru = run('curl -4 -fsS --max-time 8 https://api.ipify.org');
+    const eu = run('curl -4 -fsS --max-time 8 --interface awg1 https://api.ipify.org');
+    const telemt = run(`sudo -u ${user} curl -4 -fsS --max-time 8 https://api.ipify.org`);
+    res.json({
+        ru,
+        eu,
+        telemt,
+        ok: !!telemt && !!eu && telemt === eu
+    });
 });
 
 app.post('/api/cascade/interfaces', checkAuth, requireAdmin, async (req, res) => {

@@ -276,7 +276,7 @@ function switchTab(tabId, el) {
     if (tabId === 'tab-services') { loadServices(); connectAdGuard(false); loadAdGuardFull(); loadWarpStatus(); }
     if (tabId === 'tab-install') loadModules();
     else if (agInterval) { clearInterval(agInterval); agInterval = null; }
-    if (tabId === 'tab-cascade') { loadCascadeSetup(); loadCascadeStatus(true); loadCascadeHealth(); loadCascadeIfaces(); renderCascadeParams(); watchCascadeJob(); }
+    if (tabId === 'tab-cascade') { loadCascadeSetup(); loadCascadeStatus(true); loadCascadeHealth(); loadCascadeIfaces(); loadCascadeProxy(); renderCascadeParams(); watchCascadeJob(); }
     if (tabId === 'tab-cascade') loadCascadeSshDefaults();
     if (tabId === 'tab-obf') { loadObfCurrent(); loadObfProfiles(); }
     if (tabId === 'tab-update') loadUpdatePanel();
@@ -1990,6 +1990,65 @@ async function saveCascadeIfaces() {
     } catch (e) {
         if (res) res.innerText = e.message;
         toast('Не удалось применить интерфейсы', 'error', e.message);
+    }
+}
+
+async function loadCascadeProxy() {
+    const cb = document.getElementById('cascadeProxyEnabled');
+    const badge = document.getElementById('cascadeProxyBadge');
+    const result = document.getElementById('cascadeProxyResult');
+    try {
+        const d = await apiJson('/api/cascade/proxy');
+        if (cb) cb.checked = !!d.enabled;
+        if (badge) {
+            badge.className = 'badge ' + (d.enabled ? 'badge-good' : 'badge-muted');
+            badge.innerText = d.enabled ? 'включено' : 'выключено';
+        }
+        if (result) {
+            result.innerText = d.available
+                ? 'Пользователь: ' + d.user + ' (uid ' + d.uid + ')'
+                : 'Telemt не найден — сначала установите MTProto';
+        }
+    } catch (e) {
+        if (result) result.innerText = e.message;
+    }
+}
+
+async function toggleCascadeProxy(enabled) {
+    const cb = document.getElementById('cascadeProxyEnabled');
+    const result = document.getElementById('cascadeProxyResult');
+    if (enabled && !confirm('Пустить исходящие соединения Telemt через EU? Telemt будет перезапущен, активные подключения прервутся на несколько секунд.')) {
+        if (cb) cb.checked = false;
+        return;
+    }
+    if (result) result.innerText = enabled ? 'Включаю…' : 'Выключаю…';
+    try {
+        const d = await apiJson('/api/cascade/proxy', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+        if (result) result.innerText = d.output || 'Готово';
+        toast(enabled ? 'Прокси пущен через каскад' : 'Прокси возвращён напрямую', 'success');
+        await loadCascadeProxy();
+        loadCascadeStatus(true);
+    } catch (e) {
+        if (cb) cb.checked = !enabled;
+        if (result) result.innerText = e.message;
+        toast('Не удалось переключить прокси', 'error', e.message);
+    }
+}
+
+async function testCascadeProxy() {
+    const result = document.getElementById('cascadeProxyResult');
+    if (result) result.innerText = 'Проверяю выход…';
+    try {
+        const d = await apiJson('/api/cascade/proxy/test');
+        const text = 'RU: ' + (d.ru || '—') + ' · EU: ' + (d.eu || '—') + ' · telemt: ' + (d.telemt || '—');
+        if (result) result.innerText = (d.ok ? 'Прокси выходит через EU. ' : 'Прокси выходит не через EU. ') + text;
+        toast(d.ok ? 'Прокси выходит через EU' : 'Проверьте маршрут прокси', d.ok ? 'success' : 'error', text);
+    } catch (e) {
+        if (result) result.innerText = e.message;
+        toast('Не удалось проверить выход', 'error', e.message);
     }
 }
 
