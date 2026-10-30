@@ -901,7 +901,7 @@ async function toggleDns(enable) {
 }
 
 const WARP_DEFAULTS = {
-    listenIp: '127.0.0.1',
+    listenIp: '0.0.0.0',
     listenPort: '443',
     socksPort: '40000',
     rewriteIp: '127.0.0.1'

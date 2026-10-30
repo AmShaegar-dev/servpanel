@@ -1152,7 +1152,13 @@ test('Установщики AdGuard и WARP: безопасные подста�
     assert.ok(!/systemctl (stop|disable) (dnsmasq|bind9|named)/.test(ag), 'чужой DNS не останавливается');
     const warp = read('install_warp_xray.sh');
     assert.match(warp, /INSTALLATION DONE/);
-    assert.match(warp, /WARP_LISTEN_IP="\$\{WARP_LISTEN_IP:-127\.0\.0\.1\}"/);
+    assert.match(warp, /WARP_LISTEN_IP="\$\{WARP_LISTEN_IP:-0\.0\.0\.0\}"/);
+    // Конфиг Xray — как в инструкции: без служебных тегов, с freedom direct,
+    // loglevel info и dokodemo-door на 1.1.1.1:443 через SOCKS 127.0.0.1.
+    assert.match(warp, /"loglevel": "info"/);
+    assert.match(warp, /"address": "1\.1\.1\.1"/);
+    assert.match(warp, /"protocol": "freedom"/);
+    assert.ok(!/"tag"[[:space:]]*:[[:space:]]*"warp"/.test(warp), 'в конфиге нет служебного тега warp');
     // В шаблоне server.js подстановки shell экранированы: ${...} не должно
     // превращаться в JS-переменные.
     const server = read('server.js');

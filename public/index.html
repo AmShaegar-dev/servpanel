@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.4">
+    <meta name="panel-version" content="3.0.5">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -663,7 +663,7 @@
                     <div id="warpStatusText" class="sub-text" style="margin-bottom: 12px;">Проверка состояния...</div>
 
                     <div class="controls-row" style="margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
-                        <input type="text" id="warpListenIp" value="127.0.0.1" placeholder="127.0.0.1" aria-label="IP Xray" style="width: 170px;" title="Адрес, на котором Xray принимает TLS. Штатное значение — 127.0.0.1: слушает только этот сервер. IP интерфейса AWG нужен, только если обращаться к Xray удалённо." onblur="if(!this.value.trim())this.value='127.0.0.1'">
+                        <input type="text" id="warpListenIp" value="0.0.0.0" placeholder="0.0.0.0" aria-label="IP Xray" style="width: 170px;" title="Адрес, на котором Xray принимает TLS. По инструкции — 0.0.0.0 (все интерфейсы, поле listen не пишется). Укажите конкретный IP, если Xray должен слушать только его." onblur="if(!this.value.trim())this.value='0.0.0.0'">
                         <input type="number" id="warpListenPort" value="443" placeholder="443" aria-label="Порт Xray" style="width: 90px;" title="TCP-порт Xray" onblur="if(!this.value)this.value='443'">
                         <input type="number" id="warpSocksPort" value="40000" placeholder="40000" aria-label="SOCKS5-порт WARP" style="width: 100px;" title="Локальный SOCKS5-порт WARP" onblur="if(!this.value)this.value='40000'">
                         <button class="btn-primary" onclick="installWarp()">Установить WARP + Xray</button>

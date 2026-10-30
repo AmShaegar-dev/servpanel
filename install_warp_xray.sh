@@ -7,7 +7,7 @@ trap 'echo "ERROR: установка WARP/Xray прервана (код $?)"' E
 echo "=== Cloudflare WARP + Xray для AdGuard ==="
 echo "Дата: $(date -Is)"
 
-WARP_LISTEN_IP="${WARP_LISTEN_IP:-127.0.0.1}"
+WARP_LISTEN_IP="${WARP_LISTEN_IP:-0.0.0.0}"
 WARP_LISTEN_PORT="${WARP_LISTEN_PORT:-443}"
 WARP_SOCKS_PORT="${WARP_SOCKS_PORT:-40000}"
 
@@ -64,7 +64,7 @@ if ! command -v warp-cli >/dev/null 2>&1; then
         echo "ERROR: не удалось скачать ключ репозитория Cloudflare."
         exit 1
     fi
-    echo "deb [arch=${ARCH} signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ ${CODENAME} main" \
+    echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ ${CODENAME} main" \
         > /etc/apt/sources.list.d/cloudflare-client.list
     if ! apt-get update || ! apt-get install -y cloudflare-warp; then
         echo "ERROR: пакет cloudflare-warp для ${CODENAME}/${ARCH} не установился."
@@ -135,13 +135,27 @@ fi
 [ -x "$XRAY_BIN" ] || { echo "ERROR: бинарник Xray не найден."; exit 1; }
 mkdir -p /usr/local/etc/xray /var/log/xray
 chmod 755 /var/log/xray 2>/dev/null || true
-chown -R nobody:nogroup /var/log/xray 2>/dev/null || true
+if id xray >/dev/null 2>&1; then
+    chown -R xray:xray /var/log/xray 2>/dev/null || true
+else
+    chown -R nobody:nogroup /var/log/xray 2>/dev/null || true
+fi
 
 echo "[4/6] Конфигурация Xray (${WARP_LISTEN_IP}:${WARP_LISTEN_PORT} -> SOCKS 127.0.0.1:${WARP_SOCKS_PORT})..."
-# Чужой конфиг при уже установленном Xray не трогаем. Если Xray только что
-# поставил официальный установщик (XRAY_FRESH=1), config.json — его дефолт,
-# его можно заменить: панель и есть хозяин этой установки.
-if [ "$XRAY_FRESH" != "1" ] && [ -f "$CONFIG" ] && ! grep -q '"tag"[[:space:]]*:[[:space:]]*"warp"' "$CONFIG"; then
+# Чужой конфиг при уже установленном Xray не трогаем. Свой конфиг узнаём по
+# маркеру панели или по структуре из инструкции (dokodemo 1.1.1.1 + SOCKS
+# 127.0.0.1:40000) — служебных тегов в нём нет. Если Xray только что поставил
+# официальный установщик (XRAY_FRESH=1), config.json — его дефолт.
+IS_OURS=0
+if [ -f /root/awg/warp-xray.managed ] || [ -f /root/awg/warp.env ]; then
+    IS_OURS=1
+fi
+if [ "$IS_OURS" != "1" ] && [ -f "$CONFIG" ] \
+   && grep -q '"address"[[:space:]]*:[[:space:]]*"1.1.1.1"' "$CONFIG" \
+   && grep -q '"port"[[:space:]]*:[[:space:]]*40000' "$CONFIG"; then
+    IS_OURS=1
+fi
+if [ "$XRAY_FRESH" != "1" ] && [ -f "$CONFIG" ] && [ "$IS_OURS" != "1" ]; then
     echo "ERROR: $CONFIG уже существует и настроен не панелью."
     echo "Панель не перезаписывает чужой конфиг Xray. Сохраните его и удалите/переименуйте вручную."
     exit 1
@@ -149,16 +163,21 @@ fi
 if [ -f "$CONFIG" ]; then
     cp -a "$CONFIG" "${CONFIG}.bak_$(date +%Y%m%d-%H%M%S)"
 fi
+# Конфиг ровно как в инструкции. Если адрес не задан (0.0.0.0), поле listen
+# не пишем — Xray слушает все интерфейсы, как в инструкции.
+LISTEN_LINE=""
+if [ "$WARP_LISTEN_IP" != "0.0.0.0" ]; then
+    LISTEN_LINE="      \"listen\": \"${WARP_LISTEN_IP}\","
+fi
 cat > "$CONFIG" << EOF
 {
   "log": {
-    "loglevel": "warning",
-    "access": "/var/log/xray/access.log",
-    "error": "/var/log/xray/error.log"
+    "loglevel": "info",
+    "access": "/var/log/xray/access.log"
   },
   "inbounds": [
     {
-      "listen": "${WARP_LISTEN_IP}",
+${LISTEN_LINE}
       "port": ${WARP_LISTEN_PORT},
       "protocol": "dokodemo-door",
       "settings": {
@@ -168,14 +187,12 @@ cat > "$CONFIG" << EOF
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": ["tls"],
-        "routeOnly": false
+        "destOverride": ["tls"]
       }
     }
   ],
   "outbounds": [
     {
-      "tag": "warp",
       "protocol": "socks",
       "settings": {
         "servers": [
@@ -185,6 +202,10 @@ cat > "$CONFIG" << EOF
           }
         ]
       }
+    },
+    {
+      "protocol": "freedom",
+      "tag": "direct"
     }
   ]
 }
@@ -218,6 +239,9 @@ WARP_SOCKS_PORT=${WARP_SOCKS_PORT}
 WARP_INSTALLED_AT=$(date -Is)
 EOF
 chmod 600 /root/awg/warp.env
+# Маркер: этот config.json создан панелью. Нужен, чтобы при повторной
+# установке и удалении отличить свой конфиг от чужого без служебных тегов.
+touch /root/awg/warp-xray.managed
 
 if command -v ufw >/dev/null 2>&1; then
     if [ "$WARP_LISTEN_IP" = "127.0.0.1" ] || [ "$WARP_LISTEN_IP" = "0.0.0.0" ]; then

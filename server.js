@@ -400,10 +400,16 @@ function xrayInbound() {
     let cfg;
     try { cfg = JSON.parse(readTextSafe(XRAY_CONFIG)); } catch (e) { return null; }
     const outs = Array.isArray(cfg.outbounds) ? cfg.outbounds : [];
-    if (!outs.some(o => o && o.tag === 'warp')) return null;
+    // Свой конфиг узнаём по структуре из инструкции: outbound SOCKS на
+    // 127.0.0.1. Служебных тегов в нём нет, поэтому тег не используем.
+    const socks = outs.find(o => o && o.protocol === 'socks' &&
+        Array.isArray(o.settings && o.settings.servers) &&
+        o.settings.servers.some(s => s && String(s.address) === '127.0.0.1'));
+    if (!socks) return null;
     const inb = (Array.isArray(cfg.inbounds) ? cfg.inbounds : []).find(i => i && i.port);
     if (!inb) return null;
-    return { listen: String(inb.listen || ''), port: String(inb.port) };
+    // Без listen Xray слушает все интерфейсы — так в инструкции.
+    return { listen: String(inb.listen || '0.0.0.0'), port: String(inb.port) };
 }
 
 // WARP могли поставить вручную (пакетом Cloudflare или из snap) — тогда
@@ -427,7 +433,7 @@ function warpConfig() {
     return {
         installed: env.WARP_INSTALLED === '1' || warpBinaryPresent(),
         listenIp: IPV4_RE.test(env.WARP_LISTEN_IP || '') ? env.WARP_LISTEN_IP
-            : (xray && IPV4_RE.test(xray.listen) ? xray.listen : '127.0.0.1'),
+            : (xray && IPV4_RE.test(xray.listen) ? xray.listen : '0.0.0.0'),
         listenPort: isPort(env.WARP_LISTEN_PORT) ? String(Number(env.WARP_LISTEN_PORT))
             : (xray && isPort(xray.port) ? String(Number(xray.port)) : '443'),
         socksPort: isPort(env.WARP_SOCKS_PORT) ? String(Number(env.WARP_SOCKS_PORT)) : '40000',
@@ -7853,7 +7859,16 @@ function adguardInfo() {
     const state = installed ? isActive('AdGuardHome') : 'unknown';
     const ports = adguardPortsFromConfig();
     const httpPort = ports.http || adguardEnvPort();
-    const tlsPort = ports.tls;
+    let tlsPort = ports.tls;
+    if (!tlsPort && installed) {
+        // HTTPS-порт AdGuard не всегда попадает в YAML: определяем по тому,
+        // что процесс реально слушает, и исключаем DNS-порты и HTTP.
+        const dnsPorts = new Set([53, 553, 853, Number(httpPort) || 0]);
+        const extra = [...listeningPortsByProc('AdGuardHome')]
+            .filter(p => p > 1024 && !dnsPorts.has(p))
+            .sort((a, b) => a - b);
+        if (extra.length) tlsPort = String(extra[0]);
+    }
     return {
         installed,
         running: state === 'active',
@@ -7930,6 +7945,22 @@ function listeningTcpPorts() {
     return set;
 }
 
+// Порты, которые слушает конкретный процесс (ss -p). Нужны для AdGuard: его
+// HTTPS-порт может быть задан не в YAML, а только фактическим listen.
+function listeningPortsByProc(name) {
+    const set = new Set();
+    try {
+        const out = String(sh('bash', ['-c', `ss -lntp 2>/dev/null | grep -i '${name}' || true`]) || '');
+        for (const line of out.split('\n')) {
+            const fields = line.trim().split(/\s+/);
+            const local = fields[3] || '';
+            const m = local.match(/:(\d{1,5})$/);
+            if (m) set.add(Number(m[1]));
+        }
+    } catch (e) { /* ignore */ }
+    return set;
+}
+
 function mtprotoInfo() {
     const d = proxyUsers.detectCached ? proxyUsers.detectCached() : null;
     const backend = d ? d.backend : '';
@@ -7945,7 +7976,10 @@ function mtprotoInfo() {
     // слушается API-порт из его конфига или панель уже успешно с ним говорила.
     const apiLive = !!(telemtCfg && cfgPorts.api && listeningTcpPorts().has(Number(cfgPorts.api)));
     const cachedLive = !!(cached && cached.running && ['telemt', 'mtproxyl'].includes(cached.backend));
-    const running = !!activeUnit || apiLive || cachedLive;
+    // Прокси-порт из конфига тоже доказывает, что telemt запущен: так модуль
+    // не зависит от того, открывали ли вкладку «Прокси» в этой сессии.
+    const proxyLive = !!(telemtCfg && cfgPorts.proxy && listeningTcpPorts().has(Number(cfgPorts.proxy)));
+    const running = !!activeUnit || apiLive || proxyLive || cachedLive;
     return {
         installed,
         running,
@@ -8048,7 +8082,12 @@ fi
         script: String.raw`
 XRAY_CONFIG=/usr/local/etc/xray/config.json
 XRAY_OURS=0
-if [ -f "$XRAY_CONFIG" ] && grep -q '"tag"[[:space:]]*:[[:space:]]*"warp"' "$XRAY_CONFIG"; then
+if [ -f /root/awg/warp-xray.managed ] || [ -f /root/awg/warp.env ]; then
+  XRAY_OURS=1
+fi
+if [ "$XRAY_OURS" != "1" ] && [ -f "$XRAY_CONFIG" ] \
+   && grep -q '"address"[[:space:]]*:[[:space:]]*"1.1.1.1"' "$XRAY_CONFIG" \
+   && grep -q '"port"[[:space:]]*:[[:space:]]*40000' "$XRAY_CONFIG"; then
   XRAY_OURS=1
 fi
 
@@ -8092,7 +8131,7 @@ rm -f /etc/apt/sources.list.d/cloudflare-client.list \
       /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg \
       /etc/systemd/system/xray.service /etc/systemd/system/xray@.service \
       /usr/lib/systemd/system/xray.service /lib/systemd/system/xray.service
-rm -f /root/awg/warp.env /root/awg/warp-adguard.json
+rm -f /root/awg/warp.env /root/awg/warp-xray.managed /root/awg/warp-adguard.json
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl reset-failed >/dev/null 2>&1 || true
 
