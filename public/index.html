@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.15">
+    <meta name="panel-version" content="3.0.16">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -79,6 +79,9 @@
                     <button class="nav-item" data-tab="tab-cascade" data-title="Каскад" onclick="switchTab('tab-cascade', this)" id="navCascade">
                         <span class="nav-ico">⇄</span><span>Каскад RU → EU</span>
                     </button>
+                    <button class="nav-item" data-tab="tab-install" data-title="AmneziaWG" onclick="switchTab('tab-install', this)" id="navInstall">
+                        <span class="nav-ico">↓</span><span>AmneziaWG</span>
+                    </button>
                     <button class="nav-item" data-tab="tab-obf" data-title="Обфускация" onclick="switchTab('tab-obf', this)" id="navObf">
                         <span class="nav-ico">✦</span><span>Обфускация</span><span class="nav-dot" id="navObfDot"></span>
                     </button>
@@ -90,9 +93,6 @@
                     <div class="nav-label">Инфраструктура</div>
                     <button class="nav-item" data-tab="tab-services" data-title="Службы и DNS" onclick="switchTab('tab-services', this)" id="navServices">
                         <span class="nav-ico">◎</span><span>Службы и DNS</span>
-                    </button>
-                    <button class="nav-item" data-tab="tab-install" data-title="Установка" onclick="switchTab('tab-install', this)" id="navInstall">
-                        <span class="nav-ico">↓</span><span>Установка</span>
                     </button>
                     <button class="nav-item" data-tab="tab-ssl" data-title="Домены и SSL" onclick="switchTab('tab-ssl', this)" id="navSsl">
                         <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg></span><span>Домены и SSL</span>
@@ -109,6 +109,9 @@
                     <button class="nav-item" data-tab="tab-diag" data-title="Диагностика" onclick="switchTab('tab-diag', this)" id="navDiag">
                         <span class="nav-ico">⌁</span><span>Диагностика</span>
                     </button>
+                </div>
+                <div class="nav-group">
+                    <div class="nav-label">Система</div>
                     <button class="nav-item" data-tab="tab-update" data-title="Обновление" onclick="switchTab('tab-update', this)" id="navUpdate">
                         <span class="nav-ico">⇧</span><span>Обновление</span>
                     </button>
@@ -785,7 +788,7 @@
                         </div>
                     </div>
 
-                    <div class="card advanced-only" id="cascadeRoutingCard">
+                    <div class="card advanced-only" id="cascadeRoutingCard" style="display:none;">
                         <h3 style="color: #58a6ff; margin-bottom: 5px;">Маршрутизация Каскада (RU ➔ EU)</h3>
                         <p style="color: #ff7b72; font-size: 12px; margin-bottom: 10px; line-height: 1.3;">⚠️ <b>Важно:</b> Маршруты каскада настраиваются <b>строго на ВХОДНОМ сервере (RU)</b>.</p>
                         <div style="margin-bottom: 15px;"><span id="cascadeStatus">Ожидание...</span></div>
@@ -1096,6 +1099,20 @@
 
             <!-- КАСКАД -->
             <div id="tab-cascade" class="tab-pane">
+                <div class="card" id="cascadeChecklistCard" style="margin-bottom:20px;">
+                    <div class="card-head" style="margin-bottom:8px;">
+                        <div>
+                            <h3 style="margin:0;">Чек-лист установки</h3>
+                            <p style="margin:4px 0 0;">Параметры, которые ждёт установщик, и шаги сборки.</p>
+                        </div>
+                        <span id="cascadeChecklistBadge" class="badge badge-muted">ожидание</span>
+                    </div>
+                    <div id="cascadeParams" class="checklist-params"></div>
+                    <div class="controls-row" style="margin:0 0 10px;">
+                        <button class="btn btn-dark" type="button" onclick="checkCascadeParams(this)">Проверить параметры</button>
+                    </div>
+                    <div id="cascadeChecklist" class="checklist"></div>
+                </div>
                 <div class="card" style="margin-bottom:20px;">
                     <div class="card-head">
                         <div>
@@ -1230,51 +1247,7 @@
     </div>
     <div id="cascadeRoutingIfacesResult" class="sub-text" style="margin-top:8px;"></div>
 </div>
-<div class="card advanced-only" style="margin-bottom: 20px;">
-                    <h3 style="margin-top:0;">Шаг 1. Конфиг второй стороны</h3>
-                    <p style="color:var(--text-muted); font-size:13px; margin-top:0;">
-                        Вставьте конфиг клиента, созданного на <b>другом</b> сервере каскада. Панель сама добавит
-                        <code>Table = off</code> и уберёт DNS — это требование
-                        <a href="https://github.com/bivlked/amneziawg-installer/blob/main/CASCADE.md" target="_blank" rel="noopener" style="color:#58a6ff;">CASCADE.md</a>.
-                    </p>
-                    <div style="font-size:12.5px; color:var(--text-muted); margin:0 0 10px;">
-                        <b>На выходе (EU):</b> «Новый клиент» → скопируйте конфиг (кнопка ниже или
-                        <code>manage_amneziawg.sh add ru_host</code>) → вставьте здесь на входе (RU).<br>
-                        <b>На входе (RU):</b> «Новый клиент» → скопируйте его конфиг → вставьте во вкладке «Каскад» на выходе (EU).
-                    </div>
-                    <div class="wizard-grid" style="margin:12px 0 10px;">
-    <label class="field"><span>Адрес панели второй стороны</span>
-        <input id="cascadePeerHost" placeholder="https://servpaneltest1.duckdns.org:4444 или IP" autocomplete="off">
-    </label>
-    <label class="field"><span>Логин админа второй панели</span>
-        <input id="cascadePeerUser" placeholder="admin" autocomplete="username">
-    </label>
-    <label class="field"><span>Пароль второй панели</span>
-        <input id="cascadePeerPass" type="password" autocomplete="current-password">
-    </label>
-    <label class="field"><span>Имя клиента на второй стороне</span>
-        <input id="cascadePeerClient" value="ru_host" placeholder="ru_host">
-    </label>
-</div>
-<div class="wizard-note">Если поля заполнены, конфиг вставлять не нужно: панель сама создаст или заберёт клиента и настроит туннель. Пароль используется один раз и не сохраняется.</div>
-<div id="cascadeClientsBox" style="margin-bottom:10px; color:var(--text-muted); font-size:12px;">Загрузка клиентов...</div>
-                    <textarea id="cascadeSetupConf" rows="10" spellcheck="false" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = EU_IP:PORT&#10;AllowedIPs = 0.0.0.0/0, ::/0" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:13px; background:rgba(0,0,0,.3); color:#c9d1d9; border:1px solid var(--border); border-radius:6px; padding:10px; resize:vertical;"></textarea>
-                </div>
-
-                <div class="card advanced-only" style="margin-bottom: 20px;">
-                    <h3 style="margin-top:0;">Шаг 2. Клиентские интерфейсы и сети РФ</h3>
-                    <p style="color:var(--text-muted); font-size:13px; margin-top:0;">Выберите интерфейсы, трафик которых пойдёт в каскад (обычно <code>awg0</code>).</p>
-                    <div id="cascadeSetupIfaces" style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:14px; color:var(--text-muted);">Загрузка интерфейсов...</div>
-                    <label style="font-size:12px; color:var(--text-muted);">Дополнительные сети РФ (по одной в строке, CIDR) — их трафик пойдёт напрямую, а не через EU</label>
-                    <textarea id="cascadeExtraNets" rows="3" spellcheck="false" placeholder="203.0.113.0/24" style="width:100%; margin-top:6px; box-sizing:border-box; font-family:monospace; font-size:12px; background:rgba(0,0,0,.3); color:#c9d1d9; border:1px solid var(--border); border-radius:6px; padding:8px;"></textarea>
-                    <div class="controls-row" style="margin-top:14px; margin-bottom:0;">
-                        <button class="btn-success" style="background:#2ea043; color:#fff; border:none; border-radius:6px; padding:10px 16px;" onclick="setupCascade(this)">✅ Настроить каскад</button>
-                        <button class="btn-dark" onclick="refreshCascade()">♻️ Обновить маршруты</button>
-                        <button class="btn-danger" onclick="removeCascade()">⛔ Отключить каскад</button>
-                    </div>
-                </div>
-
-                <div class="card advanced-only">
+<div class="card advanced-only">
                     <h3 style="margin-top:0;">awg1.conf на этом сервере</h3>
                     <p style="color:var(--text-muted); font-size:12px; margin-top:0;">Только для тонкой настройки. Обычно менять здесь ничего не нужно.</p>
                     <textarea id="cascadeConfText" rows="10" spellcheck="false" style="width:100%; box-sizing:border-box; font-family:monospace; font-size:13px; background:rgba(0,0,0,.3); color:#c9d1d9; border:1px solid var(--border); border-radius:6px; padding:10px; resize:vertical;"></textarea>

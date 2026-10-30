@@ -276,7 +276,7 @@ function switchTab(tabId, el) {
     if (tabId === 'tab-services') { loadServices(); connectAdGuard(false); loadAdGuardFull(); loadWarpStatus(); }
     if (tabId === 'tab-install') loadModules();
     else if (agInterval) { clearInterval(agInterval); agInterval = null; }
-    if (tabId === 'tab-cascade') { loadCascadeSetup(); loadCascadeStatus(true); loadCascadeHealth(); loadCascadeIfaces(); }
+    if (tabId === 'tab-cascade') { loadCascadeSetup(); loadCascadeStatus(true); loadCascadeHealth(); loadCascadeIfaces(); renderCascadeParams(); watchCascadeJob(); }
     if (tabId === 'tab-cascade') loadCascadeSshDefaults();
     if (tabId === 'tab-obf') { loadObfCurrent(); loadObfProfiles(); }
     if (tabId === 'tab-update') loadUpdatePanel();
@@ -1535,16 +1535,17 @@ async function loadCascadeStatus(manual) {
 
 async function loadCascadeSetup() {
     const box = document.getElementById('cascadeSetupIfaces');
-    if (!box) return;
-    try {
-        const ifaces = await (await fetch('/api/interfaces')).json();
-        const pref = ifaces.filter(i => /^(awg|amn|wg)/.test(i));
-        const show = pref.length ? pref : ifaces;
-        box.innerHTML = show.map(i => `
-            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-main);">
-                <input type="checkbox" class="casc-setup-check" value="${i}" ${/^(awg0|amn0)$/.test(i) ? 'checked' : ''}> ${i}
-            </label>`).join('');
-    } catch (e) { box.innerText = 'Ошибка загрузки интерфейсов'; }
+    if (box) {
+        try {
+            const ifaces = await (await fetch('/api/interfaces')).json();
+            const pref = ifaces.filter(i => /^(awg|amn|wg)/.test(i));
+            const show = pref.length ? pref : ifaces;
+            box.innerHTML = show.map(i => `
+                <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--text-main);">
+                    <input type="checkbox" class="casc-setup-check" value="${i}" ${/^(awg0|amn0)$/.test(i) ? 'checked' : ''}> ${i}
+                </label>`).join('');
+        } catch (e) { box.innerText = 'Ошибка загрузки интерфейсов'; }
+    }
     if (typeof loadCascadeClients === 'function') loadCascadeClients();
     try {
         const res = await fetch('/api/cascade/config');
@@ -1632,7 +1633,11 @@ async function checkAutoCascadePeer(btn) {
                 ? 'SSH до <b>' + esc(d.host) + '</b> работает. AmneziaWG: ' + (d.hasAwg ? 'установлен' : '<b>нет — панель поставит</b>') + '.'
                 : 'SSH не работает: ' + esc(d.reason || 'нет ответа') + '.<br><span style="font-size:11px;">' + esc(d.output || '') + '</span>';
         }
+        window.cascadeSshState = d.ok ? 'ok' : 'error';
+        renderCascadeParams();
     } catch (e) {
+        window.cascadeSshState = 'error';
+        renderCascadeParams();
         if (hint) { hint.style.display = 'block'; hint.style.color = 'var(--danger)'; hint.innerText = 'Ошибка проверки: ' + e.message; }
     } finally { if (btn) { btn.disabled = false; btn.innerText = 'Проверить SSH'; } }
 }
@@ -1680,6 +1685,9 @@ async function runAutoCascade(btn) {
     const ifaces = [...document.querySelectorAll('#cascadeRoutingIfaces input[type=checkbox]:checked')]
         .map(c => c.value).filter(Boolean);
     const log = document.getElementById('autoCascadeLog');
+    renderCascadeParams();
+    const badParams = cascadeParamItems().filter(p => p.ok === false && p.name !== 'SSH');
+    if (badParams.length) return alert('Проверьте параметры:\n' + badParams.map(p => p.name + ' — ' + p.desc).join('\n'));
     if (!peerHost || !peerPass) return alert('Укажите IP второй стороны и пароль root');
     if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(peerHost)) return alert('Вторая сторона задаётся по IP, не по домену');
     if (obfMode === 'custom' && !obfSource) return alert('Вставьте параметры обфускации из Архитектора или выберите «Сгенерировать»');
@@ -1712,6 +1720,7 @@ async function runAutoCascade(btn) {
             })
         });
         // Сборка идёт в фоне: опрашиваем прогресс, чтобы не ловить 504 и видеть шаги.
+        watchCascadeJob();
         let lastCount = -1;
         for (let i = 0; i < 1800; i++) {
             await new Promise(r => setTimeout(r, 2000));
@@ -1722,6 +1731,7 @@ async function runAutoCascade(btn) {
                 if (log) log.innerHTML += '<div class="wizard-summary-row"><span>Связь</span><b>панель перезагружается, жду…</b></div>';
                 continue;
             }
+            renderCascadeChecklist(job);
             if (job && Array.isArray(job.steps) && job.steps.length !== lastCount) {
                 lastCount = job.steps.length;
                 render(job.steps);
@@ -1743,6 +1753,130 @@ async function runAutoCascade(btn) {
         if (log) log.innerHTML += '<div class="wizard-summary-row"><span style="color:var(--danger)">Ошибка</span><b>' + esc(e.message) + '</b></div>';
         toast('Каскад не собрался', 'error', e.message);
     } finally { if (btn) { btn.disabled = false; btn.innerText = '⚡ Построить каскад'; } }
+}
+
+// ---- Чек-лист каскада -------------------------------------------------
+function cascadeFieldValue(id) {
+    const el = document.getElementById(id);
+    return el ? String(el.value || '').trim() : '';
+}
+
+function cascadeParamItems() {
+    const version = cascadeFieldValue('autoCascadeVersion') || '2.0';
+    const peer = cascadeFieldValue('autoCascadePeer');
+    const port = cascadeFieldValue('autoCascadePeerPort') || '22';
+    const user = cascadeFieldValue('autoCascadeUser') || 'root';
+    const pass = (document.getElementById('autoCascadePass') || {}).value || '';
+    const obfMode = cascadeFieldValue('autoCascadeObfMode') || 'installer';
+    const obfSource = (document.getElementById('autoCascadeObfCustom') || {}).value || '';
+    const ssh = window.cascadeSshState || 'unknown';
+    const ipOk = /^(\d{1,3}\.){3}\d{1,3}$/.test(peer);
+    const portOk = Number(port) >= 1 && Number(port) <= 65535;
+    const obfOk = obfMode !== 'custom' || !!obfSource.trim();
+    return [
+        { name: 'IP второй стороны', value: peer || '—', ok: ipOk, desc: ipOk ? 'IPv4' : 'Укажите IPv4' },
+        { name: 'SSH-порт', value: port, ok: portOk, desc: portOk ? '1–65535' : 'Некорректный порт' },
+        { name: 'Пользователь SSH', value: user || '—', ok: !!user, desc: user ? '' : 'Укажите пользователя' },
+        { name: 'Пароль root', value: pass ? 'задан' : '—', ok: !!pass, desc: pass ? '' : 'Нужен для SSH' },
+        { name: 'Версия AWG', value: version, ok: ['1.5', '2.0', '3.1'].includes(version), desc: 'Одна на обеих сторонах' },
+        { name: 'Порт EU', value: '3977', ok: true, desc: 'UDP на EU' },
+        { name: 'Подсеть EU', value: '172.16.61.0/24', ok: true, desc: 'CASCADE.md' },
+        { name: 'Подсеть RU', value: '172.16.17.0/24', ok: true, desc: 'CASCADE.md' },
+        { name: 'Обфускация', value: obfMode === 'architect' ? 'Архитектор' : obfMode === 'custom' ? 'свои параметры' : 'установщик', ok: obfOk, desc: obfOk ? '' : 'Вставьте параметры' },
+        { name: 'SSH', value: ssh === 'ok' ? 'доступен' : ssh === 'error' ? 'ошибка' : 'не проверено', ok: ssh === 'ok' ? true : ssh === 'error' ? false : null, desc: ssh === 'error' ? 'Проверьте IP и пароль' : ssh === 'ok' ? '' : 'Нажмите «Проверить параметры»' }
+    ];
+}
+
+function renderCascadeParams() {
+    const box = document.getElementById('cascadeParams');
+    if (!box) return;
+    box.innerHTML = cascadeParamItems().map(p => {
+        const cls = p.ok === true ? 'checklist-ok' : p.ok === false ? 'checklist-err' : 'checklist-muted';
+        const mark = p.ok === true ? '✓' : p.ok === false ? '✗' : '•';
+        return `<div class="checklist-param" title="${esc(p.desc || '')}"><span>${esc(p.name)}</span><b class="${cls}">${esc(p.value)} ${mark}</b></div>`;
+    }).join('');
+}
+
+const CASCADE_CHECKLIST = [
+    { id: 'ssh', title: 'SSH до второй стороны', match: s => s.title === 'SSH' && /Вторая сторона доступна/.test(s.text) },
+    { id: 'eu-install', title: 'AmneziaWG на EU', match: s => s.title === 'EU' && /AmneziaWG готов/.test(s.text) },
+    { id: 'eu-obf', title: 'Обфускация EU', match: s => s.title === 'EU' && /Обфускация применена/.test(s.text), optional: true },
+    { id: 'ru-host', title: 'Клиент ru_host', match: s => /Конфиг ru_host получен/.test(s.text) },
+    { id: 'ru-install', title: 'AmneziaWG на RU', match: s => s.title === 'RU' && /AmneziaWG готов/.test(s.text) },
+    { id: 'ru-obf', title: 'Обфускация RU', match: s => s.title === 'RU' && /Обфускация применена/.test(s.text), optional: true },
+    { id: 'awg1', title: 'awg1.conf', match: s => /awg1\.conf/.test(s.text) },
+    { id: 'tunnel', title: 'Туннель awg1', match: s => /туннель awg1 поднят/.test(s.text) },
+    { id: 'routing', title: 'Маршруты и ipset', match: s => /маршруты и фильтрация применены/.test(s.text) },
+    { id: 'verify', title: 'Рукопожатие', match: s => s.title === 'Проверка' && /сек\. назад|нет рукопожатия/.test(s.text) },
+    { id: 'traffic', title: 'Трафик', match: s => s.title === 'Трафик' }
+];
+
+function renderCascadeChecklist(job) {
+    const box = document.getElementById('cascadeChecklist');
+    const badge = document.getElementById('cascadeChecklistBadge');
+    if (!box) return;
+    const obfEnabled = (cascadeFieldValue('autoCascadeObfMode') || 'installer') !== 'installer';
+    if (!job || (!job.running && !job.done && !(job.steps || []).length)) {
+        box.innerHTML = '<div class="checklist-item checklist-muted"><span class="checklist-ico">○</span><div>Сборка ещё не запускалась</div></div>';
+        if (badge) { badge.className = 'badge badge-muted'; badge.innerText = 'ожидание'; }
+        return;
+    }
+    const steps = job.steps || [];
+    const found = new Map();
+    for (const item of CASCADE_CHECKLIST) {
+        const s = steps.find(x => item.match(x));
+        if (s) found.set(item.id, s);
+    }
+    let current = -1;
+    for (let i = 0; i < CASCADE_CHECKLIST.length; i++) {
+        const item = CASCADE_CHECKLIST[i];
+        if (item.optional && !obfEnabled) continue;
+        if (!found.has(item.id)) { current = i; break; }
+    }
+    const rows = CASCADE_CHECKLIST.map((item, i) => {
+        const s = found.get(item.id);
+        let cls = 'checklist-muted', ico = '○', desc = '';
+        if (s) { cls = 'checklist-ok'; ico = '✓'; desc = s.text; }
+        else if (item.optional && !obfEnabled) { cls = 'checklist-muted'; ico = '—'; desc = 'не требуется'; }
+        else if (i === current && job.running) { cls = 'checklist-run'; ico = '◌'; desc = 'выполняется…'; }
+        else if (i === current && job.error) { cls = 'checklist-err'; ico = '✗'; desc = job.error; }
+        return `<div class="checklist-item"><span class="checklist-ico ${cls}">${ico}</span><div><b class="${cls}">${esc(item.title)}</b>${desc ? `<div class="checklist-desc">${esc(desc)}</div>` : ''}</div></div>`;
+    });
+    box.innerHTML = rows.join('');
+    if (badge) {
+        if (job.error) { badge.className = 'badge badge-warn'; badge.innerText = 'ошибка'; }
+        else if (job.running) { badge.className = 'badge badge-warn'; badge.innerText = 'идёт'; }
+        else if (job.result) { badge.className = 'badge badge-good'; badge.innerText = 'готово'; }
+        else { badge.className = 'badge badge-muted'; badge.innerText = 'ожидание'; }
+    }
+}
+
+async function checkCascadeParams(btn) {
+    renderCascadeParams();
+    const bad = cascadeParamItems().filter(p => p.ok === false && p.name !== 'SSH');
+    if (bad.length) return alert('Проверьте параметры:\n' + bad.map(p => p.name + ' — ' + p.desc).join('\n'));
+    await checkAutoCascadePeer(btn);
+    renderCascadeParams();
+}
+
+async function watchCascadeJob() {
+    try {
+        const job = await apiJson('/api/cascade/ssh-progress');
+        renderCascadeChecklist(job);
+        if (job && job.running && !window.cascadeWatchTimer) {
+            window.cascadeWatchTimer = setInterval(async () => {
+                try {
+                    const j = await apiJson('/api/cascade/ssh-progress');
+                    renderCascadeChecklist(j);
+                    if (!j.running) {
+                        clearInterval(window.cascadeWatchTimer);
+                        window.cascadeWatchTimer = null;
+                        loadCascadeStatus(true);
+                    }
+                } catch (e) { /* панель перезагружается */ }
+            }, 3000);
+        }
+    } catch (e) { renderCascadeChecklist(null); }
 }
 
 function autoCascadeObfHint() {
