@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.24">
+    <meta name="panel-version" content="3.0.25">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -306,8 +306,17 @@
                         <select id="clientExpires" style="width: 140px;">
                             <option value="">Навсегда</option><option value="1d">1 день</option><option value="7d">7 дней</option><option value="30d">30 дней</option>
                         </select>
+                        <select id="clientEndpointType" style="width: 150px;" onchange="clientEndpointTypeChanged('manual', this.value)" title="Адрес сервера в конфиге клиента">
+                            <option value="ip" selected>Endpoint: IP</option>
+                            <option value="domain">Endpoint: домен</option>
+                        </select>
+                        <label class="field" id="clientEndpointDomainWrap" style="display:none; margin:0; min-width:220px;">
+                            <span>Домен</span>
+                            <input type="text" id="clientEndpointDomain" placeholder="vpn.example.com" autocomplete="off">
+                        </label>
                         <button class="btn-primary" onclick="createConfig()">Сгенерировать конфигурации</button>
                     </div>
+                    <div id="clientEndpointHint" class="sub-text" style="margin-top:8px;">В конфиге будет IP сервера.</div>
                 </div>
 
                 <div class="card advanced-only" style="margin-bottom: 20px;">

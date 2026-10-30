@@ -1328,12 +1328,17 @@ async function createConfig() {
     const name = document.getElementById('clientName').value; 
     const count = document.getElementById('clientCount').value; 
     const expires = document.getElementById('clientExpires').value;
+    const epType = ((document.getElementById('clientEndpointType') || {}).value) || 'ip';
+    const epDomain = ((document.getElementById('clientEndpointDomain') || {}).value || '').trim();
     
     if(!name) return alert("Введите имя (префикс)");
+    if (epType === 'domain' && !/^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/.test(epDomain)) {
+        return alert('Выбран endpoint-домен. Введите домен или возьмите его из «Домен и SSL».');
+    }
     
     if (!count || parseInt(count) <= 1) {
         // Одиночное создание (остается как было)
-        const res = await fetch('/api/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, expires }) });
+        const res = await fetch('/api/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, expires, endpointType: epType, domain: epDomain }) });
         if (res.ok) { 
             const a = document.createElement('a'); 
             a.href = window.URL.createObjectURL(await res.blob()); 
@@ -1348,7 +1353,7 @@ async function createConfig() {
         document.getElementById('loaderText').innerText = "Генерация конфигов (около 1-2 сек на каждый)...";
         
         try {
-            const res = await fetch('/api/create-bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prefix: name, count: parseInt(count), expires }) });
+            const res = await fetch('/api/create-bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prefix: name, count: parseInt(count), expires, endpointType: epType, domain: epDomain }) });
             if (res.ok) { 
                 const data = await res.json();
                 if (data.configs && data.configs.length > 0) {
@@ -1379,6 +1384,30 @@ async function createConfig() {
             alert('Сетевая ошибка');
         }
         document.getElementById('loaderOverlay').style.display = 'none';
+    }
+}
+
+async function clientEndpointTypeChanged(scope, value) {
+    const wizard = scope === 'wizard';
+    const wrap = document.getElementById(wizard ? 'wizClientDomainWrap' : 'clientEndpointDomainWrap');
+    const input = document.getElementById(wizard ? 'wizClientDomain' : 'clientEndpointDomain');
+    const hint = document.getElementById(wizard ? 'wizClientDomainHint' : 'clientEndpointHint');
+    if (wrap) wrap.style.display = value === 'domain' ? '' : 'none';
+    if (value !== 'domain') {
+        if (hint) hint.innerText = 'В конфиге будет IP сервера.';
+        return;
+    }
+    if (hint) hint.innerText = 'Проверяю домен из «Домен и SSL»…';
+    try {
+        const d = await apiJson('/api/clients/domain');
+        if (d && d.domain) {
+            if (input && !input.value.trim()) input.value = d.domain;
+            if (hint) hint.innerText = 'Домен из настроек: ' + d.domain + (d.source === 'awg' ? ' (AmneziaWG)' : ' (панель)');
+        } else if (hint) {
+            hint.innerText = 'Домен не найден в настройках — введите вручную.';
+        }
+    } catch (e) {
+        if (hint) hint.innerText = 'Не удалось получить домен — введите вручную.';
     }
 }
 
@@ -3432,7 +3461,7 @@ const WIZARD_META = {
 };
 
 function wizardDefaults(scenario) {
-    if (scenario === 'client') return { name: suggestClientName(), expires: '', count: 1, device: 'phone' };
+    if (scenario === 'client') return { name: suggestClientName(), expires: '', count: 1, device: 'phone', endpointType: 'ip', endpointDomain: '' };
     if (scenario === 'obf') return { preset: 'balanced', regen: true };
     if (scenario === 'cascade') return { role: 'ru', mode: 'install', remoteIp: '', remotePort: '22', remotePass: '' };
     if (scenario === 'adguard') return { action: 'auto', url: '', probe: 'loading', detected: null, enable: true, refresh: true, port: '3000' };
@@ -3644,6 +3673,19 @@ function renderClientOptions() {
                 </select>
             </label>
         </div>
+        <div class="wizard-section-title">Endpoint в конфиге клиента</div>
+        <div class="wizard-grid">
+            <label class="field"><span>Адрес сервера</span>
+                <select id="wizClientEndpointType" onchange="clientEndpointTypeChanged('wizard', this.value)">
+                    <option value="ip" ${d.endpointType !== 'domain' ? 'selected' : ''}>IP</option>
+                    <option value="domain" ${d.endpointType === 'domain' ? 'selected' : ''}>Домен</option>
+                </select>
+            </label>
+            <label class="field" id="wizClientDomainWrap" style="display:${d.endpointType === 'domain' ? '' : 'none'};"><span>Домен</span>
+                <input id="wizClientDomain" value="${esc(d.endpointDomain || '')}" placeholder="vpn.example.com" autocomplete="off" oninput="wizardState.data.endpointDomain=this.value">
+            </label>
+        </div>
+        <div id="wizClientDomainHint" class="wizard-note" style="margin-top:8px;">${d.endpointType === 'domain' ? 'Проверяю домен из «Домен и SSL»…' : 'По умолчанию в конфиге будет IP сервера.'}</div>
         <div class="wizard-section-title">Тип устройства</div>
         <div class="choice-grid">
             ${wizChoice('phone', '▯', 'Телефон', 'AmneziaVPN / Hiddify', d.device === 'phone', 'device')}
@@ -4045,11 +4087,19 @@ function wizardValidate() {
         const nameEl = document.getElementById('wizClientName');
         const countEl = document.getElementById('wizClientCount');
         const expEl = document.getElementById('wizClientExpires');
+        const epEl = document.getElementById('wizClientEndpointType');
+        const epDomainEl = document.getElementById('wizClientDomain');
         if (nameEl) d.name = nameEl.value.trim();
         if (countEl) d.count = Math.max(1, Math.min(20, parseInt(countEl.value, 10) || 1));
         if (expEl) d.expires = expEl.value;
+        if (epEl) d.endpointType = epEl.value === 'domain' ? 'domain' : 'ip';
+        if (epDomainEl) d.endpointDomain = epDomainEl.value.trim();
         if (!/^[A-Za-z0-9_-]{1,63}$/.test(d.name)) {
             toast('Недопустимое имя', 'error', 'Разрешены A–Z, a–z, 0–9, _ и -, до 63 символов.');
+            return false;
+        }
+        if (d.endpointType === 'domain' && !/^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/.test(d.endpointDomain)) {
+            toast('Укажите домен', 'error', 'Для endpoint выбран домен — введите его или возьмите из «Домен и SSL».');
             return false;
         }
         return true;
@@ -4260,7 +4310,7 @@ async function executeClientWizard() {
     for (const name of names) {
         const res = await fetch('/api/create', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, expires: d.expires || '' })
+            body: JSON.stringify({ name, expires: d.expires || '', endpointType: d.endpointType || 'ip', domain: d.endpointDomain || '' })
         });
         if (!res.ok) {
             let data = {};

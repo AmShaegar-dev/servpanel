@@ -4906,33 +4906,48 @@ app.post('/api/warp/adguard', checkAuth, requireAdmin, async (req, res) => {
 // ---------------------------------------------------------------------------
 // Клиенты: создание
 // ---------------------------------------------------------------------------
-function guessDomain() {
+function domainInfo() {
     try {
         if (fs.existsSync('/root/awg_domain.txt')) {
             const d = fs.readFileSync('/root/awg_domain.txt', 'utf8').trim();
-            if (d && HOST_RE.test(d)) return d;
+            if (d && HOST_RE.test(d)) return { domain: d, source: 'awg' };
         }
         const nginx = shTry('cat', ['/etc/nginx/sites-available/awg-admin']);
         const m = nginx.match(/server_name\s+([^;]+);/);
         // server_name может содержать несколько имён («домен www.домен») —
         // берём первое, иначе проверка HOST_RE не проходит из-за пробела.
         const first = m && m[1] ? m[1].trim().split(/\s+/).find(n => n && n !== '_') : '';
-        if (first && HOST_RE.test(first)) return first;
+        if (first && HOST_RE.test(first)) return { domain: first, source: 'panel' };
     } catch (e) { /* ignore */ }
-    return '';
+    return { domain: '', source: '' };
 }
 
-function replaceEndpointWithDomain(confPath) {
-    const domain = guessDomain();
-    if (!domain) return;
+function guessDomain() {
+    return domainInfo().domain;
+}
+
+function replaceEndpointWithDomain(confPath, domain) {
+    const d = String(domain || '').trim() || guessDomain();
+    if (!d || !HOST_RE.test(d)) return;
     try {
-        sh('sudo', ['sed', '-i', '-E', `s/Endpoint = [0-9.]+(:[0-9]+)/Endpoint = ${domain}\\1/g`, confPath]);
+        sh('sudo', ['sed', '-i', '-E', `s/Endpoint = [0-9.]+(:[0-9]+)/Endpoint = ${d}\\1/g`, confPath]);
     } catch (e) { /* ignore */ }
 }
+
+// Домен для endpoint клиента: из настроек AmneziaWG или из «Домен и SSL».
+app.get('/api/clients/domain', checkAuth, (req, res) => {
+    try { res.json(domainInfo()); }
+    catch (e) { res.json({ domain: '', source: '' }); }
+});
 
 app.post('/api/create', checkAuth, (req, res) => {
-    const { name, expires } = req.body || {};
+    const { name, expires, endpointType, domain } = req.body || {};
     if (!name || !NAME_RE.test(name)) return res.status(400).json({ error: 'Недопустимое имя' });
+    const epType = endpointType === 'domain' ? 'domain' : endpointType === 'ip' ? 'ip' : '';
+    const epDomain = String(domain || '').trim();
+    if (epType === 'domain' && !HOST_RE.test(epDomain)) {
+        return res.status(400).json({ error: 'Укажите корректный домен для endpoint' });
+    }
     if (DEMO_MODE) {
         if (demoClients.some(c => c.name === name)) return res.status(409).json({ error: 'Клиент с таким именем уже есть' });
         const ip = '10.8.1.' + (10 + demoClients.length);
@@ -4948,7 +4963,8 @@ app.post('/api/create', checkAuth, (req, res) => {
             if (!response.ok) return res.status(500).json({ error: response.error || 'Ошибка создания' });
             const r = (response.results || [])[0];
             if (!r || !r.conf) return res.status(500).json({ error: 'Скрипт не вернул путь к конфигу' });
-            replaceEndpointWithDomain(r.conf);
+            if (epType === 'domain') replaceEndpointWithDomain(r.conf, epDomain);
+            else if (!epType) replaceEndpointWithDomain(r.conf);
             auditLog(req, `Создан клиент ${name}`);
             res.download(r.conf, `Serv_${name}.conf`);
         } catch (e) { res.status(500).json({ error: 'Ошибка обработки' }); }
@@ -4956,10 +4972,15 @@ app.post('/api/create', checkAuth, (req, res) => {
 });
 
 app.post('/api/create-bulk', checkAuth, (req, res) => {
-    const { prefix, count, expires } = req.body || {};
+    const { prefix, count, expires, endpointType, domain } = req.body || {};
     const n = parseInt(count, 10);
     if (!prefix || !NAME_RE.test(prefix) || !Number.isInteger(n) || n < 1 || n > 100) {
         return res.status(400).json({ error: 'Недопустимые параметры' });
+    }
+    const epType = endpointType === 'domain' ? 'domain' : endpointType === 'ip' ? 'ip' : '';
+    const epDomain = String(domain || '').trim();
+    if (epType === 'domain' && !HOST_RE.test(epDomain)) {
+        return res.status(400).json({ error: 'Укажите корректный домен для endpoint' });
     }
     const generated = [];
     for (let i = 1; i <= n; i++) {
@@ -4971,7 +4992,8 @@ app.post('/api/create-bulk', checkAuth, (req, res) => {
             const response = JSON.parse(result);
             const r = (response.results || [])[0];
             if (response.ok && r && r.conf) {
-                replaceEndpointWithDomain(r.conf);
+                if (epType === 'domain') replaceEndpointWithDomain(r.conf, epDomain);
+                else if (!epType) replaceEndpointWithDomain(r.conf);
                 generated.push({ name: clientName, content: sh('sudo', ['cat', r.conf]) });
             }
         } catch (e) { /* пропускаем неудачные */ }
