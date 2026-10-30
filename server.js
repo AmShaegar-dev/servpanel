@@ -3075,10 +3075,11 @@ function cascadeRole() {
         if (!fileExists(file)) continue;
         const ini = parseIni(readTextSafe(file));
         const iface = ini.Interface || {};
-        const peers = Object.keys(ini).filter(k => k === "Peer").length;
+        const addr = String(iface.Address || '');
+        if (/^172\.16\.61\./.test(addr)) return "eu";
+        if (/^172\.16\.17\./.test(addr) || /^10\.9\.9\./.test(addr)) return "ru";
         const clientPeers = (readTextSafe(file).match(/^\[Peer\]/gm) || []).length;
         if (iface.ListenPort && clientPeers > 0) return "ru";
-        void peers;
     }
     return "eu";
 }
