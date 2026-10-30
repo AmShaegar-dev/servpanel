@@ -354,7 +354,9 @@ async function uninstallModule(id) {
         ? '\n\nAdGuard Home будет остановлен, его конфиг и статистика удалены.'
         : id === 'warp'
             ? '\n\nБудут удалены WARP, Xray и их конфиги. Прокси перестанет отвечать на порту Xray.'
-            : '';
+            : id === 'mtproto'
+                ? '\n\nБудут удалены Telemt/MTProxyL/MTProto.zig, все фиксы (iptables, nftables, Zapret2), GEOIP, шейпинг, оптимизация MEKO и сам MEKO Manager.'
+                : '';
     const check = prompt(`Полностью удалить «${title}» с сервера?${extra}\n\nДля подтверждения введите слово DELETE:`);
     if (check !== 'DELETE') return;
     try {
@@ -3521,7 +3523,7 @@ const WIZARD_META = {
 
 function wizardDefaults(scenario) {
     if (scenario === 'client') return { name: suggestClientName(), expires: '', count: 1, device: 'phone', endpointType: 'ip', endpointDomain: '' };
-    if (scenario === 'obf') return { preset: 'balanced', regen: true };
+    if (scenario === 'obf') return { preset: 'balanced', regen: true, sni: '' };
     if (scenario === 'cascade') return { role: 'ru', mode: 'install', remoteIp: '', remotePort: '22', remotePass: '' };
     if (scenario === 'adguard') return { action: 'auto', url: '', probe: 'loading', detected: null, enable: true, refresh: true, port: '3000' };
     if (scenario === 'mtproto') return {
@@ -3771,6 +3773,11 @@ function renderObfOptions() {
             ${wizChoice('balanced', '◈', 'Баланс', 'AWG 3.1 · 3 цепочки · меньше нагрузки', d.preset === 'balanced', 'preset')}
             ${wizChoice('compat', '◇', 'Совместимость', 'AWG 2.0 · старые клиенты · без HPK', d.preset === 'compat', 'preset')}
         </div>
+        <div class="wizard-section-title">SNI для TLS-мимикрии (необязательно)</div>
+        <label class="field"><span>Домен</span>
+            <input id="wizObfSni" value="${esc(d.sni || '')}" placeholder="ozon.ru" autocomplete="off" oninput="wizardState.data.sni=this.value">
+        </label>
+        <div class="wizard-note">Если указан, цепочка I1 будет содержать TLS ClientHello с этим SNI. Пусто — стандартный профиль.</div>
         <div class="wizard-section-title">После применения</div>
         <label class="form-check" style="margin-bottom:8px;"><input type="checkbox" id="wizObfRegen" ${d.regen ? 'checked' : ''} onchange="wizardState.data.regen=this.checked"> Перегенерировать клиентские конфиги</label>
         <div class="wizard-note">Перед изменением панель сделает резервную копию конфига. Если интерфейс не поднимется — изменения откатятся автоматически.</div>
@@ -4293,11 +4300,16 @@ function isValidPortValue(v) {
 }
 
 function wizardPrepareObf() {
+    const sni = String(wizardState.data.sni || '').trim();
+    if (sni && !isValidRemoteHost(sni)) {
+        toast('Неверный SNI', 'error', 'Укажите домен, например ozon.ru.');
+        return;
+    }
     wizardState.busy = true;
     renderWizard();
     apiJson('/api/obf/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preset: wizardState.data.preset })
+        body: JSON.stringify({ preset: wizardState.data.preset, sni })
     }).then(preview => {
         wizardState.preview = preview;
         wizardState.step = 2;
@@ -5846,6 +5858,7 @@ async function loadProxyTab(force) {
     loadProxyBot();
     loadProxySettings();
     loadProxyFix();
+    loadProxyOptimization();
     loadProxyChecklist();
 }
 
@@ -6025,6 +6038,50 @@ async function installProxyFix() {
     } catch (e) {
         if (result) result.innerText = e.message + (e.data && e.data.output ? '\n' + e.data.output : '');
         toast('Не удалось установить фикс', 'error', e.message);
+    }
+}
+
+async function loadProxyOptimization() {
+    const badge = document.getElementById('proxyOptBadge');
+    const info = document.getElementById('proxyOptInfo');
+    try {
+        const d = await apiJson('/api/proxy/optimization');
+        proxyState.optimization = d;
+        if (badge) {
+            badge.className = 'badge ' + (d.applied ? 'badge-good' : 'badge-muted');
+            badge.innerText = d.applied ? 'применена' : 'не применена';
+        }
+        if (info) {
+            info.innerText = 'congestion: ' + (d.congestion || '—') +
+                ' · qdisc: ' + (d.qdisc || '—') +
+                ' · fastopen: ' + (d.fastopen || '—') +
+                ' · somaxconn: ' + (d.somaxconn || '—') +
+                (d.snapshot ? ' · снапшот для отката есть' : '');
+        }
+    } catch (e) {
+        if (info) info.innerText = e.message;
+    }
+}
+
+async function setProxyOptimization(action) {
+    const result = document.getElementById('proxyOptResult');
+    const apply = action === 'apply';
+    if (!confirm(apply
+        ? 'Применить оптимизацию MEKO? Будут изменены sysctl, лимиты Telemt и его конфиг, служба перезапустится.'
+        : 'Откатить оптимизацию MEKO и вернуть прежние значения?')) return;
+    if (result) result.innerText = apply ? 'Применяю…' : 'Откатываю…';
+    try {
+        const d = await apiJson('/api/proxy/optimization', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action })
+        });
+        if (result) result.innerText = d.output || 'Готово';
+        toast(apply ? 'Оптимизация применена' : 'Оптимизация откатана', 'success');
+        await loadProxyOptimization();
+        await loadProxyChecklist();
+    } catch (e) {
+        if (result) result.innerText = e.message + (e.data && e.data.output ? '\n' + e.data.output : '');
+        toast('Не удалось выполнить оптимизацию', 'error', e.message);
     }
 }
 

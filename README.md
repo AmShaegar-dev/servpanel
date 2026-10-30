@@ -898,15 +898,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.37/servpanel-3.0.37.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.37/servpanel-3.0.37.tar.gz.sha256
-sha256sum -c servpanel-3.0.37.tar.gz.sha256
-tar -xzf servpanel-3.0.37.tar.gz
-bash /root/servpanel-3.0.37/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.38/servpanel-3.0.38.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.38/servpanel-3.0.38.tar.gz.sha256
+sha256sum -c servpanel-3.0.38.tar.gz.sha256
+tar -xzf servpanel-3.0.38.tar.gz
+bash /root/servpanel-3.0.38/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.0.37`. Если `curl` не установлен:
+Должно вывести `3.0.38`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:

@@ -6057,7 +6057,7 @@ function obfRandomizeCps(template) {
  * balanced — AWG 3.1: три цепочки, меньше нагрузки;
  * compat   — AWG 2.0: без HPK/таймеров/флагов, для старых клиентов.
  */
-function generateObfProfile(preset) {
+function generateObfProfile(preset, sni) {
     const mode = ['max', 'balanced', 'compat'].includes(preset) ? preset : 'balanced';
     const p = {};
 
@@ -6086,6 +6086,9 @@ function generateObfProfile(preset) {
 
     const chains = mode === 'max' ? 5 : 3;
     for (let i = 0; i < chains; i++) p['I' + (i + 1)] = obfRandomizeCps(OBF_CPS_TEMPLATES[i]);
+    if (sni && HOST_RE.test(String(sni))) {
+        p.I1 = `<b 0x${awgArchitect.tlsClientHelloHex(String(sni))}><r ${obfRandomInt(40, 120)}>`;
+    }
 
     if (mode !== 'compat') {
         p.HeaderProtectionKey = crypto.randomBytes(32).toString('base64');
@@ -6111,11 +6114,16 @@ function generateObfProfile(preset) {
 app.post('/api/obf/generate', checkAuth, (req, res) => {
     try {
         const body = req.body || {};
+        const sni = String(body.sni || '').trim();
+        if (sni && !HOST_RE.test(sni)) {
+            return res.status(400).json({ error: 'Некорректный SNI-домен' });
+        }
         if (body.version) {
             const g = awgArchitect.generate({
                 version: body.version,
                 profile: body.profile,
                 intensity: body.intensity,
+                sni,
                 router: !!body.router,
                 noHpk: !!body.noHpk,
                 noPadding: !!body.noPadding,
@@ -6129,15 +6137,17 @@ app.post('/api/obf/generate', checkAuth, (req, res) => {
                 version: g.version,
                 profile: g.profile,
                 intensity: g.intensity,
+                sni: g.sni,
                 params,
                 versionDetected: detectObfVersion(params),
                 audit: auditObf(params)
             });
         }
         const preset = body.preset || 'balanced';
-        const params = generateObfProfile(preset);
+        const params = generateObfProfile(preset, sni);
         res.json({
             preset: ['max', 'balanced', 'compat'].includes(preset) ? preset : 'balanced',
+            sni,
             params,
             version: detectObfVersion(params),
             audit: auditObf(params)
@@ -8278,6 +8288,114 @@ app.post('/api/proxy/fix', checkAuth, requireAdmin, async (req, res) => {
     }
 });
 
+function proxyOptimizationStatus() {
+    const get = (key) => {
+        try { return String(sh('sysctl', ['-n', key]) || '').trim(); }
+        catch (e) { return ''; }
+    };
+    return {
+        applied: fs.existsSync('/etc/sysctl.d/99-custom.conf') || fs.existsSync('/etc/systemd/system/telemt.service.d/limits.conf'),
+        sysctl: fs.existsSync('/etc/sysctl.d/99-custom.conf'),
+        limits: fs.existsSync('/etc/systemd/system/telemt.service.d/limits.conf'),
+        snapshot: fs.existsSync('/opt/mtpr-simple/opt-snapshot'),
+        congestion: get('net.ipv4.tcp_congestion_control'),
+        qdisc: get('net.core.default_qdisc'),
+        fastopen: get('net.ipv4.tcp_fastopen'),
+        somaxconn: get('net.core.somaxconn')
+    };
+}
+
+app.get('/api/proxy/optimization', checkAuth, (req, res) => {
+    try { res.json(proxyOptimizationStatus()); }
+    catch (e) { res.status(500).json({ error: 'Не удалось проверить оптимизацию: ' + e.message }); }
+});
+
+app.post('/api/proxy/optimization', checkAuth, requireAdmin, async (req, res) => {
+    const action = String((req.body && req.body.action) || '');
+    if (!['apply', 'remove'].includes(action)) {
+        return res.status(400).json({ error: 'Неизвестное действие' });
+    }
+    if (!fs.existsSync('/opt/mtpr-simple') && !fs.existsSync('/usr/local/bin/mekopr')) {
+        return res.status(400).json({ error: 'MEKO не установлен — оптимизация доступна после установки MEKO' });
+    }
+    const cfg = proxyUsers.configPath() || '/etc/telemt/telemt.toml';
+    const applyScript = String.raw`
+set -e
+SNAP=/opt/mtpr-simple/opt-snapshot
+mkdir -p "$SNAP"
+if [ ! -f "$SNAP/sysctl.conf" ] && [ ! -f "$SNAP/sysctl.absent" ]; then
+  if [ -f /etc/sysctl.d/99-custom.conf ]; then cp -a /etc/sysctl.d/99-custom.conf "$SNAP/sysctl.conf"; else : > "$SNAP/sysctl.absent"; fi
+fi
+if [ ! -f "$SNAP/limits.conf" ] && [ ! -f "$SNAP/limits.absent" ]; then
+  if [ -f /etc/systemd/system/telemt.service.d/limits.conf ]; then cp -a /etc/systemd/system/telemt.service.d/limits.conf "$SNAP/limits.conf"; else : > "$SNAP/limits.absent"; fi
+fi
+CFG="__CFG__"
+if [ -f "$CFG" ] && [ ! -f "$SNAP/telemt.toml" ]; then
+  cp -a "$CFG" "$SNAP/telemt.toml"
+  printf '%s\n' "$CFG" > "$SNAP/telemt.path"
+fi
+cat > /etc/sysctl.d/99-custom.conf <<'EOF'
+net.ipv4.tcp_fastopen=3
+net.core.somaxconn=65535
+net.ipv4.tcp_max_syn_backlog=65535
+net.core.netdev_max_backlog=65535
+fs.file-max=2097152
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.ipv4.tcp_keepalive_time=45
+net.ipv4.tcp_keepalive_intvl=15
+net.ipv4.tcp_keepalive_probes=3
+EOF
+mkdir -p /etc/systemd/system/telemt.service.d
+printf '[Service]\nLimitNOFILE=65535\n' > /etc/systemd/system/telemt.service.d/limits.conf
+if [ -f "$CFG" ]; then
+  systemctl stop telemt >/dev/null 2>&1 || true
+  if grep -q '^max_connections[[:space:]]*=' "$CFG"; then
+    sed -i 's/^max_connections[[:space:]]*=.*/max_connections = 16384/' "$CFG"
+  elif grep -q '^\[server\]' "$CFG"; then
+    sed -i '/^\[server\]/a max_connections = 16384' "$CFG"
+  fi
+  if grep -q '^client_handshake[[:space:]]*=' "$CFG"; then
+    sed -i 's/^client_handshake[[:space:]]*=.*/client_handshake = 15/' "$CFG"
+  elif grep -q '^\[server\]' "$CFG"; then
+    sed -i '/^\[server\]/a client_handshake = 15' "$CFG"
+  fi
+  systemctl restart telemt >/dev/null 2>&1 || true
+fi
+sysctl --system >/dev/null 2>&1 || true
+systemctl daemon-reload >/dev/null 2>&1 || true
+echo "OK: оптимизация применена"
+`.replace('__CFG__', cfg);
+    const removeScript = String.raw`
+set -e
+SNAP=/opt/mtpr-simple/opt-snapshot
+if [ -f "$SNAP/sysctl.conf" ]; then cp -a "$SNAP/sysctl.conf" /etc/sysctl.d/99-custom.conf 2>/dev/null || true; else rm -f /etc/sysctl.d/99-custom.conf; fi
+if [ -f "$SNAP/limits.conf" ]; then mkdir -p /etc/systemd/system/telemt.service.d; cp -a "$SNAP/limits.conf" /etc/systemd/system/telemt.service.d/limits.conf 2>/dev/null || true; else rm -f /etc/systemd/system/telemt.service.d/limits.conf; rmdir /etc/systemd/system/telemt.service.d 2>/dev/null || true; fi
+if [ -f "$SNAP/telemt.toml" ] && [ -f "$SNAP/telemt.path" ]; then
+  CFG="$(cat "$SNAP/telemt.path" 2>/dev/null || true)"
+  if [ -n "$CFG" ] && [ -f "$CFG" ]; then
+    systemctl stop telemt >/dev/null 2>&1 || true
+    cp -a "$SNAP/telemt.toml" "$CFG" 2>/dev/null || true
+    systemctl restart telemt >/dev/null 2>&1 || true
+  fi
+fi
+rm -rf "$SNAP"
+sysctl --system >/dev/null 2>&1 || true
+systemctl daemon-reload >/dev/null 2>&1 || true
+echo "OK: оптимизация откатана"
+`;
+    try {
+        const out = sh('bash', ['-c', action === 'apply' ? applyScript : removeScript], { timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
+        auditLog(req, action === 'apply' ? 'Прокси: применена оптимизация MEKO' : 'Прокси: откатана оптимизация MEKO');
+        res.json({ success: true, action, output: stripAnsiText(out).slice(-2000), status: proxyOptimizationStatus() });
+    } catch (e) {
+        res.status(500).json({
+            error: 'Не удалось выполнить оптимизацию: ' + e.message,
+            output: stripAnsiText((e && (e.stdout || e.message)) || '').slice(-2000)
+        });
+    }
+});
+
 app.get('/api/proxy/checklist', checkAuth, async (req, res) => {
     try {
         const st = await proxyUsers.status().catch(e => ({ backend: 'none', error: e.message }));
@@ -8986,7 +9104,38 @@ fi
         log: '/var/log/mtproto_uninstall.log',
         bin: 'mtproto_uninstall',
         script: String.raw`
-for unit in mtproxyl-api mtproxyl mtproto.zig mtproto-zig mtg telemt mtproto; do
+# 1. Откат базовой оптимизации MEKO (если применялась)
+SNAP=/opt/mtpr-simple/opt-snapshot
+if [ -f "$SNAP/sysctl.conf" ]; then
+  cp -a "$SNAP/sysctl.conf" /etc/sysctl.d/99-custom.conf 2>/dev/null || true
+else
+  rm -f /etc/sysctl.d/99-custom.conf
+fi
+if [ -f "$SNAP/limits.conf" ]; then
+  mkdir -p /etc/systemd/system/telemt.service.d
+  cp -a "$SNAP/limits.conf" /etc/systemd/system/telemt.service.d/limits.conf 2>/dev/null || true
+else
+  rm -f /etc/systemd/system/telemt.service.d/limits.conf
+  rmdir /etc/systemd/system/telemt.service.d 2>/dev/null || true
+fi
+if [ -f "$SNAP/telemt.toml" ] && [ -f "$SNAP/telemt.path" ]; then
+  cfg="$(cat "$SNAP/telemt.path" 2>/dev/null || true)"
+  [ -n "$cfg" ] && [ -f "$cfg" ] && cp -a "$SNAP/telemt.toml" "$cfg" 2>/dev/null || true
+fi
+sysctl --system >/dev/null 2>&1 || true
+systemctl daemon-reload >/dev/null 2>&1 || true
+
+# 2. Штатное полное удаление MEKO: менеджер + все фиксы + Telemt
+if command -v mekopr >/dev/null 2>&1; then
+  echo "Запускаем mekopr remove all -y"
+  mekopr remove all -y || true
+elif [ -x /opt/mtpr-simple/main.sh ]; then
+  echo "Запускаем main.sh remove all -y"
+  bash /opt/mtpr-simple/main.sh remove all -y || true
+fi
+
+# 3. Добиваем остатки, если MEKO не смог
+for unit in mtpr-zapret2-watch mtpr-zapret2 mtpr-nft-synfix mtpr-synfix mtproxyl-api mtproxyl mtproto.zig mtproto-zig mtg telemt mtproto; do
   if systemctl list-unit-files 2>/dev/null | grep -q "^\${unit}\.service"; then
     echo "Останавливаем \${unit}.service"
     systemctl stop "$unit" >/dev/null 2>&1 || true
@@ -8995,25 +9144,38 @@ for unit in mtproxyl-api mtproxyl mtproto.zig mtproto-zig mtg telemt mtproto; do
 done
 
 if command -v docker >/dev/null 2>&1; then
-  for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Ei 'telemt|mtproto|mtg|mtproxyl' || true); do
+  for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Ei 'telemt|mtproto|mtg|mtproxyl|zapret' || true); do
     echo "Удаляем контейнер $c"
     docker rm -f "$c" >/dev/null 2>&1 || true
   done
 fi
 
-if command -v mtproxyl >/dev/null 2>&1; then
-  mtproxyl api off >/dev/null 2>&1 || true
-  mtproxyl api uninstall >/dev/null 2>&1 || true
-fi
-[ -x /opt/mtproxyl/uninstall.sh ] && bash /opt/mtproxyl/uninstall.sh >/dev/null 2>&1 || true
-[ -x /opt/telemt/uninstall.sh ] && bash /opt/telemt/uninstall.sh >/dev/null 2>&1 || true
-rm -rf /etc/telemt /opt/telemt /etc/mtproxyl /opt/mtproxyl /etc/mtproxyl-api \
-       /opt/mtproto.zig /etc/mtproto.zig
-rm -f /usr/local/bin/telemt /usr/local/bin/mtproxyl /usr/local/bin/mtproxyl-api \
+# iptables: SYN-фикс, u32, GEOIP, NAT
+iptables -t filter -D INPUT -j MTPR_SYNFIX 2>/dev/null || true
+iptables -t filter -F MTPR_SYNFIX 2>/dev/null || true
+iptables -t filter -X MTPR_SYNFIX 2>/dev/null || true
+iptables -t mangle -S PREROUTING 2>/dev/null | grep -E 'set-mark 0x400|u32|MTPR_SYNFIX' | sed 's/^-A /-D /' | xargs -r -L1 iptables -t mangle 2>/dev/null || true
+iptables -S INPUT 2>/dev/null | grep -Ei 'geoip|xt_geoip' | sed 's/^-A /-D /' | xargs -r -L1 iptables 2>/dev/null || true
+iptables -t nat -S POSTROUTING 2>/dev/null | grep -Ei 'telemt|mtpr|mtproto' | sed 's/^-A /-D /' | xargs -r -L1 iptables -t nat 2>/dev/null || true
+
+# nftables: SYN-фикс, Zapret2, лимитер, iOS-фикс
+nft delete table inet mtpr_synfix 2>/dev/null || true
+nft delete table ip MTProto 2>/dev/null || true
+nft delete table inet telemt_limit 2>/dev/null || true
+nft delete table ip mtpr_ios2_fix 2>/dev/null || true
+
+# Файлы и службы
+rm -rf /opt/mtpr-simple /opt/zapret2 /etc/zapret2 /etc/telemt /opt/telemt \
+       /etc/mtproxyl /opt/mtproxyl /etc/mtproxyl-api /opt/mtproto.zig /etc/mtproto.zig
+rm -f /etc/systemd/system/mtpr-*.service /etc/systemd/system/telemt.service \
+      /etc/systemd/system/mtproxyl*.service /etc/systemd/system/mtproto*.service \
+      /etc/sudoers.d/mtproxyl-api
+rm -f /usr/local/sbin/mtpr-* /usr/local/bin/mekopr /usr/local/bin/meko /usr/local/bin/mekomanager \
+      /usr/local/bin/telemt /usr/local/bin/mtproxyl /usr/local/bin/mtproxyl-api \
       /usr/local/bin/mtg /usr/local/bin/mtproto.zig
-rm -f /etc/sudoers.d/mtproxyl-api
+rm -f /etc/sysctl.d/99-custom.conf /etc/cron.daily/xt_geoip \
+      /etc/cron.d/mtpr* /etc/cron.d/telemt* /etc/cron.d/mtproto*
 rm -f /root/mtproto_links.txt /root/mtproto_links.mtproxyl.txt /root/mtproxyl-links.txt
-rm -f /etc/systemd/system/mtproxyl-api.service /etc/systemd/system/mtproto.zig.service
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl reset-failed >/dev/null 2>&1 || true
 
