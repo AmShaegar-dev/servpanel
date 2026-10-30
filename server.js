@@ -8471,7 +8471,8 @@ app.get('/api/proxy/checklist', checkAuth, async (req, res) => {
                 }
             }
         }
-        const apiCheck = (diag.checks || []).find(c => /API/.test(c.name));
+        const apiCheck = (diag.checks || []).find(c => /^(MTProxyL API|telemt API)$/.test(c.name)) ||
+            (diag.checks || []).find(c => /API/.test(c.name));
         const steps = [
             { key: 'engine', title: 'Движок', ok: !!st.backend && st.backend !== 'none', detail: st.backend || 'не найден' },
             { key: 'service', title: 'Служба', ok: !!st.running, detail: st.running ? 'запущена' : 'не запущена' },
