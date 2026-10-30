@@ -1713,7 +1713,7 @@ async function runAutoCascade(btn) {
         });
         // Сборка идёт в фоне: опрашиваем прогресс, чтобы не ловить 504 и видеть шаги.
         let lastCount = -1;
-        for (let i = 0; i < 1200; i++) {
+        for (let i = 0; i < 1800; i++) {
             await new Promise(r => setTimeout(r, 2000));
             let job;
             try {
@@ -1738,7 +1738,7 @@ async function runAutoCascade(btn) {
                 return;
             }
         }
-        if (log) log.innerHTML += '<div class="wizard-summary-row"><span>Долго</span><b>сборка идёт больше 40 минут — проверьте журнал установки на второй стороне</b></div>';
+        if (log) log.innerHTML += '<div class="wizard-summary-row"><span>Долго</span><b>сборка идёт больше 60 минут — проверьте журнал установки на второй стороне</b></div>';
     } catch (e) {
         if (log) log.innerHTML += '<div class="wizard-summary-row"><span style="color:var(--danger)">Ошибка</span><b>' + esc(e.message) + '</b></div>';
         toast('Каскад не собрался', 'error', e.message);

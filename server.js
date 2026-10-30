@@ -3882,10 +3882,73 @@ function cascadeObfParams(data, version) {
     return Object.keys(out).length ? out : null;
 }
 
+// Состояние сборки переживает перезапуск панели (в том числе перезагрузку RU):
+// параметры и шаги лежат в файле 0600, на старте сборка продолжается.
+const CASCADE_JOB_FILE = path.join(DATA_DIR, '.cascade_job.json');
+
+function saveCascadeJob(job) {
+    try {
+        writeJson(CASCADE_JOB_FILE, {
+            running: !!job.running,
+            startedAt: job.startedAt || '',
+            finishedAt: job.finishedAt || '',
+            role: job.role || '',
+            peer: job.peer || '',
+            steps: Array.isArray(job.steps) ? job.steps.slice(-300) : [],
+            error: job.error || '',
+            result: job.result || null,
+            params: job.params || null,
+            opts: job.opts || null
+        }, 0o600);
+    } catch (e) { /* не мешаем самой сборке */ }
+}
+
+function loadCascadeJob() {
+    const j = readJson(CASCADE_JOB_FILE, null);
+    return j && typeof j === 'object' ? j : null;
+}
+
+function clearCascadeJob() {
+    try { fs.unlinkSync(CASCADE_JOB_FILE); } catch (e) { /* файла нет */ }
+}
+
+function finishCascadeJob(job, result, error) {
+    job.running = false;
+    job.finishedAt = new Date().toISOString();
+    if (error) job.error = error;
+    else job.result = result;
+    saveCascadeJob(job);
+    clearCascadeJob();
+}
+
+function resumeCascadeJob() {
+    const saved = loadCascadeJob();
+    if (!saved || !saved.running || !saved.params || !saved.opts) return;
+    const job = {
+        running: true,
+        startedAt: saved.startedAt || new Date().toISOString(),
+        finishedAt: '',
+        role: saved.role || 'ru',
+        peer: saved.peer || saved.params.host || '',
+        steps: Array.isArray(saved.steps) ? saved.steps : [],
+        error: '',
+        result: null,
+        params: saved.params,
+        opts: saved.opts
+    };
+    job.steps.push({ title: 'Панель', text: 'Продолжаю сборку после перезагрузки панели', at: new Date().toISOString() });
+    cascadeBuildJob = job;
+    saveCascadeJob(job);
+    runCascadeBuild(job, saved.params, saved.opts)
+        .then((result) => finishCascadeJob(job, result, ''))
+        .catch((e) => finishCascadeJob(job, null, e && e.message ? e.message : String(e)));
+}
+
 async function runCascadeBuild(job, remote, opts) {
     const log = (title, text) => {
         job.steps.push({ title, text: String(text || ''), at: new Date().toISOString() });
         if (job.steps.length > 400) job.steps.splice(0, job.steps.length - 400);
+        saveCascadeJob(job);
     };
     const { version, role } = opts;
     const euSubnet = opts.euSubnet || '172.16.61.0/24';
@@ -3902,7 +3965,13 @@ async function runCascadeBuild(job, remote, opts) {
     // 2. AmneziaWG на второй стороне.
     let info = await sshBuild.awgInfo(remote);
     if (!info.installed) {
-        info = await sshBuild.installAwg(remote, { version, subnetNet: euSubnet, onLog: (m) => log('EU', m) });
+        const waited = await sshBuild.waitForAwg(remote, 5 * 60 * 1000, (m) => log('EU', m));
+        if (waited) {
+            info = waited;
+            log('EU', 'AmneziaWG уже установлен — продолжаю после перезагрузки');
+        } else {
+            info = await sshBuild.installAwg(remote, { version, subnetNet: euSubnet, onLog: (m) => log('EU', m) });
+        }
     } else {
         log('EU', 'AmneziaWG уже установлен, UDP-порт ' + (info.listenPort || '—'));
         await sshBuild.openUdp(remote, info.listenPort);
@@ -3926,20 +3995,26 @@ async function runCascadeBuild(job, remote, opts) {
     // 4. AmneziaWG на этом сервере (вход).
     let local = await sshBuild.awgInfo({ host: '127.0.0.1' });
     if (!local.installed) {
-        log('RU', 'AmneziaWG на входе не установлен — ставлю');
-        const started = await localPost('/api/install/module', {
-            module: 'awg', version, route: 'all', ipv6: 'disallow', port: '3977', awgMode: 'single'
-        });
-        if (!started || started.error) {
-            throw new Error('Установка AWG на входе не запустилась: ' + ((started && started.error) || 'ошибка'));
+        const waited = await sshBuild.waitForAwg({ host: '127.0.0.1' }, 5 * 60 * 1000, (m) => log('RU', m));
+        if (waited) {
+            local = waited;
+            log('RU', 'AmneziaWG уже установлен — продолжаю после перезагрузки');
+        } else {
+            log('RU', 'AmneziaWG на входе не установлен — ставлю');
+            const started = await localPost('/api/install/module', {
+                module: 'awg', version, route: 'all', ipv6: 'disallow', port: '3977', awgMode: 'single'
+            });
+            if (!started || started.error) {
+                throw new Error('Установка AWG на входе не запустилась: ' + ((started && started.error) || 'ошибка'));
+            }
+            for (let i = 0; i < 180; i++) {
+                await new Promise(r => setTimeout(r, 5000));
+                local = await sshBuild.awgInfo({ host: '127.0.0.1' });
+                if (local.installed) break;
+                if (i > 0 && i % 12 === 0) log('RU', 'Установка AmneziaWG на входе продолжается...');
+            }
+            if (!local.installed) throw new Error('AmneziaWG на входе не установился за 15 минут');
         }
-        for (let i = 0; i < 180; i++) {
-            await new Promise(r => setTimeout(r, 5000));
-            local = await sshBuild.awgInfo({ host: '127.0.0.1' });
-            if (local.installed) break;
-            if (i > 0 && i % 12 === 0) log('RU', 'Установка AmneziaWG на входе продолжается...');
-        }
-        if (!local.installed) throw new Error('AmneziaWG на входе не установился за 15 минут');
     }
     await sshBuild.openUdp({ host: '127.0.0.1' }, local.listenPort);
     log('RU', 'AmneziaWG готов: ' + (local.address || '') + ', порт ' + (local.listenPort || '—'));
@@ -4058,6 +4133,8 @@ app.post('/api/cascade/ssh-install', checkAuth, requireAdmin, (req, res) => {
         ? [...new Set(data.extraRuNets.map(String).filter(n => IPV4_RE.test(n) || CIDR_RE.test(n)))].slice(0, 200)
         : [];
 
+    const buildParams = { host, port, user, pass };
+    const buildOpts = { version, role, euSubnet, obf, ifaces, extraRuNets };
     cascadeBuildJob = {
         running: true,
         startedAt: new Date().toISOString(),
@@ -4066,22 +4143,17 @@ app.post('/api/cascade/ssh-install', checkAuth, requireAdmin, (req, res) => {
         peer: host,
         steps: [],
         error: '',
-        result: null
+        result: null,
+        params: buildParams,
+        opts: buildOpts
     };
     const job = cascadeBuildJob;
+    saveCascadeJob(job);
     auditLog(req, 'Запущена сборка каскада по SSH: ' + host);
 
-    runCascadeBuild(job, { host, port, user, pass }, { version, role, euSubnet, obf, ifaces, extraRuNets })
-        .then((result) => {
-            job.result = result;
-            job.running = false;
-            job.finishedAt = new Date().toISOString();
-        })
-        .catch((e) => {
-            job.error = e && e.message ? e.message : String(e);
-            job.running = false;
-            job.finishedAt = new Date().toISOString();
-        });
+    runCascadeBuild(job, buildParams, buildOpts)
+        .then((result) => finishCascadeJob(job, result, ''))
+        .catch((e) => finishCascadeJob(job, null, e && e.message ? e.message : String(e)));
 
     res.json({ started: true, role, peer: host });
 });
@@ -8803,6 +8875,12 @@ if (require.main === module) {
     } else if (PANEL_API_PORT && PANEL_API_PORT === PANEL_TLS_PORT) {
         console.log(`API-порт ${PANEL_API_PORT} совпадает с HTTPS-портом — отдельный listener не нужен.`);
     }
+
+    // Если панель перезагрузилась посреди сборки каскада (например, после
+    // перезагрузки RU при установке AWG), продолжаем её автоматически.
+    setTimeout(() => {
+        try { resumeCascadeJob(); } catch (e) { console.warn('Каскад: не удалось продолжить сборку —', e.message); }
+    }, 8000);
 
     // Перечитать сертификат без простоя: kill -HUP <pid> или pm2 reload.
     // Обновляем и HTTPS-панель, и API-порт, и HTTPS-метрики.
