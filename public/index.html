@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.3">
+    <meta name="panel-version" content="3.0.4">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -669,6 +669,7 @@
                         <button class="btn-primary" onclick="installWarp()">Установить WARP + Xray</button>
                         <button class="btn-soft" onclick="warpPower(true)">Включить</button>
                         <button class="btn-dark" onclick="warpPower(false)">Остановить</button>
+                        <button class="btn-dark" onclick="uninstallModule('warp')">🗑 Удалить</button>
                         <button class="btn-dark" onclick="warpTest()">Тест WARP</button>
                     </div>
                     <div id="warpTestResult" class="sub-text" style="margin-bottom: 14px;"></div>

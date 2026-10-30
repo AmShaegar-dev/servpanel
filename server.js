@@ -258,6 +258,47 @@ async function fetchWithTimeout(url, opts = {}, ms = 8000) {
     finally { clearTimeout(timer); }
 }
 
+// AdGuard Home по HTTPS обычно использует самоподписанный сертификат, который
+// встроенный fetch отвергает («fetch failed»). Для локальных запросов к
+// AdGuard это не имеет значения: сертификат всё равно не проверить, поэтому
+// ходим через http/https с rejectUnauthorized: false.
+function fetchInsecure(url, opts = {}, ms = 8000) {
+    return new Promise((resolve, reject) => {
+        let u;
+        try { u = new URL(url); } catch (e) { reject(e); return; }
+        const mod = u.protocol === 'https:' ? require('https') : require('http');
+        const body = opts.body === undefined ? null : Buffer.from(String(opts.body));
+        const headers = { ...(opts.headers || {}) };
+        if (body) headers['Content-Length'] = body.length;
+        const req = mod.request({
+            hostname: u.hostname,
+            port: u.port || (u.protocol === 'https:' ? 443 : 80),
+            path: u.pathname + u.search,
+            method: opts.method || 'GET',
+            headers,
+            rejectUnauthorized: false,
+            timeout: ms
+        }, (res) => {
+            const chunks = [];
+            res.on('data', d => chunks.push(d));
+            res.on('end', () => {
+                const text = Buffer.concat(chunks).toString('utf8');
+                resolve({
+                    ok: res.statusCode >= 200 && res.statusCode < 300,
+                    status: res.statusCode,
+                    headers: res.headers,
+                    text: async () => text,
+                    json: async () => JSON.parse(text)
+                });
+            });
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(new Error('timeout')); });
+        if (body) req.write(body);
+        req.end();
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Валидация
 // ---------------------------------------------------------------------------
@@ -4279,7 +4320,7 @@ app.post('/api/adguard/proxy', checkAuth, async (req, res) => {
     }
 
     try {
-        const response = await fetchWithTimeout(target, opts, 10000);
+        const response = await fetchInsecure(target, opts, 10000);
         const text = await response.text();
         let data = null;
         if (text) { try { data = JSON.parse(text); } catch (e) { data = { raw: text.slice(0, 4096) }; } }
@@ -4300,7 +4341,7 @@ app.post('/api/adguard/stats', checkAuth, async (req, res) => {
     const headers = { 'Accept': 'application/json' };
     if (user && pass) headers['Authorization'] = 'Basic ' + Buffer.from(String(user) + ':' + String(pass)).toString('base64');
     try {
-        const response = await fetchWithTimeout(base + '/control/stats', { headers }, 8000);
+        const response = await fetchInsecure(base + '/control/stats', { headers }, 8000);
         if (!response.ok) throw new Error('HTTP ' + response.status);
         res.json(await response.json());
     } catch (e) {
@@ -4308,28 +4349,38 @@ app.post('/api/adguard/stats', checkAuth, async (req, res) => {
     }
 });
 
-// Автопоиск AdGuard Home по типовым адресам. Проверяем параллельно, чтобы
-// мастер не ждал 4 × timeout. Возвращаем первый рабочий API и его статистику.
+// Автопоиск AdGuard Home. Сначала пробуем порты из его конфига (http.bind_port
+// / http.address и tls.port), затем типовые. /control/status отвечает 200 без
+// пароля и 401 с паролем — оба ответа означают, что это AdGuard. Старый поиск
+// стучался только в /control/stats, который всегда требует авторизацию, и
+// поэтому «не находил» уже установленный AdGuard.
 app.get('/api/adguard/autodetect', checkAuth, async (req, res) => {
-    const candidates = [
-        'http://127.0.0.1:8090',
+    const info = adguardInfo();
+    const fromConfig = [];
+    if (info.tlsPort) fromConfig.push('https://127.0.0.1:' + info.tlsPort);
+    if (info.httpPort) fromConfig.push('http://127.0.0.1:' + info.httpPort);
+    const candidates = [...new Set([
+        ...fromConfig,
+        'http://127.0.0.1:3000',
+        'http://127.0.0.1:3001',
+        'https://127.0.0.1:4443',
         'http://172.17.0.1:4443',
-        'http://127.0.0.1:4443',
-        'http://127.0.0.1:3000'
-    ];
+        'https://172.17.0.1:4443',
+        'http://127.0.0.1:8090'
+    ])];
     const results = await Promise.all(candidates.map(async url => {
         try {
-            const response = await fetchWithTimeout(url + '/control/stats', {
-                headers: { 'Accept': 'application/json' }
-            }, 2500);
+            const response = await fetchInsecure(url + '/control/status', { headers: { 'Accept': 'application/json' } }, 2500);
+            if (response.status === 401) return { url, needsAuth: true, stats: null };
             if (!response.ok) return null;
-            const stats = await response.json();
-            return { url, stats };
+            let stats = null;
+            try { stats = await response.json(); } catch (e) { stats = null; }
+            return { url, needsAuth: false, stats };
         } catch (e) { return null; }
     }));
     const found = results.find(Boolean);
     if (!found) return res.json({ found: false, tried: candidates });
-    res.json({ found: true, ...found });
+    res.json({ found: true, ...found, tried: candidates });
 });
 
 // ---------------------------------------------------------------------------
@@ -7752,9 +7803,45 @@ const AG_DIR = '/opt/AdGuardHome';
 const AG_CONFIG = AG_DIR + '/AdGuardHome.yaml';
 const AG_SNAP_DIR = '/var/snap/adguard-home';
 
-function adguardPortFromConfig() {
+// AdGuard Home хранит порты в YAML. В старых версиях это http.bind_port, в
+// новых — http.address вида «0.0.0.0:3001»; HTTPS-порт лежит в tls.port.
+// Раньше читался только bind_port, поэтому после первого запуска AdGuard
+// (он переписывает конфиг) панель показывала пустой порт и «не находила» его.
+function yamlBlock(text, name) {
+    const lines = String(text || '').split(/\r?\n/);
+    const out = [];
+    let inBlock = false;
+    for (const line of lines) {
+        if (/^\S/.test(line)) {
+            inBlock = line.trim() === name + ':';
+            continue;
+        }
+        if (inBlock) out.push(line);
+    }
+    return out.join('\n');
+}
+
+function adguardPortsFromConfig() {
+    const res = { http: '', tls: '' };
     const text = readTextSafe(AG_CONFIG);
-    const m = text.match(/^[ \t]*bind_port[ \t]*:[ \t]*(\d{1,5})[ \t]*$/m);
+    if (!text) return res;
+    const http = yamlBlock(text, 'http');
+    let m = http.match(/^[ \t]*bind_port[ \t]*:[ \t]*(\d{1,5})/m);
+    if (!m) m = http.match(/^[ \t]*address[ \t]*:[ \t]*["']?[^"'\s]*:(\d{1,5})["']?/m);
+    if (m && isPort(m[1])) res.http = String(Number(m[1]));
+    const tls = yamlBlock(text, 'tls');
+    m = tls.match(/^[ \t]*port[ \t]*:[ \t]*(\d{1,5})/m);
+    if (m && isPort(m[1])) res.tls = String(Number(m[1]));
+    if (!res.tls) {
+        m = text.match(/^[ \t]*tls_port[ \t]*:[ \t]*(\d{1,5})/m);
+        if (m && isPort(m[1])) res.tls = String(Number(m[1]));
+    }
+    return res;
+}
+
+function adguardEnvPort() {
+    const text = readTextSafe('/root/awg/adguard.env');
+    const m = text.match(/^ADGUARD_PORT[ \t]*=[ \t]*(\d{1,5})/m);
     return m && isPort(m[1]) ? String(Number(m[1])) : '';
 }
 
@@ -7764,13 +7851,19 @@ function adguardInfo() {
     const installed = !!config || snap || fileExists('/usr/bin/AdGuardHome') ||
         fileExists('/usr/local/bin/AdGuardHome') || fileExists(AG_DIR + '/AdGuardHome');
     const state = installed ? isActive('AdGuardHome') : 'unknown';
+    const ports = adguardPortsFromConfig();
+    const httpPort = ports.http || adguardEnvPort();
+    const tlsPort = ports.tls;
     return {
         installed,
         running: state === 'active',
         state,
         service: 'AdGuardHome',
         manager: snap ? 'snap' : 'systemd',
-        port: adguardPortFromConfig(),
+        // port — веб-интерфейс по HTTP (первая установка), tlsPort — HTTPS.
+        port: httpPort || tlsPort,
+        httpPort,
+        tlsPort,
         configPath: config || (snap ? AG_SNAP_DIR : (installed ? AG_DIR : ''))
     };
 }
@@ -7778,39 +7871,88 @@ function adguardInfo() {
 function warpInfo() {
     const cfg = warpConfig();
     const hasXray = fileExists(XRAY_CONFIG) || fileExists('/usr/local/bin/xray');
-    const installed = cfg.installed || hasXray;
+    const installed = cfg.installed;
     const active = hasXray ? isActive('xray') === 'active' : false;
     return {
         installed,
         running: installed && (active || isActive('warp-svc') === 'active'),
-        state: active ? 'active' : 'inactive',
+        state: active ? 'active' : (installed ? 'inactive' : 'unknown'),
         service: hasXray ? 'xray' : 'warp-svc',
         port: cfg.listenPort,
         listenIp: cfg.listenIp,
         socksPort: cfg.socksPort,
+        // Отдельно показываем, есть ли Xray: чужой xray без WARP больше не
+        // выдаётся за установленный WARP.
+        xray: hasXray,
         configPath: fileExists(XRAY_CONFIG) ? XRAY_CONFIG : WARP_ENV_FILE
     };
+}
+
+const TELEMT_MODULE_CONFIGS = [
+    '/etc/telemt/telemt.toml',
+    '/etc/telemt/config.toml',
+    '/etc/telemt.toml',
+    '/opt/telemt/telemt.toml',
+    '/opt/telemt/config.toml',
+    // Telemt, которым управляет MTProxyL: своего systemd-юнита у него нет.
+    '/opt/mtproxyl/mtproxy/telemt.toml',
+    '/opt/mtproxyl/mtproxy/config.toml',
+    '/opt/mtproxyl/telemt.toml'
+];
+
+function telemtConfigPorts(text) {
+    const res = { proxy: '', api: '' };
+    const lines = String(text || '').split(/\r?\n/);
+    let section = '';
+    for (const line of lines) {
+        const t = line.trim();
+        if (/^\[/.test(t)) { section = t.replace(/^\[|\]$/g, ''); continue; }
+        const m = t.match(/^port\s*=\s*(\d{1,5})/);
+        if (!m) continue;
+        if (section === 'server.api' || section === 'server.admin_api') {
+            if (!res.api) res.api = m[1];
+        } else if (!res.proxy) {
+            res.proxy = m[1];
+        }
+    }
+    return res;
+}
+
+function listeningTcpPorts() {
+    const set = new Set();
+    try {
+        const out = String(sh('bash', ['-c', "ss -lntH 2>/dev/null | awk '{print $4}'"]) || '');
+        for (const line of out.split('\n')) {
+            const m = line.trim().match(/:(\d{1,5})$/);
+            if (m) set.add(Number(m[1]));
+        }
+    } catch (e) { /* ss недоступен — останется проверка по кэшу API */ }
+    return set;
 }
 
 function mtprotoInfo() {
     const d = proxyUsers.detectCached ? proxyUsers.detectCached() : null;
     const backend = d ? d.backend : '';
-    const telemtCfg = ['/etc/telemt/telemt.toml', '/etc/telemt/config.toml', '/opt/telemt/config.toml']
-        .find(fileExists) || '';
-    let port = '';
-    const m = telemtCfg ? readTextSafe(telemtCfg, 256 * 1024).match(/^[ \t]*port[ \t]*=[ \t]*(\d{1,5})[ \t]*$/m) : null;
-    if (m && isPort(m[1])) port = String(Number(m[1]));
+    const cached = proxyUsers.cachedStatus ? proxyUsers.cachedStatus(120000) : null;
+    const telemtCfg = TELEMT_MODULE_CONFIGS.find(fileExists) || '';
+    const cfgText = telemtCfg ? readTextSafe(telemtCfg, 256 * 1024) : '';
+    const cfgPorts = telemtConfigPorts(cfgText);
     const units = ['telemt', 'mtproto', 'mtproxyl', 'mtproto.zig', 'mtproto-zig', 'mtg'];
     const activeUnit = units.find(u => isActive(u) === 'active') || '';
     const installed = (!!backend && backend !== 'none' && backend !== 'demo') || !!telemtCfg ||
         !!activeUnit || fileExists('/usr/local/bin/telemt') || fileExists('/usr/local/bin/mtproxyl');
+    // Telemt из MTProxyL не имеет своего юнита: считаем запущенным, если
+    // слушается API-порт из его конфига или панель уже успешно с ним говорила.
+    const apiLive = !!(telemtCfg && cfgPorts.api && listeningTcpPorts().has(Number(cfgPorts.api)));
+    const cachedLive = !!(cached && cached.running && ['telemt', 'mtproxyl'].includes(cached.backend));
+    const running = !!activeUnit || apiLive || cachedLive;
     return {
         installed,
-        running: !!activeUnit,
-        state: activeUnit ? 'active' : 'inactive',
-        service: activeUnit,
+        running,
+        state: running ? 'active' : (installed ? 'inactive' : 'unknown'),
+        service: activeUnit || (running ? 'telemt' : ''),
         backend,
-        port,
+        port: cfgPorts.proxy || (cached && cached.port ? String(cached.port) : '') || cfgPorts.api || '',
         configPath: telemtCfg
     };
 }
@@ -8084,7 +8226,8 @@ function awgUninstall() {
 function modulePorts(id) {
     const ports = [];
     if (id === 'adguard') {
-        [adguardInfo().port, '3000', '3001'].filter(Boolean).forEach(p => ports.push(p));
+        const ag = adguardInfo();
+        [ag.httpPort, ag.tlsPort, ag.port, '3000', '3001'].filter(Boolean).forEach(p => ports.push(p));
         ports.push('853');
     }
     if (id === 'warp') [warpInfo().port].filter(Boolean).forEach(p => ports.push(p));

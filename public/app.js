@@ -318,7 +318,7 @@ function renderModules() {
             ? `<span class="badge ${m.running ? 'badge-good' : 'badge-warn'}">${m.running ? 'работает' : 'остановлен'}</span>`
             : '<span class="badge badge-muted">не установлен</span>';
         const facts = [];
-        if (m.port) facts.push(`порт ${esc(String(m.port))}`);
+        if (m.port) facts.push(`порт ${esc(String(m.port))}${m.tlsPort && String(m.tlsPort) !== String(m.port) ? ' · TLS ' + esc(String(m.tlsPort)) : ''}`);
         if (m.manager === 'snap') facts.push('snap');
         if (m.configPath) facts.push(`<span class="mono" style="font-size:11px;">${esc(m.configPath)}</span>`);
         if (m.service && m.installed) facts.push(esc(m.service));
@@ -474,6 +474,18 @@ async function connectAdGuard(isManualClick = true) {
     if (!isManualClick && !url && sessionStorage.getItem('agUrl')) {
         url = sessionStorage.getItem('agUrl'); user = sessionStorage.getItem('agUser') || ''; pass = sessionStorage.getItem('agPass') || '';
         document.getElementById('agUrl').value = url; document.getElementById('agUser').value = user; document.getElementById('agPass').value = pass;
+    }
+    // Поле пустое — пробуем найти уже установленный AdGuard, чтобы не заставлять
+    // вводить адрес вручную (и не предлагать переустановку).
+    if (!isManualClick && !url) {
+        try {
+            const d = await apiJson('/api/adguard/autodetect');
+            if (d && d.found && d.url) {
+                url = d.url;
+                const el = document.getElementById('agUrl');
+                if (el) el.value = url;
+            }
+        } catch (e) { /* не мешаем ручному вводу */ }
     }
     if (!url) return;
     if (isManualClick) { sessionStorage.setItem('agUrl', url); sessionStorage.setItem('agUser', user); sessionStorage.setItem('agPass', pass); }
@@ -3468,9 +3480,15 @@ function renderAdGuardOptions() {
             ${wizChoice('install', '↓', 'Установить AdGuard', 'Если он ещё не установлен', d.action === 'install', 'action')}
             ${wizChoice('manual', '⌁', 'Указать URL', 'Нестандартный порт или контейнер', d.action === 'manual', 'action')}
         </div>
+        ${detected && detected.needsAuth && d.action === 'connect' ? `
+        <div class="wizard-grid" style="margin-top:14px;">
+            <label class="field"><span>Логин AdGuard</span><input id="wizAgUser" autocomplete="off" value="${esc(d.agUser || '')}" oninput="wizardState.data.agUser=this.value"></label>
+            <label class="field"><span>Пароль AdGuard</span><input id="wizAgPass" type="password" autocomplete="off" value="${esc(d.agPass || '')}" oninput="wizardState.data.agPass=this.value"></label>
+        </div>
+        <div class="wizard-note info">AdGuard защищён паролем — укажите логин и пароль, чтобы панель подключилась к нему. Сам AdGuard панель не меняет.</div>` : ''}
         <div class="wizard-grid" style="margin-top:14px;">
             <label class="field"><span>Персональный порт AdGuard</span>
-                <input id="wizAgPort" type="number" min="1" max="65535" value="${esc(d.port || '3000')}" placeholder="3000" oninput="wizardState.data.port=this.value">
+                <input id="wizAgPort" type="number" min="1" max="65535" value="${esc(d.port || '3001')}" placeholder="3001" oninput="wizardState.data.port=this.value">
             </label>
             <div class="wizard-note info" style="margin-top:0;">Веб-интерфейс и API AdGuard: <code>http://IP:порт</code>. Если порт занят (например, панелью на 3000), укажите другой — например 3001 или 8080. Порт откроется в UFW после установки.</div>
         </div>
@@ -4238,8 +4256,8 @@ async function executeBackupWizard() {
 async function executeAdGuardWizard() {
     const d = wizardState.data;
     if (d.action === 'install') {
-        await startInstall('adguard', '/var/log/adguard_install.log', { agPort: d.port || '3000' });
-        const port = Number(d.port) || 3000;
+        await startInstall('adguard', '/var/log/adguard_install.log', { agPort: d.port || '3001' });
+        const port = Number(d.port) || 3001;
         return {
             html: wizardSuccess('Установка AdGuard запущена', `AdGuard слушает порт <b>${port}</b>. Когда установка закончится, вернитесь в мастер и выберите «Подключить» — панель сама найдёт API на этом порту.`,
                 resultButton('Показать прогресс', 'showInstallProgress()', true) +
@@ -4251,24 +4269,26 @@ async function executeAdGuardWizard() {
         };
     }
     let url = d.action === 'manual' ? d.url : (d.detected && d.detected.url) || '';
-    if (!url && d.port) url = `${location.protocol === 'https:' ? 'http' : location.protocol}//${location.hostname}:${Number(d.port) || 3000}`;
+    if (!url && d.port) url = `${location.protocol === 'https:' ? 'http' : location.protocol}//${location.hostname}:${Number(d.port) || 3001}`;
     if (!url) throw new Error('AdGuard не найден. Установите его или укажите URL вручную.');
+    const agUser = d.agUser || '';
+    const agPass = d.agPass || '';
     const stats = await apiJson('/api/adguard/stats', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, user: '', pass: '' })
+        body: JSON.stringify({ url, user: agUser, pass: agPass })
     });
     const agUrl = document.getElementById('agUrl');
     if (agUrl) agUrl.value = url;
     if (d.enable) {
         await fetch('/api/adguard/proxy', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, user: '', pass: '', action: 'protection', payload: { enabled: true, duration: 0 } })
+            body: JSON.stringify({ url, user: agUser, pass: agPass, action: 'protection', payload: { enabled: true, duration: 0 } })
         });
     }
     if (d.refresh) {
         await fetch('/api/adguard/proxy', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, user: '', pass: '', action: 'filter_refresh', payload: { whitelist: false } })
+            body: JSON.stringify({ url, user: agUser, pass: agPass, action: 'filter_refresh', payload: { whitelist: false } })
         });
     }
     if (typeof connectAdGuard === 'function') connectAdGuard(true);

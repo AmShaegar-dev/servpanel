@@ -117,8 +117,18 @@ else
 fi
 
 echo "[3/6] Xray-core..."
+CONFIG="/usr/local/etc/xray/config.json"
 XRAY_BIN="$(command -v xray || true)"
+XRAY_FRESH=0
 if [ -z "$XRAY_BIN" ]; then
+    XRAY_FRESH=1
+    # Официальный установщик Xray сам создаёт config.json и молча затирает
+    # прежний. Если xray стоял раньше, сохраняем конфиг до установки.
+    mkdir -p /usr/local/etc/xray
+    if [ -f "$CONFIG" ]; then
+        cp -a "$CONFIG" "${CONFIG}.bak_$(date +%Y%m%d-%H%M%S)"
+        echo "Сохранён прежний конфиг Xray: ${CONFIG}.bak_*"
+    fi
     bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
     XRAY_BIN="/usr/local/bin/xray"
 fi
@@ -128,8 +138,10 @@ chmod 755 /var/log/xray 2>/dev/null || true
 chown -R nobody:nogroup /var/log/xray 2>/dev/null || true
 
 echo "[4/6] Конфигурация Xray (${WARP_LISTEN_IP}:${WARP_LISTEN_PORT} -> SOCKS 127.0.0.1:${WARP_SOCKS_PORT})..."
-CONFIG="/usr/local/etc/xray/config.json"
-if [ -f "$CONFIG" ] && ! grep -q '"tag"[[:space:]]*:[[:space:]]*"warp"' "$CONFIG"; then
+# Чужой конфиг при уже установленном Xray не трогаем. Если Xray только что
+# поставил официальный установщик (XRAY_FRESH=1), config.json — его дефолт,
+# его можно заменить: панель и есть хозяин этой установки.
+if [ "$XRAY_FRESH" != "1" ] && [ -f "$CONFIG" ] && ! grep -q '"tag"[[:space:]]*:[[:space:]]*"warp"' "$CONFIG"; then
     echo "ERROR: $CONFIG уже существует и настроен не панелью."
     echo "Панель не перезаписывает чужой конфиг Xray. Сохраните его и удалите/переименуйте вручную."
     exit 1
