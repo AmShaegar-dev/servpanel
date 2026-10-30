@@ -174,6 +174,15 @@ apply_telemt_extras() {
         systemctl restart telemt >/dev/null 2>&1 && say "Telemt перезапущен" || \
             say "WARNING: не удалось перезапустить telemt"
     fi
+
+    # Официальный установщик telemt оставляет конфиг root:telemt с правами 640.
+    # Служба работает под пользователем telemt, поэтому её API не может
+    # сохранить нового пользователя (failed to write config: Operation not
+    # permitted). Даём группе telemt право записи, не открывая файл всем.
+    if [ -f "$cfg" ]; then
+        chown root:telemt "$cfg" 2>/dev/null || true
+        chmod 660 "$cfg" 2>/dev/null || true
+    fi
 }
 
 save_links() {
