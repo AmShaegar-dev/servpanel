@@ -30,6 +30,7 @@ const { Panel } = require('./lib/cascade-setup');
 const sshBuild = require('./lib/cascade-ssh-build');
 const awgArchitect = require('./lib/awg-architect');
 const sshRunner = require('./lib/cascade-ssh');
+const sshAccess = require('./lib/ssh-access');
 const { ensureAwg } = require('./lib/cascade-remote');
 const { createProxyBot } = require('./lib/proxy-bot');
 
@@ -9645,6 +9646,112 @@ echo '{"ok":true,"name":"'"$NEW"'"}'
 // ---------------------------------------------------------------------------
 // API мобильного приложения: статус, APK и метрики
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// SSH-доступ для приложения: панель сама выдаёт ключ, без входа на сервер
+// ---------------------------------------------------------------------------
+app.get('/api/ssh-access/status', checkAuth, requireAdmin, (req, res) => {
+    if (NO_SYSTEM()) {
+        return res.json({
+            user: sshAccess.USER,
+            userExists: false,
+            keys: [],
+            keyCount: 0,
+            panelHost: PANEL_HOST,
+            panelPort: PANEL_PORT,
+            publicPort: PANEL_PUBLIC_PORT,
+            loopbackOnly: PANEL_HOST === '127.0.0.1',
+            forwarding: 'yes',
+            sshPort: 22,
+            hostKeys: [],
+            ufwOpen: null,
+            demo: true
+        });
+    }
+    try {
+        res.json(sshAccess.status({
+            panelHost: PANEL_HOST,
+            panelPort: PANEL_PORT,
+            publicPort: PANEL_PUBLIC_PORT
+        }));
+    } catch (e) {
+        res.status(500).json({ error: e.message || 'Не удалось прочитать SSH-настройки' });
+    }
+});
+
+app.post('/api/ssh-access/enable', checkAuth, requireAdmin, (req, res) => {
+    const publicKey = String((req.body && req.body.publicKey) || '');
+    const permitPort = Number((req.body && req.body.port) || PANEL_PORT) || PANEL_PORT;
+
+    if (NO_SYSTEM()) {
+        // Демо/тесты: ключ не ставим, но отвечаем так, будто всё получилось.
+        try {
+            const key = sshAccess.parsePublicKey(publicKey);
+            auditLog(req, `SSH-доступ приложения (демо): ключ ${key.fingerprint}`);
+            return res.json({
+                success: true,
+                user: sshAccess.USER,
+                port: permitPort,
+                fingerprint: key.fingerprint,
+                keys: [{ type: key.type, fingerprint: key.fingerprint, permitopen: `127.0.0.1:${permitPort}` }],
+                hostKeys: [],
+                demo: true
+            });
+        } catch (e) {
+            return res.status(400).json({ error: e.message });
+        }
+    }
+
+    try {
+        const result = sshAccess.enable({ publicKey, permitPort });
+        auditLog(req, `SSH-доступ приложения: добавлен ключ ${result.fingerprint}`);
+        res.json(result);
+    } catch (e) {
+        res.status(400).json({ error: e.message || 'Не удалось установить ключ' });
+    }
+});
+
+app.post('/api/ssh-access/restrict', checkAuth, requireAdmin, (req, res) => {
+    if (NO_SYSTEM()) {
+        auditLog(req, 'SSH-доступ приложения (демо): панель закрыта на loopback');
+        return res.json({ success: true, alreadyLoopback: false, restarted: false, restartInMs: 0, demo: true });
+    }
+    try {
+        const result = sshAccess.restrict({
+            panelHost: PANEL_HOST,
+            publicPort: PANEL_PUBLIC_PORT
+        });
+        auditLog(req, `Панель переведена на 127.0.0.1:${PANEL_PORT}, внешний порт ${PANEL_PUBLIC_PORT} закрыт`);
+        // Ответ должен уйти до перезапуска процесса.
+        res.json(result);
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+// Вернуть внешний доступ (вызывается через туннель, если он ещё работает).
+app.post('/api/ssh-access/restore', checkAuth, requireAdmin, (req, res) => {
+    if (NO_SYSTEM()) return res.json({ success: true, demo: true });
+    try {
+        const result = sshAccess.restore({ publicPort: PANEL_PUBLIC_PORT });
+        auditLog(req, 'Внешний доступ к панели восстановлен');
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Полностью убрать ключи и пользователя и вернуть внешний доступ.
+app.post('/api/ssh-access/disable', checkAuth, requireAdmin, (req, res) => {
+    if (NO_SYSTEM()) return res.json({ success: true, demo: true });
+    try {
+        const result = sshAccess.disable({ publicPort: PANEL_PUBLIC_PORT });
+        auditLog(req, 'SSH-доступ приложения отключён');
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.get('/api/app/status', checkAuth, async (req, res) => {
     try {
         const refresh = req.query && (req.query.refresh === '1' || req.query.refresh === 'true');
