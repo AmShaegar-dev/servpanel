@@ -7941,6 +7941,17 @@ function rewriteProxyLinkPort(link, port) {
     return String(link).replace(/([?&]port=)\d+/i, `$1${port}`);
 }
 
+function proxyLinkUsable(link) {
+    try {
+        const m = String(link).match(/[?&]server=([^&]*)/i);
+        if (!m) return true;
+        const host = decodeURIComponent(m[1]);
+        return !['::', '0.0.0.0', '127.0.0.1', 'localhost'].includes(host);
+    } catch (e) {
+        return true;
+    }
+}
+
 function rewriteProxyLinks(links, settings) {
     const host = proxyLinkHost(settings);
     return (Array.isArray(links) ? links : []).map(link => rewriteProxyLink(link, host));
@@ -8054,7 +8065,9 @@ app.get('/api/mtproto/links', checkAuth, (req, res) => {
         let port = null;
         try { if (cfg) port = telemtConfigPort(fs.readFileSync(cfg, 'utf8')); } catch (e) { /* ignore */ }
         res.json({
-            links: rewriteProxyLinks(links, settings).map(link => rewriteProxyLinkPort(link, port)),
+            links: [...new Set(rewriteProxyLinks(links, settings)
+                .filter(proxyLinkUsable)
+                .map(link => rewriteProxyLinkPort(link, port)))],
             hostType: settings.hostType,
             port
         });
@@ -8275,7 +8288,9 @@ app.get('/api/proxy/users/:name/links', checkAuth, async (req, res) => {
         const cfg = proxyUsers.configPath();
         let port = null;
         try { if (cfg) port = telemtConfigPort(fs.readFileSync(cfg, 'utf8')); } catch (e) { /* ignore */ }
-        const linksWithPort = unique.map(link => rewriteProxyLinkPort(link, port));
+        const linksWithPort = [...new Set(rewriteProxyLinks(unique, readProxySettings())
+            .filter(proxyLinkUsable)
+            .map(link => rewriteProxyLinkPort(link, port)))];
         let qr = '';
         if (linksWithPort.length) {
             try { qr = await qrDataUrl(linksWithPort[0]); } catch (e) { qr = ''; }
