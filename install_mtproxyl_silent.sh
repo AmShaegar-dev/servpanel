@@ -86,7 +86,17 @@ is_hex32() { [[ "${1:-}" =~ ^[0-9a-fA-F]{32}$ ]]; }
 
 is_user() { [[ "${1:-}" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
 
-is_listen() { [[ "${1:-}" =~ ^[A-Za-z0-9.:\[\]-]{3,64}$ ]]; }
+is_listen() {
+    local value="${1:-}" host port
+    [[ "$value" == *:* ]] || return 1
+    host="${value%:*}"
+    port="${value##*:}"
+    [[ "$port" =~ ^[0-9]{1,5}$ ]] || return 1
+    [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || return 1
+    if [[ "$host" =~ ^[A-Za-z0-9._-]+$ ]]; then return 0; fi
+    if [[ "$host" =~ ^\[[0-9A-Fa-f:]+\]$ ]]; then return 0; fi
+    return 1
+}
 
 gen_secret() {
     if command -v openssl >/dev/null 2>&1; then
