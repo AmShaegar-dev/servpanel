@@ -7585,7 +7585,7 @@ const MODULES = {
         title: 'MTProto'
     },
     mtproxyl: {
-        url: 'https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install_mtproxyl_silent.sh',
+        url: 'https://raw.githubusercontent.com/AmShaegar-dev/servpanel/65077b9aef2972dc96a767be27a4232313d1dfb4/install_mtproxyl_silent.sh',
         log: '/var/log/mtproxyl_install.log',
         title: 'MTProxyL'
     },
