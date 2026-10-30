@@ -4047,7 +4047,18 @@ async function runCascadeBuild(job, remote, opts) {
     log('RU', 'awg1.conf: ' + ((conf.match(/^Address\s*=.*$/m) || [])[0] || '').trim() +
         ' / ' + ((conf.match(/^Endpoint\s*=.*$/m) || [])[0] || '').trim());
 
-    // 6. Маршруты и фильтрация.
+    // 6. Поднимаем туннель ДО маршрутизации: скрипт маршрутов обращается
+    // к интерфейсу awg1, и без него падает с «Cannot find device awg1».
+    sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
+    try { sh('sleep', ['3']); } catch (e) { /* ignore */ }
+    const up = await sshRunner.run({ host: '127.0.0.1' }, 'systemctl is-active awg-quick@awg1', 20000);
+    if (!/active/.test(String(up.out || ''))) {
+        const why = await sshRunner.run({ host: '127.0.0.1' }, 'systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 8', 30000);
+        throw new Error('awg-quick@awg1 не запустился: ' + String(why.out || '').trim().slice(0, 500));
+    }
+    log('RU', 'туннель awg1 поднят');
+
+    // 7. Маршруты и фильтрация.
     const subnet = sshBuild.clientSubnet(local.address) || '10.9.9.0/24';
     const ifaces = Array.isArray(opts.ifaces) && opts.ifaces.length ? opts.ifaces : ['awg0'];
     const extraRuNets = Array.isArray(opts.extraRuNets) ? opts.extraRuNets : [];
@@ -4061,18 +4072,8 @@ async function runCascadeBuild(job, remote, opts) {
         throw new Error('Маршруты не применились: ' + String(routeRun.out || '').trim().slice(0, 500));
     }
     log('RU', 'маршруты и фильтрация применены (клиентская подсеть ' + subnet + ')');
-
-    // 7. Поднимаем туннель.
-    sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
-    try { sh('sleep', ['3']); } catch (e) { /* ignore */ }
     sh('sudo', ['systemctl', 'enable', 'awg-routing']);
     sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
-    const up = await sshRunner.run({ host: '127.0.0.1' }, 'systemctl is-active awg-quick@awg1', 20000);
-    if (!/active/.test(String(up.out || ''))) {
-        const why = await sshRunner.run({ host: '127.0.0.1' }, 'systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 8', 30000);
-        throw new Error('awg-quick@awg1 не запустился: ' + String(why.out || '').trim().slice(0, 500));
-    }
-    log('RU', 'туннель awg1 поднят');
 
     // 8. Рукопожатие на обеих сторонах и трафик.
     let euHs = null;
