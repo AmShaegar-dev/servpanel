@@ -1665,19 +1665,51 @@ async function runAutoCascade(btn) {
     if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(peerHost)) return alert('Вторая сторона задаётся по IP, не по домену');
     if (!confirm('Построить каскад?\n\nРоль этого сервера: ' + (role === 'ru' ? 'вход (RU)' : 'выход (EU)') +
         '\nВерсия AmneziaWG: ' + version + '\nВторая сторона: ' + peerHost + ':' + peerPort + '\n\n' +
-        'Панель по SSH поставит там AmneziaWG (если нужно), создаст клиента ru_host и поднимет туннель. Это займёт несколько минут.')) return;
+        'Панель по SSH поставит там AmneziaWG (если нужно), создаст клиента ru_host и поднимет туннель. ' +
+        'Установка занимает 5–15 минут: сервер второй стороны несколько раз перезагрузится.')) return;
     if (btn) { btn.disabled = true; btn.innerText = 'Строим каскад…'; }
-    if (log) { log.style.display = 'block'; log.innerHTML = '<div class="wizard-summary-row"><span>Подключаемся по SSH…</span></div>'; }
+    const render = (steps) => {
+        if (!log) return;
+        log.style.display = 'block';
+        log.innerHTML = (steps || []).map(s =>
+            '<div class="wizard-summary-row"><span>' + esc(s.title) + '</span><b>' + esc(s.text) + '</b></div>'
+        ).join('') || '<div class="wizard-summary-row"><span>Запускаю…</span></div>';
+        log.scrollTop = log.scrollHeight;
+    };
+    render([{ title: 'Старт', text: 'Отправляю задачу панели…' }]);
     try {
-        const res = await apiJson('/api/cascade/ssh-install', {
+        await apiJson('/api/cascade/ssh-install', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ role, version, peerHost, peerPort, peerUser, peerPass })
         });
-        if (log && Array.isArray(res.steps)) {
-            log.innerHTML = res.steps.map(s => '<div class="wizard-summary-row"><span>' + esc(s.title) + '</span><b>' + esc(s.text) + '</b></div>').join('');
+        // Сборка идёт в фоне: опрашиваем прогресс, чтобы не ловить 504 и видеть шаги.
+        let lastCount = -1;
+        for (let i = 0; i < 1200; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            let job;
+            try {
+                job = await apiJson('/api/cascade/ssh-progress');
+            } catch (e) {
+                if (log) log.innerHTML += '<div class="wizard-summary-row"><span>Связь</span><b>панель перезагружается, жду…</b></div>';
+                continue;
+            }
+            if (job && Array.isArray(job.steps) && job.steps.length !== lastCount) {
+                lastCount = job.steps.length;
+                render(job.steps);
+            }
+            if (job && job.running === false && job.done) {
+                if (job.error) {
+                    if (log) log.innerHTML += '<div class="wizard-summary-row"><span style="color:var(--danger)">Ошибка</span><b>' + esc(job.error) + '</b></div>';
+                    toast('Каскад не собрался', 'error', job.error);
+                } else if (job.result) {
+                    toast('Каскад настроен', 'success',
+                        'Рукопожатие: EU ' + job.result.euHandshakeAgo + ' сек., RU ' + job.result.ruHandshakeAgo + ' сек.');
+                }
+                loadCascadeStatus(true);
+                return;
+            }
         }
-        toast('Каскад настроен', 'success', 'Рукопожатие: EU ' + res.euHandshakeAgo + ' сек., RU ' + res.ruHandshakeAgo + ' сек.');
-        loadCascadeStatus(true);
+        if (log) log.innerHTML += '<div class="wizard-summary-row"><span>Долго</span><b>сборка идёт больше 40 минут — проверьте журнал установки на второй стороне</b></div>';
     } catch (e) {
         if (log) log.innerHTML += '<div class="wizard-summary-row"><span style="color:var(--danger)">Ошибка</span><b>' + esc(e.message) + '</b></div>';
         toast('Каскад не собрался', 'error', e.message);

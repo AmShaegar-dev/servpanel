@@ -6,9 +6,35 @@ INSTALLER_URL="https://raw.githubusercontent.com/bivlked/amneziawg-installer/mai
 STATE_ENV="/root/awg_install_params.env"
 WRAPPER_SCRIPT="/root/awg_installer_wrapper.sh"
 CRON_FILE="/etc/cron.d/awg_resume"
+RESUME_COUNT="/root/awg/.resume_count"
+
+# Новая установка должна начинаться с чистого листа: иначе скрипт увидит
+# STATE_ENV от прошлой (в том числе неудачной) попытки и пойдёт по ветке
+# «продолжение», игнорируя новые параметры. Флаг не сохраняется в STATE_ENV
+# (имя не начинается с AWG_/REMOTE_/CASCADE_), поэтому при перезагрузке
+# продолжение идёт как обычно.
+if [ "${PANEL_FRESH_INSTALL:-0}" = "1" ]; then
+    rm -f "$STATE_ENV" "$CRON_FILE" "$WRAPPER_SCRIPT" "$RESUME_COUNT"
+fi
 
 if [ -f "$STATE_ENV" ]; then
     echo "=== [Авто-продолжение] Восстановление после перезагрузки... ==="
+    # Ограничение числа продолжений: если установка не завершилась после
+    # нескольких перезагрузок, сервер не должен уходить в бесконечный цикл
+    # «загрузился — продолжил — перезагрузился». После лимита убираем cron и
+    # выходим с ошибкой, оставляя машину загружаемой.
+    _resume=0
+    [ -f "$RESUME_COUNT" ] && _resume="$(cat "$RESUME_COUNT" 2>/dev/null || echo 0)"
+    case "$_resume" in ''|*[!0-9]*) _resume=0 ;; esac
+    _resume=$((_resume + 1))
+    echo "$_resume" > "$RESUME_COUNT"
+    if [ "$_resume" -gt 5 ]; then
+        echo "=== ERROR: установка не завершилась после $_resume попыток ==="
+        echo "Автопродолжение отключено, чтобы сервер не перезагружался по кругу."
+        rm -f "$CRON_FILE" "$WRAPPER_SCRIPT" "$STATE_ENV"
+        exit 1
+    fi
+    echo "=== Попытка продолжения $_resume из 5 ==="
     source "$STATE_ENV"
 else
     echo "=== СТАРТ УСТАНОВКИ AMNEZIAWG ==="
@@ -161,6 +187,9 @@ fi
 
 [ -n "$AWG_ISOLATION" ] && INSTALL_CMD="$INSTALL_CMD --isolation=$AWG_ISOLATION"
 [ -n "$AWG_PORT" ] && INSTALL_CMD="$INSTALL_CMD --port=$AWG_PORT"
+# Подсеть туннеля в форме сети (172.16.61.0/24). Нужна каскаду, чтобы адреса
+# на входе и выходе совпадали с инструкцией CASCADE.md.
+[ -n "${AWG_TUNNEL_SUBNET:-}" ] && INSTALL_CMD="$INSTALL_CMD --subnet=$AWG_TUNNEL_SUBNET"
 [ "$AWG_KEEP_PACKAGES" = "1" ] && INSTALL_CMD="$INSTALL_CMD --keep-packages"
 [ "$AWG_NO_TWEAKS" = "1" ] && INSTALL_CMD="$INSTALL_CMD --no-tweaks"
 
@@ -173,6 +202,10 @@ eval "$INSTALL_CMD"
 # Этот блок выполнится только когда установщик полностью закончит работу без ребутов
 if grep -q "Установка завершена" "$LOG_FILE" || grep -q "Installation complete" "$LOG_FILE"; then
     echo "=== INSTALLATION DONE ==="
+    # Установка завершена — снимаем автопродолжение сразу, не дожидаясь конца
+    # скрипта: иначе при сбое на следующих шагах cron снова запустит установку
+    # при каждой перезагрузке.
+    rm -f "$CRON_FILE" "$WRAPPER_SCRIPT" "$STATE_ENV" "$RESUME_COUNT"
 
     # Открываем порт панели и фактические UDP-порты AWG из конфигов.
     ufw_open "$PORT_TO_OPEN" tcp

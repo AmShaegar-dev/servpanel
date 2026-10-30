@@ -3782,7 +3782,155 @@ app.post('/api/cascade/ssh-check', checkAuth, requireAdmin, async (req, res) => 
     });
 });
 
-app.post('/api/cascade/ssh-install', checkAuth, requireAdmin, async (req, res) => {
+// Сборка каскада идёт минутами (установка AWG перезагружает сервер), поэтому
+// HTTP-запрос только запускает её, а прогресс забирается отдельным запросом.
+let cascadeBuildJob = null;
+
+function cascadeJobSnapshot() {
+    if (!cascadeBuildJob) return { running: false, done: false, steps: [] };
+    return {
+        running: cascadeBuildJob.running,
+        done: !cascadeBuildJob.running,
+        startedAt: cascadeBuildJob.startedAt,
+        finishedAt: cascadeBuildJob.finishedAt || '',
+        role: cascadeBuildJob.role,
+        peer: cascadeBuildJob.peer,
+        steps: cascadeBuildJob.steps.slice(-300),
+        error: cascadeBuildJob.error || '',
+        result: cascadeBuildJob.result || null
+    };
+}
+
+async function runCascadeBuild(job, remote, opts) {
+    const log = (title, text) => {
+        job.steps.push({ title, text: String(text || ''), at: new Date().toISOString() });
+        if (job.steps.length > 400) job.steps.splice(0, job.steps.length - 400);
+    };
+    const { version, role } = opts;
+    const euSubnet = opts.euSubnet || '172.16.61.0/24';
+
+    // 1. Вторая сторона: SSH и внешний IP.
+    log('SSH', 'Подключаюсь к ' + remote.host + '...');
+    const ping = await sshRunner.run(remote, 'hostname; ip -4 route get 1.1.1.1 2>/dev/null | grep -oP "src \\K\\S+" | head -1', 40000);
+    if (ping.code !== 0) {
+        throw new Error('SSH до ' + remote.host + ' не работает: ' + String(ping.out || '').trim().slice(0, 300));
+    }
+    const euHost = (String(ping.out).match(/^\s*(\d{1,3}(?:\.\d{1,3}){3})\s*$/m) || [])[1] || remote.host;
+    log('SSH', 'Вторая сторона доступна: ' + euHost);
+
+    // 2. AmneziaWG на второй стороне.
+    let info = await sshBuild.awgInfo(remote);
+    if (!info.installed) {
+        info = await sshBuild.installAwg(remote, { version, subnetNet: euSubnet, onLog: (m) => log('EU', m) });
+    } else {
+        log('EU', 'AmneziaWG уже установлен, UDP-порт ' + (info.listenPort || '—'));
+        await sshBuild.openUdp(remote, info.listenPort);
+    }
+    if (!info.installed) throw new Error('На ' + remote.host + ' не установился AmneziaWG');
+    log('EU', 'AmneziaWG готов: ' + (info.address || '') + ', порт ' + (info.listenPort || '—'));
+
+    // 3. Клиент ru_host на второй стороне.
+    const ruHost = await sshBuild.createRuHost(remote, (m) => log('EU', m));
+    const innerMatch = String(ruHost.conf).match(/^\s*Address\s*=\s*([0-9.]+)/m);
+    const peerInner = (String(ruHost.conf).match(/^\s*AllowedIPs\s*=\s*([0-9.]+)/m) || [])[1] || '';
+    log('EU', 'Клиент ru_host: ' + (innerMatch ? innerMatch[1] : 'адрес неизвестен'));
+
+    // 4. AmneziaWG на этом сервере (вход).
+    let local = await sshBuild.awgInfo({ host: '127.0.0.1' });
+    if (!local.installed) {
+        log('RU', 'AmneziaWG на входе не установлен — ставлю');
+        const started = await localPost('/api/install/module', {
+            module: 'awg', version, route: 'all', ipv6: 'disallow', port: '3977', awgMode: 'single'
+        });
+        if (!started || started.error) {
+            throw new Error('Установка AWG на входе не запустилась: ' + ((started && started.error) || 'ошибка'));
+        }
+        for (let i = 0; i < 180; i++) {
+            await new Promise(r => setTimeout(r, 5000));
+            local = await sshBuild.awgInfo({ host: '127.0.0.1' });
+            if (local.installed) break;
+            if (i > 0 && i % 12 === 0) log('RU', 'Установка AmneziaWG на входе продолжается...');
+        }
+        if (!local.installed) throw new Error('AmneziaWG на входе не установился за 15 минут');
+    }
+    await sshBuild.openUdp({ host: '127.0.0.1' }, local.listenPort);
+    log('RU', 'AmneziaWG готов: ' + (local.address || '') + ', порт ' + (local.listenPort || '—'));
+
+    // 5. Конфиг туннеля: ru_host без DNS, Table = off.
+    const conf = sshBuild.cascadeConfig(ruHost.conf);
+    writeRootFile(sshBuild.AWG_CONF, conf, '0600');
+    writeRootFile(CASCADE_MARKER, String(Date.now()), '0600');
+    log('RU', 'awg1.conf: ' + ((conf.match(/^Address\s*=.*$/m) || [])[0] || '').trim() +
+        ' / ' + ((conf.match(/^Endpoint\s*=.*$/m) || [])[0] || '').trim());
+
+    // 6. Маршруты и фильтрация.
+    const subnet = sshBuild.clientSubnet(local.address) || '10.9.9.0/24';
+    const script = sshBuild.routingScript(euHost, subnet);
+    writeRootFile(ROUTING_SCRIPT, script, '0755');
+    writeRootFile('/etc/systemd/system/awg-routing.service', sshBuild.ROUTING_SERVICE, '0644');
+    writeRootFile('/etc/systemd/system/awg-routing.timer', sshBuild.ROUTING_TIMER, '0644');
+    sh('sudo', ['systemctl', 'daemon-reload']);
+    const routeRun = await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
+    if (routeRun.code !== 0) {
+        throw new Error('Маршруты не применились: ' + String(routeRun.out || '').trim().slice(0, 500));
+    }
+    log('RU', 'маршруты и фильтрация применены (клиентская подсеть ' + subnet + ')');
+
+    // 7. Поднимаем туннель.
+    sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
+    try { sh('sleep', ['3']); } catch (e) { /* ignore */ }
+    sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
+    const up = await sshRunner.run({ host: '127.0.0.1' }, 'systemctl is-active awg-quick@awg1', 20000);
+    if (!/active/.test(String(up.out || ''))) {
+        const why = await sshRunner.run({ host: '127.0.0.1' }, 'systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 8', 30000);
+        throw new Error('awg-quick@awg1 не запустился: ' + String(why.out || '').trim().slice(0, 500));
+    }
+    log('RU', 'туннель awg1 поднят');
+
+    // 8. Рукопожатие на обеих сторонах и трафик.
+    let euHs = null;
+    let ruHs = null;
+    for (let i = 0; i < 20; i++) {
+        const hsEu = await sshRunner.run(remote, "awg show awg0 latest-handshakes 2>/dev/null | awk '{print $2}' | sort -nr | head -1", 20000);
+        const tsEu = parseInt(String(hsEu.out || '').trim(), 10) || 0;
+        const hsRu = await sshRunner.run({ host: '127.0.0.1' }, "awg show awg1 latest-handshakes 2>/dev/null | awk '{print $2}' | sort -nr | head -1", 20000);
+        const tsRu = parseInt(String(hsRu.out || '').trim(), 10) || 0;
+        const now = Math.floor(Date.now() / 1000);
+        euHs = tsEu ? now - tsEu : null;
+        ruHs = tsRu ? now - tsRu : null;
+        if (euHs !== null && ruHs !== null) break;
+        if (i === 5) log('Проверка', 'жду рукопожатие (до 100 секунд)...');
+        await new Promise(r => setTimeout(r, 5000));
+    }
+    log('Проверка', 'EU: ' + (euHs === null ? 'нет рукопожатия' : euHs + ' сек. назад') +
+        ', RU: ' + (ruHs === null ? 'нет рукопожатия' : ruHs + ' сек. назад'));
+
+    if (euHs === null || ruHs === null) {
+        throw new Error('Туннель поднят, но рукопожатия нет. Проверьте, что UDP ' +
+            (info.listenPort || '3977') + ' открыт на ' + remote.host + ' (UFW и firewall провайдера).');
+    }
+
+    const before = Number(sh('sudo', ['bash', '-c', "awg show awg1 transfer 2>/dev/null | awk '{s+=$2+$3} END {print s+0}'"]).trim()) || 0;
+    try {
+        if (peerInner) sh('sudo', ['bash', '-c', 'ping -c 2 -W 2 ' + peerInner + ' >/dev/null 2>&1 || true']);
+    } catch (e) { /* ignore */ }
+    await new Promise(r => setTimeout(r, 4000));
+    const after = Number(sh('sudo', ['bash', '-c', "awg show awg1 transfer 2>/dev/null | awk '{s+=$2+$3} END {print s+0}'"]).trim()) || 0;
+    const traffic = after > before ? after - before : after;
+    log('Трафик', 'через awg1 прошло ' + traffic + ' байт');
+
+    return {
+        success: true,
+        role,
+        endpoint: euHost + ':' + (info.listenPort || ''),
+        euHandshakeAgo: euHs,
+        ruHandshakeAgo: ruHs,
+        traffic,
+        details: cascadeDetails()
+    };
+}
+
+app.post('/api/cascade/ssh-install', checkAuth, requireAdmin, (req, res) => {
     const data = req.body || {};
     const role = data.role === 'eu' ? 'eu' : 'ru';
     const version = ['3.1', '2.0', '1.5'].includes(String(data.version)) ? String(data.version) : '2.0';
@@ -3790,85 +3938,45 @@ app.post('/api/cascade/ssh-install', checkAuth, requireAdmin, async (req, res) =
     const port = Number(data.peerPort) || 22;
     const user = String(data.peerUser || 'root').trim() || 'root';
     const pass = String(data.peerPass || '');
+    const euSubnet = /^(\d{1,3}\.){3}\d{1,3}\/(1[6-9]|2\d|30)$/.test(String(data.euSubnet || ''))
+        ? String(data.euSubnet) : '172.16.61.0/24';
     if (!host || !pass) return res.status(400).json({ error: 'Нужны IP второй стороны и пароль root' });
     if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) return res.status(400).json({ error: 'Вторая сторона задаётся по IP' });
-    const steps = [];
-    const log = (title, text) => { steps.push({ title, text, at: new Date().toISOString() }); };
-    const remote = { host, port, user, pass };
-    try {
-        const ping = await sshRunner.run(remote, 'hostname && ip -4 -o addr show scope global', 30000);
-        if (ping.code !== 0) throw new Error('SSH до ' + host + ' не работает: ' + String(ping.out).trim().slice(0, 300));
-        log('SSH', host + ' доступен');
-        const ipMatch = String(ping.out).match(/(\d{1,3}\.){3}\d{1,3}\//);
-        const euHost = ipMatch ? ipMatch[0].replace(/\/$/, '') : host;
 
-        let info = await sshBuild.awgInfo(remote);
-        if (!info.installed) {
-            await sshBuild.installAwg(remote, { version, subnet: sshBuild.SUBNET_EU, onLog: (m) => log('EU', m) });
-            info = await sshBuild.awgInfo(remote);
-        }
-        if (!info.installed) throw new Error('На ' + host + ' не установился AmneziaWG');
-        log('EU', 'AmneziaWG готов, порт ' + (info.listenPort || '—'));
-
-        const ruHost = await sshBuild.createRuHost(remote, (m) => log('EU', m));
-
-        let local = await sshBuild.awgInfo({ host: '127.0.0.1' });
-        if (!local.installed) {
-            log('RU', 'AmneziaWG не установлен — запускаю установку');
-            const start = await localPost('/api/install/module', {
-                module: 'awg', version, route: 'all', ipv6: 'disallow', port: '443', awgMode: 'single'
-            });
-            if (!start || start.error) throw new Error('Установка AWG на входе: ' + ((start && start.error) || 'ошибка'));
-            for (let i = 0; i < 120; i++) {
-                await new Promise(r => setTimeout(r, 5000));
-                local = await sshBuild.awgInfo({ host: '127.0.0.1' });
-                if (local.installed) break;
-            }
-            if (!local.installed) throw new Error('AmneziaWG на входе не установился');
-        }
-        log('RU', 'AmneziaWG готов, порт ' + (local.listenPort || '—'));
-
-        const conf = sshBuild.cascadeConfig(ruHost.conf);
-        writeRootFile(sshBuild.AWG_CONF, conf, '0600');
-        writeRootFile(CASCADE_MARKER, String(Date.now()), '0600');
-        log('RU', 'awg1.conf: ' + ((conf.match(/^Address\s*=.*$/m) || [])[0] || '').trim() + ', ' + ((conf.match(/^Endpoint\s*=.*$/m) || [])[0] || '').trim());
-
-        const script = sshBuild.routingScript(euHost);
-        writeRootFile(ROUTING_SCRIPT, script, '0755');
-        writeRootFile('/etc/systemd/system/awg-routing.service', ROUTING_SERVICE, '0644');
-        writeRootFile('/etc/systemd/system/awg-routing.timer', ROUTING_TIMER, '0644');
-        sh('sudo', ['systemctl', 'daemon-reload']);
-        const routeRun = await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
-        if (routeRun.code !== 0) throw new Error('Маршруты не применились: ' + String(routeRun.out).trim().slice(0, 500));
-        log('RU', 'маршруты и фильтрация применены');
-        sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
-        try { sh('sleep', ['3']); } catch (e) { /* ignore */ }
-        sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
-
-        let euHs = null;
-        let ruHs = null;
-        for (let i = 0; i < 12; i++) {
-            const hsEu = await sshRunner.run(remote, "awg show awg0 latest-handshakes | awk '{print $2}' | sort -nr | head -1", 20000);
-            const tsEu = parseInt(String(hsEu.out).trim(), 10) || 0;
-            const hsRu = await sshRunner.run({ host: '127.0.0.1' }, "awg show awg1 latest-handshakes | awk '{print $2}' | sort -nr | head -1", 20000);
-            const tsRu = parseInt(String(hsRu.out).trim(), 10) || 0;
-            const now = Math.floor(Date.now() / 1000);
-            euHs = tsEu ? now - tsEu : null;
-            ruHs = tsRu ? now - tsRu : null;
-            if (euHs !== null && ruHs !== null) break;
-            await new Promise(r => setTimeout(r, 5000));
-        }
-        log('Проверка', 'EU: ' + (euHs === null ? 'нет рукопожатия' : euHs + ' сек. назад') + ', RU: ' + (ruHs === null ? 'нет рукопожатия' : ruHs + ' сек. назад'));
-        if (euHs === null || ruHs === null) {
-            return res.status(500).json({ error: 'Каскад поднят, но нет рукопожатия. Проверьте UDP ' + (local.listenPort || '39743') + ' на EU в облачном firewall.', steps });
-        }
-        const traffic = Number(sh('sudo', ['bash', '-c', "awg show awg1 transfer 2>/dev/null | awk '{s+=$2+$3} END {print s+0}'"]).trim()) || 0;
-        log('Трафик', 'через awg1: ' + traffic + ' байт');
-        auditLog(req, 'Каскад собран по SSH: RU -> ' + euHost);
-        res.json({ success: true, role, endpoint: euHost + ':' + (local.listenPort || ''), steps, euHandshakeAgo: euHs, ruHandshakeAgo: ruHs, traffic, details: cascadeDetails() });
-    } catch (e) {
-        res.status(500).json({ error: e.message || 'неизвестная ошибка', steps });
+    if (cascadeBuildJob && cascadeBuildJob.running) {
+        return res.status(409).json({ error: 'Сборка каскада уже идёт', steps: cascadeBuildJob.steps.slice(-50) });
     }
+
+    cascadeBuildJob = {
+        running: true,
+        startedAt: new Date().toISOString(),
+        finishedAt: '',
+        role,
+        peer: host,
+        steps: [],
+        error: '',
+        result: null
+    };
+    const job = cascadeBuildJob;
+    auditLog(req, 'Запущена сборка каскада по SSH: ' + host);
+
+    runCascadeBuild(job, { host, port, user, pass }, { version, role, euSubnet })
+        .then((result) => {
+            job.result = result;
+            job.running = false;
+            job.finishedAt = new Date().toISOString();
+        })
+        .catch((e) => {
+            job.error = e && e.message ? e.message : String(e);
+            job.running = false;
+            job.finishedAt = new Date().toISOString();
+        });
+
+    res.json({ started: true, role, peer: host });
+});
+
+app.get('/api/cascade/ssh-progress', checkAuth, requireAdmin, (req, res) => {
+    res.json(cascadeJobSnapshot());
 });
 
 app.post('/api/cascade/teardown', checkAuth, requireAdmin, async (req, res) => {
@@ -6995,6 +7103,9 @@ function mtprotoUser(value) {
 
 function installEnv(data) {
     const env = { ...process.env, PANEL_PORT: String(PANEL_PUBLIC_PORT) };
+    // Установщик AWG начинает с чистого листа: снимает состояние и cron
+    // автопродолжения от прошлой (в том числе неудачной) попытки.
+    env.PANEL_FRESH_INSTALL = '1';
     if (data.domain && HOST_RE.test(String(data.domain))) env.SERVER_PUB_IP = String(data.domain);
     env.AWG_VERSION = ['1.5', '2.0', '3.1'].includes(String(data.version)) ? String(data.version) : '3.1';
     env.AWG_ROUTE = ['all', 'amnezia', 'custom'].includes(String(data.route)) ? String(data.route) : 'all';
@@ -7897,36 +8008,73 @@ function runDetached(title, logFile, script) {
     sh('sudo', ['bash', '-c', `rm -f ${logFile} && touch ${logFile} && chmod 666 ${logFile}`]);
     const file = `/tmp/run_uninstall_${logFile.replace(/\W+/g, '_')}.sh`;
     fs.writeFileSync(file, `#!/bin/bash\nset -u\n${script}\necho "=== УДАЛЕНИЕ ЗАВЕРШЕНО ==="\n`, { mode: 0o700 });
-    const fd = fs.openSync(logFile, 'a');
+    // Отдельный systemd-юнит: удаление переживает перезапуск панели. Раньше
+    // процесс жил в cgroup панели, и её рестарт убивал dpkg посреди работы —
+    // пакеты оставались в прерванном состоянии.
+    const unit = 'servpanel-uninstall-' + String(title).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 20);
+    const viaSystemd = `if command -v systemd-run >/dev/null 2>&1; then systemd-run --unit=${unit} --collect --quiet --property=Type=oneshot bash ${file}; else setsid bash ${file} </dev/null >>${logFile} 2>&1 & fi`;
     try {
-        const child = spawn('bash', [file], { detached: true, stdio: ['ignore', fd, fd] });
+        const child = spawn('bash', ['-c', viaSystemd], { detached: true, stdio: 'ignore' });
         child.unref();
-    } finally {
-        fs.closeSync(fd);
+    } catch (e) {
+        const fd = fs.openSync(logFile, 'a');
+        try {
+            const child = spawn('bash', [file], { detached: true, stdio: ['ignore', fd, fd] });
+            child.unref();
+        } finally {
+            fs.closeSync(fd);
+        }
     }
     if (!LOG_WHITELIST.includes(logFile)) LOG_WHITELIST.push(logFile);
     return { success: true, title, logFile };
 }
 
 const AWG_UNINSTALL_SCRIPT = `#!/bin/bash
-echo "Начинаем удаление AmneziaWG..." > /var/log/awg_uninstall.log
+LOG=/var/log/awg_uninstall.log
+exec >>"$LOG" 2>&1
+echo "Начинаем удаление AmneziaWG..."
+# 1. Снимаем автопродолжение установки: иначе при следующей перезагрузке
+#    сервер снова начнёт ставить AWG (в том числе после неудачной попытки).
+rm -f /etc/cron.d/awg_resume /root/awg_installer_wrapper.sh /root/awg_install_params.env /root/awg/.resume_count
+pkill -f install_amneziawg.sh 2>/dev/null || true
+pkill -f install_awg_stateful.sh 2>/dev/null || true
+sleep 1
+# 2. Чиним dpkg, если прошлое удаление/установка были прерваны перезагрузкой.
+export DEBIAN_FRONTEND=noninteractive
+dpkg --configure -a >/dev/null 2>&1 || true
+apt-get -f install -y >/dev/null 2>&1 || true
+# 3. Штатное удаление установщиком.
 if [ -f "/root/install_amneziawg.sh" ]; then
-    bash /root/install_amneziawg.sh --uninstall --yes >> /var/log/awg_uninstall.log 2>&1
+    bash /root/install_amneziawg.sh --uninstall --yes
 else
     curl -fsSL https://raw.githubusercontent.com/bivlked/amneziawg-installer/main/install_amneziawg.sh -o /tmp/uninstall_awg.sh
-    bash /tmp/uninstall_awg.sh --uninstall --yes >> /var/log/awg_uninstall.log 2>&1
+    bash /tmp/uninstall_awg.sh --uninstall --yes
 fi
+# 4. Если пакеты остались (например, прерванный pre-removal) — добиваем.
+for p in amneziawg-dkms amneziawg amneziawg-tools; do
+    if dpkg -s "$p" >/dev/null 2>&1; then
+        echo "Дочищаю пакет $p"
+        apt-get purge -y "$p" || true
+    fi
+done
+dpkg --configure -a >/dev/null 2>&1 || true
+apt-get -f install -y >/dev/null 2>&1 || true
 systemctl stop awg-routing.timer awg-routing.service 2>/dev/null || true
 systemctl disable awg-routing.timer 2>/dev/null || true
 rm -f /etc/systemd/system/awg-routing.service /etc/systemd/system/awg-routing.timer
 rm -rf /etc/amnezia/amneziawg /root/awg /root/awg_domain.txt
 systemctl daemon-reload 2>/dev/null || true
-echo "=== УДАЛЕНИЕ ЗАВЕРШЕНО ===" >> /var/log/awg_uninstall.log
+echo "=== УДАЛЕНИЕ ЗАВЕРШЕНО ==="
 `;
 
 function awgUninstall() {
     fs.writeFileSync('/tmp/run_uninstall_awg.sh', AWG_UNINSTALL_SCRIPT, { mode: 0o700 });
-    const child = spawn('bash', ['/tmp/run_uninstall_awg.sh'], { detached: true, stdio: 'ignore' });
+    // Отдельный юнит systemd: панель может перезапуститься, и тогда dpkg
+    // останется прерванным (именно это давало 502 посреди удаления).
+    const cmd = 'if command -v systemd-run >/dev/null 2>&1; then ' +
+        'systemd-run --unit=servpanel-uninstall-awg --collect --quiet --property=Type=oneshot bash /tmp/run_uninstall_awg.sh; ' +
+        'else setsid bash /tmp/run_uninstall_awg.sh </dev/null >>/var/log/awg_uninstall.log 2>&1 & fi';
+    const child = spawn('bash', ['-c', cmd], { detached: true, stdio: 'ignore' });
     child.unref();
     return { success: true, title: 'AmneziaWG', logFile: '/var/log/awg_uninstall.log' };
 }
@@ -7968,26 +8116,9 @@ app.post('/api/modules/uninstall', checkAuth, requireAdmin, (req, res) => {
 // ---------------------------------------------------------------------------
 app.post('/api/uninstall/awg', checkAuth, requireAdmin, (req, res) => {
     try {
-        const script = `#!/bin/bash
-echo "Начинаем удаление AmneziaWG..." > /var/log/awg_uninstall.log
-if [ -f "/root/install_amneziawg.sh" ]; then
-    bash /root/install_amneziawg.sh --uninstall --yes >> /var/log/awg_uninstall.log 2>&1
-else
-    curl -fsSL https://raw.githubusercontent.com/bivlked/amneziawg-installer/main/install_amneziawg.sh -o /tmp/uninstall_awg.sh
-    bash /tmp/uninstall_awg.sh --uninstall --yes >> /var/log/awg_uninstall.log 2>&1
-fi
-systemctl stop awg-routing.timer awg-routing.service 2>/dev/null || true
-systemctl disable awg-routing.timer 2>/dev/null || true
-rm -f /etc/systemd/system/awg-routing.service /etc/systemd/system/awg-routing.timer
-rm -rf /etc/amnezia/amneziawg /root/awg /root/awg_domain.txt
-systemctl daemon-reload 2>/dev/null || true
-echo "=== УДАЛЕНИЕ ЗАВЕРШЕНО ===" >> /var/log/awg_uninstall.log
-`;
-        fs.writeFileSync('/tmp/run_uninstall_awg.sh', script, { mode: 0o700 });
-        const child = spawn('bash', ['/tmp/run_uninstall_awg.sh'], { detached: true, stdio: 'ignore' });
-        child.unref();
+        const r = awgUninstall();
         auditLog(req, 'Запущено полное удаление AmneziaWG');
-        res.json({ success: true });
+        res.json({ success: true, logFile: r.logFile });
     } catch (e) {
         res.status(500).json({ error: 'Ошибка запуска удаления' });
     }
