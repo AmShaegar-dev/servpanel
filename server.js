@@ -4016,7 +4016,8 @@ async function runCascadeBuild(job, remote, opts) {
         } else {
             log('RU', 'AmneziaWG на входе не установлен — ставлю');
             const started = await localPost('/api/install/module', {
-                module: 'awg', version, route: 'all', ipv6: 'disallow', port: '3977', awgMode: 'single'
+                module: 'awg', version, route: 'all', ipv6: 'disallow', port: '3977', awgMode: 'single',
+                subnet: '172.16.17.0/24'
             });
             if (!started || started.error) {
                 throw new Error('Установка AWG на входе не запустилась: ' + ((started && started.error) || 'ошибка'));
@@ -4181,7 +4182,14 @@ app.get('/api/cascade/ssh-progress', checkAuth, requireAdmin, (req, res) => {
 // маршрутизации, поэтому его можно менять после установки без пересборки.
 app.get('/api/cascade/interfaces', checkAuth, requireAdmin, (req, res) => {
     const script = readTextSafe(ROUTING_SCRIPT);
-    if (!script) return res.status(404).json({ error: 'Скрипт маршрутизации не найден — сначала постройте каскад' });
+    if (!script) {
+        return res.json({
+            selected: [],
+            available: [],
+            applicable: false,
+            reason: 'Маршрутизация настраивается на входе (RU). На этом сервере скрипта маршрутов нет.'
+        });
+    }
     const m = script.match(/^CLIENT_IFACES="([^"]*)"/m);
     const selected = m ? m[1].split(/\s+/).filter(Boolean) : ['awg0'];
     const out = shTry('bash', ['-c',
@@ -4189,7 +4197,7 @@ app.get('/api/cascade/interfaces', checkAuth, requireAdmin, (req, res) => {
     ], { timeout: 10000 });
     const available = [...new Set(String(out || '').split(/\s+/)
         .filter(i => IFACE_RE.test(i) && !CASCADE_IFACE_RE.test(i)))];
-    res.json({ selected, available, script: ROUTING_SCRIPT });
+    res.json({ selected, available, applicable: true, script: ROUTING_SCRIPT });
 });
 
 app.post('/api/cascade/interfaces', checkAuth, requireAdmin, async (req, res) => {
@@ -7384,6 +7392,10 @@ function installEnv(data) {
     }
     env.AWG_IPV6 = ['disallow', 'allow', 'tunnel'].includes(String(data.ipv6)) ? String(data.ipv6) : 'disallow';
     if (isPort(data.port)) env.AWG_PORT = String(data.port);
+    // Подсеть туннеля для каскада: RU — 172.16.17.0/24, EU — 172.16.61.0/24.
+    if (data.subnet && /^(\d{1,3}\.){3}\d{1,3}\/(1[6-9]|2\d|30)$/.test(String(data.subnet))) {
+        env.AWG_TUNNEL_SUBNET = String(data.subnet);
+    }
     env.AWG_ISOLATION = data.isolation === false ? 'off' : 'on';
     env.AWG_KEEP_PACKAGES = data.keepPackages === false ? '0' : '1';
     env.AWG_NO_TWEAKS = data.noTweaks ? '1' : '0';

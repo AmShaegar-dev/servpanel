@@ -1677,7 +1677,7 @@ async function runAutoCascade(btn) {
     const obfIntensity = ((document.getElementById('autoCascadeObfIntensity') || {}).value) || 'medium';
     const obfSource = ((document.getElementById('autoCascadeObfCustom') || {}).value || '').trim();
     const extraRaw = ((document.getElementById('autoCascadeExtraRu') || {}).value || '').trim();
-    const ifaces = [...document.querySelectorAll('#cascadeIfacesList input[type=checkbox]:checked')]
+    const ifaces = [...document.querySelectorAll('#cascadeRoutingIfaces input[type=checkbox]:checked')]
         .map(c => c.value).filter(Boolean);
     const log = document.getElementById('autoCascadeLog');
     if (!peerHost || !peerPass) return alert('Укажите IP второй стороны и пароль root');
@@ -1764,12 +1764,23 @@ function autoCascadeObfHint() {
 }
 
 async function loadCascadeIfaces() {
-    const box = document.getElementById('cascadeIfacesList');
-    const res = document.getElementById('cascadeIfacesResult');
+    const box = document.getElementById('cascadeRoutingIfaces');
+    const res = document.getElementById('cascadeRoutingIfacesResult');
     if (!box) return;
     box.innerHTML = '<span class="sub-text">Загрузка…</span>';
     try {
         const d = await apiJson('/api/cascade/interfaces');
+        const ctrl = document.getElementById('cascadeRoutingIfacesControls');
+        const oldCard = document.getElementById('cascadeRoutingCard');
+        if (d && d.applicable === false) {
+            box.innerHTML = `<span class="sub-text">${esc(d.reason || 'На этом сервере маршрутизация не настраивается.')}</span>`;
+            if (ctrl) ctrl.style.display = 'none';
+            if (oldCard) oldCard.style.display = 'none';
+            if (res) res.innerText = '';
+            return;
+        }
+        if (ctrl) ctrl.style.display = '';
+        if (oldCard) oldCard.style.display = '';
         const sel = new Set(d.selected || []);
         const list = [...new Set([...(d.available || []), ...sel])];
         box.innerHTML = list.length
@@ -1783,10 +1794,10 @@ async function loadCascadeIfaces() {
 }
 
 async function saveCascadeIfaces() {
-    const ifaces = [...document.querySelectorAll('#cascadeIfacesList input[type=checkbox]:checked')]
+    const ifaces = [...document.querySelectorAll('#cascadeRoutingIfaces input[type=checkbox]:checked')]
         .map(c => c.value).filter(Boolean);
     if (!ifaces.length) return alert('Выберите хотя бы один интерфейс');
-    const res = document.getElementById('cascadeIfacesResult');
+    const res = document.getElementById('cascadeRoutingIfacesResult');
     if (res) res.innerText = 'Применяю…';
     try {
         const d = await apiJson('/api/cascade/interfaces', {

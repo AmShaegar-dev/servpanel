@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.14">
+    <meta name="panel-version" content="3.0.15">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1214,7 +1214,6 @@
         «Удалить каскад» убирает службы, маршруты, ipset, правила iptables, туннель awg1 и клиента ru_host — и здесь, и на второй стороне, если указан пароль.
     </div>
 </div>
-</div>
 <div class="card" style="margin-bottom:20px;" data-admin-only>
     <div class="card-head" style="margin-bottom:8px;">
         <div><h3 style="margin:0;">Интерфейсы маршрутизации</h3></div>
@@ -1224,50 +1223,12 @@
         Отметьте интерфейсы, трафик которых должен уходить через каскад. Подсеть каждого берётся
         из его адреса, поэтому новые интерфейсы можно добавлять после сборки.
     </p>
-    <div id="cascadeIfacesList" class="controls-row" style="flex-wrap:wrap; gap:12px; min-height:24px;"></div>
-    <div class="controls-row" style="margin-top:12px;">
+    <div id="cascadeRoutingIfaces" class="controls-row" style="flex-wrap:wrap; gap:12px; min-height:24px;"></div>
+    <div class="controls-row" id="cascadeRoutingIfacesControls" style="margin-top:12px;">
         <button class="btn btn-primary" onclick="saveCascadeIfaces()">Применить</button>
         <button class="btn btn-dark" onclick="loadCascadeIfaces()">↻ Обновить</button>
     </div>
-    <div id="cascadeIfacesResult" class="sub-text" style="margin-top:8px;"></div>
-</div>
-<div class="card advanced-only" style="margin-bottom: 20px;">
-                    <h3 style="margin-top:0;">Шаг 1. Конфиг второй стороны</h3>
-                    <p style="color:var(--text-muted); font-size:13px; margin-top:0;">
-                        Вставьте конфиг клиента, созданного на <b>другом</b> сервере каскада. Панель сама добавит
-                        <code>Table = off</code> и уберёт DNS — это требование
-                        <a href="https://github.com/bivlked/amneziawg-installer/blob/main/CASCADE.md" target="_blank" rel="noopener" style="color:#58a6ff;">CASCADE.md</a>.
-                    </p>
-                    <div style="font-size:12.5px; color:var(--text-muted); margin:0 0 10px;">
-                        <b>На выходе (EU):</b> «Новый клиент» → скопируйте конфиг (кнопка ниже или
-                        <code>manage_amneziawg.sh add ru_host</code>) → вставьте здесь на входе (RU).<br>
-                        <b>На входе (RU):</b> «Новый клиент» → скопируйте его конфиг → вставьте во вкладке «Каскад» на выходе (EU).
-                    </div>
-                    <div class="wizard-grid" style="margin:12px 0 10px;">
-    <label class="field"><span>IP второй стороны (SSH)</span>
-        <input id="autoCascadePeer" placeholder="45.9.16.77" autocomplete="off">
-    </label>
-    <label class="field"><span>SSH-порт</span>
-        <input id="autoCascadePeerPort" type="number" value="22" placeholder="22">
-    </label>
-    <label class="field"><span>Пользователь SSH</span>
-        <input id="autoCascadeUser" value="root" placeholder="root" autocomplete="username">
-    </label>
-    <label class="field"><span>Пароль root</span>
-        <input id="autoCascadePass" type="password" autocomplete="current-password">
-    </label>
-</div>
-<div class="wizard-note">Вторая сторона задаётся <b>по IP</b>, доступ — по SSH (пароль root). Панель сама поставит на неё AmneziaWG, создаст клиента <code>ru_host</code> и настроит туннель на этом сервере.</div>
-<div id="autoCascadeHint" class="wizard-note" style="display:none;"></div>
-    <div id="autoCascadeLog" class="wizard-summary" style="display:none; margin-top:12px;"></div>
-    <div class="controls-row" style="margin-top:14px; margin-bottom:0;">
-        <button class="btn btn-primary" id="autoCascadeBtn" onclick="runAutoCascade(this)">⚡ Построить каскад</button>
-        <button class="btn btn-danger" id="autoCascadeDeleteBtn" onclick="cleanupCascade(this)">🗑 Удалить каскад</button>
-    </div>
-    <div class="wizard-note" style="margin-top:10px;">
-        «Удалить каскад» убирает службы, скрипт маршрутов, правила iptables/ipset, туннель <code>awg1</code> и клиента каскада.
-        Если заполнены адрес и логин второй панели — то же самое сделает и там.
-    </div>
+    <div id="cascadeRoutingIfacesResult" class="sub-text" style="margin-top:8px;"></div>
 </div>
 <div class="card advanced-only" style="margin-bottom: 20px;">
                     <h3 style="margin-top:0;">Шаг 1. Конфиг второй стороны</h3>
