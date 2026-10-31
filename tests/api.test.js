@@ -62,6 +62,22 @@ function jsonBody(obj, extra = {}) {
     };
 }
 
+/**
+ * Удаление с повторами: в Windows антивирус или ещё не закрытый поток
+ * могут на миг заблокировать файл, и обычный rmSync падает с EPERM.
+ */
+async function removeWithRetry(target, opts) {
+    for (let i = 0; ; i += 1) {
+        try {
+            fs.rmSync(target, opts);
+            return;
+        } catch (e) {
+            if (i >= 20) throw e;
+            await new Promise((r) => setTimeout(r, 50));
+        }
+    }
+}
+
 async function login(password, username = '', code = '', ip = '') {
     const headers = { 'Content-Type': 'application/json' };
     if (ip) headers['X-Forwarded-For'] = ip;
@@ -262,7 +278,8 @@ test('TOTP соответствует RFC 6238 (вектор 59 c)', () => {
 
 test('vpn:// кодируется и декодируется без потерь', () => {
     const conf = '[Interface]\nPrivateKey = AAAA\nAddress = 10.8.0.2/32\nJc = 4\n\n[Peer]\nPublicKey = BBBB\nEndpoint = 1.2.3.4:51820\nAllowedIPs = 0.0.0.0/0\n';
-    const uri = internals.buildVpnUriFromConf('phone', conf);
+    // С 3.0 в описании профиля передаётся имя сервера (options.serverName).
+    const uri = internals.buildVpnUriFromConf('phone', conf, { serverName: 'phone' });
     assert.match(uri, /^vpn:\/\//);
     const decoded = internals.vpnDecode(uri);
     assert.equal(decoded.description, 'phone');
@@ -844,6 +861,42 @@ test('Приложение: APK скачивается из GitHub, загруз
         /servpanel-android\/releases\/latest\/download\/servpanel-mobile\.apk/);
 });
 
+test('SSH-доступ: статус и выдача ключа без root', async () => {
+    const status = await request('/api/ssh-access/status');
+    assert.equal(status.status, 200);
+    assert.equal(status.json.user, 'servpanel-app');
+    assert.ok(status.json.panelPort > 0);
+    assert.equal(typeof status.json.loopbackOnly, 'boolean');
+
+    const bad = await request('/api/ssh-access/enable', jsonBody({ publicKey: 'not-a-key' }));
+    assert.equal(bad.status, 400);
+
+    const blob = 'AAAA' + Buffer.alloc(160, 7).toString('base64');
+    const pub = `ssh-rsa ${blob} test-device`;
+    const ok = await request('/api/ssh-access/enable', jsonBody({ publicKey: pub, port: 3000 }));
+    assert.equal(ok.status, 200);
+    assert.equal(ok.json.user, 'servpanel-app');
+    assert.equal(ok.json.port, 3000);
+    assert.match(ok.json.fingerprint, /^SHA256:/);
+
+    const restricted = await request('/api/ssh-access/restrict', jsonBody({}));
+    assert.equal(restricted.status, 200);
+    assert.equal(restricted.json.success, true);
+});
+
+test('SSH-доступ: без авторизации закрыт', async () => {
+    const saved = cookie;
+    cookie = '';
+    try {
+        const r = await request('/api/ssh-access/status');
+        assert.equal(r.status, 401);
+        const e = await request('/api/ssh-access/enable', jsonBody({ publicKey: 'x' }));
+        assert.equal(e.status, 401);
+    } finally {
+        cookie = saved;
+    }
+});
+
 test('Приложение: локальный APK отдаётся, если ссылка отключена', async () => {
     const settingsFile = path.join(DATA_DIR, '.app_settings.json');
     const had = fs.existsSync(settingsFile);
@@ -868,8 +921,9 @@ test('Приложение: локальный APK отдаётся, если с
         assert.equal(dl.headers.get('content-type'), 'application/vnd.android.package-archive');
         assert.equal(dl.text, bytes.toString());
     } finally {
-        fs.rmSync(apkFile, { force: true });
-        fs.rmSync(apkDir, { recursive: true, force: true });
+        // Windows может держать файл открытым после отдачи — с повторами.
+        await removeWithRetry(apkFile, { force: true });
+        await removeWithRetry(apkDir, { recursive: true, force: true });
         if (had) fs.writeFileSync(settingsFile, prev);
         else fs.rmSync(settingsFile, { force: true });
     }

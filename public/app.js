@@ -5142,15 +5142,33 @@ async function renewSslCert(name, force) {
     }
     const btn = document.getElementById('sslRenewBtn');
     sslBusy(btn, true, 'Продление…');
-    toast('Обновляю сертификат', 'info', name);
     try {
-        const d = await apiJson('/api/ssl/renew', {
+        const start = await apiJson('/api/ssl/renew', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, force: !!force })
         });
-        const days = d.certificate && d.certificate.daysLeft;
-        if (d.notDue) {
+        if (start.demo) {
+            toast('Демо-режим', 'info', 'Продление не выполняется.');
+            return;
+        }
+        let job = start.job || null;
+        if (job && job.name && job.name !== name) {
+            toast('Уже выполняется другое продление', 'info', job.name);
+            return;
+        }
+        if (job && job.running) {
+            toast('Продление запущено', 'info', 'Certbot работает, это может занять до 2 минут.');
+            job = await waitSslRenew(name, btn);
+        }
+        if (!job) {
+            toast('Продление ещё выполняется', 'info', 'Certbot не закончил. Обновите статус через минуту.');
+            return;
+        }
+        const days = job.certificate && job.certificate.daysLeft;
+        if (job.error) {
+            toast('Ошибка продления', 'error', job.error);
+        } else if (job.notDue) {
             toast('Продление не требуется', 'info', days != null
                 ? `Сертификат действует ещё ${days} дн. Certbot пропустил продление.`
                 : 'Certbot пропустил продление: срок ещё не подошёл.');
@@ -5163,6 +5181,23 @@ async function renewSslCert(name, force) {
     } finally {
         sslBusy(btn, false);
     }
+}
+
+// Ждём завершения фонового продления. Запрос статуса короткий, поэтому
+// nginx не успевает отдать 504, в отличие от синхронного certbot.
+async function waitSslRenew(name, btn) {
+    const started = Date.now();
+    const deadline = started + 6 * 60 * 1000;
+    while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 2000));
+        if (btn) btn.textContent = `Продление… ${Math.round((Date.now() - started) / 1000)} с`;
+        try {
+            const s = await apiJson('/api/ssl/renew/status?name=' + encodeURIComponent(name));
+            if (s && s.job && !s.job.running) return s.job;
+            if (s && s.none) return null;
+        } catch (e) { /* продолжаем опрос */ }
+    }
+    return null;
 }
 
 function renewPanelCert() {

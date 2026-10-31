@@ -30,6 +30,7 @@ const { Panel } = require('./lib/cascade-setup');
 const sshBuild = require('./lib/cascade-ssh-build');
 const awgArchitect = require('./lib/awg-architect');
 const sshRunner = require('./lib/cascade-ssh');
+const sshAccess = require('./lib/ssh-access');
 const { ensureAwg } = require('./lib/cascade-remote');
 const { createProxyBot } = require('./lib/proxy-bot');
 
@@ -7371,7 +7372,62 @@ app.post('/api/ssl/site', checkAuth, requireAdmin, async (req, res) => {
 // Продление сертификата (certbot renew для конкретного имени).
 // Без флага --nginx: certbot использует способ проверки, записанный при выпуске
 // (/etc/letsencrypt/renewal/<name>.conf), и не переписывает конфиг Nginx.
-app.post('/api/ssl/renew', checkAuth, requireAdmin, async (req, res) => {
+//
+// Certbot при принудительном продлении работает дольше 60 секунд, а nginx
+// обрывает такой запрос с 504. Поэтому продление выполняется в фоне, а
+// браузер опрашивает /api/ssl/renew/status и показывает реальный результат.
+let sslRenewJob = null;
+
+function sslRenewPublic(job) {
+    if (!job) return null;
+    return {
+        name: job.name,
+        force: job.force,
+        running: job.running,
+        ok: job.ok,
+        notDue: job.notDue,
+        error: job.error,
+        output: sslTail(job.output || '', 2000),
+        startedAt: job.startedAt,
+        finishedAt: job.finishedAt,
+        certificate: job.certificate || null
+    };
+}
+
+function startSslRenew(name, force, auditReq) {
+    const job = {
+        name, force, running: true, ok: false, notDue: false,
+        error: '', output: '', startedAt: Date.now(), finishedAt: null, certificate: null
+    };
+    sslRenewJob = job;
+    (async () => {
+        try {
+            const args = ['renew', '--cert-name', name, '--non-interactive'];
+            if (force) args.push('--force-renewal');
+            const run = await rootRun(findCommand('certbot') || 'certbot', args, { timeout: 300000 });
+            job.output = String(run.stdout || '') + '\n' + String(run.stderr || '');
+            if (!run.ok) {
+                job.error = /another instance of certbot|\.certbot\.lock|lock file/i.test(job.output)
+                    ? 'Certbot уже выполняется. Подождите и повторите.'
+                    : 'Certbot не смог обновить сертификат.';
+            } else {
+                job.ok = true;
+                job.notDue = /not yet due for renewal|No renewals were attempted/i.test(job.output);
+                await rootRun('systemctl', ['reload', 'nginx'], { timeout: 30000 });
+                job.certificate = currentCertificates().find(c => c.name === name) || null;
+                auditLog(auditReq, `${job.notDue ? 'Проверен' : 'Обновлён'} сертификат ${name}${force ? ' (force)' : ''}`);
+            }
+        } catch (e) {
+            job.error = 'Ошибка продления: ' + sslTail(e.message, 300);
+        } finally {
+            job.running = false;
+            job.finishedAt = Date.now();
+        }
+    })();
+    return job;
+}
+
+app.post('/api/ssl/renew', checkAuth, requireAdmin, (req, res) => {
     const name = String((req.body || {}).name || '').trim();
     const force = !!(req.body || {}).force;
     const safeName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name) && !name.includes('..');
@@ -7380,25 +7436,28 @@ app.post('/api/ssl/renew', checkAuth, requireAdmin, async (req, res) => {
     }
     if (NO_SYSTEM()) {
         auditLog(req, `[DEMO] Обновление сертификата ${name}`);
-        return res.json({ success: true, demo: true, name, notDue: false, forced: force });
+        return res.json({ success: true, demo: true, name, notDue: false, forced: force, running: false });
     }
     if (!findCommand('certbot')) return sslError(res, 409, 'Certbot не установлен.', { needDeps: true });
-    try {
-        const args = ['renew', '--cert-name', name, '--non-interactive'];
-        if (force) args.push('--force-renewal');
-        const run = await rootRun(findCommand('certbot') || 'certbot', args, { timeout: 300000 });
-        if (!run.ok) {
-            return sslError(res, 502, 'Certbot не смог обновить сертификат.', { output: sslTail(run.stderr || run.stdout) });
-        }
-        const output = String(run.stdout || '');
-        const notDue = /not yet due for renewal|No renewals were attempted/i.test(output);
-        await rootRun('systemctl', ['reload', 'nginx'], { timeout: 30000 });
-        auditLog(req, `${notDue ? 'Проверен' : 'Обновлён'} сертификат ${name}${force ? ' (force)' : ''}`);
-        const cert = currentCertificates().find(c => c.name === name) || null;
-        res.json({ success: true, name, notDue, forced: force, output: sslTail(output, 1200), certificate: cert });
-    } catch (e) {
-        sslError(res, 500, 'Ошибка обновления: ' + sslTail(e.message, 300));
+    if (sslRenewJob && sslRenewJob.running) {
+        return res.status(202).json({
+            success: true, started: false, running: true,
+            name: sslRenewJob.name, job: sslRenewPublic(sslRenewJob)
+        });
     }
+    const auditReq = { headers: req.headers, socket: req.socket, session: req.session };
+    auditLog(req, `Запущено продление сертификата ${name}${force ? ' (force)' : ''}`);
+    const job = startSslRenew(name, force, auditReq);
+    res.status(202).json({ success: true, started: true, running: true, name, force, job: sslRenewPublic(job) });
+});
+
+app.get('/api/ssl/renew/status', checkAuth, (req, res) => {
+    const name = String(req.query.name || '').trim();
+    if (!sslRenewJob) return res.json({ success: true, none: true, running: false });
+    if (name && sslRenewJob.name !== name) {
+        return res.json({ success: true, none: true, running: false, current: sslRenewJob.name });
+    }
+    res.json({ success: true, running: sslRenewJob.running, job: sslRenewPublic(sslRenewJob) });
 });
 
 // Удаление сайта, созданного из панели (сертификат при этом сохраняется).
@@ -9653,6 +9712,112 @@ echo '{"ok":true,"name":"'"$NEW"'"}'
 // ---------------------------------------------------------------------------
 // API мобильного приложения: статус, APK и метрики
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// SSH-доступ для приложения: панель сама выдаёт ключ, без входа на сервер
+// ---------------------------------------------------------------------------
+app.get('/api/ssh-access/status', checkAuth, requireAdmin, (req, res) => {
+    if (NO_SYSTEM()) {
+        return res.json({
+            user: sshAccess.USER,
+            userExists: false,
+            keys: [],
+            keyCount: 0,
+            panelHost: PANEL_HOST,
+            panelPort: PANEL_PORT,
+            publicPort: PANEL_PUBLIC_PORT,
+            loopbackOnly: PANEL_HOST === '127.0.0.1',
+            forwarding: 'yes',
+            sshPort: 22,
+            hostKeys: [],
+            ufwOpen: null,
+            demo: true
+        });
+    }
+    try {
+        res.json(sshAccess.status({
+            panelHost: PANEL_HOST,
+            panelPort: PANEL_PORT,
+            publicPort: PANEL_PUBLIC_PORT
+        }));
+    } catch (e) {
+        res.status(500).json({ error: e.message || 'Не удалось прочитать SSH-настройки' });
+    }
+});
+
+app.post('/api/ssh-access/enable', checkAuth, requireAdmin, (req, res) => {
+    const publicKey = String((req.body && req.body.publicKey) || '');
+    const permitPort = Number((req.body && req.body.port) || PANEL_PORT) || PANEL_PORT;
+
+    if (NO_SYSTEM()) {
+        // Демо/тесты: ключ не ставим, но отвечаем так, будто всё получилось.
+        try {
+            const key = sshAccess.parsePublicKey(publicKey);
+            auditLog(req, `SSH-доступ приложения (демо): ключ ${key.fingerprint}`);
+            return res.json({
+                success: true,
+                user: sshAccess.USER,
+                port: permitPort,
+                fingerprint: key.fingerprint,
+                keys: [{ type: key.type, fingerprint: key.fingerprint, permitopen: `127.0.0.1:${permitPort}` }],
+                hostKeys: [],
+                demo: true
+            });
+        } catch (e) {
+            return res.status(400).json({ error: e.message });
+        }
+    }
+
+    try {
+        const result = sshAccess.enable({ publicKey, permitPort });
+        auditLog(req, `SSH-доступ приложения: добавлен ключ ${result.fingerprint}`);
+        res.json(result);
+    } catch (e) {
+        res.status(400).json({ error: e.message || 'Не удалось установить ключ' });
+    }
+});
+
+app.post('/api/ssh-access/restrict', checkAuth, requireAdmin, (req, res) => {
+    if (NO_SYSTEM()) {
+        auditLog(req, 'SSH-доступ приложения (демо): панель закрыта на loopback');
+        return res.json({ success: true, alreadyLoopback: false, restarted: false, restartInMs: 0, demo: true });
+    }
+    try {
+        const result = sshAccess.restrict({
+            panelHost: PANEL_HOST,
+            publicPort: PANEL_PUBLIC_PORT
+        });
+        auditLog(req, `Панель переведена на 127.0.0.1:${PANEL_PORT}, внешний порт ${PANEL_PUBLIC_PORT} закрыт`);
+        // Ответ должен уйти до перезапуска процесса.
+        res.json(result);
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+// Вернуть внешний доступ (вызывается через туннель, если он ещё работает).
+app.post('/api/ssh-access/restore', checkAuth, requireAdmin, (req, res) => {
+    if (NO_SYSTEM()) return res.json({ success: true, demo: true });
+    try {
+        const result = sshAccess.restore({ publicPort: PANEL_PUBLIC_PORT });
+        auditLog(req, 'Внешний доступ к панели восстановлен');
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Полностью убрать ключи и пользователя и вернуть внешний доступ.
+app.post('/api/ssh-access/disable', checkAuth, requireAdmin, (req, res) => {
+    if (NO_SYSTEM()) return res.json({ success: true, demo: true });
+    try {
+        const result = sshAccess.disable({ publicPort: PANEL_PUBLIC_PORT });
+        auditLog(req, 'SSH-доступ приложения отключён');
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.get('/api/app/status', checkAuth, async (req, res) => {
     try {
         const refresh = req.query && (req.query.refresh === '1' || req.query.refresh === 'true');
