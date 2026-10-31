@@ -24,8 +24,8 @@ const fs = require('fs');
 const os = require('os');
 const zlib = require('zlib');
 const dns = require('dns');
-const { Readable, Transform } = require('stream');
-const { pipeline } = require('stream/promises');
+const { Readable } = require('stream');
+const { pipeline, finished } = require('stream/promises');
 const updater = require('./lib/updater');
 const proxyUsers = require('./lib/proxy-users');
 const { Panel } = require('./lib/cascade-setup');
@@ -10429,19 +10429,11 @@ app.get('/api/rustdesk/client/:platform', checkAuth, async (req, res) => {
     if (!upstream.ok || !upstream.body) return res.status(502).json({ error: 'GitHub: HTTP ' + upstream.status });
     res.setHeader('Content-Length', asset.size);
     const out = fs.createWriteStream(tmp);
-    const tee = new Transform({
-        transform(chunk, enc, cb) {
-            if (out.write(chunk)) cb(null, chunk);
-            else out.once('drain', () => cb(null, chunk));
-        }
-    });
+    const nodeStream = Readable.fromWeb(upstream.body);
+    nodeStream.pipe(out);
+    nodeStream.pipe(res);
     try {
-        await pipeline(Readable.fromWeb(upstream.body), tee, res);
-        out.end();
-        await new Promise((resolve, reject) => {
-            out.on('finish', resolve);
-            out.on('error', reject);
-        });
+        await Promise.all([finished(out), finished(res)]);
         fs.renameSync(tmp, file);
         rustdeskCleanupCache(version);
     } catch (e) {
