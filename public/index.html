@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.55">
+    <meta name="panel-version" content="3.0.56">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -592,10 +592,22 @@
                     <div class="controls-row" style="flex-wrap:wrap;margin-bottom:12px;">
                         <button class="btn-primary" id="rustdeskInstallBtn" onclick="installRustDesk()">Установить</button>
                         <button class="btn-dark" id="rustdeskUpdateBtn" onclick="updateRustDesk()">Обновить с GitHub</button>
+                        <button class="btn-danger" id="rustdeskUninstallBtn" onclick="uninstallRustDesk()">Удалить полностью</button>
                         <button class="btn-ghost" onclick="loadRustDesk(true)">↻ Обновить статус</button>
                     </div>
                     <div id="rustdeskJob" class="wizard-note" style="display:none;white-space:pre-wrap;"></div>
                     <div id="rustdeskSummary" class="wizard-summary" style="margin-top:10px;"></div>
+                </div>
+
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Чек-лист</h3>
+                            <p>Проверка того, что нужно для рабочего RustDesk.</p>
+                        </div>
+                        <span class="badge badge-muted" id="rustdeskChecklistBadge">—</span>
+                    </div>
+                    <div id="rustdeskChecklist"></div>
                 </div>
 
                 <div class="card" style="margin-bottom:20px;">

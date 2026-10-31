@@ -10139,10 +10139,48 @@ function rustdeskCleanupCache(version) {
     } catch (e) { /* ignore */ }
 }
 
+async function rustdeskHostCheck(host) {
+    if (!host) return { ok: false, detail: 'адрес не задан' };
+    if (IPV4_RE.test(host)) return { ok: true, detail: 'IP ' + host };
+    if (!normalizeDomain(host)) return { ok: false, detail: 'некорректный домен' };
+    try {
+        const addrs = await dns.promises.lookup(host, { all: true, family: 4 });
+        const ip = rustdeskPublicIp();
+        const list = addrs.map(a => a.address).join(', ');
+        const match = !ip || addrs.some(a => a.address === ip);
+        return { ok: match, detail: match ? `${host} → ${list}` : `${host} → ${list}, а IP сервера ${ip}` };
+    } catch (e) {
+        return { ok: false, detail: 'DNS не резолвится: ' + e.message };
+    }
+}
+
+async function rustdeskChecklist(settings, installed, latest, clients, key, ports, host) {
+    const items = [];
+    items.push({ id: 'installed', title: 'Сервер установлен', ok: !!installed, detail: installed || 'не установлен' });
+    const hbbs = rustdeskService('rustdesk-hbbs');
+    const hbbr = rustdeskService('rustdesk-hbbr');
+    items.push({ id: 'hbbs', title: 'Служба hbbs', ok: hbbs.state === 'active', detail: `hbbs: ${hbbs.state}` });
+    items.push({ id: 'hbbr', title: 'Служба hbbr', ok: hbbr.state === 'active', detail: `hbbr: ${hbbr.state}` });
+    const core = ports.filter(p => p.port <= 21117);
+    const missing = core.filter(p => !p.open);
+    items.push({
+        id: 'ports', title: 'Порты открыты', ok: missing.length === 0,
+        detail: missing.length ? 'не открыты: ' + missing.map(p => `${p.port}/${p.proto}`).join(', ') : '21115/tcp, 21116/tcp+udp, 21117/tcp'
+    });
+    items.push({ id: 'key', title: 'Ключ сервера', ok: !!key, detail: key ? 'получен' : 'не сгенерирован' });
+    const hostCheck = await rustdeskHostCheck(host);
+    items.push({ id: 'host', title: 'Адрес сервера', ok: hostCheck.ok, detail: hostCheck.detail });
+    const versionOk = !!(installed && latest && rustdeskCompareVersions(installed, latest) >= 0);
+    items.push({ id: 'version', title: 'Версия актуальна', ok: versionOk, detail: installed ? `${installed} / ${latest || '—'}` : 'сервер не установлен' });
+    items.push({ id: 'clients', title: 'Клиенты доступны', ok: clients.length > 0, detail: clients.length ? `${clients.length} вариантов` : 'не найдены на GitHub' });
+    return items;
+}
+
 async function rustdeskStatusPayload(force) {
     const settings = readRustdeskSettings();
     const installed = rustdeskInstalledVersion();
     const host = rustdeskHost();
+    const domain = domainInfo();
     let latest = '';
     let clientVersion = '';
     let clients = [];
@@ -10163,6 +10201,13 @@ async function rustdeskStatusPayload(force) {
             if (clientVersion) rustdeskCleanupCache(clientVersion);
         } catch (e) { error = (error ? error + '; ' : '') + 'Клиенты: ' + e.message; }
     }
+    const services = {
+        hbbs: rustdeskService('rustdesk-hbbs'),
+        hbbr: rustdeskService('rustdesk-hbbr')
+    };
+    const ports = rustdeskPortsStatus();
+    const publicKey = rustdeskPublicKey();
+    const checklist = await rustdeskChecklist(settings, installed, latest, clients, publicKey, ports, host);
     return {
         installed: !!installed,
         version: installed,
@@ -10172,13 +10217,13 @@ async function rustdeskStatusPayload(force) {
         relay: host ? `${host}:21117` : '',
         hostType: settings.hostType,
         domain: settings.domain,
+        suggestedDomain: domain.domain || '',
+        suggestedSource: domain.source || '',
         settings,
-        publicKey: rustdeskPublicKey(),
-        services: {
-            hbbs: rustdeskService('rustdesk-hbbs'),
-            hbbr: rustdeskService('rustdesk-hbbr')
-        },
-        ports: rustdeskPortsStatus(),
+        publicKey,
+        services,
+        ports,
+        checklist,
         clients,
         clientVersion,
         cache: rustdeskCacheSummary(clientVersion),
@@ -10323,6 +10368,46 @@ async function runRustdeskInstall(job) {
     }
 }
 
+async function runRustdeskUninstall(job) {
+    rustdeskLog(job, 'Останавливаю службы…');
+    await rootRun('systemctl', ['disable', '--now', 'rustdesk-hbbs', 'rustdesk-hbbr'], { timeout: 60000 });
+    const installed = rustdeskInstalledVersion();
+    if (installed) {
+        rustdeskLog(job, 'Удаляю пакеты hbbs/hbbr…');
+        let r = await rootRun('dpkg', ['--purge', 'rustdesk-server-hbbs', 'rustdesk-server-hbbr'], {
+            timeout: 300000, env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' }
+        });
+        if (!r.ok) {
+            rustdeskLog(job, 'dpkg: ' + String(r.stderr || r.stdout || '').slice(-600));
+            r = await rootRun('apt-get', ['purge', '-y', 'rustdesk-server-hbbs', 'rustdesk-server-hbbr'], {
+                timeout: 300000, env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' }
+            });
+            if (!r.ok) throw new Error('Не удалось удалить пакеты: ' + String(r.stderr || r.stdout || '').slice(-600));
+        }
+    }
+    rustdeskLog(job, 'Удаляю данные, ключи и кэш…');
+    await rootRun('rm', ['-rf',
+        '/etc/systemd/system/rustdesk-hbbs.service.d',
+        '/etc/systemd/system/rustdesk-hbbr.service.d',
+        RUSTDESK_DATA_DIR,
+        '/var/log/rustdesk-server',
+        RUSTDESK_CACHE_DIR
+    ], { timeout: 60000 });
+    try { fs.unlinkSync(RUSTDESK_SETTINGS_FILE); } catch (e) { /* файла может не быть */ }
+    await rootRun('systemctl', ['daemon-reload'], { timeout: 30000 });
+    await rootRun('systemctl', ['reset-failed'], { timeout: 30000 });
+    rustdeskLog(job, 'Закрываю порты…');
+    for (const p of RUSTDESK_PORTS) {
+        await rootRun('ufw', ['delete', 'allow', `${p.port}/${p.proto}`], { timeout: 15000 });
+    }
+    rustdeskLog(job, 'RustDesk полностью удалён.');
+}
+
+async function runRustdeskAction(job) {
+    if (job.action === 'uninstall') return runRustdeskUninstall(job);
+    return runRustdeskInstall(job);
+}
+
 function startRustdeskJob(action, req) {
     const job = {
         action, running: true, ok: false, error: '', log: [],
@@ -10333,10 +10418,10 @@ function startRustdeskJob(action, req) {
     const auditReq = { headers: req.headers, socket: req.socket, session: req.session };
     (async () => {
         try {
-            await runRustdeskInstall(job);
+            await runRustdeskAction(job);
             job.ok = true;
         } catch (e) {
-            job.error = e.message || 'Ошибка установки RustDesk';
+            job.error = e.message || 'Ошибка операции RustDesk';
         } finally {
             job.running = false;
             job.finishedAt = Date.now();
@@ -10376,10 +10461,21 @@ app.post('/api/rustdesk/update', checkAuth, requireAdmin, (req, res) => {
     res.status(202).json({ success: true, started: true, job: rustdeskJobPublic(job) });
 });
 
+app.post('/api/rustdesk/uninstall', checkAuth, requireAdmin, (req, res) => {
+    if (NO_SYSTEM()) return res.json({ success: true, demo: true, job: null });
+    if (rustdeskJob && rustdeskJob.running) {
+        return res.status(202).json({ success: true, started: false, job: rustdeskJobPublic(rustdeskJob) });
+    }
+    const job = startRustdeskJob('uninstall', req);
+    res.status(202).json({ success: true, started: true, job: rustdeskJobPublic(job) });
+});
+
 app.post('/api/rustdesk/settings', checkAuth, requireAdmin, async (req, res) => {
     const body = req.body || {};
     const hostType = body.hostType === 'domain' ? 'domain' : 'ip';
-    const domain = normalizeDomain(body.domain || '');
+    // Если домен не передали, подтягиваем его из настроек AWG/SSL — так же,
+    // как это делает создание клиентов AmneziaWG.
+    const domain = normalizeDomain(body.domain || '') || normalizeDomain(domainInfo().domain);
     if (hostType === 'domain' && !domain) {
         return res.status(400).json({ error: 'Укажите корректный домен для RustDesk' });
     }

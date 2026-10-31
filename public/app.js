@@ -5905,6 +5905,23 @@ function renderRustDesk(d) {
             + (d.error ? `<div class="wizard-note" style="margin-top:10px;color:#ffb3ad;">${esc(d.error)}</div>` : '');
     }
 
+    const checklistEl = document.getElementById('rustdeskChecklist');
+    if (checklistEl) {
+        const items = d.checklist || [];
+        const okCount = items.filter(i => i.ok).length;
+        checklistEl.innerHTML = items.map(i => `
+            <div class="checklist-item">
+                <span class="checklist-ico ${i.ok ? 'checklist-ok' : 'checklist-err'}">${i.ok ? '✓' : '!'}</span>
+                <div><b class="${i.ok ? 'checklist-ok' : 'checklist-err'}">${esc(i.title)}</b>
+                <div class="checklist-desc">${esc(i.detail || '')}</div></div>
+            </div>`).join('');
+        const badge = document.getElementById('rustdeskChecklistBadge');
+        if (badge) {
+            badge.className = 'badge ' + (items.length && okCount === items.length ? 'badge-good' : 'badge-warn');
+            badge.innerText = `${okCount}/${items.length}`;
+        }
+    }
+
     const conn = document.getElementById('rustdeskConnection');
     if (conn) {
         const key = d.publicKey || 'Ключ ещё не сгенерирован — запустите сервер.';
@@ -5920,7 +5937,7 @@ function renderRustDesk(d) {
     if (hostType) hostType.value = d.hostType || 'ip';
     const domain = document.getElementById('rustdeskDomain');
     if (domain) {
-        domain.value = d.domain || '';
+        domain.value = d.domain || d.suggestedDomain || '';
         domain.style.display = (d.hostType === 'domain') ? '' : 'none';
     }
     const openPorts = document.getElementById('rustdeskOpenPorts');
@@ -5928,7 +5945,11 @@ function renderRustDesk(d) {
     const webClient = document.getElementById('rustdeskWebClient');
     if (webClient) webClient.checked = !!(d.settings && d.settings.webClient);
     const hint = document.getElementById('rustdeskSettingsHint');
-    if (hint) hint.innerText = d.host ? 'Сейчас клиенты используют: ' + d.host + ' · relay ' + d.relay : 'Сначала установите сервер.';
+    if (hint) {
+        const src = d.suggestedSource === 'awg' ? 'AmneziaWG' : d.suggestedSource === 'panel' ? 'панель' : '';
+        hint.innerText = (d.host ? 'Сейчас клиенты используют: ' + d.host + ' · relay ' + d.relay : 'Сначала установите сервер.')
+            + (d.suggestedDomain && d.hostType !== 'domain' ? ` Домен из настроек: ${d.suggestedDomain}${src ? ' (' + src + ')' : ''}.` : '');
+    }
 
     const clientBadge = document.getElementById('rustdeskClientVersion');
     if (clientBadge) clientBadge.innerText = d.clientVersion || '—';
@@ -5946,10 +5967,27 @@ function renderRustDesk(d) {
     }
 }
 
-function rustdeskHostTypeChanged() {
+async function rustdeskHostTypeChanged() {
     const type = (document.getElementById('rustdeskHostType') || {}).value;
     const domain = document.getElementById('rustdeskDomain');
-    if (domain) domain.style.display = type === 'domain' ? '' : 'none';
+    const hint = document.getElementById('rustdeskSettingsHint');
+    if (!domain) return;
+    domain.style.display = type === 'domain' ? '' : 'none';
+    if (type !== 'domain') return;
+    if (!domain.value.trim()) {
+        if (hint) hint.innerText = 'Подтягиваю домен из настроек…';
+        try {
+            const d = await apiJson('/api/clients/domain');
+            if (d && d.domain) {
+                domain.value = d.domain;
+                if (hint) hint.innerText = 'Домен из настроек: ' + d.domain + (d.source === 'awg' ? ' (AmneziaWG)' : d.source === 'panel' ? ' (панель)' : '');
+            } else if (hint) {
+                hint.innerText = 'Домен не найден в настройках — введите вручную.';
+            }
+        } catch (e) {
+            if (hint) hint.innerText = 'Не удалось получить домен — введите вручную.';
+        }
+    }
 }
 
 async function saveRustDeskSettings() {
@@ -5987,7 +6025,7 @@ async function openRustDeskPorts() {
 }
 
 function setRustDeskBusy(busy) {
-    for (const id of ['rustdeskInstallBtn', 'rustdeskUpdateBtn']) {
+    for (const id of ['rustdeskInstallBtn', 'rustdeskUpdateBtn', 'rustdeskUninstallBtn']) {
         const b = document.getElementById(id);
         if (b) b.disabled = !!busy;
     }
@@ -6002,12 +6040,19 @@ function showRustDeskJob(job) {
 }
 
 async function runRustDeskJob(action) {
-    const label = action === 'install' ? 'Установить RustDesk Server?' : 'Обновить RustDesk Server с GitHub?';
-    if (!confirm(label + '\n\nБудет создан бэкап бинарников. Ключи и база клиентов сохраняются.')) return;
+    let message;
+    if (action === 'uninstall') {
+        message = 'Полностью удалить RustDesk Server?\n\nБудут удалены пакеты hbbs/hbbr, ключи, база, кэш клиентов, настройки модуля и правила UFW для 21115–21119. Это необратимо.';
+    } else if (action === 'install') {
+        message = 'Установить RustDesk Server?\n\nБудет скачан официальный .deb с GitHub и открыты порты.';
+    } else {
+        message = 'Обновить RustDesk Server с GitHub?\n\nКлючи и база клиентов сохраняются, перед обновлением делается бэкап бинарников.';
+    }
+    if (!confirm(message)) return;
     setRustDeskBusy(true);
     try {
         const r = await apiJson('/api/rustdesk/' + action, { method: 'POST' });
-        if (r.demo) { toast('Демо-режим', 'info', 'Установка не выполняется.'); setRustDeskBusy(false); return; }
+        if (r.demo) { toast('Демо-режим', 'info', 'Операция не выполняется.'); setRustDeskBusy(false); return; }
         showRustDeskJob(r.job);
         pollRustDeskJob();
     } catch (e) {
@@ -6018,6 +6063,7 @@ async function runRustDeskJob(action) {
 
 function installRustDesk() { return runRustDeskJob('install'); }
 function updateRustDesk() { return runRustDeskJob('update'); }
+function uninstallRustDesk() { return runRustDeskJob('uninstall'); }
 
 function pollRustDeskJob() {
     if (rustdeskJobPoll) clearInterval(rustdeskJobPoll);
@@ -6032,8 +6078,12 @@ function pollRustDeskJob() {
             clearInterval(rustdeskJobPoll);
             rustdeskJobPoll = null;
             setRustDeskBusy(false);
-            if (job.ok) toast('RustDesk готов', 'success', job.error || (job.toVersion ? 'версия ' + job.toVersion : ''));
-            else toast('Ошибка RustDesk', 'error', job.error || 'Не удалось выполнить операцию');
+            if (job.ok) {
+                const title = job.action === 'uninstall' ? 'RustDesk удалён' : 'RustDesk готов';
+                toast(title, 'success', job.error || (job.toVersion ? 'версия ' + job.toVersion : ''));
+            } else {
+                toast('Ошибка RustDesk', 'error', job.error || 'Не удалось выполнить операцию');
+            }
             await loadRustDesk(true);
         } catch (e) { /* продолжаем опрос */ }
     };
