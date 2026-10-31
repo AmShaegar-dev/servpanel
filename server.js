@@ -25,7 +25,7 @@ const os = require('os');
 const zlib = require('zlib');
 const dns = require('dns');
 const { Readable } = require('stream');
-const { pipeline, finished } = require('stream/promises');
+const { pipeline } = require('stream/promises');
 const updater = require('./lib/updater');
 const proxyUsers = require('./lib/proxy-users');
 const { Panel } = require('./lib/cascade-setup');
@@ -10109,6 +10109,26 @@ function rustdeskCacheSummary(version) {
     return { version: version || '', dir, files, bytes };
 }
 
+function rustdeskCacheTree() {
+    const out = [];
+    if (!fs.existsSync(RUSTDESK_CACHE_DIR)) return out;
+    try {
+        for (const entry of fs.readdirSync(RUSTDESK_CACHE_DIR, { withFileTypes: true })) {
+            if (!entry.isDirectory()) { out.push({ name: entry.name, type: 'file' }); continue; }
+            const dir = path.join(RUSTDESK_CACHE_DIR, entry.name);
+            const files = [];
+            try {
+                for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+                    if (!f.isFile()) continue;
+                    try { files.push({ name: f.name, size: fs.statSync(path.join(dir, f.name)).size }); } catch (e) { /* ignore */ }
+                }
+            } catch (e) { /* ignore */ }
+            out.push({ name: entry.name, type: 'dir', files });
+        }
+    } catch (e) { /* ignore */ }
+    return out;
+}
+
 function rustdeskCleanupCache(version) {
     if (!version || !fs.existsSync(RUSTDESK_CACHE_DIR)) return;
     try {
@@ -10162,6 +10182,7 @@ async function rustdeskStatusPayload(force) {
         clients,
         clientVersion,
         cache: rustdeskCacheSummary(clientVersion),
+        cacheTree: rustdeskCacheTree(),
         cacheDir: RUSTDESK_CACHE_DIR,
         source: 'https://github.com/rustdesk/rustdesk',
         error
@@ -10409,39 +10430,41 @@ app.get('/api/rustdesk/client/:platform', checkAuth, async (req, res) => {
     if (!asset) return res.status(404).json({ error: 'В последнем релизе нет ' + def.label });
     const dir = path.join(RUSTDESK_CACHE_DIR, version);
     const file = path.join(dir, asset.name);
+    const cached = fs.existsSync(file) && fs.statSync(file).size === asset.size;
+    if (!cached) {
+        fs.mkdirSync(dir, { recursive: true });
+        const tmp = file + '.part';
+        let upstream;
+        try {
+            upstream = await fetchWithTimeout(asset.browser_download_url, {
+                headers: { 'User-Agent': 'servpanel-rustdesk', Accept: 'application/octet-stream' },
+                redirect: 'follow'
+            }, 300000);
+        } catch (e) {
+            auditLog(req, `RustDesk: не удалось скачать ${asset.name}: ${e.message}`);
+            return res.status(502).json({ error: 'Не удалось скачать с GitHub: ' + e.message });
+        }
+        if (!upstream.ok || !upstream.body) {
+            auditLog(req, `RustDesk: GitHub HTTP ${upstream.status} для ${asset.name}`);
+            return res.status(502).json({ error: 'GitHub: HTTP ' + upstream.status });
+        }
+        try {
+            await pipeline(Readable.fromWeb(upstream.body), fs.createWriteStream(tmp));
+            const size = fs.statSync(tmp).size;
+            if (size !== asset.size) throw new Error(`размер ${size} вместо ${asset.size}`);
+            fs.renameSync(tmp, file);
+            rustdeskCleanupCache(version);
+            auditLog(req, `RustDesk: ${asset.name} сохранён в кэш (${size} байт)`);
+        } catch (e) {
+            try { fs.unlinkSync(tmp); } catch (err) { /* ignore */ }
+            auditLog(req, `RustDesk: ошибка кэша ${asset.name}: ${e.message}`);
+            return res.status(502).json({ error: 'Не удалось сохранить установщик RustDesk: ' + e.message });
+        }
+    }
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
-    if (fs.existsSync(file) && fs.statSync(file).size === asset.size) {
-        res.setHeader('Content-Length', asset.size);
-        return fs.createReadStream(file).pipe(res);
-    }
-    fs.mkdirSync(dir, { recursive: true });
-    const tmp = file + '.part';
-    let upstream;
-    try {
-        upstream = await fetchWithTimeout(asset.browser_download_url, {
-            headers: { 'User-Agent': 'servpanel-rustdesk', Accept: 'application/octet-stream' },
-            redirect: 'follow'
-        }, 300000);
-    } catch (e) {
-        return res.status(502).json({ error: 'Не удалось скачать с GitHub: ' + e.message });
-    }
-    if (!upstream.ok || !upstream.body) return res.status(502).json({ error: 'GitHub: HTTP ' + upstream.status });
     res.setHeader('Content-Length', asset.size);
-    const out = fs.createWriteStream(tmp);
-    const nodeStream = Readable.fromWeb(upstream.body);
-    nodeStream.pipe(out);
-    nodeStream.pipe(res);
-    try {
-        await Promise.all([finished(out), finished(res)]);
-        fs.renameSync(tmp, file);
-        rustdeskCleanupCache(version);
-    } catch (e) {
-        try { out.destroy(); } catch (err) { /* ignore */ }
-        try { fs.unlinkSync(tmp); } catch (err) { /* ignore */ }
-        if (!res.headersSent) res.status(502).json({ error: 'Ошибка скачивания RustDesk' });
-        else res.end();
-    }
+    fs.createReadStream(file).pipe(res);
 });
 
 app.get('/api/rustdesk/instructions', checkAuth, (req, res) => {
