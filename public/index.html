@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.56">
+    <meta name="panel-version" content="3.0.57">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -621,9 +621,20 @@
                     <div id="rustdeskConnection" class="wizard-summary"></div>
                     <div class="controls-row" style="margin-top:12px;flex-wrap:wrap;">
                         <button class="btn-primary" onclick="copyRustDeskConnection()">Скопировать данные</button>
-                        <button class="btn-dark" onclick="window.open('/api/rustdesk/instructions','_blank')">Инструкция</button>
-                        <button class="btn-dark" onclick="window.open('/api/rustdesk/instructions?format=txt','_blank')">Скачать .txt</button>
+                        <a class="btn-dark" href="/api/rustdesk/instructions" target="_blank" rel="noopener" style="text-decoration:none; padding:8px 14px; display:inline-block;">Инструкция</a>
+                        <a class="btn-dark" href="/api/rustdesk/instructions?format=txt" target="_blank" rel="noopener" style="text-decoration:none; padding:8px 14px; display:inline-block;">Скачать .txt</a>
                     </div>
+                </div>
+
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Как подключиться</h3>
+                            <p>Краткая инструкция. Полная версия открывается кнопкой «Инструкция».</p>
+                        </div>
+                        <span class="badge badge-muted">1-2-3</span>
+                    </div>
+                    <div id="rustdeskHowto" class="wizard-summary"></div>
                 </div>
 
                 <div class="card" style="margin-bottom:20px;">

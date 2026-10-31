@@ -5933,6 +5933,19 @@ function renderRustDesk(d) {
             <textarea readonly rows="3" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:11px;background:#05080e;color:#b9cdf5;border:1px solid var(--border);border-radius:8px;padding:8px;">${esc(key)}</textarea></div>`;
     }
 
+    const howto = document.getElementById('rustdeskHowto');
+    if (howto) {
+        const rows = [
+            ['1. Скачайте клиент', 'Windows, Android или Linux — карточка «Клиенты RustDesk» ниже'],
+            ['2. Установите и откройте', 'RustDesk → Настройки → Сеть → ID/Relay Server'],
+            ['3. ID-сервер', d.host || '—'],
+            ['4. Relay', d.relay || '—'],
+            ['5. Ключ', d.publicKey || '—'],
+            ['6. Подключение', 'Введите ID устройства и нажмите «Подключиться»']
+        ];
+        howto.innerHTML = rows.map(([k, v]) => `<div class="wizard-summary-row"><span>${esc(k)}</span><b><code>${esc(v)}</code></b></div>`).join('');
+    }
+
     const hostType = document.getElementById('rustdeskHostType');
     if (hostType) hostType.value = d.hostType || 'ip';
     const domain = document.getElementById('rustdeskDomain');
