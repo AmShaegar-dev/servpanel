@@ -315,6 +315,9 @@ ufw deny 3443/tcp          # снаружи порт закрыт
 * Загружать APK в панель больше не нужно: файл не хранится на сервере и не
   устаревает вместе с панелью. Раньше загруженный APK из `DATA_DIR/.app`
   остаётся доступен только если ссылка отключена (`PANEL_APK_URL` пустой).
+* В архив и релиз панели вложена актуальная сборка приложения — в 3.0.58
+  это **Servpanel Mobile 1.4.6** (`app/servpanel.apk`, `app/version.txt`).
+  Клиент оттуда умеет RustDesk, ZIP конфигов и фоновое продление SSL.
 * Если панель не может достучаться до GitHub, показывается версия из
   `app/version.txt` и предупреждение. Скачивание при этом всё равно работает:
   браузер идёт на GitHub напрямую.
@@ -327,7 +330,7 @@ ufw deny 3443/tcp          # снаружи порт закрыт
 | Переменная | Значение | Что делает |
 | --- | --- | --- |
 | `PANEL_APK_URL` | ссылка на последний APK | Внешняя ссылка для скачивания. Пустая — отдавать локальный файл. |
-| `PANEL_APK_VERSION` | `1.4.5` | Версия APK для отображения (перекрывает GitHub). |
+| `PANEL_APK_VERSION` | `1.4.6` | Версия APK для отображения (перекрывает GitHub). |
 | `PANEL_APK_REPO` | `AmShaegar-dev/servpanel-android` | Репозиторий релизов приложения. |
 | `PANEL_GITHUB_REPO` | `owner/repo` | Репозиторий панели для обновлений. |
 
@@ -921,15 +924,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.57/servpanel-3.0.57.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.57/servpanel-3.0.57.tar.gz.sha256
-sha256sum -c servpanel-3.0.57.tar.gz.sha256
-tar -xzf servpanel-3.0.57.tar.gz
-bash /root/servpanel-3.0.57/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.58/servpanel-3.0.58.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.58/servpanel-3.0.58.tar.gz.sha256
+sha256sum -c servpanel-3.0.58.tar.gz.sha256
+tar -xzf servpanel-3.0.58.tar.gz
+bash /root/servpanel-3.0.58/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.0.57`. Если `curl` не установлен:
+Должно вывести `3.0.58`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:
