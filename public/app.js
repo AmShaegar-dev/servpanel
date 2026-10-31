@@ -3643,6 +3643,19 @@ function closeWizard() {
     wizardState = { scenario: null, step: 0, data: {}, preview: null, result: null, busy: false };
 }
 
+// Действия из окна результата мастера: сначала закрываем мастер, иначе
+// модальное окно ключа и вкладка «Клиенты» остаются под ним и кажется,
+// что кнопка не сработала.
+function wizardShowKey(name) {
+    closeWizard();
+    showClientKey(name);
+}
+
+function wizardOpenClients() {
+    closeWizard();
+    openClientsTab();
+}
+
 function chooseScenario(key) {
     if (key === 'health') { closeWizard(); runHealthCheck(); return; }
     if (!WIZARD_META[key]) return;
@@ -4462,20 +4475,27 @@ async function executeClientWizard() {
             html: wizardSuccess('Клиент создан', `«${esc(created[0])}» готов. Отсканируйте QR или вставьте ссылку в AmneziaVPN.`,
                 resultButton('Скопировать vpn://', 'copyKeyUri()', true) +
                 resultButton('Скачать .conf', `window.location.href='/api/download/${encodeURIComponent(created[0])}'`) +
-                resultButton('Инструкция', `window.open('/api/clients/${encodeURIComponent(created[0])}/export','_blank')`) +
-                resultButton('Ещё клиент', "openWizard('client')")
+                resultButton('Открыть инструкцию', `window.open('/api/clients/${encodeURIComponent(created[0])}/export','_blank')`) +
+                resultButton('Создать ещё клиента', "openWizard('client')")
             ).replace('</h3>', `</h3>${qr}`).replace('<div class="result-actions">',
                 `<textarea readonly rows="3" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:11px;background:#05080e;color:#b9cdf5;border:1px solid var(--border);border-radius:8px;padding:8px;margin:8px 0 12px;">${esc(key.uri || 'Ключ не получен')}</textarea><div class="result-actions">`),
             toast: 'Клиент создан',
             toastMessage: created[0]
         };
     }
-    const list = created.map((name, i) => `<div class="wizard-summary-row"><span>${esc(name)}</span><b>${keys[i] && keys[i].uri ? '<span class="val-rx">ключ готов</span>' : '<span class="val-tx">ключ не получен</span>'}</b></div>`).join('');
+    const list = created.map((name, i) => {
+        const ready = keys[i] && keys[i].uri;
+        return `<div class="wizard-summary-row">
+            <span>${esc(name)}</span>
+            <b>${ready ? '<span class="val-rx">ключ готов</span>' : '<span class="val-tx">ключ не получен</span>'}</b>
+            <button class="btn btn-ghost" style="padding:3px 9px;font-size:11px;" onclick="wizardShowKey('${esc(name)}')">Показать ключ</button>
+        </div>`;
+    }).join('');
     return {
-        html: wizardSuccess('Клиенты созданы', `Создано ${created.length} клиентов. Покажите ключ нужному устройству.`,
-            resultButton('Первый ключ', `showClientKey('${esc(created[0])}')`, true) +
-            resultButton('Клиенты', 'openClientsTab()') +
-            resultButton('Ещё', "openWizard('client')")
+        html: wizardSuccess('Клиенты созданы', `Создано ${created.length} клиентов. Нажмите «Показать ключ» у нужного клиента — окно закроется и откроется его vpn:// и QR.`,
+            resultButton('Показать ключ первого клиента', `wizardShowKey('${esc(created[0])}')`, true) +
+            resultButton('Открыть список клиентов', 'wizardOpenClients()') +
+            resultButton('Создать ещё клиентов', "openWizard('client')")
         ).replace('</h3>', `</h3><div class="wizard-summary" style="width:100%;margin:10px 0;">${list}</div>`),
         toast: 'Клиенты созданы',
         toastMessage: `${created.length} шт.`
@@ -5103,20 +5123,45 @@ async function createSslSite() {
     }
 }
 
-async function renewSslCert(name) {
-    if (!name || !confirm(`Продлить сертификат ${name}?`)) return;
+async function renewSslCert(name, force) {
+    if (!name) return;
+    const cert = ((sslState && sslState.certificates) || []).find(c => c.name === name);
+    const daysLeft = cert && cert.daysLeft != null ? cert.daysLeft : null;
+    if (force === undefined) {
+        force = false;
+        if (daysLeft != null && daysLeft > 30) {
+            if (!confirm(
+                `Сертификату ${name} осталось ${daysLeft} дн. — certbot считает продление преждевременным.\n\n` +
+                `Продлить принудительно? Будет выпущен новый сертификат. ` +
+                `Let's Encrypt ограничивает повторный выпуск: не более 5 одинаковых сертификатов в неделю.`
+            )) return;
+            force = true;
+        } else if (!confirm(`Продлить сертификат ${name}?`)) {
+            return;
+        }
+    }
+    const btn = document.getElementById('sslRenewBtn');
+    sslBusy(btn, true, 'Продление…');
     toast('Обновляю сертификат', 'info', name);
     try {
         const d = await apiJson('/api/ssl/renew', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name })
+            body: JSON.stringify({ name, force: !!force })
         });
         const days = d.certificate && d.certificate.daysLeft;
-        toast('Сертификат обновлён', 'success', days != null ? `осталось ${days} дн.` : name);
+        if (d.notDue) {
+            toast('Продление не требуется', 'info', days != null
+                ? `Сертификат действует ещё ${days} дн. Certbot пропустил продление.`
+                : 'Certbot пропустил продление: срок ещё не подошёл.');
+        } else {
+            toast('Сертификат обновлён', 'success', days != null ? `осталось ${days} дн.` : name);
+        }
         await loadSslPanel();
     } catch (e) {
         toast('Ошибка обновления', 'error', e.message);
+    } finally {
+        sslBusy(btn, false);
     }
 }
 

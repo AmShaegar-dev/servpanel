@@ -30,7 +30,6 @@ const { Panel } = require('./lib/cascade-setup');
 const sshBuild = require('./lib/cascade-ssh-build');
 const awgArchitect = require('./lib/awg-architect');
 const sshRunner = require('./lib/cascade-ssh');
-const sshAccess = require('./lib/ssh-access');
 const { ensureAwg } = require('./lib/cascade-remote');
 const { createProxyBot } = require('./lib/proxy-bot');
 
@@ -5045,6 +5044,7 @@ app.post('/api/create', checkAuth, (req, res) => {
             if (!r || !r.conf) return res.status(500).json({ error: 'Скрипт не вернул путь к конфигу' });
             if (epType === 'domain') replaceEndpointWithDomain(r.conf, epDomain);
             else if (!epType) replaceEndpointWithDomain(r.conf);
+            syncClient31Params(name);
             auditLog(req, `Создан клиент ${name}`);
             res.download(r.conf, `${serverFileBase()}_${name}.conf`);
         } catch (e) { res.status(500).json({ error: 'Ошибка обработки' }); }
@@ -5074,6 +5074,7 @@ app.post('/api/create-bulk', checkAuth, (req, res) => {
             if (response.ok && r && r.conf) {
                 if (epType === 'domain') replaceEndpointWithDomain(r.conf, epDomain);
                 else if (!epType) replaceEndpointWithDomain(r.conf);
+                syncClient31Params(clientName);
                 generated.push({ name: clientName, content: sh('sudo', ['cat', r.conf]) });
             }
         } catch (e) { /* пропускаем неудачные */ }
@@ -5298,6 +5299,7 @@ app.get('/api/download/:name', checkAuth, (req, res) => {
     }
     const filePath = path.join(AWG_DIR, `${name}.conf`);
     if (fs.existsSync(filePath)) {
+        try { syncClient31Params(name); } catch (e) { /* ignore */ }
         let content = fs.readFileSync(filePath, 'utf8');
         const domain = domainInfo().domain;
         if (domain) content = rewriteConfEndpoint(content, domain);
@@ -7371,24 +7373,29 @@ app.post('/api/ssl/site', checkAuth, requireAdmin, async (req, res) => {
 // (/etc/letsencrypt/renewal/<name>.conf), и не переписывает конфиг Nginx.
 app.post('/api/ssl/renew', checkAuth, requireAdmin, async (req, res) => {
     const name = String((req.body || {}).name || '').trim();
+    const force = !!(req.body || {}).force;
     const safeName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name) && !name.includes('..');
     if (!normalizeDomain(name) && !safeName) {
         return sslError(res, 400, 'Некорректное имя сертификата.');
     }
     if (NO_SYSTEM()) {
         auditLog(req, `[DEMO] Обновление сертификата ${name}`);
-        return res.json({ success: true, demo: true, name });
+        return res.json({ success: true, demo: true, name, notDue: false, forced: force });
     }
     if (!findCommand('certbot')) return sslError(res, 409, 'Certbot не установлен.', { needDeps: true });
     try {
-        const run = await rootRun(findCommand('certbot') || 'certbot', ['renew', '--cert-name', name, '--non-interactive'], { timeout: 300000 });
+        const args = ['renew', '--cert-name', name, '--non-interactive'];
+        if (force) args.push('--force-renewal');
+        const run = await rootRun(findCommand('certbot') || 'certbot', args, { timeout: 300000 });
         if (!run.ok) {
             return sslError(res, 502, 'Certbot не смог обновить сертификат.', { output: sslTail(run.stderr || run.stdout) });
         }
+        const output = String(run.stdout || '');
+        const notDue = /not yet due for renewal|No renewals were attempted/i.test(output);
         await rootRun('systemctl', ['reload', 'nginx'], { timeout: 30000 });
-        auditLog(req, `Обновлён сертификат ${name}`);
+        auditLog(req, `${notDue ? 'Проверен' : 'Обновлён'} сертификат ${name}${force ? ' (force)' : ''}`);
         const cert = currentCertificates().find(c => c.name === name) || null;
-        res.json({ success: true, name, output: sslTail(run.stdout, 1200), certificate: cert });
+        res.json({ success: true, name, notDue, forced: force, output: sslTail(output, 1200), certificate: cert });
     } catch (e) {
         sslError(res, 500, 'Ошибка обновления: ' + sslTail(e.message, 300));
     }
@@ -9646,112 +9653,6 @@ echo '{"ok":true,"name":"'"$NEW"'"}'
 // ---------------------------------------------------------------------------
 // API мобильного приложения: статус, APK и метрики
 // ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// SSH-доступ для приложения: панель сама выдаёт ключ, без входа на сервер
-// ---------------------------------------------------------------------------
-app.get('/api/ssh-access/status', checkAuth, requireAdmin, (req, res) => {
-    if (NO_SYSTEM()) {
-        return res.json({
-            user: sshAccess.USER,
-            userExists: false,
-            keys: [],
-            keyCount: 0,
-            panelHost: PANEL_HOST,
-            panelPort: PANEL_PORT,
-            publicPort: PANEL_PUBLIC_PORT,
-            loopbackOnly: PANEL_HOST === '127.0.0.1',
-            forwarding: 'yes',
-            sshPort: 22,
-            hostKeys: [],
-            ufwOpen: null,
-            demo: true
-        });
-    }
-    try {
-        res.json(sshAccess.status({
-            panelHost: PANEL_HOST,
-            panelPort: PANEL_PORT,
-            publicPort: PANEL_PUBLIC_PORT
-        }));
-    } catch (e) {
-        res.status(500).json({ error: e.message || 'Не удалось прочитать SSH-настройки' });
-    }
-});
-
-app.post('/api/ssh-access/enable', checkAuth, requireAdmin, (req, res) => {
-    const publicKey = String((req.body && req.body.publicKey) || '');
-    const permitPort = Number((req.body && req.body.port) || PANEL_PORT) || PANEL_PORT;
-
-    if (NO_SYSTEM()) {
-        // Демо/тесты: ключ не ставим, но отвечаем так, будто всё получилось.
-        try {
-            const key = sshAccess.parsePublicKey(publicKey);
-            auditLog(req, `SSH-доступ приложения (демо): ключ ${key.fingerprint}`);
-            return res.json({
-                success: true,
-                user: sshAccess.USER,
-                port: permitPort,
-                fingerprint: key.fingerprint,
-                keys: [{ type: key.type, fingerprint: key.fingerprint, permitopen: `127.0.0.1:${permitPort}` }],
-                hostKeys: [],
-                demo: true
-            });
-        } catch (e) {
-            return res.status(400).json({ error: e.message });
-        }
-    }
-
-    try {
-        const result = sshAccess.enable({ publicKey, permitPort });
-        auditLog(req, `SSH-доступ приложения: добавлен ключ ${result.fingerprint}`);
-        res.json(result);
-    } catch (e) {
-        res.status(400).json({ error: e.message || 'Не удалось установить ключ' });
-    }
-});
-
-app.post('/api/ssh-access/restrict', checkAuth, requireAdmin, (req, res) => {
-    if (NO_SYSTEM()) {
-        auditLog(req, 'SSH-доступ приложения (демо): панель закрыта на loopback');
-        return res.json({ success: true, alreadyLoopback: false, restarted: false, restartInMs: 0, demo: true });
-    }
-    try {
-        const result = sshAccess.restrict({
-            panelHost: PANEL_HOST,
-            publicPort: PANEL_PUBLIC_PORT
-        });
-        auditLog(req, `Панель переведена на 127.0.0.1:${PANEL_PORT}, внешний порт ${PANEL_PUBLIC_PORT} закрыт`);
-        // Ответ должен уйти до перезапуска процесса.
-        res.json(result);
-    } catch (e) {
-        res.status(400).json({ error: e.message });
-    }
-});
-
-// Вернуть внешний доступ (вызывается через туннель, если он ещё работает).
-app.post('/api/ssh-access/restore', checkAuth, requireAdmin, (req, res) => {
-    if (NO_SYSTEM()) return res.json({ success: true, demo: true });
-    try {
-        const result = sshAccess.restore({ publicPort: PANEL_PUBLIC_PORT });
-        auditLog(req, 'Внешний доступ к панели восстановлен');
-        res.json(result);
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
-// Полностью убрать ключи и пользователя и вернуть внешний доступ.
-app.post('/api/ssh-access/disable', checkAuth, requireAdmin, (req, res) => {
-    if (NO_SYSTEM()) return res.json({ success: true, demo: true });
-    try {
-        const result = sshAccess.disable({ publicPort: PANEL_PUBLIC_PORT });
-        auditLog(req, 'SSH-доступ приложения отключён');
-        res.json(result);
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
 app.get('/api/app/status', checkAuth, async (req, res) => {
     try {
         const refresh = req.query && (req.query.refresh === '1' || req.query.refresh === 'true');
