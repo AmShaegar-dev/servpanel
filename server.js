@@ -9962,8 +9962,8 @@ const RUSTDESK_CLIENT_PLATFORMS = [
     { id: 'android-armv7', group: 'Android', label: 'Android ARMv7 (.apk)', re: /^rustdesk-[\d.]+-armv7-signed\.apk$/ },
     { id: 'linux-x64-deb', group: 'Linux', label: 'Linux x64 (.deb)', re: /^rustdesk-[\d.]+-x86_64\.deb$/ },
     { id: 'linux-arm64-deb', group: 'Linux', label: 'Linux ARM64 (.deb)', re: /^rustdesk-[\d.]+-aarch64\.deb$/ },
-    { id: 'linux-x64-rpm', group: 'Linux', label: 'Linux x64 (.rpm)', re: /^rustdesk-[\d.]+-x86_64\.rpm$/ },
-    { id: 'linux-arm64-rpm', group: 'Linux', label: 'Linux ARM64 (.rpm)', re: /^rustdesk-[\d.]+-aarch64\.rpm$/ },
+    { id: 'linux-x64-rpm', group: 'Linux', label: 'Linux x64 (.rpm)', re: /^rustdesk-[\d.]+(?:-\d+)?\.x86_64\.rpm$/ },
+    { id: 'linux-arm64-rpm', group: 'Linux', label: 'Linux ARM64 (.rpm)', re: /^rustdesk-[\d.]+(?:-\d+)?\.aarch64\.rpm$/ },
     { id: 'linux-x64-appimage', group: 'Linux', label: 'Linux x64 (AppImage)', re: /^rustdesk-[\d.]+-x86_64\.AppImage$/ },
     { id: 'linux-arm64-appimage', group: 'Linux', label: 'Linux ARM64 (AppImage)', re: /^rustdesk-[\d.]+-aarch64\.AppImage$/ }
 ];
