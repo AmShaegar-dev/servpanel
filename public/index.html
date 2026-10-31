@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.50">
+    <meta name="panel-version" content="3.0.51">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -336,6 +336,20 @@
                         <button class="btn-primary" onclick="createConfig()">Сгенерировать конфигурации</button>
                     </div>
                     <div id="clientEndpointHint" class="sub-text" style="margin-top:8px;">В конфиге будет IP сервера.</div>
+                </div>
+
+                <div id="bulkResultCard" class="card" style="display:none; margin-bottom: 20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Конфиги созданы</h3>
+                            <p id="bulkResultText">Скачайте все конфиги одним архивом.</p>
+                        </div>
+                        <span class="badge badge-good">ZIP</span>
+                    </div>
+                    <div class="controls-row" style="margin-bottom:0;">
+                        <button class="btn-primary" onclick="downloadBulkConfigs()">⬇ Скачать созданные конфиги</button>
+                        <button class="btn-dark" onclick="document.getElementById('bulkResultCard').style.display='none'">Скрыть</button>
+                    </div>
                 </div>
 
                 <div class="card advanced-only" style="margin-bottom: 20px;">

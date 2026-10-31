@@ -1393,42 +1393,65 @@ async function createConfig() {
             loadStats(); 
         }
     } else {
-        // Массовое создание (Прямое скачивание файлов вместо ZIP)
-        document.getElementById('loaderOverlay').style.display = 'flex'; 
+        // Массовое создание: не заставляем браузер скачивать десятки файлов
+        // по одному, а показываем кнопку «Скачать созданные конфиги» (ZIP).
+        document.getElementById('loaderOverlay').style.display = 'flex';
         document.getElementById('loaderText').innerText = "Генерация конфигов (около 1-2 сек на каждый)...";
-        
         try {
             const res = await fetch('/api/create-bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prefix: name, count: parseInt(count), expires, endpointType: epType, domain: epDomain }) });
-            if (res.ok) { 
-                const data = await res.json();
-                if (data.configs && data.configs.length > 0) {
-                    // Запускаем поочередное скачивание всех файлов
-                    data.configs.forEach((conf, index) => {
-                        // Задержка 300мс между скачиваниями, чтобы браузер (Chrome/Safari) не заблокировал их как спам-попапы
-                        setTimeout(() => {
-                            const blob = new Blob([conf.content], { type: 'text/plain' });
-                            const a = document.createElement('a');
-                            a.href = window.URL.createObjectURL(blob);
-                            a.download = `${serverFileBaseClient()}_${conf.name}.conf`;
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                        }, index * 300);
-                    });
-                } else {
-                    alert("Конфиги не сгенерировались. Проверьте логи.");
-                }
-                
-                document.getElementById('clientName').value = ''; 
-                document.getElementById('clientCount').value = ''; 
-                loadStats(); 
-            } else {
-                alert('Ошибка массовой генерации на сервере');
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Ошибка массовой генерации на сервере');
+            if (!data.configs || !data.configs.length) throw new Error('Конфиги не сгенерировались. Проверьте логи.');
+            window.__lastBulkNames = data.configs.map(c => c.name);
+            const card = document.getElementById('bulkResultCard');
+            const text = document.getElementById('bulkResultText');
+            if (text) text.innerText = `Создано ${data.configs.length} клиентов: ${window.__lastBulkNames.join(', ')}. Скачайте все конфиги одним архивом.`;
+            if (card) {
+                card.style.display = '';
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
+            document.getElementById('clientName').value = '';
+            document.getElementById('clientCount').value = '';
+            loadStats();
+            toast('Конфиги созданы', 'success', `${data.configs.length} шт.`);
         } catch (e) {
-            alert('Сетевая ошибка');
+            toast('Ошибка создания', 'error', e.message);
+        } finally {
+            document.getElementById('loaderOverlay').style.display = 'none';
         }
-        document.getElementById('loaderOverlay').style.display = 'none';
+    }
+}
+
+// Скачиваем все созданные конфиги одним ZIP. Имена берём из результата
+// массового создания или из окна мастера.
+async function downloadBulkConfigs(names) {
+    const list = Array.isArray(names) ? names : (window.__lastBulkNames || []);
+    if (!list.length) {
+        toast('Нет конфигов для скачивания', 'error', 'Сначала создайте клиентов');
+        return;
+    }
+    try {
+        const res = await fetch('/api/download-bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ names: list })
+        });
+        if (!res.ok) {
+            let d = {};
+            try { d = await res.json(); } catch (e) { /* not json */ }
+            throw new Error(d.error || ('HTTP ' + res.status));
+        }
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = window.URL.createObjectURL(blob);
+        a.download = `${serverFileBaseClient()}_configs.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => window.URL.revokeObjectURL(a.href), 15000);
+        toast('Архив скачан', 'success', `${list.length} конфигов`);
+    } catch (e) {
+        toast('Не удалось скачать конфиги', 'error', e.message);
     }
 }
 
@@ -4483,6 +4506,7 @@ async function executeClientWizard() {
             toastMessage: created[0]
         };
     }
+    window.__lastBulkNames = created.slice();
     const list = created.map((name, i) => {
         const ready = keys[i] && keys[i].uri;
         return `<div class="wizard-summary-row">
@@ -4492,8 +4516,9 @@ async function executeClientWizard() {
         </div>`;
     }).join('');
     return {
-        html: wizardSuccess('Клиенты созданы', `Создано ${created.length} клиентов. Нажмите «Показать ключ» у нужного клиента — окно закроется и откроется его vpn:// и QR.`,
-            resultButton('Показать ключ первого клиента', `wizardShowKey('${esc(created[0])}')`, true) +
+        html: wizardSuccess('Клиенты созданы', `Создано ${created.length} клиентов. Скачайте все .conf одним ZIP или покажите ключ нужного клиента.`,
+            resultButton('Скачать все .conf (ZIP)', 'downloadBulkConfigs(window.__lastBulkNames)', true) +
+            resultButton('Показать ключ первого клиента', `wizardShowKey('${esc(created[0])}')`) +
             resultButton('Открыть список клиентов', 'wizardOpenClients()') +
             resultButton('Создать ещё клиентов', "openWizard('client')")
         ).replace('</h3>', `</h3><div class="wizard-summary" style="width:100%;margin:10px 0;">${list}</div>`),

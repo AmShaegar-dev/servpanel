@@ -5143,9 +5143,8 @@ app.get('/api/clients/:name/key', checkAuth, async (req, res) => {
         try { syncClient31Params(name); } catch (e) { /* ignore */ }
         try { if (fs.existsSync(confPath)) conf = sh('sudo', ['cat', confPath]); } catch (e) { conf = ''; }
         if (conf) {
-            const domain = domainInfo().domain;
-            const useDomain = !!domain;
-            conf = rewriteConfEndpoint(conf, useDomain ? domain : '');
+            // Endpoint уже записан в конфиг при создании клиента (IP или домен).
+            // Не переписываем его здесь, иначе выбор «Endpoint: IP» теряется.
             uri = buildVpnUriFromConf(name, conf);
         }
         if (!uri && fs.existsSync(uriPath)) uri = sh('sudo', ['cat', uriPath]).trim();
@@ -5174,8 +5173,12 @@ app.get('/api/clients/:name/export', checkAuth, requireAdmin, async (req, res) =
         if (!conf) return res.status(404).json({ error: 'Конфиг клиента не найден' });
 
         let uri = '';
-        try { if (fs.existsSync(uriPath)) uri = sh('sudo', ['cat', uriPath]).trim(); } catch (e) { uri = ''; }
-        if (!uri) uri = buildVpnUriFromConf(name, conf);
+        // Сначала собираем ключ из актуального .conf: в нём Endpoint выбран
+        // при создании (IP или домен). Старый .vpnuri мог сохранить домен.
+        try { uri = buildVpnUriFromConf(name, conf); } catch (e) { uri = ''; }
+        if (!uri) {
+            try { if (fs.existsSync(uriPath)) uri = sh('sudo', ['cat', uriPath]).trim(); } catch (e) { uri = ''; }
+        }
 
         let qr = '';
         try {
@@ -5301,11 +5304,111 @@ app.get('/api/download/:name', checkAuth, (req, res) => {
     const filePath = path.join(AWG_DIR, `${name}.conf`);
     if (fs.existsSync(filePath)) {
         try { syncClient31Params(name); } catch (e) { /* ignore */ }
-        let content = fs.readFileSync(filePath, 'utf8');
-        const domain = domainInfo().domain;
-        if (domain) content = rewriteConfEndpoint(content, domain);
+        // Отдаём конфиг как есть: Endpoint (IP или домен) выбран при создании.
+        const content = fs.readFileSync(filePath, 'utf8');
         res.attachment(`${serverFileBase()}_${name}.conf`).type('text/plain').send(content);
     } else res.status(404).send('Конфиг не найден');
+});
+
+// ---------------------------------------------------------------------------
+// ZIP без внешних зависимостей (store): несколько .conf одним архивом.
+// ---------------------------------------------------------------------------
+const ZIP_CRC_TABLE = (() => {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        table[n] = c >>> 0;
+    }
+    return table;
+})();
+
+function zipCrc32(buf) {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < buf.length; i++) c = ZIP_CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function buildZipStore(entries) {
+    const now = new Date();
+    const dosTime = ((now.getHours() & 31) << 11) | ((now.getMinutes() & 63) << 5) | ((Math.floor(now.getSeconds() / 2)) & 31);
+    const dosDate = (((now.getFullYear() - 1980) & 127) << 9) | (((now.getMonth() + 1) & 15) << 5) | (now.getDate() & 31);
+    const localParts = [];
+    const centralParts = [];
+    let offset = 0;
+    for (const entry of entries) {
+        const name = Buffer.from(String(entry.name), 'utf8');
+        const data = Buffer.isBuffer(entry.data) ? entry.data : Buffer.from(entry.data);
+        const crc = zipCrc32(data);
+        const local = Buffer.alloc(30);
+        local.writeUInt32LE(0x04034b50, 0);
+        local.writeUInt16LE(20, 4);
+        local.writeUInt16LE(0x0800, 6); // UTF-8 имена
+        local.writeUInt16LE(0, 8);      // без сжатия
+        local.writeUInt16LE(dosTime, 10);
+        local.writeUInt16LE(dosDate, 12);
+        local.writeUInt32LE(crc, 14);
+        local.writeUInt32LE(data.length, 18);
+        local.writeUInt32LE(data.length, 22);
+        local.writeUInt16LE(name.length, 26);
+        local.writeUInt16LE(0, 28);
+        localParts.push(local, name, data);
+
+        const central = Buffer.alloc(46);
+        central.writeUInt32LE(0x02014b50, 0);
+        central.writeUInt16LE(20, 4);
+        central.writeUInt16LE(20, 6);
+        central.writeUInt16LE(0x0800, 8);
+        central.writeUInt16LE(0, 10);
+        central.writeUInt16LE(dosTime, 12);
+        central.writeUInt16LE(dosDate, 14);
+        central.writeUInt32LE(crc, 16);
+        central.writeUInt32LE(data.length, 20);
+        central.writeUInt32LE(data.length, 24);
+        central.writeUInt16LE(name.length, 28);
+        central.writeUInt16LE(0, 30);
+        central.writeUInt16LE(0, 32);
+        central.writeUInt16LE(0, 34);
+        central.writeUInt16LE(0, 36);
+        central.writeUInt32LE(0, 38);
+        central.writeUInt32LE(offset, 42);
+        centralParts.push(central, name);
+        offset += local.length + name.length + data.length;
+    }
+    const centralBuf = Buffer.concat(centralParts);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0);
+    end.writeUInt16LE(0, 4);
+    end.writeUInt16LE(0, 6);
+    end.writeUInt16LE(entries.length, 8);
+    end.writeUInt16LE(entries.length, 10);
+    end.writeUInt32LE(centralBuf.length, 12);
+    end.writeUInt32LE(offset, 16);
+    end.writeUInt16LE(0, 20);
+    return Buffer.concat([...localParts, centralBuf, end]);
+}
+
+// Скачать несколько готовых клиентских конфигов одним ZIP.
+app.post('/api/download-bulk', checkAuth, (req, res) => {
+    const names = Array.isArray(req.body && req.body.names) ? req.body.names : [];
+    if (!names.length || names.length > 200) {
+        return res.status(400).json({ error: 'Передайте от 1 до 200 имён клиентов' });
+    }
+    const base = serverFileBase();
+    const entries = [];
+    for (const raw of names) {
+        const name = String(raw || '');
+        if (!NAME_RE.test(name)) continue;
+        const filePath = path.join(AWG_DIR, name + '.conf');
+        if (!fs.existsSync(filePath)) continue;
+        try { syncClient31Params(name); } catch (e) { /* ignore */ }
+        try {
+            entries.push({ name: `${base}_${name}.conf`, data: fs.readFileSync(filePath) });
+        } catch (e) { /* пропускаем недоступный файл */ }
+    }
+    if (!entries.length) return res.status(404).json({ error: 'Конфиги не найдены' });
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.attachment(`${base}_configs_${stamp}.zip`).type('application/zip').send(buildZipStore(entries));
 });
 
 app.delete('/api/delete/:name', checkAuth, (req, res) => {
