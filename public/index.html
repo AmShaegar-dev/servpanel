@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.51">
+    <meta name="panel-version" content="3.0.52">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -102,6 +102,9 @@
                     </button>
                     <button class="nav-item" data-tab="tab-app" data-title="Приложение" onclick="switchTab('tab-app', this)" id="navApp">
                         <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10.5 5.5h3"/><path d="M12 18.5h.01"/></svg></span><span>Приложение</span>
+                    </button>
+                    <button class="nav-item" data-tab="tab-rustdesk" data-title="RustDesk" onclick="switchTab('tab-rustdesk', this)" id="navRustdesk">
+                        <span class="nav-ico">▣</span><span>RustDesk</span>
                     </button>
                 </div>
                 <div class="nav-group">
@@ -573,6 +576,80 @@
                             <tbody id="sslSitesTable"><tr><td colspan="5">Загрузка…</td></tr></tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <!-- RUSTDESK -->
+            <div id="tab-rustdesk" class="tab-pane">
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>RustDesk Server</h3>
+                            <p>Свой ID/relay-сервер для удалённого доступа. Клиенты подключаются по адресу и ключу ниже.</p>
+                        </div>
+                        <span class="badge badge-muted" id="rustdeskStatusBadge">проверка</span>
+                    </div>
+                    <div class="controls-row" style="flex-wrap:wrap;margin-bottom:12px;">
+                        <button class="btn-primary" id="rustdeskInstallBtn" onclick="installRustDesk()">Установить</button>
+                        <button class="btn-dark" id="rustdeskUpdateBtn" onclick="updateRustDesk()">Обновить с GitHub</button>
+                        <button class="btn-ghost" onclick="loadRustDesk(true)">↻ Обновить статус</button>
+                    </div>
+                    <div id="rustdeskJob" class="wizard-note" style="display:none;white-space:pre-wrap;"></div>
+                    <div id="rustdeskSummary" class="wizard-summary" style="margin-top:10px;"></div>
+                </div>
+
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Подключение</h3>
+                            <p>Эти данные вводятся в клиенте RustDesk: Настройки → Сеть → ID/Relay Server.</p>
+                        </div>
+                        <span class="badge badge-muted">ключ</span>
+                    </div>
+                    <div id="rustdeskConnection" class="wizard-summary"></div>
+                    <div class="controls-row" style="margin-top:12px;flex-wrap:wrap;">
+                        <button class="btn-primary" onclick="copyRustDeskConnection()">Скопировать данные</button>
+                        <button class="btn-dark" onclick="window.open('/api/rustdesk/instructions','_blank')">Инструкция</button>
+                        <button class="btn-dark" onclick="window.open('/api/rustdesk/instructions?format=txt','_blank')">Скачать .txt</button>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Адрес сервера</h3>
+                            <p>Можно выбрать IP или домен. После смены hbbs перезапустится.</p>
+                        </div>
+                        <span class="badge badge-muted">relay</span>
+                    </div>
+                    <div class="controls-row" style="flex-wrap:wrap;">
+                        <select id="rustdeskHostType" onchange="rustdeskHostTypeChanged()" style="width:170px;">
+                            <option value="ip">IP сервера</option>
+                            <option value="domain">Домен</option>
+                        </select>
+                        <input type="text" id="rustdeskDomain" placeholder="vpn.example.com" autocomplete="off" spellcheck="false" style="max-width:320px;display:none;">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-muted);">
+                            <input type="checkbox" id="rustdeskOpenPorts" style="width:auto;"> Открывать порты в UFW
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-muted);">
+                            <input type="checkbox" id="rustdeskWebClient" style="width:auto;"> Веб-клиент (21118/21119)
+                        </label>
+                        <button class="btn-primary" onclick="saveRustDeskSettings()">Сохранить</button>
+                        <button class="btn-dark" onclick="openRustDeskPorts()">Открыть порты</button>
+                    </div>
+                    <div id="rustdeskSettingsHint" class="sub-text" style="margin-top:8px;"></div>
+                </div>
+
+                <div class="card">
+                    <div class="card-head">
+                        <div>
+                            <h3>Клиенты RustDesk</h3>
+                            <p>Последняя версия с GitHub. На сервере кэшируется только она, старые версии удаляются.</p>
+                        </div>
+                        <span class="badge badge-muted" id="rustdeskClientVersion">—</span>
+                    </div>
+                    <div id="rustdeskClients" class="controls-row" style="flex-wrap:wrap;"></div>
+                    <div class="sub-text" style="margin-top:8px;">Официальные сборки RustDesk. Источник: github.com/rustdesk/rustdesk, лицензия AGPL-3.0.</div>
                 </div>
             </div>
 

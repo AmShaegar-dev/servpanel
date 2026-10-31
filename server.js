@@ -24,6 +24,8 @@ const fs = require('fs');
 const os = require('os');
 const zlib = require('zlib');
 const dns = require('dns');
+const { Readable, Transform } = require('stream');
+const { pipeline } = require('stream/promises');
 const updater = require('./lib/updater');
 const proxyUsers = require('./lib/proxy-users');
 const { Panel } = require('./lib/cascade-setup');
@@ -89,6 +91,15 @@ const INSTALL_STATE = path.join(DATA_DIR, '.install_state.json');
 // переживают обновление панели и не попадают в релизный архив.
 const APP_SETTINGS_FILE = path.join(DATA_DIR, '.app_settings.json');
 const APP_APK_DIR = path.join(DATA_DIR, '.app');
+
+// RustDesk: настройки модуля, кэш клиентских сборок и данные сервера.
+// Кэш лежит вне каталога панели, чтобы обновление панели его не трогало.
+const RUSTDESK_SETTINGS_FILE = path.join(DATA_DIR, '.rustdesk.json');
+const RUSTDESK_CACHE_DIR = process.env.SERVEPANEL_RUSTDESK_CACHE
+    || (process.platform === 'win32' ? path.join(DATA_DIR, 'rustdesk-cache') : '/var/cache/servpanel-rustdesk');
+const RUSTDESK_DATA_DIR = '/var/lib/rustdesk-server';
+const RUSTDESK_SERVER_REPO = 'rustdesk/rustdesk-server';
+const RUSTDESK_CLIENT_REPO = 'rustdesk/rustdesk';
 const PANEL_VERSION = (() => {
     try { return String(JSON.parse(fs.readFileSync(path.join(APP_DIR, 'package.json'), 'utf8')).version || ''); }
     catch (e) { return ''; }
@@ -9929,6 +9940,580 @@ app.get('/api/app/status', checkAuth, async (req, res) => {
     } catch (e) {
         res.status(500).json({ error: 'Не удалось прочитать настройки приложения' });
     }
+});
+
+// ---------------------------------------------------------------------------
+// RustDesk: установка своего ID/relay-сервера, клиенты и обновления.
+// ---------------------------------------------------------------------------
+const RUSTDESK_PORTS = [
+    { port: 21115, proto: 'tcp', label: 'NAT test' },
+    { port: 21116, proto: 'tcp', label: 'ID-сервер' },
+    { port: 21116, proto: 'udp', label: 'ID-сервер' },
+    { port: 21117, proto: 'tcp', label: 'Relay' },
+    { port: 21118, proto: 'tcp', label: 'Веб-клиент' },
+    { port: 21119, proto: 'tcp', label: 'Веб-клиент' }
+];
+const RUSTDESK_CLIENT_PLATFORMS = [
+    { id: 'windows-x64-exe', group: 'Windows', label: 'Windows x64 (.exe)', re: /^rustdesk-[\d.]+-x86_64\.exe$/ },
+    { id: 'windows-x64-msi', group: 'Windows', label: 'Windows x64 (.msi)', re: /^rustdesk-[\d.]+-x86_64\.msi$/ },
+    { id: 'windows-arm64-exe', group: 'Windows', label: 'Windows ARM64 (.exe)', re: /^rustdesk-[\d.]+-aarch64\.exe$/ },
+    { id: 'android-arm64', group: 'Android', label: 'Android ARM64 (.apk)', re: /^rustdesk-[\d.]+-aarch64-signed\.apk$/ },
+    { id: 'android-universal', group: 'Android', label: 'Android Universal (.apk)', re: /^rustdesk-[\d.]+-universal-signed\.apk$/ },
+    { id: 'android-armv7', group: 'Android', label: 'Android ARMv7 (.apk)', re: /^rustdesk-[\d.]+-armv7-signed\.apk$/ },
+    { id: 'linux-x64-deb', group: 'Linux', label: 'Linux x64 (.deb)', re: /^rustdesk-[\d.]+-x86_64\.deb$/ },
+    { id: 'linux-arm64-deb', group: 'Linux', label: 'Linux ARM64 (.deb)', re: /^rustdesk-[\d.]+-aarch64\.deb$/ },
+    { id: 'linux-x64-rpm', group: 'Linux', label: 'Linux x64 (.rpm)', re: /^rustdesk-[\d.]+-x86_64\.rpm$/ },
+    { id: 'linux-arm64-rpm', group: 'Linux', label: 'Linux ARM64 (.rpm)', re: /^rustdesk-[\d.]+-aarch64\.rpm$/ },
+    { id: 'linux-x64-appimage', group: 'Linux', label: 'Linux x64 (AppImage)', re: /^rustdesk-[\d.]+-x86_64\.AppImage$/ },
+    { id: 'linux-arm64-appimage', group: 'Linux', label: 'Linux ARM64 (AppImage)', re: /^rustdesk-[\d.]+-aarch64\.AppImage$/ }
+];
+const rustdeskReleaseCache = new Map();
+let rustdeskIpCache = { ip: '', at: 0 };
+let rustdeskJob = null;
+
+function defaultRustdeskSettings() {
+    return { hostType: 'ip', domain: '', openPorts: true, webClient: false };
+}
+
+function readRustdeskSettings() {
+    const raw = readJson(RUSTDESK_SETTINGS_FILE, null);
+    const def = defaultRustdeskSettings();
+    if (!raw || typeof raw !== 'object') return def;
+    const domain = normalizeDomain(raw.domain || '');
+    return {
+        hostType: raw.hostType === 'domain' && domain ? 'domain' : 'ip',
+        domain,
+        openPorts: raw.openPorts !== false,
+        webClient: !!raw.webClient
+    };
+}
+
+function rustdeskPublicIp() {
+    if (NO_SYSTEM()) return '203.0.113.10';
+    if (rustdeskIpCache.ip && Date.now() - rustdeskIpCache.at < 3600 * 1000) return rustdeskIpCache.ip;
+    let ip = '';
+    try { ip = String(shTry('curl', ['-4s', '--max-time', '5', 'https://api.ipify.org'], { timeout: 8000 })).trim(); } catch (e) { /* ignore */ }
+    if (!IPV4_RE.test(ip)) {
+        try { ip = String(shTry('curl', ['-4s', '--max-time', '5', 'https://ifconfig.me'], { timeout: 8000 })).trim(); } catch (e) { /* ignore */ }
+    }
+    if (!IPV4_RE.test(ip)) {
+        try {
+            for (const list of Object.values(os.networkInterfaces())) {
+                for (const ni of list || []) {
+                    if (ni && ni.family === 'IPv4' && !ni.internal && IPV4_RE.test(ni.address)) { ip = ni.address; break; }
+                }
+                if (ip) break;
+            }
+        } catch (e) { /* ignore */ }
+    }
+    if (IPV4_RE.test(ip)) rustdeskIpCache = { ip, at: Date.now() };
+    return ip;
+}
+
+function rustdeskHost() {
+    const s = readRustdeskSettings();
+    if (s.hostType === 'domain' && s.domain) return s.domain;
+    return rustdeskPublicIp();
+}
+
+function rustdeskInstalledVersion() {
+    if (NO_SYSTEM()) return '';
+    try {
+        return String(sh('dpkg-query', ['-W', '-f=${Version}', 'rustdesk-server-hbbs'], { timeout: 10000 })).trim();
+    } catch (e) { return ''; }
+}
+
+function rustdeskPublicKey() {
+    if (NO_SYSTEM()) return 'DEMO_RUSTDESK_PUBLIC_KEY';
+    try {
+        return String(readTextMaybeRoot(path.join(RUSTDESK_DATA_DIR, 'id_ed25519.pub')) || '').trim();
+    } catch (e) { return ''; }
+}
+
+function rustdeskService(unit) {
+    if (NO_SYSTEM()) return { state: 'inactive', enabled: false };
+    return { state: isActive(unit), enabled: isEnabled(unit) };
+}
+
+function rustdeskPortsStatus() {
+    if (NO_SYSTEM()) return RUSTDESK_PORTS.map(p => ({ ...p, open: false }));
+    let out = '';
+    try { out = String(rootShTry('ufw', ['status'])); } catch (e) { out = ''; }
+    return RUSTDESK_PORTS.map(p => ({
+        ...p,
+        open: new RegExp(`\\b${p.port}/${p.proto}\\b`).test(out) || new RegExp(`\\b${p.port}\\b`).test(out)
+    }));
+}
+
+function rustdeskVersionParts(v) {
+    return String(v || '').replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+}
+
+function rustdeskCompareVersions(a, b) {
+    const x = rustdeskVersionParts(a), y = rustdeskVersionParts(b);
+    for (let i = 0; i < Math.max(x.length, y.length, 3); i++) {
+        if ((x[i] || 0) > (y[i] || 0)) return 1;
+        if ((x[i] || 0) < (y[i] || 0)) return -1;
+    }
+    return 0;
+}
+
+async function rustdeskLatestRelease(repo, force) {
+    const hit = rustdeskReleaseCache.get(repo);
+    if (!force && hit && Date.now() - hit.at < 30 * 60 * 1000) return hit.data;
+    const res = await fetchWithTimeout(`https://api.github.com/repos/${repo}/releases/latest`, {
+        headers: { 'User-Agent': 'servpanel-rustdesk', Accept: 'application/vnd.github+json' }
+    }, 15000);
+    if (!res.ok) throw new Error('GitHub API: HTTP ' + res.status);
+    const data = await res.json();
+    rustdeskReleaseCache.set(repo, { at: Date.now(), data });
+    return data;
+}
+
+function rustdeskClientCatalog(release) {
+    const version = String((release && release.tag_name) || '').replace(/^v/, '');
+    return RUSTDESK_CLIENT_PLATFORMS.map(def => {
+        const asset = ((release && release.assets) || []).find(a => def.re.test(a.name));
+        if (!asset) return null;
+        return {
+            id: def.id, group: def.group, label: def.label,
+            name: asset.name, size: asset.size, version,
+            url: `/api/rustdesk/client/${encodeURIComponent(def.id)}`
+        };
+    }).filter(Boolean);
+}
+
+function rustdeskDemoClients() {
+    return RUSTDESK_CLIENT_PLATFORMS.map(def => ({
+        id: def.id, group: def.group, label: def.label,
+        name: `rustdesk-1.5.0-${def.id}`, size: 25000000, version: '1.5.0',
+        url: `/api/rustdesk/client/${encodeURIComponent(def.id)}`
+    }));
+}
+
+function rustdeskCacheSummary(version) {
+    const dir = version ? path.join(RUSTDESK_CACHE_DIR, version) : '';
+    const files = {};
+    let bytes = 0;
+    if (dir && fs.existsSync(dir)) {
+        try {
+            for (const name of fs.readdirSync(dir)) {
+                if (name.endsWith('.part')) continue;
+                try {
+                    const st = fs.statSync(path.join(dir, name));
+                    if (st.isFile()) { files[name] = st.size; bytes += st.size; }
+                } catch (e) { /* ignore */ }
+            }
+        } catch (e) { /* ignore */ }
+    }
+    return { version: version || '', dir, files, bytes };
+}
+
+function rustdeskCleanupCache(version) {
+    if (!version || !fs.existsSync(RUSTDESK_CACHE_DIR)) return;
+    try {
+        for (const name of fs.readdirSync(RUSTDESK_CACHE_DIR)) {
+            if (name === version) continue;
+            try { fs.rmSync(path.join(RUSTDESK_CACHE_DIR, name), { recursive: true, force: true }); } catch (e) { /* ignore */ }
+        }
+    } catch (e) { /* ignore */ }
+}
+
+async function rustdeskStatusPayload(force) {
+    const settings = readRustdeskSettings();
+    const installed = rustdeskInstalledVersion();
+    const host = rustdeskHost();
+    let latest = '';
+    let clientVersion = '';
+    let clients = [];
+    let error = '';
+    if (NO_SYSTEM()) {
+        latest = '1.1.16';
+        clientVersion = '1.5.0';
+        clients = rustdeskDemoClients();
+    } else {
+        try {
+            const rel = await rustdeskLatestRelease(RUSTDESK_SERVER_REPO, force);
+            latest = String(rel.tag_name || '').replace(/^v/, '');
+        } catch (e) { error = 'Сервер: ' + e.message; }
+        try {
+            const rel = await rustdeskLatestRelease(RUSTDESK_CLIENT_REPO, force);
+            clientVersion = String(rel.tag_name || '').replace(/^v/, '');
+            clients = rustdeskClientCatalog(rel);
+            if (clientVersion) rustdeskCleanupCache(clientVersion);
+        } catch (e) { error = (error ? error + '; ' : '') + 'Клиенты: ' + e.message; }
+    }
+    return {
+        installed: !!installed,
+        version: installed,
+        latestVersion: latest,
+        updateAvailable: !!(installed && latest && rustdeskCompareVersions(latest, installed) > 0),
+        host,
+        relay: host ? `${host}:21117` : '',
+        hostType: settings.hostType,
+        domain: settings.domain,
+        settings,
+        publicKey: rustdeskPublicKey(),
+        services: {
+            hbbs: rustdeskService('rustdesk-hbbs'),
+            hbbr: rustdeskService('rustdesk-hbbr')
+        },
+        ports: rustdeskPortsStatus(),
+        clients,
+        clientVersion,
+        cache: rustdeskCacheSummary(clientVersion),
+        cacheDir: RUSTDESK_CACHE_DIR,
+        source: 'https://github.com/rustdesk/rustdesk',
+        error
+    };
+}
+
+function rustdeskLog(job, message) {
+    if (!job) return;
+    job.log.push(`[${new Date().toISOString()}] ${message}`);
+}
+
+function rustdeskJobPublic(job) {
+    if (!job) return null;
+    return {
+        action: job.action, running: job.running, ok: job.ok, error: job.error,
+        fromVersion: job.fromVersion, toVersion: job.toVersion,
+        startedAt: job.startedAt, finishedAt: job.finishedAt,
+        log: job.log.slice(-160)
+    };
+}
+
+function rustdeskArch() {
+    if (process.arch === 'x64') return 'amd64';
+    if (process.arch === 'arm64') return 'arm64';
+    if (process.arch === 'arm') return 'armhf';
+    if (process.arch === 'ia32') return 'i386';
+    throw new Error('Архитектура ' + process.arch + ' не поддерживается RustDesk');
+}
+
+function rustdeskApplyRelay(host) {
+    const override = `[Service]\nExecStart=\nExecStart=/usr/bin/hbbs -r ${host}:21117\n`;
+    writeRootFile('/etc/systemd/system/rustdesk-hbbs.service.d/override.conf', override, '0644');
+}
+
+async function rustdeskOpenPorts(job) {
+    const settings = readRustdeskSettings();
+    for (const p of RUSTDESK_PORTS) {
+        if (p.port >= 21118 && !settings.webClient) continue;
+        const r = await rootRun('ufw', ['allow', `${p.port}/${p.proto}`], { timeout: 15000 });
+        rustdeskLog(job, `UFW ${p.port}/${p.proto}: ${r.ok ? 'открыт' : 'пропущен'}`);
+    }
+}
+
+async function rustdeskWaitServices(job) {
+    for (let i = 0; i < 20; i++) {
+        if (isActive('rustdesk-hbbs') === 'active' && isActive('rustdesk-hbbr') === 'active') return;
+        await new Promise(r => setTimeout(r, 1000));
+    }
+    const status = await rootRun('systemctl', ['status', 'rustdesk-hbbs', 'rustdesk-hbbr', '--no-pager', '-l'], { timeout: 15000 });
+    throw new Error('Службы не запустились: ' + String(status.stdout || status.stderr || '').slice(-800));
+}
+
+async function rustdeskDownload(url, dest, job) {
+    rustdeskLog(job, `Скачиваю ${path.basename(dest)}…`);
+    const res = await fetchWithTimeout(url, {
+        headers: { 'User-Agent': 'servpanel-rustdesk', Accept: 'application/octet-stream' },
+        redirect: 'follow'
+    }, 300000);
+    if (!res.ok || !res.body) throw new Error('GitHub: HTTP ' + res.status);
+    await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(dest));
+}
+
+function rustdeskBackupBinaries() {
+    const dir = path.join(RUSTDESK_DATA_DIR, '.panel-backup');
+    rootShTry('mkdir', ['-p', dir]);
+    for (const bin of ['hbbs', 'hbbr']) {
+        const src = '/usr/bin/' + bin;
+        if (fs.existsSync(src)) rootShTry('cp', ['-a', src, path.join(dir, bin)]);
+    }
+    return dir;
+}
+
+function rustdeskRestoreBinaries(dir, job) {
+    if (!dir) return;
+    for (const bin of ['hbbs', 'hbbr']) {
+        const src = path.join(dir, bin);
+        if (fs.existsSync(src)) rootShTry('cp', ['-a', src, '/usr/bin/' + bin]);
+    }
+    rootShTry('systemctl', ['daemon-reload']);
+    rootShTry('systemctl', ['restart', 'rustdesk-hbbs', 'rustdesk-hbbr']);
+    rustdeskLog(job, 'Восстановлены предыдущие бинарники RustDesk.');
+}
+
+async function runRustdeskInstall(job) {
+    const action = job.action;
+    rustdeskLog(job, 'Проверяю последнюю версию на GitHub…');
+    const release = await rustdeskLatestRelease(RUSTDESK_SERVER_REPO, true);
+    const version = String(release.tag_name || '').replace(/^v/, '');
+    job.toVersion = version;
+    const current = rustdeskInstalledVersion();
+    if (action === 'update' && current && rustdeskCompareVersions(version, current) <= 0) {
+        rustdeskLog(job, `Уже установлена последняя версия ${current}.`);
+        return;
+    }
+    const arch = rustdeskArch();
+    const hbbsName = `rustdesk-server-hbbs_${version}_${arch}.deb`;
+    const hbbrName = `rustdesk-server-hbbr_${version}_${arch}.deb`;
+    const assets = release.assets || [];
+    const hbbs = assets.find(a => a.name === hbbsName);
+    const hbbr = assets.find(a => a.name === hbbrName);
+    if (!hbbs || !hbbr) throw new Error(`В релизе ${version} нет .deb для ${arch}`);
+    const host = rustdeskHost();
+    if (!host) throw new Error('Не удалось определить IP сервера. Укажите домен в настройках.');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rustdesk-'));
+    let backup = '';
+    try {
+        const hbbsPath = path.join(tmp, hbbsName);
+        const hbbrPath = path.join(tmp, hbbrName);
+        await rustdeskDownload(hbbs.browser_download_url, hbbsPath, job);
+        await rustdeskDownload(hbbr.browser_download_url, hbbrPath, job);
+        backup = rustdeskBackupBinaries();
+        rustdeskLog(job, 'Устанавливаю пакеты hbbs/hbbr…');
+        let r = await rootRun('dpkg', ['-i', hbbsPath, hbbrPath], { timeout: 300000 });
+        if (!r.ok) {
+            rustdeskLog(job, 'dpkg: ' + String(r.stderr || r.stdout || '').slice(-600));
+            const fix = await rootRun('apt-get', ['-f', 'install', '-y'], {
+                timeout: 300000, env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' }
+            });
+            if (!fix.ok) throw new Error('Не удалось установить зависимости: ' + String(fix.stderr || fix.stdout || '').slice(-600));
+            r = await rootRun('dpkg', ['-i', hbbsPath, hbbrPath], { timeout: 300000 });
+            if (!r.ok) throw new Error('dpkg: ' + String(r.stderr || r.stdout || '').slice(-600));
+        }
+        rustdeskLog(job, `Настраиваю relay ${host}:21117…`);
+        rustdeskApplyRelay(host);
+        await rootRun('systemctl', ['daemon-reload'], { timeout: 30000 });
+        await rootRun('systemctl', ['enable', '--now', 'rustdesk-hbbs', 'rustdesk-hbbr'], { timeout: 60000 });
+        await rootRun('systemctl', ['restart', 'rustdesk-hbbs', 'rustdesk-hbbr'], { timeout: 60000 });
+        if (readRustdeskSettings().openPorts) await rustdeskOpenPorts(job);
+        rustdeskLog(job, 'Проверяю службы…');
+        await rustdeskWaitServices(job);
+        rustdeskLog(job, 'Готово. Версия: ' + (rustdeskInstalledVersion() || version));
+    } catch (e) {
+        rustdeskLog(job, 'Ошибка: ' + (e.message || e));
+        try { rustdeskRestoreBinaries(backup, job); } catch (err) { /* ignore */ }
+        throw e;
+    } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+    }
+}
+
+function startRustdeskJob(action, req) {
+    const job = {
+        action, running: true, ok: false, error: '', log: [],
+        startedAt: Date.now(), finishedAt: null,
+        fromVersion: rustdeskInstalledVersion(), toVersion: ''
+    };
+    rustdeskJob = job;
+    const auditReq = { headers: req.headers, socket: req.socket, session: req.session };
+    (async () => {
+        try {
+            await runRustdeskInstall(job);
+            job.ok = true;
+        } catch (e) {
+            job.error = e.message || 'Ошибка установки RustDesk';
+        } finally {
+            job.running = false;
+            job.finishedAt = Date.now();
+            auditLog(auditReq, `RustDesk ${action}: ${job.ok ? 'успешно' : 'ошибка'} ${job.error}`.trim());
+        }
+    })();
+    return job;
+}
+
+app.get('/api/rustdesk/status', checkAuth, async (req, res) => {
+    try {
+        res.json(await rustdeskStatusPayload(req.query.refresh === '1'));
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось прочитать состояние RustDesk: ' + e.message });
+    }
+});
+
+app.get('/api/rustdesk/job', checkAuth, (req, res) => {
+    res.json({ success: true, job: rustdeskJobPublic(rustdeskJob) });
+});
+
+app.post('/api/rustdesk/install', checkAuth, requireAdmin, (req, res) => {
+    if (NO_SYSTEM()) return res.json({ success: true, demo: true, job: null });
+    if (rustdeskJob && rustdeskJob.running) {
+        return res.status(202).json({ success: true, started: false, job: rustdeskJobPublic(rustdeskJob) });
+    }
+    const job = startRustdeskJob('install', req);
+    res.status(202).json({ success: true, started: true, job: rustdeskJobPublic(job) });
+});
+
+app.post('/api/rustdesk/update', checkAuth, requireAdmin, (req, res) => {
+    if (NO_SYSTEM()) return res.json({ success: true, demo: true, job: null });
+    if (rustdeskJob && rustdeskJob.running) {
+        return res.status(202).json({ success: true, started: false, job: rustdeskJobPublic(rustdeskJob) });
+    }
+    const job = startRustdeskJob('update', req);
+    res.status(202).json({ success: true, started: true, job: rustdeskJobPublic(job) });
+});
+
+app.post('/api/rustdesk/settings', checkAuth, requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const hostType = body.hostType === 'domain' ? 'domain' : 'ip';
+    const domain = normalizeDomain(body.domain || '');
+    if (hostType === 'domain' && !domain) {
+        return res.status(400).json({ error: 'Укажите корректный домен для RustDesk' });
+    }
+    const settings = {
+        hostType, domain,
+        openPorts: body.openPorts !== false,
+        webClient: !!body.webClient
+    };
+    writeJson(RUSTDESK_SETTINGS_FILE, settings, 0o600);
+    if (!NO_SYSTEM() && rustdeskInstalledVersion()) {
+        try {
+            rustdeskApplyRelay(rustdeskHost());
+            await rootRun('systemctl', ['daemon-reload'], { timeout: 30000 });
+            await rootRun('systemctl', ['restart', 'rustdesk-hbbs'], { timeout: 60000 });
+            if (settings.openPorts) await rustdeskOpenPorts(null);
+            await rustdeskWaitServices(null);
+        } catch (e) {
+            return res.status(500).json({ error: 'Настройки сохранены, но hbbs не перезапустился: ' + e.message });
+        }
+    }
+    auditLog(req, `RustDesk: адрес ${rustdeskHost()}, порты ${settings.openPorts ? 'авто' : 'вручную'}`);
+    res.json({ success: true, settings, host: rustdeskHost(), relay: `${rustdeskHost()}:21117`, publicKey: rustdeskPublicKey() });
+});
+
+app.post('/api/rustdesk/ports', checkAuth, requireAdmin, async (req, res) => {
+    if (NO_SYSTEM()) return res.json({ success: true, demo: true });
+    try {
+        await rustdeskOpenPorts(null);
+        res.json({ success: true, ports: rustdeskPortsStatus() });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось открыть порты: ' + e.message });
+    }
+});
+
+app.get('/api/rustdesk/client/:platform', checkAuth, async (req, res) => {
+    const id = String(req.params.platform || '');
+    const def = RUSTDESK_CLIENT_PLATFORMS.find(p => p.id === id);
+    if (!def) return res.status(400).json({ error: 'Неизвестный клиент RustDesk' });
+    if (NO_SYSTEM()) return res.status(404).json({ error: 'В демо-режиме скачивание отключено' });
+    let release;
+    try {
+        release = await rustdeskLatestRelease(RUSTDESK_CLIENT_REPO);
+    } catch (e) {
+        return res.status(502).json({ error: 'GitHub недоступен: ' + e.message });
+    }
+    const version = String(release.tag_name || '').replace(/^v/, '');
+    const asset = (release.assets || []).find(a => def.re.test(a.name));
+    if (!asset) return res.status(404).json({ error: 'В последнем релизе нет ' + def.label });
+    const dir = path.join(RUSTDESK_CACHE_DIR, version);
+    const file = path.join(dir, asset.name);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${asset.name}"`);
+    if (fs.existsSync(file) && fs.statSync(file).size === asset.size) {
+        res.setHeader('Content-Length', asset.size);
+        return fs.createReadStream(file).pipe(res);
+    }
+    fs.mkdirSync(dir, { recursive: true });
+    const tmp = file + '.part';
+    let upstream;
+    try {
+        upstream = await fetchWithTimeout(asset.browser_download_url, {
+            headers: { 'User-Agent': 'servpanel-rustdesk', Accept: 'application/octet-stream' },
+            redirect: 'follow'
+        }, 300000);
+    } catch (e) {
+        return res.status(502).json({ error: 'Не удалось скачать с GitHub: ' + e.message });
+    }
+    if (!upstream.ok || !upstream.body) return res.status(502).json({ error: 'GitHub: HTTP ' + upstream.status });
+    res.setHeader('Content-Length', asset.size);
+    const out = fs.createWriteStream(tmp);
+    const tee = new Transform({
+        transform(chunk, enc, cb) {
+            if (out.write(chunk)) cb(null, chunk);
+            else out.once('drain', () => cb(null, chunk));
+        }
+    });
+    try {
+        await pipeline(Readable.fromWeb(upstream.body), tee, res);
+        out.end();
+        await new Promise((resolve, reject) => {
+            out.on('finish', resolve);
+            out.on('error', reject);
+        });
+        fs.renameSync(tmp, file);
+        rustdeskCleanupCache(version);
+    } catch (e) {
+        try { out.destroy(); } catch (err) { /* ignore */ }
+        try { fs.unlinkSync(tmp); } catch (err) { /* ignore */ }
+        if (!res.headersSent) res.status(502).json({ error: 'Ошибка скачивания RustDesk' });
+        else res.end();
+    }
+});
+
+app.get('/api/rustdesk/instructions', checkAuth, (req, res) => {
+    const settings = readRustdeskSettings();
+    const host = rustdeskHost();
+    const relay = host ? `${host}:21117` : '';
+    const key = rustdeskPublicKey();
+    const ports = rustdeskPortsStatus().filter(p => p.port <= 21117 || settings.webClient);
+    if (String(req.query.format || '') === 'txt') {
+        return res.type('text/plain').send([
+            'RustDesk — подключение к своему серверу',
+            '',
+            'ID-сервер: ' + (host || 'не настроен'),
+            'Relay: ' + (relay || 'не настроен'),
+            'Ключ: ' + (key || 'не сгенерирован'),
+            '',
+            'Порты: ' + ports.map(p => `${p.port}/${p.proto}`).join(', '),
+            '',
+            'Windows: скачайте .exe/.msi, установите, откройте Настройки → Сеть → ID/Relay Server.',
+            'Android: скачайте .apk, установите, откройте Настройки → ID/Relay Server.',
+            'Linux: установите .deb/.rpm или запустите AppImage, затем Настройки → Сеть → ID/Relay Server.',
+            '',
+            'Везде укажите ID-сервер, Relay и ключ выше.',
+            'Клиенты: https://github.com/rustdesk/rustdesk/releases/latest',
+            'Сервер: https://github.com/rustdesk/rustdesk-server/releases/latest'
+        ].join('\n'));
+    }
+    const safeHost = escapeHtml(host || 'не настроен');
+    const safeRelay = escapeHtml(relay || 'не настроен');
+    const safeKey = escapeHtml(key || 'не сгенерирован');
+    const portList = ports.map(p => `${p.port}/${p.proto}`).join(', ');
+    res.type('html').send(`<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RustDesk — подключение</title>
+<style>
+body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0d1117;color:#c9d1d9;margin:0;padding:20px}
+.card{max-width:720px;margin:0 auto;background:#161b22;border:1px solid #30363d;border-radius:12px;padding:22px}
+h1{font-size:22px;margin:0 0 8px;color:#fff}h2{font-size:15px;color:#fff;margin:20px 0 6px}
+p,li{font-size:13px;line-height:1.6;color:#b9c6d8}.muted{color:#8b949e;font-size:12px}
+code,textarea{font-family:monospace;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:8px}
+textarea{width:100%;box-sizing:border-box;resize:vertical}
+button{background:#2f81f7;color:#fff;border:0;border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer;margin:6px 6px 0 0}
+.warn{background:rgba(255,127,80,.08);border:1px solid #ff7b72;border-radius:8px;padding:10px;font-size:12px;color:#ffb3ad;margin-top:16px}
+</style></head><body><div class="card">
+<h1>RustDesk — подключение</h1>
+<p class="muted">Свой ID/relay-сервер. Данные ниже вводятся в клиенте RustDesk.</p>
+<h2>ID-сервер</h2><textarea id="host" readonly rows="1">${safeHost}</textarea>
+<h2>Relay</h2><textarea id="relay" readonly rows="1">${safeRelay}</textarea>
+<h2>Ключ</h2><textarea id="key" readonly rows="3">${safeKey}</textarea>
+<p class="muted">Порты: ${escapeHtml(portList)}</p>
+<div class="controls">
+<button onclick="navigator.clipboard.writeText(document.getElementById('host').value)">Скопировать ID-сервер</button>
+<button onclick="navigator.clipboard.writeText(document.getElementById('relay').value)">Скопировать Relay</button>
+<button onclick="navigator.clipboard.writeText(document.getElementById('key').value)">Скопировать ключ</button>
+</div>
+<h2>Windows</h2>
+<ol><li>Скачайте установщик на вкладке RustDesk в панели.</li><li>Установите и откройте RustDesk.</li><li>Настройки → Сеть → ID/Relay Server.</li><li>Укажите ID-сервер, Relay и ключ выше.</li></ol>
+<h2>Android</h2>
+<ol><li>Скачайте .apk на вкладке RustDesk.</li><li>Установите (разрешите установку из этого источника).</li><li>Настройки → ID/Relay Server.</li><li>Укажите ID-сервер, Relay и ключ выше.</li></ol>
+<h2>Linux</h2>
+<ol><li>Скачайте .deb/.rpm или AppImage.</li><li>Установите и запустите RustDesk.</li><li>Настройки → Сеть → ID/Relay Server.</li><li>Укажите ID-сервер, Relay и ключ выше.</li></ol>
+<div class="warn">Не публикуйте ключ и не открывайте лишние порты. Сервер обновляйте с GitHub через панель.</div>
+<p class="muted">Источник клиентов: github.com/rustdesk/rustdesk (AGPL-3.0). Сервер: github.com/rustdesk/rustdesk-server.</p>
+</div></body></html>`);
 });
 
 // Компактные метрики доступны и на основном API — приложению не обязателен

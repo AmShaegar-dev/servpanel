@@ -633,6 +633,19 @@ curl https://panel.example.com:9101/health
 
 ---
 
+## ▣ RustDesk
+
+Свой **ID/relay-сервер RustDesk** без Docker и без платной подписки. Панель ставит официальные пакеты `hbbs`/`hbbr` из GitHub, настраивает systemd и открывает порты.
+
+* **Адрес сервера** — IP или домен. Домен должен указывать A-записью на сервер. После смены адреса `hbbs` перезапускается.
+* **Порты** — `21115/tcp`, `21116/tcp`, `21116/udp`, `21117/tcp`. Для веб-клиента дополнительно `21118/tcp` и `21119/tcp`.
+* **Ключ сервера** — панель показывает публичный ключ из `/var/lib/rustdesk-server/id_ed25519.pub`. Его нужно ввести в клиенте вместе с ID-сервером и Relay.
+* **Клиенты** — Windows `.exe`/`.msi`, Android ARM64/Universal/ARMv7, Linux `.deb`/`.rpm`/AppImage. Панель берёт последнюю версию из `rustdesk/rustdesk` и кэширует только её; старые версии удаляются.
+* **Обновление сервера** — кнопка «Обновить с GitHub» скачивает новые `.deb` из `rustdesk/rustdesk-server`, устанавливает и перезапускает службы. Ключи и база клиентов сохраняются, перед обновлением делается резервная копия бинарников.
+* **Инструкция** — кнопка «Инструкция» открывает готовую страницу с адресом, Relay, ключом и шагами для Windows/Android/Linux.
+
+Источники: [rustdesk/rustdesk](https://github.com/rustdesk/rustdesk) (клиенты, AGPL-3.0) и [rustdesk/rustdesk-server](https://github.com/rustdesk/rustdesk-server) (сервер).
+
 ## 🛡️ AdGuard Home
 
 Вкладка «Службы и DNS» получила полноценное управление AdGuard Home (Basic-auth, API v0.107+):
@@ -904,15 +917,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.51/servpanel-3.0.51.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.51/servpanel-3.0.51.tar.gz.sha256
-sha256sum -c servpanel-3.0.51.tar.gz.sha256
-tar -xzf servpanel-3.0.51.tar.gz
-bash /root/servpanel-3.0.51/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.52/servpanel-3.0.52.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.52/servpanel-3.0.52.tar.gz.sha256
+sha256sum -c servpanel-3.0.52.tar.gz.sha256
+tar -xzf servpanel-3.0.52.tar.gz
+bash /root/servpanel-3.0.52/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.0.51`. Если `curl` не установлен:
+Должно вывести `3.0.52`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:
