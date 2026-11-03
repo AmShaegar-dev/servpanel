@@ -441,6 +441,13 @@ function formatBytes(bytes) {
 }
 function formatSpeed(bytesPerSec) { return formatBytes(bytesPerSec) + '/s'; }
 
+/* HTTPS настроен на сервере, а не просто «текущий запрос пришёл по TLS».
+   Старые панели присылают только `https`, новые — ещё и `httpsConfigured`. */
+function httpsConfigured(status) {
+    if (!status) return false;
+    return status.httpsConfigured === undefined ? !!status.https : !!status.httpsConfigured;
+}
+
 async function loadServices() {
     try {
         const res = await fetch('/api/services');
@@ -3408,7 +3415,7 @@ function renderDashboardState() {
     renderHealthCard('healthSecurity', {
         status: security.defaultPassword ? 'bad' : security.totpEnabled ? 'good' : 'warn', icon: '◈', label: 'Безопасность',
         value: security.defaultPassword ? 'Пароль по умолчанию' : security.totpEnabled ? 'Защищено' : 'Без 2FA',
-        meta: `2FA: ${security.totpEnabled ? 'вкл' : 'выкл'} · HTTPS: ${security.https ? 'да' : 'нет'}`,
+        meta: `2FA: ${security.totpEnabled ? 'вкл' : 'выкл'} · HTTPS: ${httpsConfigured(security) ? 'да' : 'нет'}`,
         action: 'openAdminTab()', actionLabel: 'Настроить'
     });
 
@@ -3424,7 +3431,7 @@ function renderDashboardState() {
     if (security.defaultPassword) addRec('bad', '⚿', 'Сменить пароль по умолчанию', 'Панель доступна с паролем admin123 — это критично.', 'changePassword()', 'Сменить');
     if (!security.totpEnabled) addRec('warn', '◈', 'Включить 2FA', 'Дополнительная защита входа в панель.', 'openAdminTab()', 'Включить');
     if (backupConfig && !backupConfig.enabled) addRec('warn', '⤓', 'Включить автобэкап', 'Ежедневные зашифрованные копии конфигов и состояния.', "openWizard('backup')", 'Включить');
-    if (!security.https) addRec('info', '⌁', 'Настроить HTTPS', 'Панель работает без TLS — трафик входа можно перехватить.', 'openAdminTab()', 'Открыть');
+    if (!httpsConfigured(security)) addRec('info', '⌁', 'Настроить HTTPS', 'Панель работает без TLS — трафик входа можно перехватить.', 'openAdminTab()', 'Открыть');
     const recBox = document.getElementById('recommendations');
     if (recBox) {
         recBox.innerHTML = recs.length
@@ -4813,7 +4820,7 @@ async function runHealthCheck() {
     if (sec) {
         const bad = sec.defaultPassword || !sec.totpEnabled;
         add(bad ? (sec.defaultPassword ? 'bad' : 'warn') : 'good', '◈', 'Безопасность',
-            `2FA: ${sec.totpEnabled ? 'вкл' : 'выкл'} · HTTPS: ${sec.https ? 'да' : 'нет'} · пароль: ${sec.defaultPassword ? 'по умолчанию' : 'изменён'}`,
+            `2FA: ${sec.totpEnabled ? 'вкл' : 'выкл'} · HTTPS: ${httpsConfigured(sec) ? 'да' : 'нет'} · пароль: ${sec.defaultPassword ? 'по умолчанию' : 'изменён'}`,
             'openAdminTab()', bad ? 'Настроить' : 'Открыть');
     } else add('warn', '◈', 'Безопасность', 'Статус недоступен', 'openAdminTab()', 'Открыть');
     if (backup && backup.config) {

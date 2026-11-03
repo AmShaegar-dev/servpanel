@@ -1894,11 +1894,17 @@ app.get('/api/security/status', checkAuth, (req, res) => {
     try { passFileExists = fs.existsSync(PASS_FILE); } catch (e) { /* ignore */ }
     const me = findUser(req.session.user || 'admin') || { username: 'admin', role: 'admin', builtin: true };
     const st = totpState(me);
+    const httpsState = panelHttpsState();
     res.json({
         defaultPassword: ADMIN_PASSWORD === 'admin123',
         passFileExists,
         secretsFileExists: fs.existsSync(SECRETS_FILE),
         https: String(req.headers['x-forwarded-proto'] || '').split(',')[0] === 'https' || req.secure === true,
+        // HTTPS настроен на сервере (сертификат и ssl в конфиге панели),
+        // независимо от того, как пришёл текущий запрос.
+        httpsConfigured: httpsState.configured,
+        httpsDomain: httpsState.domain,
+        httpsPort: httpsState.port,
         node: process.version,
         panelPort: PANEL_PORT,
         panelPublicPort: PANEL_PUBLIC_PORT,
@@ -7296,6 +7302,28 @@ function sslStatusPayload() {
 
 function sslError(res, status, message, extra = {}) {
     return res.status(status).json({ error: message, ...extra });
+}
+
+// Настроен ли HTTPS для домена панели — в отличие от `https` в
+// /api/security/status, который говорит лишь о текущем запросе.
+// Приложению и веб-панели нужен именно факт настройки: внутри SSH-туннеля
+// запрос всегда приходит по http, хотя сертификат выпущен и работает.
+function panelHttpsState() {
+    try {
+        if (DEMO_MODE) {
+            return { configured: true, domain: panelDomain(), port: String(PANEL_PUBLIC_PORT || 443) };
+        }
+        const conf = readTextMaybeRoot(PANEL_SITE_CONF) || '';
+        const configured = /ssl_certificate\s/.test(conf);
+        const port = existingSslPort(conf) || PANEL_PUBLIC_PORT;
+        return {
+            configured,
+            domain: configured ? panelDomain() : '',
+            port: port ? String(port) : ''
+        };
+    } catch (e) {
+        return { configured: false, domain: '', port: '' };
+    }
 }
 
 // Статус: сертификаты, сайты, пути и состояние инструментов.
