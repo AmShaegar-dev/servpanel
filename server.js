@@ -9133,6 +9133,8 @@ app.get('/api/proxy/log', checkAuth, requireAdmin, (req, res) => {
         .split('\n').filter(line => /kvguardd|telemt|mtproxyl/i.test(line)).join('\n');
     out.unit = String(shTry('systemctl', ['show', 'kvguardd', '-p', 'User', '-p', 'UID', '-p', 'MainPID', '-p', 'ExecStart', '-p', 'FragmentPath'], { timeout: 15000 }) || '');
     out.telemtUnit = String(shTry('systemctl', ['show', 'telemt', '-p', 'User', '-p', 'UID', '-p', 'MainPID', '-p', 'ExecStart', '-p', 'FragmentPath'], { timeout: 15000 }) || '');
+    out.unitFile = String(readTextMaybeRoot('/etc/systemd/system/kvguardd.service') || '');
+    out.cgroupMatch = String(shTry('iptables', ['-m', 'cgroup', '--help'], { timeout: 10000 }) || '');
     res.json(out);
 });
 
