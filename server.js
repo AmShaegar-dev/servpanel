@@ -8975,7 +8975,17 @@ app.get('/api/proxy/diag', checkAuth, async (req, res) => {
 
 app.get('/api/proxy/users', checkAuth, async (req, res) => {
     try {
-        const users = await proxyUsers.listUsers();
+        const settings = readProxySettings();
+        const users = (await proxyUsers.listUsers()).map(user => {
+            if (user && user.links && typeof user.links === 'object') {
+                for (const key of ['classic', 'secure', 'tls', 'web']) {
+                    if (Array.isArray(user.links[key])) {
+                        user.links[key] = rewriteProxyLinks(user.links[key].filter(proxyLinkUsable), settings);
+                    }
+                }
+            }
+            return user;
+        });
         res.json({ users });
     } catch (e) { proxyError(res, e); }
 });
