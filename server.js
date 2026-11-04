@@ -4449,7 +4449,12 @@ app.post('/api/cascade/proxy', checkAuth, requireAdmin, async (req, res) => {
         if (r.code !== 0) {
             return res.status(500).json({ error: 'Скрипт маршрутизации вернул ошибку', output: String(r.out || '').slice(-1600) });
         }
-        try { sh('systemctl', ['restart', 'telemt']); } catch (e) { /* прокси может быть не установлен */ }
+        // MTProxyL-Telemt может работать как kvguardd, а не как telemt.
+        // Без перезапуска реального юнита старые upstream-сокеты остаются
+        // в обход новых правил каскада.
+        for (const unit of ['telemt', 'kvguardd', 'mtproxyl']) {
+            try { sh('systemctl', ['restart', unit]); } catch (e) { /* юнита может не быть */ }
+        }
         auditLog(req, enabled ? 'Каскад: MTProto-прокси пущен через EU' : 'Каскад: MTProto-прокси возвращён напрямую');
         res.json({ success: true, enabled, user, uid, output: String(r.out || '').slice(-1600) });
     } catch (e) {
