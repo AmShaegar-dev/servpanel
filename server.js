@@ -7874,12 +7874,14 @@ const MODULES = {
         title: 'AmneziaWG'
     },
     mtproto: {
-        url: 'https://raw.githubusercontent.com/AmShaegar-dev/servpanel/0b372c97825ddf7e28bfc4985b24ed7fcbfc958b/install_mtproto_silent.sh',
+        // Локальный установщик из релиза: не тянем старую закреплённую
+        // версию с GitHub, иначе исправления в панели не доходят.
+        local: path.join(APP_DIR, 'install_mtproto_silent.sh'),
         log: '/var/log/mtproto_install.log',
         title: 'MTProto'
     },
     mtproxyl: {
-        url: 'https://raw.githubusercontent.com/AmShaegar-dev/servpanel/65077b9aef2972dc96a767be27a4232313d1dfb4/install_mtproxyl_silent.sh',
+        local: path.join(APP_DIR, 'install_mtproxyl_silent.sh'),
         log: '/var/log/mtproxyl_install.log',
         title: 'MTProxyL'
     },
