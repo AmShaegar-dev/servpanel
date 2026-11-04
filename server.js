@@ -4355,8 +4355,15 @@ app.get('/api/cascade/interfaces', checkAuth, requireAdmin, (req, res) => {
 
 function ensureProxyCascadeBlock(script) {
     if (!script) return script;
-    if (script.includes('# --- MTProto-прокси через каскад (Servpanel) ---')) return script;
     const block = sshBuild.PROXY_CASCADE_LINES.join('\n');
+    const startMarker = '# --- MTProto-прокси через каскад (Servpanel) ---';
+    const endMarker = 'if [ -n "${WAN_GW:-}" ]; then';
+    const existing = script.indexOf(startMarker);
+    if (existing >= 0) {
+        const end = script.indexOf(endMarker, existing);
+        if (end > existing) return script.slice(0, existing) + block + '\n' + script.slice(end);
+        return script;
+    }
     const marker = 'sysctl -w net.ipv4.ip_forward=1';
     const idx = script.indexOf(marker);
     if (idx < 0) return script.replace(/\s*$/, '') + '\n\n' + block + '\n';
