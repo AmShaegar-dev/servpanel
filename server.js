@@ -9827,7 +9827,11 @@ app.get('/api/diag/wan-speed', checkAuth, requireAdmin, (req, res) => {
             raw: String(out).slice(0, 300)
         });
     }
-    res.json({ results });
+    const telegram = String(shTry('curl', [
+        '-4', '-sS', '-o', '/dev/null', '-w', '%{http_code} %{time_total}',
+        '--max-time', '12', 'https://core.telegram.org/'
+    ], { timeout: 18000 }) || '');
+    res.json({ results, telegram });
 });
 
 app.get('/api/diag/log', checkAuth, (req, res) => {
