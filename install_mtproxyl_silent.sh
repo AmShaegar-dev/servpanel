@@ -297,9 +297,9 @@ save_panel_key() {
     say "Ключ API сохранён для панели: $KEY_FILE"
 }
 
+API_KEY=""
 if [ "$API" = "yes" ]; then
     say "[4/4] Настройка API управления..."
-    API_KEY=""
     # Свежая установка печатает ключ один раз — забираем последний 64-hex
     # из вывода и проверяем его запросом к API.
     CANDIDATE=$(grep -Eo '[0-9a-f]{64}' "$TMP_OUT" 2>/dev/null | tail -1)
