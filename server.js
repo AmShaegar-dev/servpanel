@@ -4385,6 +4385,7 @@ function optimizeRoutingIpSet(script) {
         'ipset create ru hash:net -exist',
         'ipset create ru_tmp hash:net -exist',
         'ipset flush ru_tmp',
+        'extra_bad=0',
         '{',
         '    while read -r net; do [ -n "$net" ] && printf "add ru_tmp %s -exist\\n" "$net"; done < "$RU_ZONE"',
         '    set -f',
@@ -4394,7 +4395,12 @@ function optimizeRoutingIpSet(script) {
         'ipset swap ru_tmp ru',
         'ipset destroy ru_tmp'
     ].join('\n');
-    return script.includes(oldBlock) ? script.replace(oldBlock, newBlock) : script;
+    let out = script.includes(oldBlock) ? script.replace(oldBlock, newBlock) : script;
+    // Скрипт мог уже быть обновлён предыдущей версией без extra_bad.
+    if (!/^extra_bad=0$/m.test(out) && out.includes('ipset flush ru_tmp')) {
+        out = out.replace('ipset flush ru_tmp', 'ipset flush ru_tmp\nextra_bad=0');
+    }
+    return out;
 }
 
 app.get('/api/cascade/proxy', checkAuth, (req, res) => {
