@@ -9582,13 +9582,16 @@ fi
 # 3. Добиваем остатки, если MEKO не смог
 for unit in mtpr-zapret2-watch mtpr-zapret2 mtpr-nft-synfix mtpr-synfix \
             mtproxyl-bridge-watch mtproxyl-zapret2 mtproxyl-syn-limit mtproxyl-telemt mtproxyl \
-            mtproxyl-api mtproto.zig mtproto-zig mtg telemt mtproto; do
+            mtproxyl-api mtproto.zig mtproto-zig mtg telemt mtproto kvguardd; do
   if systemctl list-unit-files 2>/dev/null | grep -q "^\${unit}\.service"; then
     echo "Останавливаем \${unit}.service"
     systemctl stop "$unit" >/dev/null 2>&1 || true
     systemctl disable "$unit" >/dev/null 2>&1 || true
   fi
 done
+pkill -f '/opt/mtproxyl/engine/kvguardd' 2>/dev/null || true
+pkill -f 'mtproxyl-zapret' 2>/dev/null || true
+pkill -f '/opt/mtproxyl-zapret2/bin/nfqws2' 2>/dev/null || true
 
 if command -v docker >/dev/null 2>&1; then
   for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Ei 'telemt|mtproto|mtg|mtproxyl|zapret' || true); do
@@ -9620,6 +9623,7 @@ rm -rf /opt/mtpr-simple /opt/zapret2 /etc/zapret2 /etc/telemt /opt/telemt \
        /opt/mtproxyl-zapret2 /etc/mtproxyl-zapret2
 rm -f /etc/systemd/system/mtpr-*.service /etc/systemd/system/telemt.service \
       /etc/systemd/system/mtproxyl*.service /etc/systemd/system/mtproto*.service \
+      /etc/systemd/system/kvguardd.service /etc/systemd/system/kvguardd.service.d/* \
       /etc/sudoers.d/mtproxyl-api
 rm -f /usr/local/sbin/mtpr-* /usr/local/sbin/mtproxyl-* /usr/local/bin/mekopr /usr/local/bin/meko /usr/local/bin/mekomanager \
       /usr/local/bin/telemt /usr/local/bin/mtproxyl /usr/local/bin/mtproxyl-api \

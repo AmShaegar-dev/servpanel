@@ -1794,7 +1794,7 @@ async function cleanupCascade(btn) {
 
 async function runAutoCascade(btn) {
     const role = ((document.getElementById('autoCascadeRole') || {}).value) || 'ru';
-    const version = ((document.getElementById('autoCascadeVersion') || {}).value) || '2.0';
+    const version = ((document.getElementById('autoCascadeVersion') || {}).value) || '3.1';
     const peerHost = ((document.getElementById('autoCascadePeer') || {}).value || '').trim();
     const peerPort = ((document.getElementById('autoCascadePeerPort') || {}).value || '22');
     const peerUser = ((document.getElementById('autoCascadeUser') || {}).value || 'root');
@@ -1884,7 +1884,7 @@ function cascadeFieldValue(id) {
 }
 
 function cascadeParamItems() {
-    const version = cascadeFieldValue('autoCascadeVersion') || '2.0';
+    const version = cascadeFieldValue('autoCascadeVersion') || '3.1';
     const peer = cascadeFieldValue('autoCascadePeer');
     const port = cascadeFieldValue('autoCascadePeerPort') || '22';
     const user = cascadeFieldValue('autoCascadeUser') || 'root';
