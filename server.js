@@ -9129,6 +9129,10 @@ app.get('/api/proxy/log', checkAuth, requireAdmin, (req, res) => {
         out[unit] = String(shTry('journalctl', ['-u', unit, '-n', '200', '--no-pager', '--output', 'short-iso'], { timeout: 15000 }) || '');
     }
     out.status = String(shTry('systemctl', ['status', 'telemt', '--no-pager', '-l'], { timeout: 15000 }) || '');
+    out.process = String(shTry('ps', ['-eo', 'pid,user,uid,comm,args', '--no-headers'], { timeout: 15000 }) || '')
+        .split('\n').filter(line => /kvguardd|telemt|mtproxyl/i.test(line)).join('\n');
+    out.unit = String(shTry('systemctl', ['show', 'kvguardd', '-p', 'User', '-p', 'UID', '-p', 'MainPID', '-p', 'ExecStart', '-p', 'FragmentPath'], { timeout: 15000 }) || '');
+    out.telemtUnit = String(shTry('systemctl', ['show', 'telemt', '-p', 'User', '-p', 'UID', '-p', 'MainPID', '-p', 'ExecStart', '-p', 'FragmentPath'], { timeout: 15000 }) || '');
     res.json(out);
 });
 
