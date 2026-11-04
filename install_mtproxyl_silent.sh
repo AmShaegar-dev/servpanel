@@ -240,7 +240,11 @@ FLAGS+=(--sni "$SNI" --zapret2 "$ZAPRET2" --syn-limiter "$SYN_LIMITER" --meko "$
 if [ "$WEB" = "yes" ]; then
     FLAGS+=(--web yes --web-domain "$WEB_DOMAIN" --web-carrier "$WEB_CARRIER")
 fi
-FLAGS+=(--api "$API" --api-listen "$API_LISTEN")
+if [ "$API" = "yes" ]; then
+    FLAGS+=(--api yes --api-listen "$API_LISTEN")
+else
+    FLAGS+=(--api no)
+fi
 [ -n "$TGBOT_TOKEN" ] && FLAGS+=(--tgbot-token "$TGBOT_TOKEN" --tgbot-admin "$TGBOT_ADMIN")
 [ "$FORCE" = "1" ] && FLAGS+=(--force)
 
