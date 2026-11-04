@@ -4363,6 +4363,40 @@ function ensureProxyCascadeBlock(script) {
     return script.slice(0, idx) + block + '\n\n' + script.slice(idx);
 }
 
+// Старые установки содержали цикл ipset add по одной сети — на 8–9 тысяч
+// сетей это десятки секунд. Заменяем его на один ipset restore.
+function optimizeRoutingIpSet(script) {
+    if (!script) return script;
+    const oldBlock = [
+        'ipset create ru hash:net -exist',
+        'ipset create ru_tmp hash:net -exist',
+        'ipset flush ru_tmp',
+        'while read -r net; do [ -n "$net" ] && ipset add ru_tmp "$net" -exist; done < "$RU_ZONE"',
+        'extra_bad=0',
+        'set -f',
+        'for net in $EXTRA_RU_NETS; do',
+        '    ipset add ru_tmp "$net" -exist || { echo "WARN: EXTRA_RU_NETS: не добавил $net" >&2; extra_bad=$((extra_bad+1)); }',
+        'done',
+        'set +f',
+        'ipset swap ru_tmp ru',
+        'ipset destroy ru_tmp'
+    ].join('\n');
+    const newBlock = [
+        'ipset create ru hash:net -exist',
+        'ipset create ru_tmp hash:net -exist',
+        'ipset flush ru_tmp',
+        '{',
+        '    while read -r net; do [ -n "$net" ] && printf "add ru_tmp %s -exist\\n" "$net"; done < "$RU_ZONE"',
+        '    set -f',
+        '    for net in $EXTRA_RU_NETS; do printf "add ru_tmp %s -exist\\n" "$net"; done',
+        '    set +f',
+        '} | ipset restore -exist',
+        'ipset swap ru_tmp ru',
+        'ipset destroy ru_tmp'
+    ].join('\n');
+    return script.includes(oldBlock) ? script.replace(oldBlock, newBlock) : script;
+}
+
 app.get('/api/cascade/proxy', checkAuth, (req, res) => {
     const user = readTextSafe(PROXY_CASCADE_UID_FILE).trim() || 'telemt';
     let uid = '';
@@ -4395,7 +4429,7 @@ app.post('/api/cascade/proxy', checkAuth, requireAdmin, async (req, res) => {
             try { fs.unlinkSync(PROXY_CASCADE_FLAG_FILE); } catch (e) { /* уже нет */ }
             if (uid) writeRootFile(PROXY_CASCADE_UID_FILE, user + '\n', '0600');
         }
-        const script = ensureProxyCascadeBlock(readTextSafe(ROUTING_SCRIPT));
+        const script = optimizeRoutingIpSet(ensureProxyCascadeBlock(readTextSafe(ROUTING_SCRIPT)));
         if (!script) return res.status(404).json({ error: 'Скрипт маршрутизации не найден' });
         writeRootFile(ROUTING_SCRIPT, script, '0755');
         const r = await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
