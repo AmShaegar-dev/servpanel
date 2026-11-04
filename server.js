@@ -4459,10 +4459,18 @@ app.get('/api/cascade/proxy/test', checkAuth, requireAdmin, async (req, res) => 
     const ru = run('curl -4 -fsS --max-time 8 https://api.ipify.org');
     const eu = run('curl -4 -fsS --max-time 8 --interface awg1 https://api.ipify.org');
     const telemt = run(`sudo -u ${user} curl -4 -fsS --max-time 8 https://api.ipify.org`);
+    const tcp = (host, asUser) => run(`${asUser ? `sudo -u ${user} ` : ''}timeout 6 bash -c "cat < /dev/null > /dev/tcp/${host}/443" >/dev/null 2>&1 && echo ok || echo fail`);
+    const dcHosts = ['149.154.167.99', '149.154.175.53', '91.108.56.130', '149.154.167.51'];
+    const telegram = dcHosts.map(host => ({
+        host,
+        direct: tcp(host, false),
+        telemt: tcp(host, true)
+    }));
     res.json({
         ru,
         eu,
         telemt,
+        telegram,
         ok: !!telemt && !!eu && telemt === eu
     });
 });
@@ -9110,6 +9118,18 @@ app.get('/api/proxy/users/:name/links', checkAuth, async (req, res) => {
         }
         res.json({ username: name, links: linksWithPort, qr });
     } catch (e) { proxyError(res, e); }
+});
+
+// Журнал движка прокси: помогает увидеть ошибки egress/DC, когда Telegram
+// висит на «Проверка...».
+app.get('/api/proxy/log', checkAuth, requireAdmin, (req, res) => {
+    const units = ['telemt', 'mtproxyl', 'cachebridged', 'kvguardd'];
+    const out = {};
+    for (const unit of units) {
+        out[unit] = String(shTry('journalctl', ['-u', unit, '-n', '200', '--no-pager', '--output', 'short-iso'], { timeout: 15000 }) || '');
+    }
+    out.status = String(shTry('systemctl', ['status', 'telemt', '--no-pager', '-l'], { timeout: 15000 }) || '');
+    res.json(out);
 });
 
 app.post('/api/proxy/restart', checkAuth, requireAdmin, async (req, res) => {
