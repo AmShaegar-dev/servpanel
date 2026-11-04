@@ -9695,6 +9695,27 @@ app.post('/api/diag/traceroute', checkAuth, (req, res) => {
     });
 });
 
+// Диагностика шейпинга и сетевых счётчиков: помогает понять, почему
+// скорость через туннель отличается от канала.
+app.get('/api/diag/tc', checkAuth, requireAdmin, (req, res) => {
+    if (NO_SYSTEM()) return res.json({ demo: true });
+    const run = (cmd, args) => {
+        try { return String(sh('sudo', [cmd, ...args], { timeout: 15000 })); }
+        catch (e) { return String(e.stdout || e.message || ''); }
+    };
+    res.json({
+        qdisc: run('tc', ['-s', 'qdisc', 'show']),
+        classesAwg0: run('tc', ['-s', 'class', 'show', 'dev', 'awg0']),
+        classesEns3: run('tc', ['-s', 'class', 'show', 'dev', 'ens3']),
+        filtersAwg0: run('tc', ['-s', 'filter', 'show', 'dev', 'awg0']),
+        awg0: run('ip', ['-s', 'link', 'show', 'awg0']),
+        awg1: run('ip', ['-s', 'link', 'show', 'awg1']),
+        ens3: run('ip', ['-s', 'link', 'show', 'ens3']),
+        ss: run('ss', ['-s']),
+        routes: run('ip', ['route', 'show', 'table', 'all'])
+    });
+});
+
 app.get('/api/diag/log', checkAuth, (req, res) => {
     const logFile = String(req.query.file || '');
     if (DEMO_MODE) {
