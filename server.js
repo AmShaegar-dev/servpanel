@@ -9716,6 +9716,35 @@ app.get('/api/diag/tc', checkAuth, requireAdmin, (req, res) => {
     });
 });
 
+// Скорость внешнего канала сервера (не через VPN): помогает понять,
+// ограничен ли сам сервер или проблема на пути EU→RU/телефон.
+app.get('/api/diag/wan-speed', checkAuth, requireAdmin, (req, res) => {
+    if (NO_SYSTEM()) return res.json({ demo: true });
+    const urls = [
+        'https://speed.cloudflare.com/__down?bytes=25000000',
+        'https://proof.ovh.net/files/10Mb.dat'
+    ];
+    const results = [];
+    for (const url of urls) {
+        const out = shTry('curl', [
+            '-4', '-sS', '-o', '/dev/null',
+            '-w', '%{speed_download} %{time_total} %{size_download}',
+            '--max-time', '25', url
+        ], { timeout: 35000 });
+        const parts = String(out).trim().split(/\s+/);
+        const bps = Number(parts[0]) || 0;
+        results.push({
+            url,
+            bytes: Number(parts[2]) || 0,
+            seconds: Number(parts[1]) || 0,
+            bytesPerSec: bps,
+            mbps: (bps * 8 / 1e6).toFixed(2),
+            raw: String(out).slice(0, 300)
+        });
+    }
+    res.json({ results });
+});
+
 app.get('/api/diag/log', checkAuth, (req, res) => {
     const logFile = String(req.query.file || '');
     if (DEMO_MODE) {
