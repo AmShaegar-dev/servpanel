@@ -5325,6 +5325,7 @@ curl -s "https://www.google.com/search?q=test&amp;hl=en" | grep -o '&lt;html lan
 
 <h2>Правила AdGuard</h2>
 <p>Откройте AdGuard Home → <b>Filters</b> → <b>Custom filtering rules</b> и вставьте правила. Панель их не записывает: так вы можете проверить список и не хранить пароль AdGuard.</p>
+<p class="warn">Если WARP/Xray установлен на другом сервере (например, EU), замените IP в правилах на публичный IP того сервера. Ниже указан IP текущего сервера — это правильно только при локальной установке.</p>
 <p><b>Выбранные сервисы:</b> ${esc(serviceNames)}. Доменов: <b>${selectedDomains.length}</b>. Публичный IP для подмены: <code>${esc(publicIp)}</code>.</p>
 <pre>${esc(selectedRules)}</pre>
 <p class="muted">Если IP сервера изменился, замените его в правилах. После изменения правил очистите кэш AdGuard и DNS на клиенте: <code>ipconfig /flushdns</code>.</p>

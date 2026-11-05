@@ -688,6 +688,7 @@ curl https://panel.example.com:9101/health
 
 * порт **443** должен быть свободен; MTProto/nginx на нём конфликтуют с Xray;
 * клиенты должны использовать AdGuard Home как DoH/DoT DNS;
+* если WARP/Xray уже работает на EU-выходе, не устанавливайте его повторно на RU: скопируйте правила AdGuard из «Инструкции» и замените IP на публичный IP EU;
 * если WARP уже используется как системный VPN, не переводите его повторно в proxy-режим;
 * после изменения правил AdGuard очистите кэш AdGuard и DNS на клиенте.
 
@@ -931,15 +932,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.80/servpanel-3.0.80.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.80/servpanel-3.0.80.tar.gz.sha256
-sha256sum -c servpanel-3.0.80.tar.gz.sha256
-tar -xzf servpanel-3.0.80.tar.gz
-bash /root/servpanel-3.0.80/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.81/servpanel-3.0.81.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.81/servpanel-3.0.81.tar.gz.sha256
+sha256sum -c servpanel-3.0.81.tar.gz.sha256
+tar -xzf servpanel-3.0.81.tar.gz
+bash /root/servpanel-3.0.81/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.0.80`. Если `curl` не установлен:
+Должно вывести `3.0.81`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:
