@@ -10,6 +10,13 @@ echo "Дата: $(date -Is)"
 WARP_LISTEN_IP="${WARP_LISTEN_IP:-0.0.0.0}"
 WARP_LISTEN_PORT="${WARP_LISTEN_PORT:-443}"
 WARP_SOCKS_PORT="${WARP_SOCKS_PORT:-40000}"
+# v1 — WARP и Xray уже установлены, только раскладываем маршруты.
+# v2 — полная установка WARP + Xray с нуля.
+WARP_MODE="${WARP_MODE:-v2}"
+case "$WARP_MODE" in
+    v1|v2) ;;
+    *) echo "ERROR: неизвестный WARP_MODE=$WARP_MODE"; exit 1 ;;
+esac
 
 is_port() {
     case "$1" in
@@ -51,6 +58,20 @@ if [ "$WARP_LISTEN_IP" != "0.0.0.0" ] && [ "$WARP_LISTEN_IP" != "127.0.0.1" ] \
 fi
 
 echo "[2/6] Cloudflare WARP..."
+if [ "$WARP_MODE" = "v1" ]; then
+    echo "Вариант 1: WARP уже установлен — установку пропускаю."
+    command -v warp-cli >/dev/null 2>&1 || { echo "ERROR: WARP не установлен. Используйте вариант 2."; exit 1; }
+    warp-cli --accept-tos mode proxy || { echo "ERROR: не удалось включить proxy-режим WARP."; exit 1; }
+    warp-cli --accept-tos proxy port "$WARP_SOCKS_PORT" || { echo "ERROR: не удалось задать порт SOCKS ${WARP_SOCKS_PORT}."; exit 1; }
+    warp-cli --accept-tos connect >/dev/null 2>&1 || true
+    WARP_STATUS="$(warp-cli status 2>/dev/null || true)"
+    if ! printf '%s\n' "$WARP_STATUS" | grep -Eqi '(^|[[:space:]])Connected([[:space:]]|$)'; then
+        echo "ERROR: WARP не подключён. Сначала выполните warp-cli connect."
+        exit 1
+    fi
+    echo "WARP уже подключён."
+else
+
 if ! command -v warp-cli >/dev/null 2>&1; then
     . /etc/os-release
     CODENAME="${VERSION_CODENAME:-}"
@@ -107,6 +128,7 @@ if [ "$WARP_OK" -ne 1 ]; then
 else
     echo "WARP подключён."
 fi
+fi
 
 if curl -fsS --max-time 15 -x "socks5h://127.0.0.1:${WARP_SOCKS_PORT}" https://ipinfo.io/json >/tmp/warp-check.json 2>/dev/null; then
     echo "SOCKS5 WARP отвечает:"
@@ -120,17 +142,22 @@ echo "[3/6] Xray-core..."
 CONFIG="/usr/local/etc/xray/config.json"
 XRAY_BIN="$(command -v xray || true)"
 XRAY_FRESH=0
-if [ -z "$XRAY_BIN" ]; then
-    XRAY_FRESH=1
-    # Официальный установщик Xray сам создаёт config.json и молча затирает
-    # прежний. Если xray стоял раньше, сохраняем конфиг до установки.
-    mkdir -p /usr/local/etc/xray
-    if [ -f "$CONFIG" ]; then
-        cp -a "$CONFIG" "${CONFIG}.bak_$(date +%Y%m%d-%H%M%S)"
-        echo "Сохранён прежний конфиг Xray: ${CONFIG}.bak_*"
+if [ "$WARP_MODE" = "v1" ]; then
+    [ -n "$XRAY_BIN" ] || { echo "ERROR: Xray не установлен. Используйте вариант 2."; exit 1; }
+    echo "Вариант 1: Xray уже установлен — установку пропускаю."
+else
+    if [ -z "$XRAY_BIN" ]; then
+        XRAY_FRESH=1
+        # Официальный установщик Xray сам создаёт config.json и молча затирает
+        # прежний. Если xray стоял раньше, сохраняем конфиг до установки.
+        mkdir -p /usr/local/etc/xray
+        if [ -f "$CONFIG" ]; then
+            cp -a "$CONFIG" "${CONFIG}.bak_$(date +%Y%m%d-%H%M%S)"
+            echo "Сохранён прежний конфиг Xray: ${CONFIG}.bak_*"
+        fi
+        bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+        XRAY_BIN="/usr/local/bin/xray"
     fi
-    bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
-    XRAY_BIN="/usr/local/bin/xray"
 fi
 [ -x "$XRAY_BIN" ] || { echo "ERROR: бинарник Xray не найден."; exit 1; }
 mkdir -p /usr/local/etc/xray /var/log/xray
@@ -193,6 +220,7 @@ ${LISTEN_LINE}
   ],
   "outbounds": [
     {
+      "tag": "warp",
       "protocol": "socks",
       "settings": {
         "servers": [
@@ -204,10 +232,47 @@ ${LISTEN_LINE}
       }
     },
     {
+      "tag": "direct",
       "protocol": "freedom",
-      "tag": "direct"
+      "settings": {
+        "domainStrategy": "UseIPv4"
+      }
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
     }
-  ]
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "domain": [
+          "domain:youtube.com", "domain:youtu.be", "domain:ytimg.com",
+          "domain:youtube-nocookie.com", "domain:youtubekids.com",
+          "domain:youtubemusic.com", "domain:googlevideo.com",
+          "domain:ggpht.com", "domain:youtubei.googleapis.com"
+        ],
+        "outboundTag": "warp"
+      },
+      {
+        "type": "field",
+        "domain": [
+          "domain:google.com", "domain:googleapis.com", "domain:gstatic.com",
+          "domain:googleusercontent.com", "domain:gvt1.com",
+          "domain:google-analytics.com", "domain:googletagmanager.com",
+          "domain:gemini.google", "domain:deepmind.google"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "network": "tcp,udp",
+        "outboundTag": "warp"
+      }
+    ]
+  }
 }
 EOF
 

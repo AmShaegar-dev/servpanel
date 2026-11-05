@@ -1,4 +1,5 @@
 let logInterval = null;
+let warpPresetMode = '';
 let lastStats = {}; let isFetching = false; 
 let pollingInterval = null; let historyInterval = null; let agInterval = null;
 let currentChartView = 'global'; let currentChartRange = '1h'; let trafficChart = null;
@@ -173,10 +174,19 @@ async function pollLog(logFile) {
             clearInterval(logInterval); logInterval = null;
             badge.innerText = 'Установка завершена';
             badge.className = 'val-rx';
+            if (warpPresetMode) {
+                const mode = warpPresetMode;
+                warpPresetMode = '';
+                setTimeout(() => finishWarpPreset(mode), 400);
+            }
         } else if (d.status === 'error') {
             clearInterval(logInterval); logInterval = null;
             badge.innerText = 'Ошибка установки — смотрите лог';
             badge.className = 'val-tx';
+            if (warpPresetMode) {
+                warpPresetMode = '';
+                toast('WARP не установился', 'error', 'Смотрите лог установки');
+            }
         } else {
             badge.innerText = 'Установка идёт... ' + (d.progress || 0) + '%';
             badge.className = 'val-sys';
@@ -930,9 +940,7 @@ function warpField(id, fallback) {
 async function loadWarpStatus() {
     if (currentRole !== 'admin') return;
     try {
-        const res = await fetch('/api/warp/status');
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const st = await res.json();
+        const st = await apiJson('/api/warp/status');
         window.warpStatus = st;
 
         const badge = document.getElementById('warpStatusBadge');
@@ -952,13 +960,13 @@ async function loadWarpStatus() {
         const txt = document.getElementById('warpStatusText');
         if (txt) {
             if (!st.installed) {
-                txt.innerText = 'WARP на этом сервере не установлен. AdGuard работает как обычно. Если WARP уже стоит на EU-выходе, устанавливать его здесь не нужно — ниже можно записать правила AdGuard на IP туннеля EU.';
+                txt.innerText = 'WARP не установлен. Выберите вариант 2 для полной установки или вариант 1, если WARP и Xray уже стоят.';
             } else {
                 const parts = [
                     `Xray: ${st.xrayActive ? 'активен' : 'остановлен'} (${st.listenIp}:${st.listenPort})`,
                     `WARP: ${st.connected ? 'Connected' : (st.warpActive ? 'не подключён' : 'служба остановлена')}`,
                     `SOCKS: 127.0.0.1:${st.socksPort}`,
-                    `доменов: ${st.domains}`
+                    `сервисов: ${(st.selectedServices || []).length}`
                 ];
                 txt.innerText = parts.join(' · ');
             }
@@ -967,49 +975,119 @@ async function loadWarpStatus() {
             }
         }
 
-        // Не затираем введённые значения, но пустые поля заполняем дефолтами.
-        const setIfEmpty = (id, val) => {
-            const el = document.getElementById(id);
-            if (el && !String(el.value || '').trim()) el.value = val;
-        };
-        setIfEmpty('warpListenIp', st.listenIp || WARP_DEFAULTS.listenIp);
-        setIfEmpty('warpListenPort', st.listenPort || WARP_DEFAULTS.listenPort);
-        setIfEmpty('warpSocksPort', st.socksPort || WARP_DEFAULTS.socksPort);
-        setIfEmpty('warpRewriteIp',
-            (st.listenIp && st.listenIp !== '0.0.0.0') ? st.listenIp : WARP_DEFAULTS.rewriteIp);
-        window.warpFieldsLoaded = true;
-
-        // Подставляем данные AdGuard из соседней формы, если пользователь их уже ввёл.
-        const agUrl = document.getElementById('agUrl');
-        const wUrl = document.getElementById('warpAgUrl');
-        if (wUrl && !wUrl.value && agUrl) wUrl.value = agUrl.value || '';
-        const agUser = document.getElementById('agUser');
-        const wUser = document.getElementById('warpAgUser');
-        if (wUser && !wUser.value && agUser) wUser.value = agUser.value || '';
-        const agPass = document.getElementById('agPass');
-        const wPass = document.getElementById('warpAgPass');
-        if (wPass && !wPass.value && agPass) wPass.value = agPass.value || '';
+        renderWarpChecklist(st.checks || []);
+        renderWarpServices(st.services || []);
     } catch (e) {
         const txt = document.getElementById('warpStatusText');
         if (txt) txt.innerText = 'Не удалось получить статус WARP: ' + e.message;
     }
 }
 
-async function installWarp() {
-    const listenIp = warpField('warpListenIp', WARP_DEFAULTS.listenIp);
-    const listenPort = warpField('warpListenPort', WARP_DEFAULTS.listenPort);
-    const socksPort = warpField('warpSocksPort', WARP_DEFAULTS.socksPort);
-    if (!/^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(listenIp.trim())) {
-        return alert('Укажите корректный IP для Xray (обычно 127.0.0.1)');
+function renderWarpChecklist(checks) {
+    const el = document.getElementById('warpChecklist');
+    if (!el) return;
+    const items = Array.isArray(checks) ? checks : [];
+    const okCount = items.filter(i => i.ok).length;
+    el.innerHTML = items.map(i => `
+        <div class="checklist-item">
+            <span class="checklist-ico ${i.ok ? 'checklist-ok' : 'checklist-err'}">${i.ok ? '✓' : '!'}</span>
+            <div><b class="${i.ok ? 'checklist-ok' : 'checklist-err'}">${esc(i.title)}</b>
+            <div class="checklist-desc">${esc(i.detail || '')}</div></div>
+        </div>`).join('') || '<div class="sub-text">Проверок пока нет.</div>';
+    const badge = document.getElementById('warpChecklistBadge');
+    if (badge) {
+        badge.className = 'badge ' + (items.length && okCount === items.length ? 'badge-good' : 'badge-warn');
+        badge.innerText = `${okCount}/${items.length}`;
     }
-    if (!confirm('Установить Cloudflare WARP + Xray?\n\nБудут установлены пакеты cloudflare-warp и Xray, WARP переключится в SOCKS5-режим. AdGuard не изменится до нажатия «Записать правила».')) return;
-    switchTab('tab-install', document.getElementById('navInstall'));
-    await startInstall('warp', '/var/log/warp_install.log', {
-        listenIp: listenIp.trim(),
-        listenPort: String(listenPort).trim(),
-        socksPort: String(socksPort).trim()
+}
+
+function renderWarpServices(services) {
+    const el = document.getElementById('warpServices');
+    if (!el) return;
+    const list = Array.isArray(services) ? services : [];
+    el.innerHTML = `<div style="width:100%; display:flex; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
+        <button class="btn btn-ghost btn-sm" type="button" onclick="warpSelectAll(true)">Все AI</button>
+        <button class="btn btn-ghost btn-sm" type="button" onclick="warpSelectAll(false)">Снять</button>
+    </div>` + list.map(s => `
+        <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text-muted); border:1px solid var(--border); border-radius:8px; padding:7px 10px; background:rgba(0,0,0,.12);">
+            <input type="checkbox" data-warp-service="${esc(s.id)}" data-warp-group="${esc(s.group || '')}" ${s.selected ? 'checked' : ''} style="width:auto;">
+            ${esc(s.label)}
+        </label>`).join('');
+}
+
+function warpSelectAll(flag) {
+    document.querySelectorAll('#warpServices input[data-warp-service]').forEach(el => {
+        if (flag === true && el.dataset.warpGroup && el.dataset.warpGroup !== 'AI') return;
+        el.checked = !!flag;
     });
 }
+
+function warpSelectedServiceIds() {
+    return Array.from(document.querySelectorAll('#warpServices input[data-warp-service]:checked'))
+        .map(el => el.dataset.warpService).filter(Boolean);
+}
+
+async function startWarpPreset(mode) {
+    const ids = warpSelectedServiceIds();
+    if (!ids.length) {
+        toast('Выберите сервисы', 'error', 'Отметьте хотя бы одну нейросеть или YouTube');
+        return;
+    }
+    const text = mode === 'v1'
+        ? 'Накатить вариант 1?\n\nWARP и Xray уже должны быть установлены. Панель настроит маршрутизацию Xray и правила AdGuard для выбранных сервисов.'
+        : 'Накатить вариант 2?\n\nБудут установлены Cloudflare WARP и Xray, настроен SOCKS5, маршрутизация и правила AdGuard. Порт 443 должен быть свободен.';
+    if (!confirm(text)) return;
+    try {
+        await apiJson('/api/warp/services', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ services: ids })
+        });
+        switchTab('tab-install', document.getElementById('navInstall'));
+        warpPresetMode = mode;
+        await startInstall('warp', '/var/log/warp_install.log', {
+            warpMode: mode,
+            listenIp: '0.0.0.0',
+            listenPort: '443',
+            socksPort: '40000'
+        });
+    } catch (e) {
+        warpPresetMode = '';
+        toast('Не удалось запустить WARP', 'error', e.message);
+    }
+}
+
+async function finishWarpPreset(mode) {
+    toast(mode === 'v1' ? 'WARP: маршруты обновлены' : 'WARP + Xray установлены', 'success');
+    await syncWarpAdGuard(true);
+}
+
+async function syncWarpAdGuard(silent) {
+    const val = id => (document.getElementById(id) || {}).value || '';
+    const url = val('agUrl') || 'http://127.0.0.1:3000';
+    const user = val('agUser');
+    const pass = val('agPass');
+    let rewriteIp = '';
+    try {
+        const si = await apiJson('/api/server-info');
+        if (si && si.ip && si.ip !== 'Неизвестно') rewriteIp = si.ip;
+    } catch (e) { /* ignore */ }
+    if (!rewriteIp) rewriteIp = '127.0.0.1';
+    try {
+        const svc = await apiJson('/api/warp/services');
+        const domains = Array.isArray(svc.domains) ? svc.domains : [];
+        if (!domains.length) throw new Error('Не выбраны сервисы');
+        const d = await apiJson('/api/warp/adguard', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, user, pass, rewriteIp, domains })
+        });
+        toast('Правила AdGuard обновлены', 'success', `${d.count} доменов → ${d.rewriteIp}`);
+    } catch (e) {
+        toast('WARP настроен, но AdGuard не обновлён', 'error', e.message + '. Проверьте URL/логин AdGuard в разделе «Службы».');
+    }
+    await loadWarpStatus();
+}
+
+function installWarp() { return startWarpPreset('v2'); }
 
 async function warpPower(enable) {
     if (!confirm(enable ? 'Включить Xray и подключить WARP?' : 'Остановить Xray и отключить WARP? Правила AdGuard останутся, но перестанут работать.')) return;
@@ -1027,7 +1105,7 @@ async function warpPower(enable) {
 
 async function warpTest() {
     const el = document.getElementById('warpTestResult');
-    const socksPort = warpField('warpSocksPort', WARP_DEFAULTS.socksPort);
+    const socksPort = (window.warpStatus && window.warpStatus.socksPort) || WARP_DEFAULTS.socksPort;
     if (el) { el.style.color = 'var(--text-muted)'; el.innerText = `Проверка WARP через SOCKS5 127.0.0.1:${socksPort}...`; }
     try {
         const res = await fetch('/api/warp/test', {
@@ -1044,48 +1122,6 @@ async function warpTest() {
             el.style.color = 'var(--danger)';
             el.innerText = 'WARP не ответил: ' + (d.error || 'неизвестная ошибка');
         }
-    } catch (e) {
-        if (el) { el.style.color = 'var(--danger)'; el.innerText = 'Сетевая ошибка: ' + e.message; }
-    }
-}
-
-async function syncWarpAdGuard() {
-    const val = id => (document.getElementById(id) || {}).value || '';
-    const url = val('warpAgUrl') || val('agUrl');
-    const user = val('warpAgUser') || val('agUser');
-    const pass = val('warpAgPass') || val('agPass');
-    let rewriteIp = val('warpRewriteIp').trim();
-    if (!rewriteIp || rewriteIp === '0.0.0.0') rewriteIp = warpField('warpListenIp', WARP_DEFAULTS.listenIp);
-    if (!rewriteIp || rewriteIp === '0.0.0.0') rewriteIp = WARP_DEFAULTS.rewriteIp;
-    if (!url) return alert('Укажите URL API AdGuard Home');
-    const count = (window.warpStatus && window.warpStatus.domains) || 0;
-    if (window.warpStatus) {
-        if (window.warpStatus.installed && !window.warpStatus.connected) {
-            if (!confirm('WARP на этом сервере не подключён. Если записать правила, эти домены могут перестать открываться. Продолжить?')) return;
-        } else if (!window.warpStatus.installed) {
-            if (!confirm('WARP на этом сервере не установлен. Если он уже работает на EU-выходе, правила можно записать на IP его туннеля. Продолжить?')) return;
-        }
-    }
-    if (!confirm(`Записать ${count} правил dnsrewrite в AdGuard?\n\nСтарый блок SERVEPANEL WARP будет заменён, остальные пользовательские правила сохранятся.`)) return;
-
-    const el = document.getElementById('warpAgResult');
-    if (el) { el.style.color = 'var(--text-muted)'; el.innerText = 'Запись правил в AdGuard...'; }
-    try {
-        const res = await fetch('/api/warp/adguard', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, user, pass, rewriteIp })
-        });
-        const d = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            if (el) { el.style.color = 'var(--danger)'; el.innerText = d.error || 'Ошибка AdGuard'; }
-            return;
-        }
-        if (el) {
-            el.style.color = 'var(--rx-color)';
-            el.innerText = `Готово: ${d.count} доменов -> ${d.rewriteIp}. Всего правил в AdGuard: ${d.totalRules}.`;
-        }
-        loadWarpStatus();
     } catch (e) {
         if (el) { el.style.color = 'var(--danger)'; el.innerText = 'Сетевая ошибка: ' + e.message; }
     }

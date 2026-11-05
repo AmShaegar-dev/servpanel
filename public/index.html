@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.77">
+    <meta name="panel-version" content="3.0.78">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -800,35 +800,42 @@
                 <div class="card" id="warpCard" data-admin-only style="margin-bottom: 20px;">
                     <div class="card-head">
                         <div>
-                            <h3>Cloudflare WARP для AdGuard <span class="badge badge-muted">опционально</span></h3>
-                            <p>Xray принимает TLS на 127.0.0.1:443, WARP уходит в SOCKS5. AdGuard подменяет A-записи выбранных доменов на 127.0.0.1 — запросы к ним идут через WARP, минуя блокировки провайдера.</p>
+                            <h3>Cloudflare WARP для нейросетей <span class="badge badge-muted">Xray + AdGuard</span></h3>
+                            <p>Xray принимает TLS на порту 443 и по SNI направляет Google/Gemini напрямую, а YouTube, Claude, ChatGPT и другие AI-сервисы — через Cloudflare WARP. AdGuard подменяет A-записи выбранных доменов на IP сервера.</p>
                         </div>
                         <span id="warpStatusBadge" class="badge badge-muted">не установлен</span>
                     </div>
                     <div id="warpStatusText" class="sub-text" style="margin-bottom: 12px;">Проверка состояния...</div>
 
-                    <div class="controls-row" style="margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
-                        <input type="text" id="warpListenIp" value="0.0.0.0" placeholder="0.0.0.0" aria-label="IP Xray" style="width: 170px;" title="Адрес, на котором Xray принимает TLS. По инструкции — 0.0.0.0 (все интерфейсы, поле listen не пишется). Укажите конкретный IP, если Xray должен слушать только его." onblur="if(!this.value.trim())this.value='0.0.0.0'">
-                        <input type="number" id="warpListenPort" value="443" placeholder="443" aria-label="Порт Xray" style="width: 90px;" title="TCP-порт Xray" onblur="if(!this.value)this.value='443'">
-                        <input type="number" id="warpSocksPort" value="40000" placeholder="40000" aria-label="SOCKS5-порт WARP" style="width: 100px;" title="Локальный SOCKS5-порт WARP" onblur="if(!this.value)this.value='40000'">
-                        <button class="btn-primary" onclick="installWarp()">Установить WARP + Xray</button>
-                        <button class="btn-soft" onclick="warpPower(true)">Включить</button>
-                        <button class="btn-dark" onclick="warpPower(false)">Остановить</button>
-                        <button class="btn-dark" onclick="uninstallModule('warp')">🗑 Удалить</button>
-                        <button class="btn-dark" onclick="warpTest()">Тест WARP</button>
+                    <div class="card" style="margin:0 0 14px; background:rgba(0,0,0,.14);">
+                        <div class="card-head" style="margin-bottom:6px;">
+                            <div><h4 style="margin:0;">Чек-лист</h4><p style="margin:2px 0 0;">Что проверено для рабочей схемы.</p></div>
+                            <span class="badge badge-muted" id="warpChecklistBadge">—</span>
+                        </div>
+                        <div id="warpChecklist"></div>
                     </div>
-                    <div id="warpTestResult" class="sub-text" style="margin-bottom: 14px;"></div>
 
-                    <h4 style="margin: 10px 0 6px;">Правила AdGuard для WARP (WARP может быть на EU-выходе)</h4>
-                    <div class="controls-row" style="flex-wrap: wrap; gap: 8px;">
-                        <input type="text" id="warpAgUrl" placeholder="URL AdGuard API (127.0.0.1:8090)" style="width: 240px;">
-                        <input type="text" id="warpAgUser" placeholder="Логин AdGuard" style="width: 140px;">
-                        <input type="password" id="warpAgPass" placeholder="Пароль AdGuard" style="width: 140px;">
-                        <input type="text" id="warpRewriteIp" value="127.0.0.1" placeholder="127.0.0.1" aria-label="IP для dnsrewrite" style="width: 170px;" title="Адрес, на который AdGuard перепишет A-записи. 127.0.0.1 — Xray на этом же сервере." onblur="if(!this.value.trim())this.value='127.0.0.1'">
-                        <button class="btn-primary" onclick="syncWarpAdGuard()">Записать правила</button>
+                    <h4 style="margin: 10px 0 6px;">Какие сервисы пускать через WARP</h4>
+                    <div id="warpServices" class="controls-row" style="flex-wrap:wrap; gap:8px; margin-bottom:10px;"></div>
+
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; margin:12px 0;">
+                        <div style="border:1px solid var(--border); border-radius:10px; padding:14px; background:rgba(0,0,0,.12);">
+                            <h4 style="margin:0 0 6px;">Вариант 1 — WARP уже установлен</h4>
+                            <p style="margin:0 0 10px; color:var(--text-muted); font-size:12.5px;">Только раскладывает маршруты Xray и правила AdGuard. WARP и Xray должны быть уже установлены. Подходит, когда WARP уже работает на этом сервере.</p>
+                            <button class="btn-primary" onclick="startWarpPreset('v1')">Накатить вариант 1</button>
+                        </div>
+                        <div style="border:1px solid var(--border); border-radius:10px; padding:14px; background:rgba(0,0,0,.12);">
+                            <h4 style="margin:0 0 6px;">Вариант 2 — полная установка с нуля</h4>
+                            <p style="margin:0 0 10px; color:var(--text-muted); font-size:12.5px;">Ставит Cloudflare WARP и Xray, настраивает SOCKS5, маршрутизацию и AdGuard. Нужен свободный порт 443.</p>
+                            <button class="btn-primary" onclick="startWarpPreset('v2')">Накатить вариант 2</button>
+                        </div>
                     </div>
-                    <div id="warpAgResult" class="sub-text" style="margin-top: 8px;"></div>
-                    <div class="sub-text" style="margin-top: 8px;">WARP не устанавливается автоматически. Если он уже работает на EU-выходе, устанавливать его на этом сервере не нужно — только запишите правила AdGuard на IP туннеля EU. Не ставьте компонент, если WARP уже используется здесь как системный VPN: он будет переведён в режим SOCKS5.</div>
+
+                    <div class="controls-row" style="flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+                        <a class="btn-dark" href="/api/warp/instructions" target="_blank" rel="noopener" style="text-decoration:none; padding:8px 14px; display:inline-block;">Инструкции</a>
+                        <button class="btn-dark advanced-only" onclick="uninstallModule('warp')">Удалить WARP</button>
+                    </div>
+                    <div id="warpTestResult" class="sub-text" style="margin-bottom: 4px;"></div>
                 </div>
 
                 <div class="stats-cards">

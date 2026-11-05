@@ -665,24 +665,31 @@ curl https://panel.example.com:9101/health
 
 Логин и пароль AdGuard хранятся только в `sessionStorage` текущей вкладки и очищаются при её закрытии.
 
-### Cloudflare WARP для AdGuard (опционально)
+### Cloudflare WARP для нейросетей (Xray + AdGuard)
 
-WARP не устанавливается автоматически. На вкладке **«Службы и DNS»** есть отдельная карточка **«Cloudflare WARP для AdGuard»**; пока её не открыть и не нажать «Установить», панель работает как обычно.
+На вкладке **«Службы и DNS»** есть карточка **«Cloudflare WARP для нейросетей»**. В ней две кнопки вместо ручных полей:
 
-Что делает компонент:
+* **Вариант 1 — WARP уже установлен.** Настраивает только Xray и AdGuard: маршруты и правила для выбранных сервисов. WARP и Xray должны быть уже установлены.
+* **Вариант 2 — полная установка с нуля.** Ставит `cloudflare-warp` и Xray, настраивает SOCKS5 на `127.0.0.1:40000`, маршрутизацию и AdGuard.
 
-* ставит `cloudflare-warp` и переводит его в SOCKS5-режим на `127.0.0.1:40000`;
-* ставит Xray и слушает TLS на IP туннеля AWG (по умолчанию `10.8.1.1:443`);
-* Xray сниффит SNI и отправляет соединение в SOCKS5 WARP;
-* кнопка «Записать правила» добавляет в AdGuard блок `dnsrewrite` для доменов из `warp-domains.txt` (200 доменов) на IP туннеля.
+Перед запуском отметьте галочками, какие сервисы нужно пускать через WARP: ChatGPT/OpenAI, Claude/Anthropic, Gemini/Google AI, Grok/xAI, Copilot, DeepSeek, Perplexity, YouTube. Кнопка «Все AI» отмечает только нейросети.
 
-Почему IP туннеля, а не публичный IP: так трафик клиента идёт через AWG-каскад, а не напрямую на EU-сервер. Если WARP блокируется в РФ, устанавливайте компонент на EU-выходе и указывайте его туннельный IP. Правила AdGuard при этом записываются из панели RU-входа: WARP на RU ставить не нужно, достаточно указать IP туннеля EU в поле «IP для dnsrewrite».
+Как работает схема:
 
-Правила в AdGuard обрамляются маркерами `# BEGIN SERVEPANEL WARP` / `# END SERVEPANEL WARP`, поэтому повторная синхронизация заменяет только блок панели и не трогает остальные пользовательские правила.
+* Xray слушает TLS на `0.0.0.0:443` и по SNI определяет домен;
+* Google/Gemini идут **direct** с IP сервера (французский IP);
+* YouTube, Claude, ChatGPT и остальные AI-сервисы идут через **WARP**;
+* AdGuard подменяет A-записи выбранных доменов на публичный IP сервера, поэтому клиенты с DoH AdGuard попадают в Xray;
+* правила AdGuard обрамляются `# BEGIN SERVEPANEL WARP` / `# END SERVEPANEL WARP` и не трогают остальные правила.
 
-Не ставьте Xray на `0.0.0.0`, если не хотите открыть вход на публичный IP. По умолчанию панель предлагает `10.8.1.1`.
+В карточке есть **чек-лист**: WARP установлен, WARP Connected, Xray active, маршрутизация, порт 443, SOCKS5, правила AdGuard и выбранные сервисы. Кнопка **«Инструкции»** открывает полную страницу с ручными командами, схемой работы, проверкой и откатом.
 
-Компонент переводит Cloudflare WARP в режим `proxy` (SOCKS5 на localhost). Если WARP уже используется на этом сервере как системный VPN, не устанавливайте компонент: режим будет изменён.
+Важно:
+
+* порт **443** должен быть свободен; MTProto/nginx на нём конфликтуют с Xray;
+* клиенты должны использовать AdGuard Home как DoH/DoT DNS;
+* если WARP уже используется как системный VPN, выбирайте вариант 1 и не переводите его повторно в proxy-режим;
+* после изменения правил очистите кэш AdGuard и DNS на клиенте.
 
 ---
 
@@ -924,15 +931,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.77/servpanel-3.0.77.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.77/servpanel-3.0.77.tar.gz.sha256
-sha256sum -c servpanel-3.0.77.tar.gz.sha256
-tar -xzf servpanel-3.0.77.tar.gz
-bash /root/servpanel-3.0.77/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.78/servpanel-3.0.78.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.78/servpanel-3.0.78.tar.gz.sha256
+sha256sum -c servpanel-3.0.78.tar.gz.sha256
+tar -xzf servpanel-3.0.78.tar.gz
+bash /root/servpanel-3.0.78/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.0.77`. Если `curl` не установлен:
+Должно вывести `3.0.78`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:
