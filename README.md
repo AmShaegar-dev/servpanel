@@ -669,27 +669,27 @@ curl https://panel.example.com:9101/health
 
 На вкладке **«Службы и DNS»** есть карточка **«Cloudflare WARP для нейросетей»**. В ней две кнопки вместо ручных полей:
 
-* **Вариант 1 — WARP уже установлен.** Настраивает только Xray и AdGuard: маршруты и правила для выбранных сервисов. WARP и Xray должны быть уже установлены.
-* **Вариант 2 — полная установка с нуля.** Ставит `cloudflare-warp` и Xray, настраивает SOCKS5 на `127.0.0.1:40000`, маршрутизацию и AdGuard.
+* **Вариант 1 — первая инструкция.** Ставит `cloudflare-warp` и Xray, если их нет, и настраивает Xray так, что весь трафик идёт через WARP. Google и AI-сервисы выходят через Cloudflare.
+* **Вариант 2 — вторая инструкция.** Ставит WARP и Xray, если их нет. Google/Gemini идут **direct** с IP сервера, YouTube и AI-сервисы — через **WARP**.
 
-Перед запуском отметьте галочками, какие сервисы нужно пускать через WARP: ChatGPT/OpenAI, Claude/Anthropic, Gemini/Google AI, Grok/xAI, Copilot, DeepSeek, Perplexity, YouTube. Кнопка «Все AI» отмечает только нейросети.
+Перед запуском отметьте галочками, какие AI-сервисы нужно пускать через WARP: ChatGPT/OpenAI, Claude/Anthropic, Gemini/Google AI, Grok/xAI, Copilot, GitHub Copilot, ElevenLabs, Codeium/Windsurf, DeepL, Trae, JetBrains AI, DeepSeek, Perplexity. YouTube в списке нет. Кнопка «Все AI» отмечает все нейросети.
 
 Как работает схема:
 
 * Xray слушает TLS на `0.0.0.0:443` и по SNI определяет домен;
-* Google/Gemini идут **direct** с IP сервера (французский IP);
-* YouTube, Claude, ChatGPT и остальные AI-сервисы идут через **WARP**;
+* вариант 1: весь трафик Xray идёт в первый outbound `warp`;
+* вариант 2: Google/Gemini → `direct`, YouTube и AI → `warp`;
 * AdGuard подменяет A-записи выбранных доменов на публичный IP сервера, поэтому клиенты с DoH AdGuard попадают в Xray;
-* правила AdGuard обрамляются `# BEGIN SERVEPANEL WARP` / `# END SERVEPANEL WARP` и не трогают остальные правила.
+* **правила AdGuard панель не записывает.** Готовый список `dnsrewrite` для выбранных сервисов и полный список из первой инструкции находятся на странице **«Инструкции»**. Скопируйте их в AdGuard Home → Filters → Custom filtering rules.
 
-В карточке есть **чек-лист**: WARP установлен, WARP Connected, Xray active, маршрутизация, порт 443, SOCKS5, правила AdGuard и выбранные сервисы. Кнопка **«Инструкции»** открывает полную страницу с ручными командами, схемой работы, проверкой и откатом.
+В карточке есть **чек-лист**: WARP установлен, WARP Connected, Xray active, маршрутизация, порт 443, SOCKS5 и выбранные сервисы. Кнопка **«Инструкции»** открывает полную страницу с командами для обоих вариантов, схемой работы, правилами AdGuard, проверкой и откатом.
 
 Важно:
 
 * порт **443** должен быть свободен; MTProto/nginx на нём конфликтуют с Xray;
 * клиенты должны использовать AdGuard Home как DoH/DoT DNS;
-* если WARP уже используется как системный VPN, выбирайте вариант 1 и не переводите его повторно в proxy-режим;
-* после изменения правил очистите кэш AdGuard и DNS на клиенте.
+* если WARP уже используется как системный VPN, не переводите его повторно в proxy-режим;
+* после изменения правил AdGuard очистите кэш AdGuard и DNS на клиенте.
 
 ---
 
@@ -931,15 +931,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.79/servpanel-3.0.79.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.79/servpanel-3.0.79.tar.gz.sha256
-sha256sum -c servpanel-3.0.79.tar.gz.sha256
-tar -xzf servpanel-3.0.79.tar.gz
-bash /root/servpanel-3.0.79/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.80/servpanel-3.0.80.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.80/servpanel-3.0.80.tar.gz.sha256
+sha256sum -c servpanel-3.0.80.tar.gz.sha256
+tar -xzf servpanel-3.0.80.tar.gz
+bash /root/servpanel-3.0.80/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.0.79`. Если `curl` не установлен:
+Должно вывести `3.0.80`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:

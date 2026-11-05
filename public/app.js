@@ -960,9 +960,10 @@ async function loadWarpStatus() {
         const txt = document.getElementById('warpStatusText');
         if (txt) {
             if (!st.installed) {
-                txt.innerText = 'WARP не установлен. Выберите вариант 2 для полной установки или вариант 1, если WARP и Xray уже стоят.';
+                txt.innerText = 'WARP не установлен. Вариант 1 — первая инструкция (всё через WARP), вариант 2 — вторая (Google напрямую). Оба варианта ставят WARP и Xray, если их нет.';
             } else {
                 const parts = [
+                    `Режим: ${st.mode === 'v1' ? '1 (всё через WARP)' : '2 (Google direct)'}`,
                     `Xray: ${st.xrayActive ? 'активен' : 'остановлен'} (${st.listenIp}:${st.listenPort})`,
                     `WARP: ${st.connected ? 'Connected' : (st.warpActive ? 'не подключён' : 'служба остановлена')}`,
                     `SOCKS: 127.0.0.1:${st.socksPort}`,
@@ -970,9 +971,7 @@ async function loadWarpStatus() {
                 ];
                 txt.innerText = parts.join(' · ');
             }
-            if (st.adguard && st.adguard.syncedAt) {
-                txt.innerText += ` · AdGuard: ${st.adguard.count} доменов, ${new Date(st.adguard.syncedAt).toLocaleString()}`;
-            }
+            txt.innerText += ' · правила AdGuard не записываются автоматически — скопируйте их из «Инструкции»';
         }
 
         renderWarpChecklist(st.checks || []);
@@ -1030,12 +1029,12 @@ function warpSelectedServiceIds() {
 async function startWarpPreset(mode) {
     const ids = warpSelectedServiceIds();
     if (!ids.length) {
-        toast('Выберите сервисы', 'error', 'Отметьте хотя бы одну нейросеть или YouTube');
+        toast('Выберите сервисы', 'error', 'Отметьте хотя бы одну нейросеть');
         return;
     }
     const text = mode === 'v1'
-        ? 'Накатить вариант 1?\n\nWARP и Xray уже должны быть установлены. Панель настроит маршрутизацию Xray и правила AdGuard для выбранных сервисов.'
-        : 'Накатить вариант 2?\n\nБудут установлены Cloudflare WARP и Xray, настроен SOCKS5, маршрутизация и правила AdGuard. Порт 443 должен быть свободен.';
+        ? 'Накатить вариант 1?\n\nПервая инструкция: WARP и Xray ставятся с нуля (если их нет), весь трафик идёт через WARP. Порт 443 должен быть свободен. Правила AdGuard панель не записывает — их нужно скопировать из «Инструкции».'
+        : 'Накатить вариант 2?\n\nВторая инструкция: WARP и Xray ставятся с нуля (если их нет), Google идёт напрямую, YouTube и AI — через WARP. Порт 443 должен быть свободен. Правила AdGuard панель не записывает — их нужно скопировать из «Инструкции».';
     if (!confirm(text)) return;
     try {
         await apiJson('/api/warp/services', {
@@ -1057,33 +1056,8 @@ async function startWarpPreset(mode) {
 }
 
 async function finishWarpPreset(mode) {
-    toast(mode === 'v1' ? 'WARP: маршруты обновлены' : 'WARP + Xray установлены', 'success');
-    await syncWarpAdGuard(true);
-}
-
-async function syncWarpAdGuard(silent) {
-    const val = id => (document.getElementById(id) || {}).value || '';
-    const url = val('agUrl') || 'http://127.0.0.1:3000';
-    const user = val('agUser');
-    const pass = val('agPass');
-    let rewriteIp = '';
-    try {
-        const si = await apiJson('/api/server-info');
-        if (si && si.ip && si.ip !== 'Неизвестно') rewriteIp = si.ip;
-    } catch (e) { /* ignore */ }
-    if (!rewriteIp) rewriteIp = '127.0.0.1';
-    try {
-        const svc = await apiJson('/api/warp/services');
-        const domains = Array.isArray(svc.domains) ? svc.domains : [];
-        if (!domains.length) throw new Error('Не выбраны сервисы');
-        const d = await apiJson('/api/warp/adguard', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url, user, pass, rewriteIp, domains })
-        });
-        toast('Правила AdGuard обновлены', 'success', `${d.count} доменов → ${d.rewriteIp}`);
-    } catch (e) {
-        toast('WARP настроен, но AdGuard не обновлён', 'error', e.message + '. Проверьте URL/логин AdGuard в разделе «Службы».');
-    }
+    toast(mode === 'v1' ? 'Вариант 1 применён' : 'Вариант 2 применён', 'success',
+        'Правила AdGuard панель не записывает — скопируйте их из «Инструкции».');
     await loadWarpStatus();
 }
 

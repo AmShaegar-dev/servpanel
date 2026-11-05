@@ -136,35 +136,87 @@ const WARP_SERVICE_CATALOG = [
     {
         id: 'chatgpt', group: 'AI', label: 'ChatGPT / OpenAI',
         domains: ['openai.com', 'chatgpt.com', 'oaistatic.com', 'oaiusercontent.com', 'sora.com',
-            'api.openai.com', 'auth.openai.com', 'platform.openai.com', 'android.chat.openai.com',
-            'ios.chat.openai.com', 'tcr9i.chat.openai.com', 'webrtc.chatgpt.com', 'operator.chatgpt.com',
-            'ab.chatgpt.com', 'cdn.oaistatic.com', 'files.oaiusercontent.com', 'videos.openai.com',
-            'sora.chatgpt.com', 'www.openai.com', 'www.chatgpt.com']
+            'api.openai.com', 'auth.openai.com', 'auth0.openai.com', 'platform.openai.com',
+            'android.chat.openai.com', 'ios.chat.openai.com', 'tcr9i.chat.openai.com',
+            'webrtc.chatgpt.com', 'operator.chatgpt.com', 'ab.chatgpt.com', 'cdn.oaistatic.com',
+            'files.oaiusercontent.com', 'videos.openai.com', 'sora.chatgpt.com',
+            'www.openai.com', 'www.chatgpt.com']
     },
     {
         id: 'claude', group: 'AI', label: 'Claude / Anthropic',
-        domains: ['anthropic.com', 'claude.ai', 'api.anthropic.com', 'console.anthropic.com',
-            'platform.claude.com', 'auth.anthropic.com', 'support.anthropic.com', 'status.anthropic.com',
+        domains: ['anthropic.com', 'claude.ai', 'api.anthropic.com', 'api.claude.ai',
+            'api.console.anthropic.com', 'console.anthropic.com', 'platform.claude.com',
+            'auth.anthropic.com', 'support.anthropic.com', 'status.anthropic.com',
             'statsig.anthropic.com', 'cdn.anthropic.com', 'a-cdn.anthropic.com', 's-cdn.anthropic.com',
-            'a.claude.ai', 'api.claude.ai', 'www.claude.ai', 'www.anthropic.com']
+            'a.claude.ai', 'a-api.anthropic.com', 'www.claude.ai', 'www.anthropic.com', 'workos.imgix.net']
     },
     {
         id: 'gemini', group: 'AI', label: 'Gemini / Google AI',
         domains: ['gemini.google.com', 'gemini.google', 'ai.google.dev', 'aistudio.google.com',
             'generativelanguage.googleapis.com', 'deepmind.google', 'deepmind.com', 'labs.google',
-            'notebooklm.google.com', 'notebooklm.google', 'bard.google.com',
-            'google.com', 'googleapis.com', 'gstatic.com', 'googleusercontent.com', 'gvt1.com',
-            'google-analytics.com', 'googletagmanager.com']
+            'notebooklm.google.com', 'notebooklm.google', 'notebook.google', 'bard.google.com',
+            'google.com', 'google.ru', 'services.google.com', 'googleapis.com', 'gstatic.com',
+            'googleusercontent.com', 'gvt1.com', 'google-analytics.com', 'googletagmanager.com',
+            'apis.google.com', 'play.google.com', 'play.googleapis.com', 'play-fe.googleapis.com',
+            'android.clients.google.com', 'android.googleapis.com', 'connectivitycheck.gstatic.com',
+            'clients3.google.com', 'clients1.google.com', 'update.googleapis.com', 'dl.google.com',
+            'o.pki.goog', 'mdp-appconf-ru.heytapdl.com', 'aitestkitchen.withgoogle.com',
+            'aisandbox-pa.googleapis.com', 'webchannel-alkalimakersuite-pa.clients6.google.com',
+            'alkalimakersuite-pa.clients6.google.com', 'alkalicore-pa.clients6.google.com',
+            'assistant-s3-pa.googleapis.com', 'proactivebackend-pa.googleapis.com',
+            'daily-cloudcode-pa.googleapis.com', 'developerprofiles-pa.googleapis.com',
+            'fitbit-pa.googleapis.com', 'fitbitvestibuleshim-pa.googleapis.com',
+            'geller-pa.googleapis.com', 'generativeai.google']
     },
     {
         id: 'grok', group: 'AI', label: 'Grok / xAI',
         domains: ['x.ai', 'grok.com', 'api.x.ai', 'assets.x.ai', 'accounts.x.ai', 'grok.x.ai',
-            'www.grok.com', 'www.x.ai']
+            'assets.grok.com', 'www.grok.com', 'www.x.ai']
     },
     {
         id: 'copilot', group: 'AI', label: 'Copilot / Microsoft',
         domains: ['copilot.microsoft.com', 'sydney.bing.com', 'edgeservices.bing.com',
-            'rewards.bing.com', 'designer.microsoft.com', 'ecs.office.com']
+            'rewards.bing.com', 'designer.microsoft.com', 'ecs.office.com',
+            'xboxdesignlab.xbox.com', 'xgpuweb.gssv-play-prod.xboxlive.com',
+            'xgpuwebf2p.gssv-play-prod.xboxlive.com', 'xsts.auth.xboxlive.com']
+    },
+    {
+        id: 'githubcopilot', group: 'AI', label: 'GitHub Copilot',
+        domains: ['api.github.com', 'api.individual.githubcopilot.com', 'proxy.individual.githubcopilot.com']
+    },
+    {
+        id: 'elevenlabs', group: 'AI', label: 'ElevenLabs',
+        domains: ['elevenlabs.io', 'api.elevenlabs.io', 'api.us.elevenlabs.io',
+            'eleven-public-cdn.elevenlabs.io', 'elevenreader.io', 'help.elevenlabs.io',
+            'payload.elevenlabs.io', 'try.elevenlabs.io', 'www.elevenlabs.io']
+    },
+    {
+        id: 'codeium', group: 'AI', label: 'Codeium / Windsurf',
+        domains: ['codeium.com', 'codeiumdata.com', 'inference.codeium.com', 'marketplace.windsurf.com',
+            'server.codeium.com', 'unleash.codeium.com', 'web-backend.codeium.com', 'windsurf.com',
+            'windsurf-stable.codeium.com', 'windsurf-telemetry.codeium.com']
+    },
+    {
+        id: 'deepl', group: 'AI', label: 'DeepL',
+        domains: ['deepl.com', 'api.deepl.com', 'api-free.deepl.com', 'auth.deepl.com',
+            'backend.deepl.com', 'checkout.www.deepl.com', 'clearance.deepl.com',
+            'community-auth.deepl.com', 'developers.deepl.com', 'dict.deepl.com', 'dict-audio.deepl.com',
+            'errortracking.deepl.com', 'experimentation.deepl.com', 'experimentation-grpc.deepl.com',
+            'gtm.deepl.com', 'home.deepl.com', 'hs.deepl.com', 'ita-free.app.deepl.com',
+            'ita-free.www.deepl.com', 'login-wall.deepl.com', 'oneshot-free.www.deepl.com',
+            'ott.deepl.com', 's.deepl.com', 'shield.deepl.com', 'sl.deepl.com', 'static.deepl.com',
+            'support.deepl.com', 'w.deepl.com', 'write-free.www.deepl.com', 'www.deepl.com', 'www2.deepl.com']
+    },
+    {
+        id: 'trae', group: 'AI', label: 'Trae',
+        domains: ['api.trae.ai', 'api-sg-central.trae.ai', 'api16-normal-alisg.mchost.guru',
+            'trae-api-sg.mchost.guru']
+    },
+    {
+        id: 'jetbrains', group: 'AI', label: 'JetBrains AI',
+        domains: ['account.jetbrains.com', 'api.jetbrains.ai', 'datalore.jetbrains.com',
+            'jetbrains.com', 'jetbrains.space', 'myjetbrains.com', 'plugins.jetbrains.com',
+            'www.jetbrains.com', 'www.jetbrains.space']
     },
     {
         id: 'deepseek', group: 'AI', label: 'DeepSeek',
@@ -173,11 +225,6 @@ const WARP_SERVICE_CATALOG = [
     {
         id: 'perplexity', group: 'AI', label: 'Perplexity',
         domains: ['perplexity.ai', 'www.perplexity.ai', 'api.perplexity.ai']
-    },
-    {
-        id: 'youtube', group: 'Медиа', label: 'YouTube',
-        domains: ['youtube.com', 'youtu.be', 'ytimg.com', 'youtube-nocookie.com', 'youtubekids.com',
-            'youtubemusic.com', 'googlevideo.com', 'ggpht.com', 'youtubei.googleapis.com']
     }
 ];
 
@@ -495,6 +542,7 @@ function warpConfig() {
     const xray = xrayInbound();
     return {
         installed: env.WARP_INSTALLED === '1' || warpBinaryPresent(),
+        mode: env.WARP_MODE === 'v1' ? 'v1' : 'v2',
         listenIp: IPV4_RE.test(env.WARP_LISTEN_IP || '') ? env.WARP_LISTEN_IP
             : (xray && IPV4_RE.test(xray.listen) ? xray.listen : '0.0.0.0'),
         listenPort: isPort(env.WARP_LISTEN_PORT) ? String(Number(env.WARP_LISTEN_PORT))
@@ -4979,7 +5027,6 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
                 { id: 'routing', title: 'Маршрутизация Xray', ok: false, detail: 'демо-режим' },
                 { id: 'port', title: 'Порт 443', ok: false, detail: 'демо-режим' },
                 { id: 'socks', title: 'SOCKS5 WARP', ok: false, detail: 'демо-режим' },
-                { id: 'adguard', title: 'Правила AdGuard', ok: false, detail: 'демо-режим' },
                 { id: 'services', title: 'Сервисы выбраны', ok: selectedDomains.length > 0, detail: `${selected.length} сервисов` }
             ],
             adguard,
@@ -4996,7 +5043,15 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
     } catch (e) { /* ignore */ }
 
     const configText = readTextSafe('/usr/local/etc/xray/config.json');
-    const routingOk = /"routing"\s*:/.test(configText) && /"tag"\s*:\s*"warp"/.test(configText);
+    const hasRouting = /"routing"\s*:/.test(configText);
+    const hasWarpOut = /"tag"\s*:\s*"warp"/.test(configText);
+    const hasDirectRoute = /"outboundTag"\s*:\s*"direct"/.test(configText);
+    const routingOk = cfg.mode === 'v1'
+        ? (hasWarpOut && !hasRouting)
+        : (hasWarpOut && hasRouting && hasDirectRoute);
+    const routingDetail = cfg.mode === 'v1'
+        ? 'весь трафик через WARP (первая инструкция)'
+        : 'Google direct / YouTube + AI через WARP (вторая инструкция)';
     const portListening = xrayActive && new RegExp(`:${cfg.listenPort}\\b`).test(shTry('ss', ['-ltn'], { timeout: 8000 }));
     let socksOk = false;
     if (warpActive && connected) {
@@ -5007,10 +5062,9 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
         { id: 'warp', title: 'WARP установлен', ok: !!(cfg.installed || warpActive), detail: cfg.installed ? 'пакет установлен' : warpActive ? 'служба запущена' : 'не установлен' },
         { id: 'connected', title: 'WARP подключён', ok: connected, detail: connected ? 'Connected' : 'нет соединения' },
         { id: 'xray', title: 'Xray активен', ok: xrayActive, detail: xrayActive ? 'active' : 'inactive' },
-        { id: 'routing', title: 'Маршрутизация Xray', ok: routingOk, detail: routingOk ? 'Google direct / YouTube + AI через WARP' : 'routing не настроен' },
+        { id: 'routing', title: 'Маршрутизация Xray', ok: routingOk, detail: routingOk ? routingDetail : 'конфиг не совпадает с выбранным вариантом' },
         { id: 'port', title: `Порт ${cfg.listenPort}`, ok: !!portListening, detail: portListening ? `слушает Xray` : 'не слушается' },
         { id: 'socks', title: 'SOCKS5 WARP', ok: socksOk, detail: socksOk ? `127.0.0.1:${cfg.socksPort} отвечает` : 'проверка не прошла' },
-        { id: 'adguard', title: 'Правила AdGuard', ok: !!(adguard && adguard.count), detail: adguard && adguard.count ? `${adguard.count} доменов → ${adguard.rewriteIp || '—'}` : 'не записаны' },
         { id: 'services', title: 'Сервисы выбраны', ok: selectedDomains.length > 0, detail: `${selected.length} сервисов, ${selectedDomains.length} доменов` }
     ];
 
@@ -5053,106 +5107,274 @@ app.post('/api/warp/services', checkAuth, requireAdmin, (req, res) => {
 });
 
 app.get('/api/warp/instructions', checkAuth, (req, res) => {
+    const cfg = warpConfig();
+    const selected = warpServiceIds();
+    const selectedDomains = warpSelectedDomains();
+    const allDomains = warpDomainList();
+    const publicIp = rustdeskPublicIp() || 'IP_СЕРВЕРА';
+    const rule = d => `||${d}^$dnsrewrite=NOERROR;A;${publicIp}`;
+    const selectedRules = selectedDomains.map(rule).join('\n');
+    const allRules = allDomains.map(rule).join('\n');
+    const serviceNames = WARP_SERVICE_CATALOG
+        .filter(s => selected.includes(s.id))
+        .map(s => s.label)
+        .join(', ') || 'не выбраны';
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const listenLine = cfg.listenIp && cfg.listenIp !== '0.0.0.0'
+        ? `      "listen": "${cfg.listenIp}",\n`
+        : '';
+    const v1Config = `{
+  "log": {
+    "loglevel": "info",
+    "access": "/var/log/xray/access.log"
+  },
+  "inbounds": [
+    {
+${listenLine}      "port": ${cfg.listenPort},
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "1.1.1.1",
+        "port": 443,
+        "network": "tcp"
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["tls"]
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "warp",
+      "protocol": "socks",
+      "settings": {
+        "servers": [
+          {
+            "address": "127.0.0.1",
+            "port": ${cfg.socksPort}
+          }
+        ]
+      }
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom",
+      "settings": {
+        "domainStrategy": "UseIPv4"
+      }
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    }
+  ]
+}`;
+    const v2Config = `{
+  "log": {
+    "loglevel": "info",
+    "access": "/var/log/xray/access.log"
+  },
+  "inbounds": [
+    {
+${listenLine}      "port": ${cfg.listenPort},
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "1.1.1.1",
+        "port": 443,
+        "network": "tcp"
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["tls"]
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "warp",
+      "protocol": "socks",
+      "settings": {
+        "servers": [
+          {
+            "address": "127.0.0.1",
+            "port": ${cfg.socksPort}
+          }
+        ]
+      }
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom",
+      "settings": {
+        "domainStrategy": "UseIPv4"
+      }
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "domain": [
+          "domain:youtube.com", "domain:youtu.be", "domain:ytimg.com",
+          "domain:youtube-nocookie.com", "domain:youtubekids.com",
+          "domain:youtubemusic.com", "domain:googlevideo.com",
+          "domain:ggpht.com", "domain:youtubei.googleapis.com"
+        ],
+        "outboundTag": "warp"
+      },
+      {
+        "type": "field",
+        "domain": [
+          "domain:google.com", "domain:googleapis.com", "domain:gstatic.com",
+          "domain:googleusercontent.com", "domain:gvt1.com",
+          "domain:google-analytics.com", "domain:googletagmanager.com",
+          "domain:gemini.google", "domain:deepmind.google"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "network": "tcp,udp",
+        "outboundTag": "warp"
+      }
+    ]
+  }
+}`;
+
     res.type('html').send(`<!DOCTYPE html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WARP + Xray + AdGuard — инструкция</title>
+<title>WARP + Xray + AdGuard — инструкции</title>
 <style>
 body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0d1117;color:#c9d1d9;margin:0;padding:20px;line-height:1.55}
-.card{max-width:820px;margin:0 auto;background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px}
-h1{font-size:24px;margin:0 0 8px;color:#fff}h2{font-size:17px;margin:24px 0 8px;color:#fff}h3{font-size:14px;margin:16px 0 6px;color:#e6edf3}
+.card{max-width:860px;margin:0 auto;background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px}
+h1{font-size:24px;margin:0 0 8px;color:#fff}h2{font-size:18px;margin:26px 0 8px;color:#fff}h3{font-size:14px;margin:18px 0 6px;color:#e6edf3}
 p,li{font-size:13px;color:#b9c6d8}code,pre{font-family:ui-monospace,Consolas,monospace;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px}
-code{padding:2px 5px}pre{padding:12px;overflow:auto;font-size:12px;white-space:pre-wrap}
+code{padding:2px 5px}pre{padding:12px;overflow:auto;font-size:12px;white-space:pre-wrap;line-height:1.45}
 .muted{color:#8b949e;font-size:12px}.warn{background:rgba(255,127,80,.08);border:1px solid #ff7b72;border-radius:8px;padding:12px;color:#ffb3ad;margin:16px 0}
+.ok{background:rgba(63,185,80,.08);border:1px solid #3fb950;border-radius:8px;padding:12px;color:#7ee787;margin:16px 0}
 table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12px}td,th{border-bottom:1px solid #30363d;padding:7px;text-align:left}th{color:#fff}
+details{margin:10px 0;border:1px solid #30363d;border-radius:8px;padding:10px}summary{cursor:pointer;color:#e6edf3;font-size:13px}
 </style></head><body><div class="card">
 <h1>WARP + Xray + AdGuard</h1>
-<p class="muted">Разблокировка Google/Gemini, YouTube, Claude, ChatGPT и других нейросетей через Cloudflare WARP.</p>
+<p class="muted">Две инструкции: базовая (вариант 1) и с разделением Google/YouTube/AI (вариант 2). Панель настраивает WARP и Xray, а правила AdGuard вы копируете вручную.</p>
 
 <h2>Зачем это нужно</h2>
-<p>Провайдер блокирует часть зарубежных сервисов. Схема поднимает на VPS Xray, который принимает TLS на порту 443 и по SNI понимает, куда идёт запрос. Google и Gemini идут напрямую с IP VPS (французский IP), а YouTube, Claude, ChatGPT и остальные — через Cloudflare WARP. AdGuard подменяет A-записи выбранных доменов на IP вашего VPS, поэтому клиенты с DoH AdGuard автоматически попадают в нужный маршрут.</p>
+<p>Провайдер блокирует часть зарубежных сервисов. На VPS поднимается Xray, который принимает TLS на порту ${esc(cfg.listenPort)} и по SNI понимает, куда идёт запрос. WARP работает как локальный SOCKS5-прокси <code>127.0.0.1:${esc(cfg.socksPort)}</code>. AdGuard подменяет A-записи выбранных доменов на публичный IP сервера, поэтому клиенты с DoH AdGuard попадают в Xray.</p>
+
+<div class="warn"><b>Правила AdGuard панель не записывает.</b> Скопируйте готовый список из раздела «Правила AdGuard» ниже в AdGuard Home → Filters → Custom filtering rules. Так вы контролируете, какие домены подменяются, и не зависите от пароля AdGuard.</div>
 
 <h2>Как это работает</h2>
 <pre>Клиент (DoH AdGuard)
-   │  A-запись выбранного домена = IP VPS
+   │  A-запись выбранного домена = ${esc(publicIp)}
    ▼
-VPS :443  Xray dokodemo-door + sniffing TLS (SNI)
-   ├── google.com / gemini.google / googleapis.com → direct (IP VPS, FR)
-   ├── youtube.com / googlevideo.com / ggpht.com  → WARP
-   └── claude.ai / chatgpt.com / openai.com ...    → WARP
+VPS :${esc(cfg.listenPort)}  Xray dokodemo-door + sniffing TLS (SNI)
+   ├── вариант 1: весь трафик → WARP
+   └── вариант 2: Google → direct (IP VPS), YouTube + AI → WARP
                          │
                          ▼
-              Cloudflare WARP SOCKS5 127.0.0.1:40000</pre>
-<p>Почему Google отдельно: Google и Gemini видят IP VPS и работают как из Франции. YouTube и AI-сервисы через WARP получают другой выходной IP и обходят блокировки.</p>
+              Cloudflare WARP SOCKS5 127.0.0.1:${esc(cfg.socksPort)}</pre>
 
-<h2>Вариант 1 — WARP и Xray уже установлены</h2>
-<p>Подходит, если <code>warp-cli</code> и <code>xray</code> уже стоят, нужно только разложить маршруты и правила AdGuard.</p>
-<pre>warp-cli --accept-tos status
-warp-cli --accept-tos mode proxy
-warp-cli --accept-tos proxy port 40000
-warp-cli --accept-tos connect
-curl -s -x socks5h://127.0.0.1:40000 https://ipinfo.io/json</pre>
-<p>Конфиг Xray: <code>/usr/local/etc/xray/config.json</code>. В нём должны быть outbound <code>warp</code> (socks 127.0.0.1:40000), <code>direct</code> (freedom, UseIPv4) и правила: YouTube → warp, Google → direct, остальное → warp. Панель делает это кнопкой «Накатить вариант 1».</p>
-
-<h3>Правила AdGuard</h3>
-<p>В AdGuard Home → Filters → Custom filtering rules добавьте выбранные домены:</p>
-<pre>||claude.ai^$dnsrewrite=NOERROR;A;IP_VPS
-||anthropic.com^$dnsrewrite=NOERROR;A;IP_VPS
-||chatgpt.com^$dnsrewrite=NOERROR;A;IP_VPS
-||openai.com^$dnsrewrite=NOERROR;A;IP_VPS
-||gemini.google.com^$dnsrewrite=NOERROR;A;IP_VPS
-||google.com^$dnsrewrite=NOERROR;A;IP_VPS
-||youtube.com^$dnsrewrite=NOERROR;A;IP_VPS</pre>
-<p>Вместо <code>IP_VPS</code> укажите публичный IP сервера. Кнопка «Накатить» записывает выбранные домены автоматически. После изменения правил очистите кэш AdGuard и выполните <code>ipconfig /flushdns</code> на клиенте.</p>
-
-<h2>Вариант 2 — полная установка с нуля</h2>
-<p>Ставит Cloudflare WARP, Xray и базовую маршрутизацию. Выполняется на VPS с чистым портом 443.</p>
-<pre>apt update
-apt install -y curl wget unzip python3 jq ca-certificates gnupg lsb-release
-ufw allow 22/tcp
-ufw allow 443/tcp
-
-# WARP
-curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+<h2>Вариант 1 — первая инструкция: всё через WARP</h2>
+<p>Подходит, когда нужно просто разблокировать зарубежные сервисы. WARP и Xray ставятся с нуля, Xray отправляет весь трафик в WARP. Google тоже идёт через WARP.</p>
+<h3>1. Установка WARP</h3>
+<pre>curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
 echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" > /etc/apt/sources.list.d/cloudflare-client.list
 apt update && apt install -y cloudflare-warp
+
 warp-cli registration new
 warp-cli mode proxy
-warp-cli proxy port 40000
+warp-cli proxy port ${esc(cfg.socksPort)}
 warp-cli connect
-
-# Xray
-bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install</pre>
-<p>Далее запишите конфиг Xray (панель делает это сама) и правила AdGuard. Проверка:</p>
-<pre>curl -s -x socks5h://127.0.0.1:40000 https://ipinfo.io/json
+curl -x socks5h://127.0.0.1:${esc(cfg.socksPort)} https://ipinfo.io/json</pre>
+<p>В ответе <code>ipinfo.io</code> должен быть IP Cloudflare (например, <code>104.28.x.x</code>), а не IP сервера.</p>
+<h3>2. Установка Xray</h3>
+<pre>bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install</pre>
+<h3>3. Конфиг Xray</h3>
+<pre>nano /usr/local/etc/xray/config.json</pre>
+<pre>${esc(v1Config)}</pre>
+<p>В этом конфиге нет <code>routing</code>: первый outbound — <code>warp</code>, поэтому весь трафик идёт через Cloudflare WARP.</p>
+<h3>4. Запуск и проверка</h3>
+<pre>systemctl restart xray
+systemctl status xray --no-pager
 curl -s https://ipinfo.io/json
 curl -s "https://www.google.com/search?q=test&amp;hl=en" | grep -o '&lt;html lang="[^"]*"'</pre>
-<p>Ожидаемо: WARP отдаёт IP Cloudflare (например, 104.28.x.x), прямой запрос — IP VPS, Google отдаёт <code>lang="en-FR"</code>.</p>
 
-<h2>Чек-лист</h2>
+<h2>Вариант 2 — вторая инструкция: Google напрямую, YouTube и AI через WARP</h2>
+<p>Подходит, если Google/Gemini должны видеть французский IP VPS, а YouTube и AI-сервисы — выходить через Cloudflare WARP. WARP и Xray можно не переустанавливать: панель обновит конфиг Xray.</p>
+<h3>1. Проверка WARP</h3>
+<pre>warp-cli status
+warp-cli settings | grep -i mode
+curl -s -x socks5h://127.0.0.1:${esc(cfg.socksPort)} https://ipinfo.io/json</pre>
+<p>Ожидаемо: <code>Connected</code>, режим <code>proxy</code>, IP Cloudflare.</p>
+<h3>2. Конфиг Xray</h3>
+<pre>cp /usr/local/etc/xray/config.json /usr/local/etc/xray/config.json.bak.$(date +%Y%m%d-%H%M%S)
+nano /usr/local/etc/xray/config.json</pre>
+<pre>${esc(v2Config)}</pre>
+<p>Правила: YouTube и его CDN → <code>warp</code>, Google/Gemini → <code>direct</code>, всё остальное → <code>warp</code>.</p>
+<h3>3. Запуск и проверка</h3>
+<pre>/usr/local/bin/xray -test -config /usr/local/etc/xray/config.json
+systemctl restart xray
+systemctl status xray --no-pager
+curl -s "https://www.google.com/search?q=test&amp;hl=en" | grep -o '&lt;html lang="[^"]*"'</pre>
+<p>Ожидаемо: <code>lang="en-FR"</code>. Если <code>en-RU</code> — Google идёт не через <code>direct</code>, проверьте <code>routing.rules</code>.</p>
+
+<h2>Правила AdGuard</h2>
+<p>Откройте AdGuard Home → <b>Filters</b> → <b>Custom filtering rules</b> и вставьте правила. Панель их не записывает: так вы можете проверить список и не хранить пароль AdGuard.</p>
+<p><b>Выбранные сервисы:</b> ${esc(serviceNames)}. Доменов: <b>${selectedDomains.length}</b>. Публичный IP для подмены: <code>${esc(publicIp)}</code>.</p>
+<pre>${esc(selectedRules)}</pre>
+<p class="muted">Если IP сервера изменился, замените его в правилах. После изменения правил очистите кэш AdGuard и DNS на клиенте: <code>ipconfig /flushdns</code>.</p>
+<details>
+<summary>Полный список из первой инструкции (${allDomains.length} доменов)</summary>
+<pre>${esc(allRules)}</pre>
+</details>
+<p class="muted">Для Android-клиентов и браузеров с IPv6 можно добавить правила <code>$dnstype=AAAA</code> и <code>$dnstype=HTTPS</code>, чтобы они не уходили на IPv6/SVCB. Это не обязательно, если у клиента нет IPv6.</p>
+
+<h2>Проверка на клиенте (Windows)</h2>
+<pre>Resolve-DnsName www.google.com -Type A | ft Name,IPAddress
+Resolve-DnsName gemini.gstatic.com -Type A | ft Name,TTL,IPAddress
+curl.exe -s https://ipinfo.io/json
+curl.exe -s "https://www.google.com/search?q=test&amp;hl=en"</pre>
 <table><tr><th>Проверка</th><th>Что должно быть</th></tr>
 <tr><td>WARP установлен</td><td><code>warp-cli --version</code> отвечает</td></tr>
 <tr><td>WARP подключён</td><td><code>warp-cli status</code> → Connected</td></tr>
 <tr><td>Xray активен</td><td><code>systemctl is-active xray</code> → active</td></tr>
-<tr><td>Порт 443</td><td><code>ss -lntp | grep :443</code> показывает xray</td></tr>
-<tr><td>SOCKS5</td><td><code>curl -x socks5h://127.0.0.1:40000 https://ipinfo.io/json</code></td></tr>
-<tr><td>Маршрутизация</td><td>в config.json есть routing: YouTube→warp, Google→direct</td></tr>
-<tr><td>AdGuard</td><td>правила dnsrewrite на IP VPS записаны</td></tr>
-<tr><td>Клиент</td><td><code>Resolve-DnsName chatgpt.com</code> → IP VPS</td></tr></table>
+<tr><td>Порт ${esc(cfg.listenPort)}</td><td><code>ss -lntp | grep :${esc(cfg.listenPort)}</code> показывает xray</td></tr>
+<tr><td>SOCKS5</td><td><code>curl -x socks5h://127.0.0.1:${esc(cfg.socksPort)} https://ipinfo.io/json</code></td></tr>
+<tr><td>Маршрутизация</td><td>вариант 1 — без routing; вариант 2 — Google direct / YouTube + AI warp</td></tr>
+<tr><td>AdGuard</td><td>правила из этого раздела вставлены в Custom filtering rules</td></tr>
+<tr><td>Клиент</td><td><code>Resolve-DnsName chatgpt.com</code> → ${esc(publicIp)}</td></tr></table>
+
+<h2>Откат</h2>
+<pre># вернуть предыдущий конфиг Xray
+CFG=/usr/local/etc/xray/config.json
+cp "$(ls -t "$CFG".bak.* | head -1)" "$CFG"
+/usr/local/bin/xray -test -config "$CFG"
+systemctl restart xray
+
+# удалить правила AdGuard из Custom filtering rules
+
+# остановить WARP (если больше не нужен)
+warp-cli disconnect
+systemctl disable --now warp-svc
+apt purge -y cloudflare-warp</pre>
 
 <h2>Важно</h2>
 <ul>
-<li>Порт 443 должен быть свободен. Если на нём уже работает MTProto/nginx, Xray не запустится.</li>
+<li>Порт ${esc(cfg.listenPort)} должен быть свободен. Если на нём уже работает MTProto/nginx, Xray не запустится.</li>
 <li>Клиенты должны использовать AdGuard Home как DoH/DoT DNS, иначе подмена A-записей не сработает.</li>
 <li>TTL у AdGuard около часа; после изменений очистите кэш AdGuard и DNS на клиенте.</li>
-<li>Если WARP уже используется как системный VPN, не ставьте его повторно — используйте вариант 1.</li>
-<li>Откат: <code>systemctl disable --now xray</code>, <code>warp-cli disconnect</code>, удалить блок <code># BEGIN SERVEPANEL WARP</code> из правил AdGuard.</li>
+<li>Если WARP уже используется как системный VPN, не ставьте его повторно — используйте вариант 2 и не переводите WARP в proxy-режим повторно.</li>
+<li>Панель не перезаписывает чужой <code>config.json</code> Xray без подтверждения.</li>
 </ul>
-<p class="muted">Команды выполняются от root. Панель не перезаписывает чужой config.json Xray без подтверждения.</p>
+<p class="muted">Команды выполняются от root. Текущий режим панели: <b>${cfg.mode === 'v1' ? 'вариант 1 (всё через WARP)' : 'вариант 2 (Google direct)'}</b>.</p>
 </div></body></html>`);
 });
 
-// Включение/выключение WARP и Xray. Пакеты при выключении не удаляются:
-// компонент остаётся установленным, но перестаёт принимать трафик.
 app.post('/api/warp/power', checkAuth, requireAdmin, (req, res) => {
     const enable = !!(req.body && req.body.enable);
     if (TEST_MODE || DEMO_MODE) return res.json({ success: true, enabled: enable, demo: true });
