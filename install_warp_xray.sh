@@ -309,8 +309,8 @@ chmod 600 /root/awg/warp.env
 touch /root/awg/warp-xray.managed
 
 if command -v ufw >/dev/null 2>&1; then
-    if [ "$WARP_LISTEN_IP" = "127.0.0.1" ] || [ "$WARP_LISTEN_IP" = "0.0.0.0" ]; then
-        echo "UFW: TCP/${WARP_LISTEN_PORT} наружу не открываем — Xray слушает ${WARP_LISTEN_IP}."
+    if [ "$WARP_LISTEN_IP" = "127.0.0.1" ]; then
+        echo "UFW: TCP/${WARP_LISTEN_PORT} наружу не открываем — Xray слушает 127.0.0.1."
     else
         ufw allow "${WARP_LISTEN_PORT}/tcp" >/dev/null 2>&1 || true
         echo "UFW: разрешён TCP/${WARP_LISTEN_PORT}."
@@ -319,7 +319,7 @@ if command -v ufw >/dev/null 2>&1; then
         echo "UFW не включён: правило добавлено и применится после включения."
     fi
 else
-    echo "WARNING: ufw не найден. Порты открывать вручную не нужно, если Xray слушает 127.0.0.1."
+    echo "WARNING: ufw не найден. Проверьте порт ${WARP_LISTEN_PORT} вручную."
 fi
 
 if [ "$WARP_LISTEN_IP" = "127.0.0.1" ]; then
@@ -327,6 +327,10 @@ if [ "$WARP_LISTEN_IP" = "127.0.0.1" ]; then
     echo "Для AdGuard укажите 127.0.0.1 (localhost) вместо IP туннеля."
 else
     echo "Xray слушает ${WARP_LISTEN_IP}:${WARP_LISTEN_PORT}, WARP SOCKS — 127.0.0.1:${WARP_SOCKS_PORT}."
-    echo "Для AdGuard укажите IP ${WARP_LISTEN_IP}."
+    if [ "$WARP_LISTEN_IP" = "0.0.0.0" ]; then
+        echo "Для AdGuard укажите публичный IP сервера."
+    else
+        echo "Для AdGuard укажите IP ${WARP_LISTEN_IP}."
+    fi
 fi
 echo "INSTALLATION DONE"

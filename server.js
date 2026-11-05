@@ -5244,7 +5244,15 @@ app.post('/api/warp/adguard', checkAuth, requireAdmin, async (req, res) => {
     const BEGIN = '# BEGIN SERVEPANEL WARP';
     const END = '# END SERVEPANEL WARP';
     try {
-        const cur = await fetchWithTimeout(base + '/control/filtering/status', { headers }, 10000);
+        // AdGuard Home почти всегда отдаёт HTTPS с самоподписанным сертификатом,
+        // поэтому обычный fetch падает с «fetch failed». Ходим через fetchInsecure.
+        const cur = await fetchInsecure(base + '/control/filtering/status', { headers }, 10000);
+        if (cur.status === 401) {
+            throw new Error('AdGuard требует логин и пароль (HTTP 401). Укажите их в разделе «Службы и DNS» → AdGuard.');
+        }
+        if (cur.status === 404) {
+            throw new Error('по адресу ' + base + ' нет API AdGuard (HTTP 404). Проверьте порт и URL.');
+        }
         if (!cur.ok) throw new Error('AdGuard HTTP ' + cur.status);
         const data = await cur.json();
         const current = Array.isArray(data.user_rules) ? data.user_rules : [];
@@ -5270,7 +5278,7 @@ app.post('/api/warp/adguard', checkAuth, requireAdmin, async (req, res) => {
             END
         ];
         const next = [...kept, ...block];
-        const set = await fetchWithTimeout(base + '/control/filtering/set_rules', {
+        const set = await fetchInsecure(base + '/control/filtering/set_rules', {
             method: 'POST',
             headers: { ...headers, 'Content-Type': 'application/json' },
             body: JSON.stringify({ rules: next })
