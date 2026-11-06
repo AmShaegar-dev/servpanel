@@ -5051,7 +5051,7 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
         : (hasWarpOut && hasRouting && hasDirectRoute);
     const routingDetail = cfg.mode === 'v1'
         ? 'весь трафик через WARP (первая инструкция)'
-        : 'Google direct / YouTube + AI через WARP (вторая инструкция)';
+        : 'Google direct / AI через WARP (вторая инструкция)';
     const portListening = xrayActive && new RegExp(`:${cfg.listenPort}\\b`).test(shTry('ss', ['-ltn'], { timeout: 8000 }));
     let socksOk = false;
     if (warpActive && connected) {
@@ -5115,6 +5115,8 @@ app.get('/api/warp/instructions', checkAuth, (req, res) => {
     const rule = d => `||${d}^$dnsrewrite=NOERROR;A;${publicIp}`;
     const selectedRules = selectedDomains.map(rule).join('\n');
     const allRules = allDomains.map(rule).join('\n');
+    const routingDomains = selectedDomains.length ? selectedDomains : allDomains;
+    const routingDomainsJson = routingDomains.map(d => `"domain:${d}"`).join(', ');
     const serviceNames = WARP_SERVICE_CATALOG
         .filter(s => selected.includes(s.id))
         .map(s => s.label)
@@ -5220,16 +5222,6 @@ ${listenLine}      "port": ${cfg.listenPort},
       {
         "type": "field",
         "domain": [
-          "domain:youtube.com", "domain:youtu.be", "domain:ytimg.com",
-          "domain:youtube-nocookie.com", "domain:youtubekids.com",
-          "domain:youtubemusic.com", "domain:googlevideo.com",
-          "domain:ggpht.com", "domain:youtubei.googleapis.com"
-        ],
-        "outboundTag": "warp"
-      },
-      {
-        "type": "field",
-        "domain": [
           "domain:google.com", "domain:googleapis.com", "domain:gstatic.com",
           "domain:googleusercontent.com", "domain:gvt1.com",
           "domain:google-analytics.com", "domain:googletagmanager.com",
@@ -5239,8 +5231,13 @@ ${listenLine}      "port": ${cfg.listenPort},
       },
       {
         "type": "field",
-        "network": "tcp,udp",
+        "domain": [${routingDomainsJson}],
         "outboundTag": "warp"
+      },
+      {
+        "type": "field",
+        "network": "tcp,udp",
+        "outboundTag": "direct"
       }
     ]
   }
@@ -5261,7 +5258,7 @@ table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12px}td,th{bord
 details{margin:10px 0;border:1px solid #30363d;border-radius:8px;padding:10px}summary{cursor:pointer;color:#e6edf3;font-size:13px}
 </style></head><body><div class="card">
 <h1>WARP + Xray + AdGuard</h1>
-<p class="muted">Две инструкции: базовая (вариант 1) и с разделением Google/YouTube/AI (вариант 2). Панель настраивает WARP и Xray, а правила AdGuard вы копируете вручную.</p>
+<p class="muted">Две инструкции: базовая (вариант 1) и с разделением Google/AI (вариант 2). Панель настраивает WARP и Xray, а правила AdGuard вы копируете вручную.</p>
 
 <h2>Зачем это нужно</h2>
 <p>Провайдер блокирует часть зарубежных сервисов. На VPS поднимается Xray, который принимает TLS на порту ${esc(cfg.listenPort)} и по SNI понимает, куда идёт запрос. WARP работает как локальный SOCKS5-прокси <code>127.0.0.1:${esc(cfg.socksPort)}</code>. AdGuard подменяет A-записи выбранных доменов на публичный IP сервера, поэтому клиенты с DoH AdGuard попадают в Xray.</p>
@@ -5274,7 +5271,7 @@ details{margin:10px 0;border:1px solid #30363d;border-radius:8px;padding:10px}su
    ▼
 VPS :${esc(cfg.listenPort)}  Xray dokodemo-door + sniffing TLS (SNI)
    ├── вариант 1: весь трафик → WARP
-   └── вариант 2: Google → direct (IP VPS), YouTube + AI → WARP
+   └── вариант 2: Google → direct (IP VPS), AI → WARP
                          │
                          ▼
               Cloudflare WARP SOCKS5 127.0.0.1:${esc(cfg.socksPort)}</pre>
@@ -5304,8 +5301,8 @@ systemctl status xray --no-pager
 curl -s https://ipinfo.io/json
 curl -s "https://www.google.com/search?q=test&amp;hl=en" | grep -o '&lt;html lang="[^"]*"'</pre>
 
-<h2>Вариант 2 — вторая инструкция: Google напрямую, YouTube и AI через WARP</h2>
-<p>Подходит, если Google/Gemini должны видеть французский IP VPS, а YouTube и AI-сервисы — выходить через Cloudflare WARP. WARP и Xray можно не переустанавливать: панель обновит конфиг Xray.</p>
+<h2>Вариант 2 — вторая инструкция: Google напрямую, AI через WARP</h2>
+<p>Подходит, если Google/Gemini должны видеть французский IP VPS, а AI-сервисы — выходить через Cloudflare WARP. WARP и Xray можно не переустанавливать: панель обновит конфиг Xray.</p>
 <h3>1. Проверка WARP</h3>
 <pre>warp-cli status
 warp-cli settings | grep -i mode
@@ -5315,7 +5312,7 @@ curl -s -x socks5h://127.0.0.1:${esc(cfg.socksPort)} https://ipinfo.io/json</pre
 <pre>cp /usr/local/etc/xray/config.json /usr/local/etc/xray/config.json.bak.$(date +%Y%m%d-%H%M%S)
 nano /usr/local/etc/xray/config.json</pre>
 <pre>${esc(v2Config)}</pre>
-<p>Правила: YouTube и его CDN → <code>warp</code>, Google/Gemini → <code>direct</code>, всё остальное → <code>warp</code>.</p>
+<p>Правила: Google/Gemini → <code>direct</code>, AI-сервисы → <code>warp</code>, всё остальное → <code>direct</code>.</p>
 <h3>3. Запуск и проверка</h3>
 <pre>/usr/local/bin/xray -test -config /usr/local/etc/xray/config.json
 systemctl restart xray
@@ -5346,7 +5343,7 @@ curl.exe -s "https://www.google.com/search?q=test&amp;hl=en"</pre>
 <tr><td>Xray активен</td><td><code>systemctl is-active xray</code> → active</td></tr>
 <tr><td>Порт ${esc(cfg.listenPort)}</td><td><code>ss -lntp | grep :${esc(cfg.listenPort)}</code> показывает xray</td></tr>
 <tr><td>SOCKS5</td><td><code>curl -x socks5h://127.0.0.1:${esc(cfg.socksPort)} https://ipinfo.io/json</code></td></tr>
-<tr><td>Маршрутизация</td><td>вариант 1 — без routing; вариант 2 — Google direct / YouTube + AI warp</td></tr>
+<tr><td>Маршрутизация</td><td>вариант 1 — без routing; вариант 2 — Google и остальное direct, AI warp</td></tr>
 <tr><td>AdGuard</td><td>правила из этого раздела вставлены в Custom filtering rules</td></tr>
 <tr><td>Клиент</td><td><code>Resolve-DnsName chatgpt.com</code> → ${esc(publicIp)}</td></tr></table>
 
@@ -8472,6 +8469,10 @@ function installEnv(data) {
     env.WARP_SOCKS_PORT = Number.isInteger(warpSocksPort) && warpSocksPort >= 1 && warpSocksPort <= 65535
         ? String(warpSocksPort) : '40000';
     env.WARP_MODE = data.warpMode === 'v1' ? 'v1' : 'v2';
+    // Список доменов выбранных AI-сервисов для routing Xray (вариант 2).
+    // Домены уже провалидированы каталогом, поэтому это безопасная строка.
+    env.WARP_AI_DOMAINS = warpSelectedDomains().join(',');
+    env.WARP_AI_DOMAINS_FILE = WARP_DOMAINS_FILE;
 
     // MTProto / WEB-прокси (MEKO). Значения проверяются здесь и в скрипте,
     // чтобы установщик MEKO не задавал ни одного вопроса.

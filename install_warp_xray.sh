@@ -11,8 +11,11 @@ WARP_LISTEN_IP="${WARP_LISTEN_IP:-0.0.0.0}"
 WARP_LISTEN_PORT="${WARP_LISTEN_PORT:-443}"
 WARP_SOCKS_PORT="${WARP_SOCKS_PORT:-40000}"
 # v1 — первая инструкция: WARP + Xray, весь трафик через WARP.
-# v2 — вторая инструкция: Google напрямую, YouTube и AI через WARP.
+# v2 — вторая инструкция: Google напрямую, AI через WARP, остальное напрямую.
 WARP_MODE="${WARP_MODE:-v1}"
+# Список доменов AI-сервисов для routing v2. Панель передаёт его в
+# WARP_AI_DOMAINS; при ручном запуске берём полный warp-domains.txt.
+WARP_AI_DOMAINS_FILE="${WARP_AI_DOMAINS_FILE:-$(cd "$(dirname "$0")" && pwd)/warp-domains.txt}"
 case "$WARP_MODE" in
     v1|v2) ;;
     *) echo "ERROR: неизвестный WARP_MODE=$WARP_MODE"; exit 1 ;;
@@ -44,7 +47,7 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 echo "[1/6] Системные пакеты..."
 apt-get update || echo "WARNING: apt-get update завершился с ошибкой, продолжаем."
-apt-get install -y curl gnupg lsb-release ca-certificates unzip iproute2 \
+apt-get install -y curl gnupg lsb-release ca-certificates unzip iproute2 python3 \
     || { echo "ERROR: не удалось установить базовые пакеты."; exit 1; }
 
 # 127.0.0.1 — штатный адрес WARP-прокси (только с этого же сервера). Порт Xray
@@ -177,41 +180,8 @@ if [ "$WARP_LISTEN_IP" != "0.0.0.0" ]; then
     LISTEN_LINE="      \"listen\": \"${WARP_LISTEN_IP}\","
 fi
 # v1 — первая инструкция: routing нет, весь трафик идёт в первый outbound (warp).
-# v2 — вторая инструкция: YouTube и AI через warp, Google напрямую.
-ROUTING_BLOCK=""
-if [ "$WARP_MODE" = "v2" ]; then
-    ROUTING_BLOCK=',
-  "routing": {
-    "domainStrategy": "AsIs",
-    "rules": [
-      {
-        "type": "field",
-        "domain": [
-          "domain:youtube.com", "domain:youtu.be", "domain:ytimg.com",
-          "domain:youtube-nocookie.com", "domain:youtubekids.com",
-          "domain:youtubemusic.com", "domain:googlevideo.com",
-          "domain:ggpht.com", "domain:youtubei.googleapis.com"
-        ],
-        "outboundTag": "warp"
-      },
-      {
-        "type": "field",
-        "domain": [
-          "domain:google.com", "domain:googleapis.com", "domain:gstatic.com",
-          "domain:googleusercontent.com", "domain:gvt1.com",
-          "domain:google-analytics.com", "domain:googletagmanager.com",
-          "domain:gemini.google", "domain:deepmind.google"
-        ],
-        "outboundTag": "direct"
-      },
-      {
-        "type": "field",
-        "network": "tcp,udp",
-        "outboundTag": "warp"
-      }
-    ]
-  }'
-fi
+# v2 — вторая инструкция: Google напрямую, AI через warp, остальное напрямую.
+# Маршруты v2 добавляются после записи базового конфига через python3.
 cat > "$CONFIG" << EOF
 {
   "log": {
@@ -258,9 +228,38 @@ ${LISTEN_LINE}
       "tag": "block",
       "protocol": "blackhole"
     }
-  ]${ROUTING_BLOCK}
+  ]
 }
 EOF
+
+if [ "$WARP_MODE" = "v2" ]; then
+python3 - "$CONFIG" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+with open(path, encoding='utf-8') as f:
+    cfg = json.load(f)
+ai = [d.strip().lower() for d in os.environ.get('WARP_AI_DOMAINS', '').split(',') if d.strip()]
+if not ai:
+    fallback = os.environ.get('WARP_AI_DOMAINS_FILE', '')
+    if fallback and os.path.exists(fallback):
+        with open(fallback, encoding='utf-8') as f:
+            ai = [line.strip().lower() for line in f if line.strip() and not line.strip().startswith('#')]
+google = [
+    "domain:google.com", "domain:googleapis.com", "domain:gstatic.com",
+    "domain:googleusercontent.com", "domain:gvt1.com",
+    "domain:google-analytics.com", "domain:googletagmanager.com",
+    "domain:gemini.google", "domain:deepmind.google"
+]
+rules = [{"type": "field", "domain": google, "outboundTag": "direct"}]
+if ai:
+    rules.append({"type": "field", "domain": ["domain:" + d for d in ai], "outboundTag": "warp"})
+rules.append({"type": "field", "network": "tcp,udp", "outboundTag": "direct"})
+cfg["routing"] = {"domainStrategy": "AsIs", "rules": rules}
+with open(path, 'w', encoding='utf-8') as f:
+    json.dump(cfg, f, indent=2, ensure_ascii=False)
+print("routing v2: Google direct, AI warp, default direct; AI domains:", len(ai))
+PY
+fi
 
 "$XRAY_BIN" -test -config "$CONFIG"
 
@@ -323,7 +322,7 @@ fi
 if [ "$WARP_MODE" = "v1" ]; then
     echo "Режим v1: весь трафик Xray идёт через WARP (первая инструкция)."
 else
-    echo "Режим v2: Google напрямую, YouTube и AI через WARP (вторая инструкция)."
+    echo "Режим v2: Google напрямую, AI через WARP, остальное напрямую (вторая инструкция)."
 fi
 echo "Правила AdGuard панель не записывает — скопируйте их из «Инструкции»."
 echo "INSTALLATION DONE"

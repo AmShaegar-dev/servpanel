@@ -957,6 +957,20 @@ async function loadWarpStatus() {
             }
         }
 
+        const modeBadge = document.getElementById('warpModeBadge');
+        if (modeBadge) {
+            if (!st.installed) {
+                modeBadge.innerText = 'вариант —';
+                modeBadge.className = 'badge badge-muted';
+            } else if (st.mode === 'v1') {
+                modeBadge.innerText = 'вариант 1';
+                modeBadge.className = 'badge badge-good';
+            } else {
+                modeBadge.innerText = 'вариант 2';
+                modeBadge.className = 'badge badge-good';
+            }
+        }
+
         const txt = document.getElementById('warpStatusText');
         if (txt) {
             if (!st.installed) {
@@ -1034,7 +1048,7 @@ async function startWarpPreset(mode) {
     }
     const text = mode === 'v1'
         ? 'Накатить вариант 1?\n\nПервая инструкция: WARP и Xray ставятся с нуля (если их нет), весь трафик идёт через WARP. Порт 443 должен быть свободен. Правила AdGuard панель не записывает — их нужно скопировать из «Инструкции».'
-        : 'Накатить вариант 2?\n\nВторая инструкция: WARP и Xray ставятся с нуля (если их нет), Google идёт напрямую, YouTube и AI — через WARP. Порт 443 должен быть свободен. Правила AdGuard панель не записывает — их нужно скопировать из «Инструкции».';
+        : 'Накатить вариант 2?\n\nВторая инструкция: WARP и Xray ставятся с нуля (если их нет), Google/Gemini идут напрямую с IP сервера, AI-сервисы — через WARP. Порт 443 должен быть свободен. Правила AdGuard панель не записывает — их нужно скопировать из «Инструкции».';
     if (!confirm(text)) return;
     try {
         await apiJson('/api/warp/services', {

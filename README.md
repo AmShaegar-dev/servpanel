@@ -670,15 +670,15 @@ curl https://panel.example.com:9101/health
 На вкладке **«Службы и DNS»** есть карточка **«Cloudflare WARP для нейросетей»**. В ней две кнопки вместо ручных полей:
 
 * **Вариант 1 — первая инструкция.** Ставит `cloudflare-warp` и Xray, если их нет, и настраивает Xray так, что весь трафик идёт через WARP. Google и AI-сервисы выходят через Cloudflare.
-* **Вариант 2 — вторая инструкция.** Ставит WARP и Xray, если их нет. Google/Gemini идут **direct** с IP сервера, YouTube и AI-сервисы — через **WARP**.
+* **Вариант 2 — вторая инструкция.** Ставит WARP и Xray, если их нет. Google/Gemini идут **direct** с IP сервера, AI-сервисы — через **WARP**, остальное — напрямую.
 
-Перед запуском отметьте галочками, какие AI-сервисы нужно пускать через WARP: ChatGPT/OpenAI, Claude/Anthropic, Gemini/Google AI, Grok/xAI, Copilot, GitHub Copilot, ElevenLabs, Codeium/Windsurf, DeepL, Trae, JetBrains AI, DeepSeek, Perplexity. YouTube в списке нет. Кнопка «Все AI» отмечает все нейросети.
+Перед запуском отметьте галочками, какие AI-сервисы нужно пускать через WARP: ChatGPT/OpenAI, Claude/Anthropic, Gemini/Google AI, Grok/xAI, Copilot, GitHub Copilot, ElevenLabs, Codeium/Windsurf, DeepL, Trae, JetBrains AI, DeepSeek, Perplexity. Кнопка «Все AI» отмечает все нейросети.
 
 Как работает схема:
 
 * Xray слушает TLS на `0.0.0.0:443` и по SNI определяет домен;
 * вариант 1: весь трафик Xray идёт в первый outbound `warp`;
-* вариант 2: Google/Gemini → `direct`, YouTube и AI → `warp`;
+* вариант 2: Google/Gemini → `direct`, AI → `warp`, остальное → `direct`;
 * AdGuard подменяет A-записи выбранных доменов на публичный IP сервера, поэтому клиенты с DoH AdGuard попадают в Xray;
 * **правила AdGuard панель не записывает.** Готовый список `dnsrewrite` для выбранных сервисов и полный список из первой инструкции находятся на странице **«Инструкции»**. Скопируйте их в AdGuard Home → Filters → Custom filtering rules.
 
@@ -932,15 +932,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.81/servpanel-3.0.81.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.81/servpanel-3.0.81.tar.gz.sha256
-sha256sum -c servpanel-3.0.81.tar.gz.sha256
-tar -xzf servpanel-3.0.81.tar.gz
-bash /root/servpanel-3.0.81/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.82/servpanel-3.0.82.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.82/servpanel-3.0.82.tar.gz.sha256
+sha256sum -c servpanel-3.0.82.tar.gz.sha256
+tar -xzf servpanel-3.0.82.tar.gz
+bash /root/servpanel-3.0.82/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.0.81`. Если `curl` не установлен:
+Должно вывести `3.0.82`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:
