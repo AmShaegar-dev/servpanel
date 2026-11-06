@@ -365,7 +365,7 @@ async function uninstallModule(id) {
     const extra = id === 'adguard'
         ? '\n\nAdGuard Home будет остановлен, его конфиг и статистика удалены.'
         : id === 'warp'
-            ? '\n\nБудут удалены WARP, Xray и их конфиги. Прокси перестанет отвечать на порту Xray.'
+            ? '\n\nБудут удалены Cloudflare WARP, Xray, их конфиги, systemd-службы, регистрация WARP, пакеты и правило UFW для порта Xray. Если есть предыдущий конфиг Xray, он будет восстановлен. Правила AdGuard не трогаются.'
             : id === 'mtproto'
                 ? '\n\nБудут удалены Telemt/MTProxyL/MTProto.zig, все фиксы (iptables, nftables, Zapret2), GEOIP, шейпинг, оптимизация MEKO и сам MEKO Manager.'
                 : '';
