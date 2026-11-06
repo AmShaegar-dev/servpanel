@@ -679,7 +679,7 @@ curl https://panel.example.com:9101/health
 * Xray слушает TLS на `0.0.0.0:443` и по SNI определяет домен;
 * вариант 1: весь трафик Xray идёт в первый outbound `warp`;
 * вариант 2: Google/Gemini → `direct`, AI → `warp`, остальное → `direct`;
-* AdGuard подменяет A-записи выбранных доменов на публичный IP сервера, поэтому клиенты с DoH AdGuard попадают в Xray;
+* AdGuard подменяет A-записи выбранных сервисов на публичный IP сервера, поэтому клиенты с DoH AdGuard попадают в Xray;
 * **правила AdGuard панель не записывает.** Готовый список `dnsrewrite` для выбранных сервисов и полный список из первой инструкции находятся на странице **«Инструкции»**. Скопируйте их в AdGuard Home → Filters → Custom filtering rules.
 
 В карточке есть **чек-лист**: WARP установлен, WARP Connected, Xray active, маршрутизация, порт 443, SOCKS5 и выбранные сервисы. Кнопка **«Инструкции»** открывает полную страницу с командами для обоих вариантов, схемой работы, правилами AdGuard, проверкой и откатом.
@@ -932,15 +932,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.84/servpanel-3.0.84.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.84/servpanel-3.0.84.tar.gz.sha256
-sha256sum -c servpanel-3.0.84.tar.gz.sha256
-tar -xzf servpanel-3.0.84.tar.gz
-bash /root/servpanel-3.0.84/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.85/servpanel-3.0.85.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.85/servpanel-3.0.85.tar.gz.sha256
+sha256sum -c servpanel-3.0.85.tar.gz.sha256
+tar -xzf servpanel-3.0.85.tar.gz
+bash /root/servpanel-3.0.85/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.0.84`. Если `curl` не установлен:
+Должно вывести `3.0.85`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:

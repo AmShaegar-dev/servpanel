@@ -5261,13 +5261,13 @@ details{margin:10px 0;border:1px solid #30363d;border-radius:8px;padding:10px}su
 <p class="muted">Две инструкции: базовая (вариант 1) и с разделением Google/AI (вариант 2). Панель настраивает WARP и Xray, а правила AdGuard вы копируете вручную.</p>
 
 <h2>Зачем это нужно</h2>
-<p>Провайдер блокирует часть зарубежных сервисов. На VPS поднимается Xray, который принимает TLS на порту ${esc(cfg.listenPort)} и по SNI понимает, куда идёт запрос. WARP работает как локальный SOCKS5-прокси <code>127.0.0.1:${esc(cfg.socksPort)}</code>. AdGuard подменяет A-записи выбранных доменов на публичный IP сервера, поэтому клиенты с DoH AdGuard попадают в Xray.</p>
+<p>Провайдер блокирует часть зарубежных сервисов. На VPS поднимается Xray, который принимает TLS на порту ${esc(cfg.listenPort)} и по SNI понимает, куда идёт запрос. WARP работает как локальный SOCKS5-прокси <code>127.0.0.1:${esc(cfg.socksPort)}</code>. AdGuard подменяет A-записи выбранных сервисов на публичный IP сервера, поэтому клиенты с DoH AdGuard попадают в Xray.</p>
 
-<div class="warn"><b>Правила AdGuard панель не записывает.</b> Скопируйте готовый список из раздела «Правила AdGuard» ниже в AdGuard Home → Filters → Custom filtering rules. Так вы контролируете, какие домены подменяются, и не зависите от пароля AdGuard.</div>
+<div class="warn"><b>Правила AdGuard панель не записывает.</b> Скопируйте готовый список из раздела «Правила AdGuard» ниже в AdGuard Home → Filters → Custom filtering rules. Так вы контролируете, какие сервисы подменяются, и не зависите от пароля AdGuard.</div>
 
 <h2>Как это работает</h2>
 <pre>Клиент (DoH AdGuard)
-   │  A-запись выбранного домена = ${esc(publicIp)}
+   │  A-запись выбранного сервиса = ${esc(publicIp)}
    ▼
 VPS :${esc(cfg.listenPort)}  Xray dokodemo-door + sniffing TLS (SNI)
    ├── вариант 1: весь трафик → WARP
