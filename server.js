@@ -5065,7 +5065,7 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
         { id: 'routing', title: 'Маршрутизация Xray', ok: routingOk, detail: routingOk ? routingDetail : 'конфиг не совпадает с выбранным вариантом' },
         { id: 'port', title: `Порт ${cfg.listenPort}`, ok: !!portListening, detail: portListening ? `слушает Xray` : 'не слушается' },
         { id: 'socks', title: 'SOCKS5 WARP', ok: socksOk, detail: socksOk ? `127.0.0.1:${cfg.socksPort} отвечает` : 'проверка не прошла' },
-        { id: 'services', title: 'Сервисы выбраны', ok: selectedDomains.length > 0, detail: `${selected.length} сервисов, ${selectedDomains.length} доменов` }
+        { id: 'services', title: 'Сервисы выбраны', ok: selectedDomains.length > 0, detail: `${selected.length} сервисов` }
     ];
 
     res.json({
@@ -5323,11 +5323,11 @@ curl -s "https://www.google.com/search?q=test&amp;hl=en" | grep -o '&lt;html lan
 <h2>Правила AdGuard</h2>
 <p>Откройте AdGuard Home → <b>Filters</b> → <b>Custom filtering rules</b> и вставьте правила. Панель их не записывает: так вы можете проверить список и не хранить пароль AdGuard.</p>
 <p class="warn">Если WARP/Xray установлен на другом сервере (например, EU), замените IP в правилах на публичный IP того сервера. Ниже указан IP текущего сервера — это правильно только при локальной установке.</p>
-<p><b>Выбранные сервисы:</b> ${esc(serviceNames)}. Доменов: <b>${selectedDomains.length}</b>. Публичный IP для подмены: <code>${esc(publicIp)}</code>.</p>
+<p><b>Выбранные сервисы:</b> ${esc(serviceNames)}. Правил: <b>${selectedDomains.length}</b>. Публичный IP для подмены: <code>${esc(publicIp)}</code>.</p>
 <pre>${esc(selectedRules)}</pre>
 <p class="muted">Если IP сервера изменился, замените его в правилах. После изменения правил очистите кэш AdGuard и DNS на клиенте: <code>ipconfig /flushdns</code>.</p>
 <details>
-<summary>Полный список из первой инструкции (${allDomains.length} доменов)</summary>
+<summary>Полный список из первой инструкции (${allDomains.length} правил)</summary>
 <pre>${esc(allRules)}</pre>
 </details>
 <p class="muted">Для Android-клиентов и браузеров с IPv6 можно добавить правила <code>$dnstype=AAAA</code> и <code>$dnstype=HTTPS</code>, чтобы они не уходили на IPv6/SVCB. Это не обязательно, если у клиента нет IPv6.</p>
@@ -5513,7 +5513,7 @@ app.post('/api/warp/adguard', checkAuth, requireAdmin, async (req, res) => {
                 }, null, 2), '0600');
             } catch (e) { /* статус не критичен */ }
         }
-        auditLog(req, `WARP: правила AdGuard обновлены (${domains.length} доменов -> ${rewriteIp})`);
+        auditLog(req, `WARP: правила AdGuard обновлены (${domains.length} правил -> ${rewriteIp})`);
         res.json({ success: true, count: domains.length, totalRules: next.length, rewriteIp, syncedAt });
     } catch (e) {
         res.status(502).json({ error: 'Не удалось обновить AdGuard: ' + e.message });
