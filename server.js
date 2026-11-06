@@ -5046,12 +5046,13 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
     const hasRouting = /"routing"\s*:/.test(configText);
     const hasWarpOut = /"tag"\s*:\s*"warp"/.test(configText);
     const hasDirectRoute = /"outboundTag"\s*:\s*"direct"/.test(configText);
+    const defaultDirect = /"network"\s*:\s*"tcp,udp"[\s\S]*?"outboundTag"\s*:\s*"direct"/.test(configText);
     const routingOk = cfg.mode === 'v1'
         ? (hasWarpOut && !hasRouting)
-        : (hasWarpOut && hasRouting && hasDirectRoute);
+        : (hasWarpOut && hasRouting && hasDirectRoute && defaultDirect);
     const routingDetail = cfg.mode === 'v1'
         ? 'весь трафик через WARP (первая инструкция)'
-        : 'Google direct / AI через WARP (вторая инструкция)';
+        : 'Google и остальное direct, AI через WARP (вторая инструкция)';
     const portListening = xrayActive && new RegExp(`:${cfg.listenPort}\\b`).test(shTry('ss', ['-ltn'], { timeout: 8000 }));
     let socksOk = false;
     if (warpActive && connected) {
