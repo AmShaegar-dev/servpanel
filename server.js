@@ -4537,13 +4537,31 @@ function optimizeRoutingIpSet(script) {
     return out;
 }
 
+function validProxyUsers(list) {
+    const out = [];
+    for (const u of (Array.isArray(list) ? list : [])) {
+        if (!u) continue;
+        try {
+            if (String(sh('id', ['-u', u], { timeout: 5000 }) || '').trim()) out.push(u);
+        } catch (e) { /* ignore */ }
+    }
+    return [...new Set(out)];
+}
+
 function proxyCascadeUsers() {
     const users = new Set();
     try {
-        const out = String(sh('ps', ['-eo', 'user=,comm=,args='], { timeout: 8000 }) || '');
+        const out = String(sh('ps', ['-eo', 'uid=,comm=,args='], { timeout: 8000 }) || '');
         for (const line of out.split(/\r?\n/)) {
             if (!line || !/telemt|mtproxyl|kvguardd/i.test(line)) continue;
-            const user = line.trim().split(/\s+/)[0];
+            const parts = line.trim().split(/\s+/);
+            const uid = parts[0];
+            const comm = parts[1] || '';
+            if (!/^\d+$/.test(uid) || uid === '0') continue;
+            // Только сам прокси, не его API/меню/обёртки.
+            if (!/^(telemt|mtproxyl|kvguardd)(?:\.sh)?$/i.test(comm)) continue;
+            let user = '';
+            try { user = String(sh('id', ['-nu', uid], { timeout: 5000 }) || '').trim(); } catch (e) { /* ignore */ }
             if (user && user !== 'root') users.add(user);
         }
     } catch (e) { /* ignore */ }
@@ -4666,7 +4684,7 @@ function restoreProxyCascadeNatIp() {
 }
 
 app.get('/api/cascade/proxy', checkAuth, (req, res) => {
-    const stored = String(readTextSafe(PROXY_CASCADE_UID_FILE) || '').trim().split(/\s+/).filter(Boolean);
+    const stored = validProxyUsers(String(readTextSafe(PROXY_CASCADE_UID_FILE) || '').trim().split(/\s+/).filter(Boolean));
     const users = stored.length ? stored : proxyCascadeUsers();
     const uids = users.map(u => String(shTry('id', ['-u', u]) || '').trim()).filter(Boolean);
     res.json({
@@ -4727,7 +4745,7 @@ app.post('/api/cascade/proxy', checkAuth, requireAdmin, async (req, res) => {
 });
 
 app.get('/api/cascade/proxy/test', checkAuth, requireAdmin, async (req, res) => {
-    const stored = String(readTextSafe(PROXY_CASCADE_UID_FILE) || '').trim().split(/\s+/).filter(Boolean);
+    const stored = validProxyUsers(String(readTextSafe(PROXY_CASCADE_UID_FILE) || '').trim().split(/\s+/).filter(Boolean));
     const users = stored.length ? stored : proxyCascadeUsers();
     const run = (cmd) => {
         try { return String(sh('bash', ['-c', cmd], { timeout: 30000 }) || '').trim(); }
