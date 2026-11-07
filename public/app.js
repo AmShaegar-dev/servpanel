@@ -6930,7 +6930,7 @@ async function loadProxyBot() {
                 } else if (st.claimActive) {
                     lines.push(`Ожидаю /start: осталось <b>${st.claimLeft}</b> сек. Откройте бота и отправьте /start — ID запишется администратором автоматически.`);
                 } else {
-                    lines.push('Окно автоопределения истекло. Отправьте /start, бот покажет ID, добавьте его в поле выше.');
+                    lines.push('Окно автоопределения истекло. Нажмите «Сохранить», чтобы открыть его заново, или отправьте /start и добавьте ID вручную.');
                 }
             }
             lines.push('Команды: /status, /users, /user, /link, /add, /del, /enable, /disable, /rotate, /reset, /restart.');
