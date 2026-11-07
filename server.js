@@ -784,7 +784,9 @@ class FileSessionStore extends session.Store {
                 if (!f.endsWith('.json')) continue;
                 const p = path.join(this.dir, f);
                 fs.stat(p, (e, st) => {
-                    if (!e && now - st.mtimeMs > 24 * 60 * 60 * 1000) fs.unlink(p, () => { /* ignore */ });
+                    // Держим файл дольше срока мобильной сессии (30 дней),
+                    // иначе долгая сессия приложения исчезнет с диска.
+                    if (!e && now - st.mtimeMs > 31 * 24 * 60 * 60 * 1000) fs.unlink(p, () => { /* ignore */ });
                 });
             }
         });
@@ -805,6 +807,23 @@ app.use(session({
         maxAge: 12 * 60 * 60 * 1000
     }
 }));
+
+// Мобильному клиенту сессия нужна надолго: приложение не хранит пароль
+// и не может войти заново без пользователя. Браузер заголовок не шлёт,
+// поэтому у него остаются обычные 12 часов. Длинный срок ставится и при
+// входе (сессия пересоздаётся), и на каждом следующем запросе (rolling).
+const MOBILE_SESSION_TTL = 30 * 24 * 60 * 60 * 1000;
+function isMobileClient(req) {
+    return String(req.headers['x-servpanel-client'] || '').toLowerCase() === 'android';
+}
+app.use((req, res, next) => {
+    try {
+        if (req.session && isMobileClient(req)) {
+            req.session.cookie.maxAge = MOBILE_SESSION_TTL;
+        }
+    } catch (e) { /* ignore */ }
+    next();
+});
 
 // PANEL_WEB=0 выключает веб-интерфейс: статика не раздаётся, все не-API
 // маршруты отвечают 404. API (/api/*) продолжает работать как обычно.
@@ -1682,6 +1701,7 @@ app.post('/api/login', (req, res) => {
     loginFails.delete(key);
     req.session.regenerate(err => {
         if (err) return res.status(500).json({ error: 'Ошибка сессии' });
+        if (isMobileClient(req)) req.session.cookie.maxAge = MOBILE_SESSION_TTL;
         req.session.loggedIn = true;
         req.session.user = user.username;
         req.session.role = user.role;
