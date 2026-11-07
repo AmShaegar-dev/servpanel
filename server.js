@@ -784,9 +784,7 @@ class FileSessionStore extends session.Store {
                 if (!f.endsWith('.json')) continue;
                 const p = path.join(this.dir, f);
                 fs.stat(p, (e, st) => {
-                    // Держим файл дольше срока мобильной сессии (30 дней),
-                    // иначе долгая сессия приложения исчезнет с диска.
-                    if (!e && now - st.mtimeMs > 31 * 24 * 60 * 60 * 1000) fs.unlink(p, () => { /* ignore */ });
+                    if (!e && now - st.mtimeMs > 24 * 60 * 60 * 1000) fs.unlink(p, () => { /* ignore */ });
                 });
             }
         });
@@ -807,23 +805,6 @@ app.use(session({
         maxAge: 12 * 60 * 60 * 1000
     }
 }));
-
-// Мобильному клиенту сессия нужна надолго: приложение не хранит пароль
-// и не может войти заново без пользователя. Браузер заголовок не шлёт,
-// поэтому у него остаются обычные 12 часов. Длинный срок ставится и при
-// входе (сессия пересоздаётся), и на каждом следующем запросе (rolling).
-const MOBILE_SESSION_TTL = 30 * 24 * 60 * 60 * 1000;
-function isMobileClient(req) {
-    return String(req.headers['x-servpanel-client'] || '').toLowerCase() === 'android';
-}
-app.use((req, res, next) => {
-    try {
-        if (req.session && isMobileClient(req)) {
-            req.session.cookie.maxAge = MOBILE_SESSION_TTL;
-        }
-    } catch (e) { /* ignore */ }
-    next();
-});
 
 // PANEL_WEB=0 выключает веб-интерфейс: статика не раздаётся, все не-API
 // маршруты отвечают 404. API (/api/*) продолжает работать как обычно.
@@ -1701,7 +1682,6 @@ app.post('/api/login', (req, res) => {
     loginFails.delete(key);
     req.session.regenerate(err => {
         if (err) return res.status(500).json({ error: 'Ошибка сессии' });
-        if (isMobileClient(req)) req.session.cookie.maxAge = MOBILE_SESSION_TTL;
         req.session.loggedIn = true;
         req.session.user = user.username;
         req.session.role = user.role;
@@ -4557,15 +4537,145 @@ function optimizeRoutingIpSet(script) {
     return out;
 }
 
+function proxyCascadeUsers() {
+    const users = new Set();
+    try {
+        const out = String(sh('ps', ['-eo', 'user=,comm=,args='], { timeout: 8000 }) || '');
+        for (const line of out.split(/\r?\n/)) {
+            if (!line || !/telemt|mtproxyl|kvguardd/i.test(line)) continue;
+            const user = line.trim().split(/\s+/)[0];
+            if (user && user !== 'root') users.add(user);
+        }
+    } catch (e) { /* ignore */ }
+    // Если прокси ещё не запущен, но пользователь уже создан установщиком,
+    // оставляем возможность включить каскад заранее.
+    if (!users.size) {
+        for (const u of ['telemt', 'mtproxyl', 'kvguardd']) {
+            try {
+                if (String(sh('id', ['-u', u], { timeout: 5000 }) || '').trim()) users.add(u);
+            } catch (e) { /* ignore */ }
+        }
+    }
+    return [...users];
+}
+
+function proxyCascadeExitIp() {
+    let ip = '';
+    try {
+        ip = String(sh('bash', ['-c', 'curl -4 -fsS --max-time 8 --interface awg1 https://api.ipify.org'], { timeout: 12000 }) || '').trim();
+    } catch (e) { /* ignore */ }
+    if (IPV4_RE.test(ip)) return ip;
+    const conf = existingCascadeConf();
+    if (conf) {
+        try {
+            const ini = parseIni(readTextSafe(conf));
+            const ep = String((ini.Peer || {}).Endpoint || '');
+            const m = ep.match(/^([A-Za-z0-9.\-]+):/);
+            if (m) {
+                const resolved = resolveHostSync(m[1]);
+                if (IPV4_RE.test(resolved)) return resolved;
+            }
+        } catch (e) { /* ignore */ }
+    }
+    return '';
+}
+
+function setNatIpText(text, ip) {
+    const line = `middle_proxy_nat_ip = "${ip}"`;
+    if (/^\s*middle_proxy_nat_ip\s*=.*$/m.test(text)) {
+        return text.replace(/^\s*middle_proxy_nat_ip\s*=.*$/m, line);
+    }
+    if (/^\[general\]\s*$/m.test(text)) {
+        return text.replace(/^\[general\]\s*$/m, `[general]\n${line}`);
+    }
+    return text.replace(/\s*$/, `\n\n[general]\n${line}\n`);
+}
+
+function removeNatIpText(text) {
+    return text.replace(/^\s*middle_proxy_nat_ip\s*=.*\r?\n?/m, '');
+}
+
+function writeTelemtConfig(cfg, text) {
+    let real = cfg;
+    try { real = fs.realpathSync(cfg); } catch (e) { /* ignore */ }
+    let mode = '0640';
+    let uid = null, gid = null;
+    try {
+        const st = fs.statSync(real);
+        mode = '0' + (st.mode & 0o777).toString(8);
+        uid = st.uid;
+        gid = st.gid;
+    } catch (e) { /* ignore */ }
+    writeRootFile(real, text, mode);
+    if (uid !== null && gid !== null) {
+        try { fs.chownSync(real, uid, gid); } catch (e) { /* ignore */ }
+    }
+}
+
+// При включении каскада ME-хендшейк Telemt должен считать ключи от EU-IP,
+// а не от RU-IP. Сохраняем прежнее значение, чтобы вернуть его при выключении.
+function applyProxyCascadeNatIp(ip) {
+    const paths = (typeof proxyUsers.configPaths === 'function' ? proxyUsers.configPaths() : [])
+        .filter(Boolean);
+    if (!paths.length) return { changed: [], paths: [] };
+    const stateFile = '/root/awg/proxy-cascade.nat.json';
+    let state = null;
+    try { state = JSON.parse(readTextSafe(stateFile).replace(/^\uFEFF/, '')); } catch (e) { state = null; }
+    const previous = {};
+    const changed = [];
+    for (const cfg of paths) {
+        const text = readTextSafe(cfg);
+        if (!text) continue;
+        const m = text.match(/^\s*middle_proxy_nat_ip\s*=\s*"?([^"\n]*)"?\s*$/m);
+        if (state && state.paths && Object.prototype.hasOwnProperty.call(state.paths, cfg)) {
+            previous[cfg] = state.paths[cfg];
+        } else {
+            previous[cfg] = m ? m[1] : null;
+        }
+        const next = setNatIpText(text, ip);
+        if (next !== text) {
+            writeTelemtConfig(cfg, next);
+            changed.push(cfg);
+        }
+    }
+    if (changed.length) {
+        try { writeRootFile(stateFile, JSON.stringify({ paths: previous }, null, 2), '0600'); } catch (e) { /* ignore */ }
+    }
+    return { changed, paths };
+}
+
+function restoreProxyCascadeNatIp() {
+    const stateFile = '/root/awg/proxy-cascade.nat.json';
+    let state = null;
+    try { state = JSON.parse(readTextSafe(stateFile).replace(/^\uFEFF/, '')); } catch (e) { state = null; }
+    if (!state || !state.paths) return [];
+    const changed = [];
+    for (const [cfg, prev] of Object.entries(state.paths)) {
+        const text = readTextSafe(cfg);
+        if (!text) continue;
+        const next = (prev === null || prev === undefined || prev === '')
+            ? removeNatIpText(text)
+            : setNatIpText(text, prev);
+        if (next !== text) {
+            writeTelemtConfig(cfg, next);
+            changed.push(cfg);
+        }
+    }
+    try { fs.unlinkSync(stateFile); } catch (e) { /* ignore */ }
+    return changed;
+}
+
 app.get('/api/cascade/proxy', checkAuth, (req, res) => {
-    const user = readTextSafe(PROXY_CASCADE_UID_FILE).trim() || 'telemt';
-    let uid = '';
-    try { uid = String(sh('id', ['-u', user]) || '').trim(); } catch (e) { /* нет пользователя */ }
+    const stored = String(readTextSafe(PROXY_CASCADE_UID_FILE) || '').trim().split(/\s+/).filter(Boolean);
+    const users = stored.length ? stored : proxyCascadeUsers();
+    const uids = users.map(u => String(shTry('id', ['-u', u]) || '').trim()).filter(Boolean);
     res.json({
         enabled: fs.existsSync(PROXY_CASCADE_FLAG_FILE),
-        user,
-        uid,
-        available: !!uid,
+        users,
+        uids,
+        user: users[0] || 'telemt',
+        uid: uids[0] || '',
+        available: users.length > 0,
         script: fs.existsSync(ROUTING_SCRIPT)
     });
 });
@@ -4575,19 +4685,22 @@ app.post('/api/cascade/proxy', checkAuth, requireAdmin, async (req, res) => {
     if (!fs.existsSync(ROUTING_SCRIPT)) {
         return res.status(404).json({ error: 'Сначала постройте каскад' });
     }
-    const user = 'telemt';
-    let uid = '';
-    try { uid = String(sh('id', ['-u', user]) || '').trim(); } catch (e) { /* нет пользователя */ }
-    if (enabled && !uid) {
-        return res.status(400).json({ error: 'MTProto/Telemt не установлен — сначала установите прокси' });
+    const users = proxyCascadeUsers();
+    const uids = users.map(u => String(shTry('id', ['-u', u]) || '').trim()).filter(Boolean);
+    if (enabled && !users.length) {
+        return res.status(400).json({ error: 'Telemt/MTProxyL не найден — сначала установите MTProto-прокси' });
+    }
+    const exitIp = enabled ? proxyCascadeExitIp() : '';
+    if (enabled && !exitIp) {
+        return res.status(400).json({ error: 'Не удалось определить EU-IP через awg1. Проверьте каскад и маршрут awg1.' });
     }
     try {
         if (enabled) {
-            writeRootFile(PROXY_CASCADE_UID_FILE, user + '\n', '0600');
+            writeRootFile(PROXY_CASCADE_UID_FILE, users.join(' ') + '\n', '0600');
             writeRootFile(PROXY_CASCADE_FLAG_FILE, '1\n', '0600');
         } else {
             try { fs.unlinkSync(PROXY_CASCADE_FLAG_FILE); } catch (e) { /* уже нет */ }
-            if (uid) writeRootFile(PROXY_CASCADE_UID_FILE, user + '\n', '0600');
+            if (users.length) writeRootFile(PROXY_CASCADE_UID_FILE, users.join(' ') + '\n', '0600');
         }
         const script = optimizeRoutingIpSet(ensureProxyCascadeBlock(readTextSafe(ROUTING_SCRIPT)));
         if (!script) return res.status(404).json({ error: 'Скрипт маршрутизации не найден' });
@@ -4596,29 +4709,39 @@ app.post('/api/cascade/proxy', checkAuth, requireAdmin, async (req, res) => {
         if (r.code !== 0) {
             return res.status(500).json({ error: 'Скрипт маршрутизации вернул ошибку', output: String(r.out || '').slice(-1600) });
         }
+        if (enabled) applyProxyCascadeNatIp(exitIp);
+        else restoreProxyCascadeNatIp();
         // MTProxyL-Telemt может работать как kvguardd, а не как telemt.
         // Без перезапуска реального юнита старые upstream-сокеты остаются
         // в обход новых правил каскада.
         for (const unit of ['telemt', 'kvguardd', 'mtproxyl']) {
             try { sh('systemctl', ['restart', unit]); } catch (e) { /* юнита может не быть */ }
         }
-        auditLog(req, enabled ? 'Каскад: MTProto-прокси пущен через EU' : 'Каскад: MTProto-прокси возвращён напрямую');
-        res.json({ success: true, enabled, user, uid, output: String(r.out || '').slice(-1600) });
+        auditLog(req, enabled
+            ? `Каскад: MTProto-прокси (${users.join(', ')}) пущен через EU`
+            : 'Каскад: MTProto-прокси возвращён напрямую');
+        res.json({ success: true, enabled, users, uids, exitIp, output: String(r.out || '').slice(-1600) });
     } catch (e) {
         res.status(500).json({ error: 'Не удалось переключить прокси: ' + e.message });
     }
 });
 
 app.get('/api/cascade/proxy/test', checkAuth, requireAdmin, async (req, res) => {
-    const user = readTextSafe(PROXY_CASCADE_UID_FILE).trim() || 'telemt';
+    const stored = String(readTextSafe(PROXY_CASCADE_UID_FILE) || '').trim().split(/\s+/).filter(Boolean);
+    const users = stored.length ? stored : proxyCascadeUsers();
     const run = (cmd) => {
         try { return String(sh('bash', ['-c', cmd], { timeout: 30000 }) || '').trim(); }
         catch (e) { return ''; }
     };
     const ru = run('curl -4 -fsS --max-time 8 https://api.ipify.org');
     const eu = run('curl -4 -fsS --max-time 8 --interface awg1 https://api.ipify.org');
-    const telemt = run(`sudo -u ${user} curl -4 -fsS --max-time 8 https://api.ipify.org`);
-    const tcp = (host, asUser) => run(`${asUser ? `sudo -u ${user} ` : ''}timeout 6 bash -c "cat < /dev/null > /dev/tcp/${host}/443" >/dev/null 2>&1 && echo ok || echo fail`);
+    const proxies = users.map(user => ({
+        user,
+        ip: run(`sudo -u ${user} curl -4 -fsS --max-time 8 https://api.ipify.org`)
+    }));
+    const telemt = (proxies.find(p => p.user === 'telemt') || {}).ip || '';
+    const firstUser = users[0] || 'telemt';
+    const tcp = (host, asUser) => run(`${asUser ? `sudo -u ${firstUser} ` : ''}timeout 6 bash -c "cat < /dev/null > /dev/tcp/${host}/443" >/dev/null 2>&1 && echo ok || echo fail`);
     const dcHosts = ['149.154.167.99', '149.154.175.53', '91.108.56.130', '149.154.167.51'];
     const telegram = dcHosts.map(host => ({
         host,
@@ -4629,8 +4752,9 @@ app.get('/api/cascade/proxy/test', checkAuth, requireAdmin, async (req, res) => 
         ru,
         eu,
         telemt,
+        proxies,
         telegram,
-        ok: !!telemt && !!eu && telemt === eu
+        ok: !!eu && proxies.length > 0 && proxies.every(p => p.ip === eu)
     });
 });
 

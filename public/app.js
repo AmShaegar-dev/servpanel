@@ -2105,9 +2105,11 @@ async function loadCascadeProxy() {
             badge.innerText = d.enabled ? 'включено' : 'выключено';
         }
         if (result) {
+            const users = Array.isArray(d.users) && d.users.length ? d.users : (d.user ? [d.user] : []);
+            const uids = Array.isArray(d.uids) ? d.uids : (d.uid ? [d.uid] : []);
             result.innerText = d.available
-                ? 'Пользователь: ' + d.user + ' (uid ' + d.uid + ')'
-                : 'Telemt не найден — сначала установите MTProto';
+                ? 'Прокси: ' + users.map((u, i) => u + (uids[i] ? ' (uid ' + uids[i] + ')' : '')).join(', ')
+                : 'Telemt/MTProxyL не найден — сначала установите MTProto';
         }
     } catch (e) {
         if (result) result.innerText = e.message;
@@ -2117,7 +2119,7 @@ async function loadCascadeProxy() {
 async function toggleCascadeProxy(enabled) {
     const cb = document.getElementById('cascadeProxyEnabled');
     const result = document.getElementById('cascadeProxyResult');
-    if (enabled && !confirm('Пустить исходящие соединения Telemt через EU? Telemt будет перезапущен, активные подключения прервутся на несколько секунд.')) {
+    if (enabled && !confirm('Пустить исходящие соединения Telemt/MTProxyL через EU?\n\nПрокси будет перезапущен, активные подключения прервутся на несколько секунд. Также будет задан middle_proxy_nat_ip = EU-IP и добавлен DC 203.')) {
         if (cb) cb.checked = false;
         return;
     }
@@ -2143,7 +2145,10 @@ async function testCascadeProxy() {
     if (result) result.innerText = 'Проверяю выход…';
     try {
         const d = await apiJson('/api/cascade/proxy/test');
-        const text = 'RU: ' + (d.ru || '—') + ' · EU: ' + (d.eu || '—') + ' · telemt: ' + (d.telemt || '—');
+        const proxies = Array.isArray(d.proxies) && d.proxies.length
+            ? d.proxies.map(p => p.user + ': ' + (p.ip || '—')).join(' · ')
+            : ('telemt: ' + (d.telemt || '—'));
+        const text = 'RU: ' + (d.ru || '—') + ' · EU: ' + (d.eu || '—') + ' · ' + proxies;
         if (result) result.innerText = (d.ok ? 'Прокси выходит через EU. ' : 'Прокси выходит не через EU. ') + text;
         toast(d.ok ? 'Прокси выходит через EU' : 'Проверьте маршрут прокси', d.ok ? 'success' : 'error', text);
     } catch (e) {
