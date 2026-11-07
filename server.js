@@ -5200,7 +5200,7 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
     try { warpActive = isActive('warp-svc') === 'active'; } catch (e) { /* ignore */ }
     try { xrayActive = isActive('xray') === 'active'; } catch (e) { /* ignore */ }
     try {
-        warpStatus = String(shTry('bash', ['-c', 'warp-cli status 2>&1'], { timeout: 8000 }) || '').trim();
+        warpStatus = String(shTry('bash', ['-c', 'warp-cli --accept-tos status 2>&1'], { timeout: 8000 }) || '').trim();
         connected = /(^|\s)Connected(\s|$)/i.test(warpStatus) && !/Disconnected/i.test(warpStatus);
     } catch (e) { /* ignore */ }
 
@@ -5218,7 +5218,7 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
     const portListening = xrayActive && new RegExp(`:${cfg.listenPort}\\b`).test(shTry('ss', ['-ltn'], { timeout: 8000 }));
     let socksOk = false;
     if (warpActive && connected) {
-        const out = String(shTry('curl', ['-fsS', '--max-time', '5', '-x', `socks5h://127.0.0.1:${cfg.socksPort}`, 'https://ipinfo.io/ip'], { timeout: 9000 }) || '').trim();
+        const out = String(shTry('curl', ['-fsS', '--max-time', '5', '-x', `socks5h://127.0.0.1:${cfg.socksPort}`, 'https://api.ipify.org'], { timeout: 9000 }) || '').trim();
         socksOk = IPV4_RE.test(out);
     }
     const checks = [
@@ -5564,7 +5564,7 @@ app.post('/api/warp/test', checkAuth, requireAdmin, (req, res) => {
     execFile('curl', [
         '-fsS', '--max-time', '15',
         '-x', `socks5h://127.0.0.1:${socksPort}`,
-        'https://ipinfo.io/json'
+        'https://api.ipify.org?format=json'
     ], { timeout: 25000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) {
             return res.json({ ok: false, error: String(stderr || err.message || 'WARP не ответил').slice(0, 1000) });

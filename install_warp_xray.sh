@@ -50,6 +50,17 @@ apt-get update || echo "WARNING: apt-get update завершился с ошиб
 apt-get install -y curl gnupg lsb-release ca-certificates unzip iproute2 python3 \
     || { echo "ERROR: не удалось установить базовые пакеты."; exit 1; }
 
+# Порт Xray не должен быть занят чужой службой (Telemt, nginx, MTProto).
+# Свой Xray на этом порту разрешён — его мы всё равно перезапустим.
+PORT_LINE="$(ss -ltnp 2>/dev/null | grep -E "[:.]${WARP_LISTEN_PORT}[[:space:]]" || true)"
+if [ -n "$PORT_LINE" ] && ! printf '%s' "$PORT_LINE" | grep -q 'xray'; then
+    echo "ERROR: порт ${WARP_LISTEN_PORT} уже занят:"
+    printf '%s\n' "$PORT_LINE" | sed 's/^/  /'
+    echo "Xray не сможет слушать этот порт. Остановите службу или выберите другой порт."
+    echo "На RU порт 443 часто занят Telemt; WARP/Xray лучше ставить на EU-сервере."
+    exit 1
+fi
+
 # 127.0.0.1 — штатный адрес WARP-прокси (только с этого же сервера). Порт Xray
 # слушает локально и его не нужно открывать наружу; если нужен доступ из
 # туннеля AWG, укажите IP интерфейса — он должен существовать.
@@ -129,12 +140,15 @@ else
     echo "WARP подключён."
 fi
 
-if curl -fsS --max-time 15 -x "socks5h://127.0.0.1:${WARP_SOCKS_PORT}" https://ipinfo.io/json >/tmp/warp-check.json 2>/dev/null; then
+if curl -fsS --max-time 15 -x "socks5h://127.0.0.1:${WARP_SOCKS_PORT}" 'https://api.ipify.org?format=json' >/tmp/warp-check.json 2>/dev/null; then
     echo "SOCKS5 WARP отвечает:"
     cat /tmp/warp-check.json
     echo
 else
     echo "WARNING: проверка socks5h://127.0.0.1:${WARP_SOCKS_PORT} не прошла."
+    echo "WARP settings:"
+    warp-cli --accept-tos settings 2>&1 | head -20 | sed 's/^/  /' || true
+    ss -ltnp 2>/dev/null | grep ":${WARP_SOCKS_PORT} " | sed 's/^/  /' || true
 fi
 
 echo "[3/6] Xray-core..."
@@ -294,7 +308,7 @@ fi
 echo "[5/6] Запуск Xray..."
 systemctl enable xray >/dev/null 2>&1 || true
 systemctl restart xray || true
-sleep 1
+sleep 3
 if ! systemctl is-active --quiet xray; then
     echo "ERROR: Xray не запустился. Последние строки журнала:"
     journalctl -u xray -n 30 --no-pager || true
@@ -304,6 +318,11 @@ if ! systemctl is-active --quiet xray; then
         systemctl restart xray >/dev/null 2>&1 || true
         echo "Восстановлен предыдущий конфиг Xray: $LAST_BAK"
     fi
+    exit 1
+fi
+if ! ss -ltn 2>/dev/null | grep -qE "[:.]${WARP_LISTEN_PORT}[[:space:]]"; then
+    echo "ERROR: Xray активен, но не слушает порт ${WARP_LISTEN_PORT}."
+    journalctl -u xray -n 30 --no-pager || true
     exit 1
 fi
 
