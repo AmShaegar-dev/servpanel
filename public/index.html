@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.90">
+    <meta name="panel-version" content="3.0.91">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1581,8 +1581,12 @@
                             <input id="proxyBotAdmins" placeholder="123456789, 987654321">
                         </label>
                     </div>
-                    <label class="form-check" style="margin:4px 0 12px;">
+                    <div class="sub-text" style="margin:-6px 0 10px;">ID — это номер вашего аккаунта Telegram, не токен бота. Отправьте боту <code>/start</code>, чтобы узнать ID.</div>
+                    <label class="form-check" style="margin:4px 0 8px;">
                         <input type="checkbox" id="proxyBotEnabled"> Включить бота
+                    </label>
+                    <label class="form-check" style="margin:4px 0 12px;">
+                        <input type="checkbox" id="proxyBotAutoClaim" checked> Автоопределение админа: первый /start в течение минуты
                     </label>
                     <div class="controls-row" style="flex-wrap:wrap;">
                         <button class="btn-primary" onclick="saveProxyBot()">Сохранить</button>

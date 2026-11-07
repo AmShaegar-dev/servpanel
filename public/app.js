@@ -6912,16 +6912,35 @@ async function loadProxyBot() {
         if (adminsEl) adminsEl.value = (st.admins || []).join(', ');
         const enabledEl = document.getElementById('proxyBotEnabled');
         if (enabledEl) enabledEl.checked = !!st.enabled;
+        const autoEl = document.getElementById('proxyBotAutoClaim');
+        if (autoEl) autoEl.checked = st.autoClaim !== false;
         const info = document.getElementById('proxyBotInfo');
         if (info) {
             const lines = [];
-            if (st.botUsername) lines.push(`Бот: <b>@${esc(st.botUsername)}</b>.`);
-            if (st.lastError) lines.push(`Последняя ошибка: ${esc(st.lastError)}.`);
-            lines.push('Команды: /status, /users, /user, /link, /add, /del, /enable, /disable, /rotate, /reset, /restart.');
-            if (!st.admins || !st.admins.length) {
-                lines.push('Сначала отправьте боту /start — он покажет ваш Telegram ID, добавьте его в список администраторов.');
+            if (st.admins && st.admins.length) {
+                lines.push(`Админы: <code>${st.admins.map(esc).join(', ')}</code>.`);
             }
+            if (st.botUsername) {
+                lines.push(`Бот: <a href="https://t.me/${esc(st.botUsername)}" target="_blank" rel="noopener">@${esc(st.botUsername)}</a>.`);
+            }
+            if (st.lastError) lines.push(`Последняя ошибка: ${esc(st.lastError)}.`);
+            if (!st.admins || !st.admins.length) {
+                if (st.autoClaim === false) {
+                    lines.push('Автоопределение выключено: отправьте /start, бот покажет ID, добавьте его в поле выше.');
+                } else if (st.claimActive) {
+                    lines.push(`Ожидаю /start: осталось <b>${st.claimLeft}</b> сек. Откройте бота и отправьте /start — ID запишется администратором автоматически.`);
+                } else {
+                    lines.push('Окно автоопределения истекло. Отправьте /start, бот покажет ID, добавьте его в поле выше.');
+                }
+            }
+            lines.push('Команды: /status, /users, /user, /link, /add, /del, /enable, /disable, /rotate, /reset, /restart.');
             info.innerHTML = lines.join(' ');
+        }
+        if (st.claimActive) {
+            if (!proxyState.botPoll) proxyState.botPoll = setInterval(() => loadProxyBot(), 5000);
+        } else if (proxyState.botPoll) {
+            clearInterval(proxyState.botPoll);
+            proxyState.botPoll = null;
         }
     } catch (e) {
         const info = document.getElementById('proxyBotInfo');
@@ -6933,8 +6952,10 @@ async function saveProxyBot() {
     const tokenEl = document.getElementById('proxyBotToken');
     const adminsEl = document.getElementById('proxyBotAdmins');
     const enabledEl = document.getElementById('proxyBotEnabled');
+    const autoEl = document.getElementById('proxyBotAutoClaim');
     const body = {
         enabled: !!(enabledEl && enabledEl.checked),
+        autoClaim: !!(autoEl && autoEl.checked),
         admins: String((adminsEl && adminsEl.value) || '').split(/[,\s;]+/).filter(Boolean)
     };
     const token = String((tokenEl && tokenEl.value) || '').trim();
