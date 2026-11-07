@@ -101,19 +101,30 @@ warp-cli --accept-tos connect >/dev/null 2>&1 || true
 
 echo -n "Ожидание подключения WARP"
 WARP_OK=0
-for _ in $(seq 1 30); do
-    WARP_STATUS="$(warp-cli status 2>/dev/null || true)"
+for i in $(seq 1 60); do
+    WARP_STATUS="$(warp-cli --accept-tos status 2>/dev/null || true)"
     if printf '%s\n' "$WARP_STATUS" | grep -Eqi '(^|[[:space:]])Connected([[:space:]]|$)'; then
         WARP_OK=1
         break
+    fi
+    if [ "$i" -eq 15 ]; then
+        echo -n " (повторный connect)"
+        warp-cli --accept-tos connect >/dev/null 2>&1 || true
     fi
     echo -n "."
     sleep 1
 done
 echo
 if [ "$WARP_OK" -ne 1 ]; then
-    echo "WARNING: WARP не перешёл в Connected за 30 секунд."
-    echo "Проверьте: warp-cli status; journalctl -u warp-svc -n 50"
+    echo "WARNING: WARP не перешёл в Connected за 60 секунд."
+    echo "WARP status:"
+    warp-cli --accept-tos status 2>&1 | sed 's/^/  /' || true
+    echo "WARP settings:"
+    warp-cli --accept-tos settings 2>&1 | head -20 | sed 's/^/  /' || true
+    echo "Последние строки журнала warp-svc:"
+    journalctl -u warp-svc -n 20 --no-pager 2>&1 | sed 's/^/  /' || true
+    echo "WARNING: Xray будет настроен, но AI-маршруты не заработают, пока WARP не подключён."
+    echo "Если WARP блокируется провайдером, устанавливайте компонент на EU-сервере."
 else
     echo "WARP подключён."
 fi
@@ -143,13 +154,25 @@ if [ -z "$XRAY_BIN" ]; then
     XRAY_BIN="/usr/local/bin/xray"
 fi
 [ -x "$XRAY_BIN" ] || { echo "ERROR: бинарник Xray не найден."; exit 1; }
-mkdir -p /usr/local/etc/xray /var/log/xray
-chmod 755 /var/log/xray 2>/dev/null || true
-if id xray >/dev/null 2>&1; then
-    chown -R xray:xray /var/log/xray 2>/dev/null || true
-else
-    chown -R nobody:nogroup /var/log/xray 2>/dev/null || true
+# Официальный установщик Xray мог создать /var/log/xray от root и запустить
+# службу до записи конфига. Останавливаем её и готовим каталоги/файлы явно.
+systemctl stop xray >/dev/null 2>&1 || true
+if [ -L /var/log/xray ]; then
+    rm -f /var/log/xray
 fi
+mkdir -p /usr/local/etc/xray /var/log/xray
+XRAY_UID="$(id -u xray 2>/dev/null || true)"
+XRAY_GID="$(id -g xray 2>/dev/null || true)"
+XRAY_UID="${XRAY_UID:-65534}"
+XRAY_GID="${XRAY_GID:-$XRAY_UID}"
+chown -R "$XRAY_UID:$XRAY_GID" /var/log/xray 2>/dev/null || true
+chmod 755 /var/log/xray
+rm -f /var/log/xray/access.log /var/log/xray/error.log
+touch /var/log/xray/access.log /var/log/xray/error.log
+chown "$XRAY_UID:$XRAY_GID" /var/log/xray/access.log /var/log/xray/error.log 2>/dev/null || true
+chmod 644 /var/log/xray/access.log /var/log/xray/error.log
+chown root:"$XRAY_GID" /usr/local/etc/xray 2>/dev/null || true
+chmod 750 /usr/local/etc/xray 2>/dev/null || true
 
 echo "[4/6] Конфигурация Xray (${WARP_LISTEN_IP}:${WARP_LISTEN_PORT} -> SOCKS 127.0.0.1:${WARP_SOCKS_PORT})..."
 # Чужой конфиг при уже установленном Xray не трогаем. Свой конфиг узнаём по
@@ -259,6 +282,11 @@ with open(path, 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2, ensure_ascii=False)
 print("routing v2: Google direct, AI warp, default direct; AI domains:", len(ai))
 PY
+fi
+
+if [ -f "$CONFIG" ]; then
+    chown root:"${XRAY_GID:-65534}" "$CONFIG" 2>/dev/null || true
+    chmod 640 "$CONFIG" 2>/dev/null || true
 fi
 
 "$XRAY_BIN" -test -config "$CONFIG"
