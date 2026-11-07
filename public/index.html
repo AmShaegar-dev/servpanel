@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.89">
+    <meta name="panel-version" content="3.0.90">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1437,11 +1437,42 @@
                     <div class="controls-row" style="flex-wrap:wrap;">
                         <button class="btn-primary" onclick="openWizard('mtproto')">Установить MTProto (MEKO)</button>
                         <button class="btn-dark" onclick="openMtproxylWizard()">Установить MTProxyL</button>
-                        <button class="btn-primary" onclick="openProxyUserModal()">＋ Добавить пользователя</button>
                         <button class="btn-dark" onclick="loadProxyTab(true)">↻ Обновить</button>
                         <button class="btn-dark" onclick="proxyRestart()">⟳ Перезапустить прокси</button>
                         <button class="btn-dark" id="proxyRotateKeyBtn" onclick="proxyRotateKey()">🔑 Выдать ключ API</button>
                         <button class="btn-dark" onclick="proxyDiag()">🩺 Диагностика</button>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-bottom:20px;">
+                    <div class="card-head">
+                        <div>
+                            <h3>Пользователи прокси</h3>
+                            <p>Скорость, уникальные IP, TCP-соединения, квота трафика, срок действия и рекламная метка.</p>
+                        </div>
+                        <span id="proxyUsersCount" class="badge badge-muted">0</span>
+                    </div>
+                    <div class="controls-row" style="flex-wrap:wrap; margin:8px 0 12px;">
+                        <button class="btn-primary" onclick="openProxyUserModal()">＋ Добавить пользователя</button>
+                        <button class="btn-dark" onclick="loadProxyTab(true)">↻ Обновить</button>
+                    </div>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width:15%;">Пользователь</th>
+                                    <th style="width:10%;">Статус</th>
+                                    <th style="width:16%;">Трафик / квота</th>
+                                    <th style="width:14%;">Лимиты</th>
+                                    <th style="width:13%;">Скорость</th>
+                                    <th style="width:10%;">Срок</th>
+                                    <th style="width:22%;">Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody id="proxyUsersTable">
+                                <tr><td colspan="7" style="text-align:center; color:var(--text-muted);">Загрузка…</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
 
@@ -1532,34 +1563,6 @@
                         <button class="btn-dark" onclick="loadProxyChecklist()">↻ Обновить</button>
                     </div>
                     <div id="proxyChecklist" class="checklist"><div class="checklist-item checklist-muted"><span class="checklist-ico">○</span><div>Загрузка…</div></div></div>
-                </div>
-
-                <div class="card">
-                    <div class="card-head">
-                        <div>
-                            <h3>Пользователи прокси</h3>
-                            <p>Скорость, уникальные IP, TCP-соединения, квота трафика, срок действия и рекламная метка.</p>
-                        </div>
-                        <span id="proxyUsersCount" class="badge badge-muted">0</span>
-                    </div>
-                    <div class="table-wrapper">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th style="width:15%;">Пользователь</th>
-                                    <th style="width:10%;">Статус</th>
-                                    <th style="width:16%;">Трафик / квота</th>
-                                    <th style="width:14%;">Лимиты</th>
-                                    <th style="width:13%;">Скорость</th>
-                                    <th style="width:10%;">Срок</th>
-                                    <th style="width:22%;">Действия</th>
-                                </tr>
-                            </thead>
-                            <tbody id="proxyUsersTable">
-                                <tr><td colspan="7" style="text-align:center; color:var(--text-muted);">Загрузка…</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
                 </div>
 
                 <div class="card" style="margin-top:20px;">
