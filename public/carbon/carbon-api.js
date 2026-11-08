@@ -16,7 +16,8 @@ const carbon = {
   sys: null,
   loaded: false,
   chartRange: '1h',
-  history: null
+  history: null,
+  distribution: null
 };
 
 async function api(path, options = {}) {
@@ -240,7 +241,7 @@ async function carbonLogout() {
 
 async function loadCarbonData() {
   const safe = p => api(p).catch(() => null);
-  const [stats, clients, modules, services, security, interfaces, update, server, sys, ufw, cascade, cascadeProxy, obf, profiles, proxy, proxyUsers, ssl, app, rustdesk, users, audit, backup, notify, awgConfig, history] = await Promise.all([
+  const [stats, clients, modules, services, security, interfaces, update, server, sys, ufw, cascade, cascadeProxy, obf, profiles, proxy, proxyUsers, ssl, app, rustdesk, users, audit, backup, notify, awgConfig, history, distribution] = await Promise.all([
     safe('/api/stats'), safe('/api/clients'), safe('/api/modules'), safe('/api/services'),
     safe('/api/security/status'), safe('/api/interfaces'), safe('/api/update/info'),
     safe('/api/server-info'), safe('/api/sysinfo'), safe('/api/ufw'), safe('/api/cascade/status'),
@@ -248,7 +249,8 @@ async function loadCarbonData() {
     safe('/api/proxy/status'), safe('/api/proxy/users'), safe('/api/ssl/status'),
     safe('/api/app/status'), safe('/api/rustdesk/status'), safe('/api/users'),
     safe('/api/audit?limit=50'), safe('/api/backup/auto'), safe('/api/notify/status'),
-    safe('/api/awg/config'), safe('/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global')
+    safe('/api/awg/config'), safe('/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global'),
+    safe('/api/traffic/distribution')
   ]);
   carbon.stats = Array.isArray(stats) ? stats : [];
   carbon.clients = Array.isArray(clients) ? clients : carbon.stats;
@@ -275,6 +277,7 @@ async function loadCarbonData() {
   carbon.notify = notify;
   carbon.awgConfig = awgConfig;
   carbon.history = history;
+  carbon.distribution = distribution;
   carbon.loaded = true;
   applyShellData();
 }
@@ -361,7 +364,40 @@ function realTrafficChart() {
   const area = rxPath ? `${rxPath} L${width},${height} L0,${height} Z` : '';
   const names = { '1h': 'последний час', '24h': 'последние 24 часа', '7d': 'последние 7 суток' };
   const subline = range === '1h' && labels.length ? labels[0] + ' — ' + labels[labels.length - 1] : names[range];
-  return `<section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Трафик</div><div class="card-sub">${escHtml(subline || '')}</div></div><div class="legend"><span><i style="background:#5b8cff"></i>Rx</span><span><i style="background:var(--accent)"></i>Tx</span><div class="chips" style="margin-left:8px"><button class="chip ${range === '1h' ? 'on' : ''}" data-carbon-action="chart-range" data-range="1h">1ч</button><button class="chip ${range === '24h' ? 'on' : ''}" data-carbon-action="chart-range" data-range="24h">24ч</button><button class="chip ${range === '7d' ? 'on' : ''}" data-carbon-action="chart-range" data-range="7d">7д</button></div></div></div>${labels.length ? `<svg class="chart" viewBox="0 0 760 235" preserveAspectRatio="none" aria-label="График трафика"><g stroke="var(--line)" stroke-width="1"><line x1="0" y1="${height / 4}" x2="${width}" y2="${height / 4}"/><line x1="0" y1="${height / 2}" x2="${width}" y2="${height / 2}"/><line x1="0" y1="${height * 0.75}" x2="${width}" y2="${height * 0.75}"/></g><path d="${area}" fill="rgba(91,140,255,.10)" stroke="none"/><path d="${txPath}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" vector-effect="non-scaling-stroke"/><path d="${rxPath}" fill="none" stroke="#5b8cff" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg><div class="mini-grid" style="grid-template-columns:repeat(4,1fr);margin-top:10px">${mini('Пик Rx', fmtBytes(Math.round(max)) + '/s', 'сглажено')}${mini('Точек', String(labels.length), 'в окне')}${mini('Rx', fmtBytes(Math.round(rx.reduce((a, b) => a + b, 0) / Math.max(1, rx.length))) + '/s', 'среднее')}${mini('Tx', fmtBytes(Math.round(tx.reduce((a, b) => a + b, 0) / Math.max(1, tx.length))) + '/s', 'среднее')}</div>` : '<div class="empty-row">Нет данных истории за этот период</div>'}</section>`;
+  return `<section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Трафик</div><div class="card-sub">${escHtml(subline || '')}</div></div><div class="legend"><span><i style="background:#5b8cff"></i>Rx</span><span><i style="background:var(--accent)"></i>Tx</span><div class="chips" style="margin-left:8px"><button class="chip ${range === '1h' ? 'on' : ''}" data-carbon-action="chart-range" data-range="1h">1ч</button><button class="chip ${range === '24h' ? 'on' : ''}" data-carbon-action="chart-range" data-range="24h">24ч</button><button class="chip ${range === '7d' ? 'on' : ''}" data-carbon-action="chart-range" data-range="7d">7д</button></div></div></div>${labels.length ? `<svg class="chart" viewBox="0 0 760 235" preserveAspectRatio="none" aria-label="График трафика"><g stroke="var(--line)" stroke-width="1"><line x1="0" y1="${height / 4}" x2="${width}" y2="${height / 4}"/><line x1="0" y1="${height / 2}" x2="${width}" y2="${height / 2}"/><line x1="0" y1="${height * 0.75}" x2="${width}" y2="${height * 0.75}"/></g><path d="${area}" fill="rgba(91,140,255,.10)" stroke="none"/><path d="${txPath}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" vector-effect="non-scaling-stroke"/><path d="${rxPath}" fill="none" stroke="#5b8cff" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg><div class="mini-grid" style="grid-template-columns:repeat(4,1fr);margin-top:10px">${mini('Пик Rx', fmtBytes(Math.round(max)) + '/s', 'сглажено')}${mini('Точек', String(labels.length), 'в окне')}${mini('Rx', fmtBytes(Math.round(rx.reduce((a, b) => a + b, 0) / Math.max(1, rx.length))) + '/s', 'среднее')}${mini('Tx', fmtBytes(Math.round(tx.reduce((a, b) => a + b, 0) / Math.max(1, tx.length))) + '/s', 'среднее')}</div>` : '<div class="empty-row">Нет данных истории за этот период</div>'}</section>`;
+}
+
+function realTrafficDistribution() {
+  const d = carbon.distribution || {};
+  const tunnel = Number(d.tunnel) || 0;
+  const direct = Number(d.direct) || 0;
+  const blocked = Number(d.blocked) || 0;
+  const total = tunnel + direct + blocked;
+  const C = 2 * Math.PI * 46;
+  const parts = [
+    { label: 'В EU-туннель', value: tunnel, color: '#5b8cff' },
+    { label: 'Напрямую', value: direct, color: 'var(--accent)' },
+    { label: 'GeoIP blocked', value: blocked, color: '#d29922' }
+  ];
+  let offset = 0;
+  const rings = parts.map(p => {
+    const len = total ? C * p.value / total : 0;
+    const el = `<circle cx="60" cy="60" r="46" fill="none" stroke="${p.color}" stroke-width="14" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-offset}" transform="rotate(-90 60 60)"/>`;
+    offset += len;
+    return el;
+  }).join('');
+  const pct = v => total ? Math.round(v / total * 100) : 0;
+  const legend = parts.map(p => `<div class="list-row"><b><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:7px"></span>${p.label}</b><span class="mono">${pct(p.value)}% · ${fmtBytes(p.value)}</span></div>`).join('');
+  return `<section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">RU-вход · туннель / напрямую / GeoIP</div></div>${tag(total ? 'live' : 'нет данных', total ? 'good' : 'warn')}</div>
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div style="position:relative;width:148px;height:148px;flex:0 0 auto">
+        <svg viewBox="0 0 120 120" style="width:100%;height:100%"><circle cx="60" cy="60" r="46" fill="none" stroke="var(--surface-3)" stroke-width="14"/>${rings}</svg>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center"><b style="font-size:15px">${fmtBytes(total)}</b><span style="font:500 9px/1.4 var(--mono);color:var(--text-3)">всего</span></div>
+      </div>
+      <div style="flex:1;min-width:160px">${legend}</div>
+    </div>
+    <div class="donut-note" style="margin-top:12px">${total ? 'Данные из счётчиков awg0/awg1, клиентов и правил ru_block.' : 'Нет данных: каскад не активен или счётчики ещё не накоплены.'}</div>
+  </section>`;
 }
 
 function realDashboard() {
@@ -382,6 +418,7 @@ function realDashboard() {
       ${kpi('Клиенты', String(clients.length), online + ' онлайн', 'users', 'neutral', clients.length ? 60 : 5, 'var(--good)')}
       ${kpi('Uptime', escHtml(sys.uptime || '—'), 'с последнего запуска', 'pulse', 'neutral', 90, 'var(--accent-2)')}
       ${realTrafficChart()}
+      ${realTrafficDistribution()}
       <section class="card chart-card" style="position:relative"><div class="card-top"><div><div class="card-title">Сервер</div><div class="card-sub">реальные данные API</div></div>${tag('live', 'good')}</div><div class="mini-grid" style="grid-template-columns:1fr 1fr;margin:0">${mini('CPU', (sys.cpu || '—') + '%', 'нагрузка')}${mini('RAM', (sys.ram || '—') + '%', 'использование')}${mini('Интерфейсы', String(carbon.interfaces.length), 'сетевые')}${mini('Модули', String(carbon.modules.filter(m => m.installed).length) + ' / ' + carbon.modules.length, 'установлено')}</div></section>
       <section class="card donut-card"><div class="card-top"><div><div class="card-title">Службы</div><div class="card-sub">ключевые узлы</div></div>${tag(carbon.services.filter(x => x.state === 'active').length + ' / ' + carbon.services.length, 'good')}</div><div class="list">${carbon.services.slice(0, 6).map(s => `<div class="list-row"><b>${escHtml(s.name)}</b><span class="mono">${escHtml(s.state || s.status)}</span></div>`).join('') || '<div class="list-row"><b>Нет данных</b></div>'}</div></section>
       <section class="card table-card"><div class="card-top"><div><div class="card-title">Клиенты</div><div class="card-sub">активные подключения</div></div><button class="tag" data-tab="clients">Все ${icon('arrow', 'ico')}</button></div>${realClientsTable()}</section>

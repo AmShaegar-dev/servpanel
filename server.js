@@ -1890,6 +1890,50 @@ function historyDownsample(samples, fromMs, toMs, maxPoints) {
     return out;
 }
 
+function readIfaceBytes(name) {
+    try {
+        const base = `/sys/class/net/${name}/statistics`;
+        const rx = Number(fs.readFileSync(path.join(base, 'rx_bytes'), 'utf8')) || 0;
+        const tx = Number(fs.readFileSync(path.join(base, 'tx_bytes'), 'utf8')) || 0;
+        return { rx, tx, total: rx + tx };
+    } catch (e) { return null; }
+}
+
+function readRuBlockBytes() {
+    try {
+        const out = sh('iptables', ['-L', 'ru_block', '-v', '-n', '-x'], { maxBuffer: 4 * 1024 * 1024 });
+        let total = 0;
+        for (const line of String(out || '').split('\n')) {
+            const m = /^\s*\d+\s+(\d+)/.exec(line);
+            if (m) total += Number(m[1]) || 0;
+        }
+        return total;
+    } catch (e) { return 0; }
+}
+
+app.get('/api/traffic/distribution', checkAuth, (req, res) => {
+    try {
+        const clients = Array.isArray(lastClientsSnapshot) ? lastClientsSnapshot : [];
+        const clientTotal = clients.reduce((a, c) => a + (Number(c.rx) || 0) + (Number(c.tx) || 0), 0);
+        const tunnelIface = readIfaceBytes('awg1') || readIfaceBytes('amn1');
+        const clientIface = readIfaceBytes('awg0') || readIfaceBytes('amn0');
+        const tunnelRaw = tunnelIface ? tunnelIface.rx + tunnelIface.tx : 0;
+        const blockedRaw = readRuBlockBytes();
+        const tunnel = Math.min(clientTotal, tunnelRaw);
+        const blocked = Math.min(Math.max(0, clientTotal - tunnel), blockedRaw);
+        const direct = Math.max(0, clientTotal - tunnel - blocked);
+        const total = tunnel + direct + blocked;
+        res.json({
+            total, tunnel, direct, blocked,
+            clientTotal, tunnelRaw, blockedRaw,
+            interfaces: {
+                client: clientIface ? { rx: clientIface.rx, tx: clientIface.tx } : null,
+                tunnel: tunnelIface ? { rx: tunnelIface.rx, tx: tunnelIface.tx } : null
+            }
+        });
+    } catch (e) { res.status(500).json({ error: 'Не удалось получить распределение трафика' }); }
+});
+
 app.get('/api/history', checkAuth, (req, res) => {
     try {
         const rangeKey = String(req.query.range || '1h');
