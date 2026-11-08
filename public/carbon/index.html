@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Servpanel — Carbon</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c.4-3.4 2.7-5.2 5.5-5.2s5.1 1.8 5.5 5.2"/><path d="M16 5.6a3 3 0 0 1 0 5.8M17.4 14.9c2 .5 3.2 2.1 3.5 4.6"/></symbol>
+  <symbol id="i-cascade" viewBox="0 0 24 24"><path d="M4 7h13M14 4l3 3-3 3M20 17H7M10 14l-3 3 3 3"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.2 19 6v5.2c0 4.4-2.9 7.4-7 9.6-4.1-2.2-7-5.2-7-9.6V6l7-2.8Z"/><path d="m9 12 2 2 4-4.5"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="m21 3-7.5 18-3.2-7.3L3 10.5 21 3Z"/><path d="M10.3 13.7 21 3"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="6" rx="2"/><rect x="3.5" y="14" width="17" height="6" rx="2"/><path d="M7 7h.01M7 17h.01M11 7h5M11 17h5"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.7 12h16.6M12 3.5c2.2 2.3 3.4 5.2 3.4 8.5S14.2 18.2 12 20.5c-2.2-2.3-3.4-5.2-3.4-8.5S9.8 5.8 12 3.5Z"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2.8" width="10" height="18.4" rx="2.6"/><path d="M10.5 5h3M11 18.5h2"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2.2-6 4.2 12 2.4-6H21"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 3v14M7 12l5 5 5-5M4 21h16"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.5 8.5 0 1 0 20 14.2Z"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 4 21 20H3L12 4Z"/><path d="M12 10v4M12 17h.01"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 9a6 6 0 1 0-12 0c0 7-3 7-3 7h18s-3 0-3-7"/><path d="M10 20a2 2 0 0 0 4 0"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 3h4v4M14 6l4 4"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-3-3 2.6-2.6Z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L20 8l-4-4L4 16v4Z"/><path d="m14 6 4 4"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 21h16"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M14 4h5a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-5M10 8l-4 4 4 4M6 12h9"/></symbol>
+</svg>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">SP</div><div><div class="brand-name">Servpanel</div><div class="brand-sub">Carbon console</div></div></div>
+    <nav class="nav">
+      <div class="nav-label">Панель</div>
+      <a class="nav-item" href="/" title="Вернуться в старую панель"><svg class="ico"><use href="#i-external"/></svg>Старая панель</a>
+      <div class="nav-label">Обзор</div>
+      <button class="nav-item active" data-tab="dashboard"><svg class="ico"><use href="#i-grid"/></svg>Дашборд<span class="nav-dot"></span></button>
+      <button class="nav-item" data-tab="clients"><svg class="ico"><use href="#i-users"/></svg>Клиенты<span class="nav-count">8</span></button>
+      <div class="nav-label">Установка</div>
+      <button class="nav-item" data-tab="install"><svg class="ico"><use href="#i-download"/></svg>Установка</button>
+      <div class="nav-label">Подключение</div>
+      <button class="nav-item" data-tab="network"><svg class="ico"><use href="#i-globe"/></svg>Сеть и порты</button>
+      <button class="nav-item" data-tab="cascade"><svg class="ico"><use href="#i-cascade"/></svg>Каскад RU → EU</button>
+      <button class="nav-item" data-tab="obfuscation"><svg class="ico"><use href="#i-shield"/></svg>Обфускация</button>
+      <button class="nav-item" data-tab="proxy"><svg class="ico"><use href="#i-send"/></svg>Прокси</button>
+      <div class="nav-label">Инфраструктура</div>
+      <button class="nav-item" data-tab="services"><svg class="ico"><use href="#i-server"/></svg>Службы и DNS</button>
+      <button class="nav-item" data-tab="domains"><svg class="ico"><use href="#i-lock"/></svg>Домены и SSL</button>
+      <button class="nav-item" data-tab="app"><svg class="ico"><use href="#i-phone"/></svg>Приложение</button>
+      <button class="nav-item" data-tab="rustdesk"><svg class="ico"><use href="#i-monitor"/></svg>RustDesk</button>
+      <div class="nav-label">Система</div>
+      <button class="nav-item" data-tab="security"><svg class="ico"><use href="#i-pulse"/></svg>Защита и GeoIP</button>
+      <button class="nav-item" data-tab="diagnostics"><svg class="ico"><use href="#i-terminal"/></svg>Диагностика</button>
+      <button class="nav-item" data-tab="update"><svg class="ico"><use href="#i-down"/></svg>Обновление</button>
+      <button class="nav-item" data-tab="admin"><svg class="ico"><use href="#i-sliders"/></svg>Администрирование</button>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="user-chip"><div class="avatar">A</div><div><div class="user-name">admin</div><div class="user-role">administrator</div></div></div>
+      <button class="nav-item nav-quiet" data-action="open-password-modal"><svg class="ico"><use href="#i-key"/></svg>Сменить пароль</button>
+      <button class="nav-item nav-quiet" data-action="logout"><svg class="ico"><use href="#i-logout"/></svg>Выйти</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="crumbs">Servpanel <span style="color:var(--line-3)">/</span> <b id="crumb">Дашборд</b></div>
+      <div class="top-tabs" id="topTabs">
+        <button class="top-tab active" data-tab="dashboard">Обзор</button>
+        <button class="top-tab" data-tab="clients">Клиенты</button>
+        <button class="top-tab" data-tab="cascade">Каскад</button>
+        <button class="top-tab" data-tab="services">Службы</button>
+      </div>
+      <div class="top-actions">
+        <a class="btn btn-sm" href="/" title="Вернуться в старую панель">↩ Старая панель</a>
+        <div class="search"><svg class="ico" style="width:15px;height:15px"><use href="#i-search"/></svg><input placeholder="Поиск и действия"></div>
+        <div class="theme-toggle" aria-label="Тема">
+          <button data-theme-set="dark" class="on" aria-label="Тёмная"><svg class="ico" style="width:14px;height:14px"><use href="#i-moon"/></svg></button>
+          <button data-theme-set="light" aria-label="Светлая"><svg class="ico" style="width:14px;height:14px"><use href="#i-sun"/></svg></button>
+        </div>
+        <button class="icon-btn" aria-label="Уведомления" data-toast="Новых уведомлений нет"><span class="dot" style="background:var(--accent)"></span></button>
+        <button class="icon-btn" aria-label="Выйти" data-action="logout"><svg class="ico"><use href="#i-logout"/></svg></button>
+        <div class="avatar">A</div>
+      </div>
+    </header>
+    <div class="content" id="view"></div>
+  </main>
+</div>
+
+<div class="modal" id="clientModal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="clientModalTitle">
+    <div class="modal-head">
+      <div><div class="modal-title" id="clientModalTitle">Новый клиент</div><div class="modal-sub">Ключ и ссылка создадутся автоматически.</div></div>
+      <button class="icon-btn" data-action="close-modal" aria-label="Закрыть">✕</button>
+    </div>
+    <div class="form-grid">
+      <label class="field"><span>Имя</span><input id="newClientName" placeholder="client-01"></label>
+      <label class="field"><span>Лимит соединений</span><input id="newClientConns" type="number" placeholder="8"></label>
+      <label class="field"><span>Квота, ГБ</span><input id="newClientQuota" type="number" placeholder="50"></label>
+      <label class="field"><span>Срок, дней</span><input id="newClientDays" type="number" placeholder="30"></label>
+      <label class="field"><span>Endpoint</span><select id="newClientEndpoint"><option>IP сервера</option><option>Домен</option></select></label>
+      <label class="field"><span>Домен</span><input id="newClientDomain" placeholder="vpn.example.com"></label>
+      <label class="field"><span>Устройство</span><select id="newClientDevice"><option>Телефон</option><option>Ноутбук</option><option>Роутер</option></select></label>
+      <label class="field"><span>Количество</span><input id="newClientCount" type="number" min="1" max="20" value="1"></label>
+    </div>
+    <label class="switch" style="margin-top:12px"><input type="checkbox" checked> Включить клиента сразу</label>
+    <div class="modal-actions"><button class="btn" data-action="close-modal">Отмена</button><button class="btn btn-primary" data-action="create-client">Создать</button></div>
+  </div>
+</div>
+<div class="modal" id="passwordModal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="passwordModalTitle">
+    <div class="modal-head">
+      <div><div class="modal-title" id="passwordModalTitle">Сменить пароль</div><div class="modal-sub">Минимум 12 символов. После смены сессии будут завершены.</div></div>
+      <button class="icon-btn" data-action="close-password-modal" aria-label="Закрыть">✕</button>
+    </div>
+    <div class="form-grid" style="grid-template-columns:1fr">
+      <label class="field"><span>Текущий пароль</span><input id="pwdCurrent" type="password" placeholder="••••••••"></label>
+      <label class="field"><span>Новый пароль</span><input id="pwdNew" type="password" placeholder="Минимум 12 символов"></label>
+      <label class="field"><span>Повторите новый пароль</span><input id="pwdRepeat" type="password" placeholder="Ещё раз"></label>
+    </div>
+    <div class="modal-actions"><button class="btn" data-action="close-password-modal">Отмена</button><button class="btn btn-primary" data-action="change-password">Сменить пароль</button></div>
+  </div>
+</div>
+<div class="modal" id="moduleModal" hidden>
+  <div class="modal-card modal-wide" role="dialog" aria-modal="true" aria-labelledby="moduleModalTitle">
+    <div class="modal-head">
+      <div><div class="modal-title" id="moduleModalTitle">Параметры модуля</div><div class="modal-sub" id="moduleModalSub"></div></div>
+      <button class="icon-btn" data-action="close-module-modal" aria-label="Закрыть">✕</button>
+    </div>
+    <div id="moduleModalBody"></div>
+    <div class="modal-actions"><button class="btn" data-action="close-module-modal">Закрыть</button><button class="btn btn-primary" data-action="module-save">Сохранить параметры</button></div>
+  </div>
+</div>
+<div class="modal" id="textModal" hidden>
+  <div class="modal-card modal-wide" role="dialog" aria-modal="true" aria-labelledby="textModalTitle">
+    <div class="modal-head">
+      <div><div class="modal-title" id="textModalTitle">Вставить текстом</div><div class="modal-sub" id="textModalSub">Вставьте конфиг, JSON, vpn:// или ссылку. Текст никуда не отправляется.</div></div>
+      <button class="icon-btn" data-action="close-text-modal" aria-label="Закрыть">✕</button>
+    </div>
+    <textarea id="textImport" rows="14" spellcheck="false" placeholder="Вставьте текст сюда…"></textarea>
+    <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap">
+      <div class="page-actions"><button class="btn" data-action="paste-clipboard"><svg class="ico"><use href="#i-upload"/></svg>Вставить из буфера</button><button class="btn" data-action="copy-textarea"><svg class="ico"><use href="#i-copy"/></svg>Скопировать</button><button class="btn" data-action="clear-target" data-target="textImport">Очистить</button></div>
+      <div class="page-actions"><button class="btn" data-action="close-text-modal">Отмена</button><button class="btn btn-primary" data-action="apply-text">Применить</button></div>
+    </div>
+  </div>
+</div>
+<div class="modal" id="pageSettingsModal" hidden>
+  <div class="modal-card modal-wide" role="dialog" aria-modal="true" aria-labelledby="pageSettingsTitle">
+    <div class="modal-head">
+      <div><div class="modal-title" id="pageSettingsTitle">Настройки страницы</div><div class="modal-sub" id="pageSettingsSub"></div></div>
+      <button class="icon-btn" data-action="close-page-settings" aria-label="Закрыть">✕</button>
+    </div>
+    <div id="pageSettingsBody"></div>
+    <div class="modal-actions"><button class="btn" data-action="close-page-settings">Отмена</button><button class="btn btn-primary" data-action="save-page-settings">Сохранить</button></div>
+  </div>
+</div>
+<div class="modal" id="deleteModal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle">
+    <div class="modal-head">
+      <div><div class="modal-title" id="deleteModalTitle">Удалить?</div><div class="modal-sub" id="deleteModalSub">Действие необратимо.</div></div>
+      <button class="icon-btn" data-action="close-delete-modal" aria-label="Закрыть">✕</button>
+    </div>
+    <label class="field"><span>Введите DELETE для подтверждения</span><input id="deleteConfirmInput" placeholder="DELETE" autocomplete="off"></label>
+    <div class="modal-actions"><button class="btn" data-action="close-delete-modal">Отмена</button><button class="btn btn-danger" data-action="confirm-delete">Удалить</button></div>
+  </div>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script src="app.js"></script>
+<script src="carbon-api.js"></script>
+</body>
+</html>

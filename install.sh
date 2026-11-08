@@ -84,8 +84,8 @@ show_header() {
 
 main_menu() {
     show_header
-    echo "1) ${BOLD}Установить панель${NC}"
-    echo "2) ${BOLD}Удалить панель${NC}"
+    echo -e "1) ${BOLD}Установить панель${NC}"
+    echo -e "2) ${BOLD}Удалить панель${NC}"
     echo "3) Выход"
     echo
     case "$(ask 'Ваш выбор (1/2/3)' '1')" in

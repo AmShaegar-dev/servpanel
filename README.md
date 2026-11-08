@@ -18,16 +18,9 @@
 
 ## 🖼 Скриншоты
 
-> Скриншоты с demo-стенда, данные вымышленные.
+> Скриншоты удалены из репозитория, чтобы не публиковать реальные IP, имена и логины. Демо-стенд можно запустить локально.
 
-| | |
-|---|---|
-| **Дашборд** | **Каскад: чек-лист и статус EU** |
-| ![Дашборд](public/screenshots/01-dashboard.png) | ![Каскад](public/screenshots/02-cascade.png) |
-| **Клиент: endpoint IP / домен** | **Обфускация** |
-| ![Клиент](public/screenshots/03-client-endpoint.png) | ![Обфускация](public/screenshots/04-obfuscation.png) |
-| **Службы и DNS** | **Клиенты** |
-| ![Службы](public/screenshots/05-services.png) | ![Клиенты](public/screenshots/06-clients.png) |
+> Новый Carbon-интерфейс доступен по `/carbon/`, старая панель — по `/`. Подробности в [CARBON.md](CARBON.md).
 
 ---
 
@@ -932,15 +925,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.94/servpanel-3.0.94.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.94/servpanel-3.0.94.tar.gz.sha256
-sha256sum -c servpanel-3.0.94.tar.gz.sha256
-tar -xzf servpanel-3.0.94.tar.gz
-bash /root/servpanel-3.0.94/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.95/servpanel-3.0.95.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.0.95/servpanel-3.0.95.tar.gz.sha256
+sha256sum -c servpanel-3.0.95.tar.gz.sha256
+tar -xzf servpanel-3.0.95.tar.gz
+bash /root/servpanel-3.0.95/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.0.94`. Если `curl` не установлен:
+Должно вывести `3.0.95`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:
@@ -1015,3 +1008,4 @@ npm test
 ## 📄 Лицензия и Благодарности
 * В основе серверного ядра используется модифицированный стек установщика [bivlked/amneziawg-installer](https://github.com/bivlked/amneziawg-installer) и протокол [AmneziaWG](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module).
 * Лицензия: **MIT**.
+

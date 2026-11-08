@@ -6653,7 +6653,7 @@ function openProxyUserModal(name) {
     const html = `
         <div class="wizard-grid">
             <label class="field"><span>Имя пользователя</span>
-                <input id="pufName" value="${esc(u.username || '')}" ${isEdit ? 'disabled' : ''} placeholder="alice">
+                <input id="pufName" value="${esc(u.username || '')}" ${isEdit ? 'disabled' : ''} placeholder="client-01">
             </label>
             <label class="field"><span>Секрет (32 hex)</span>
                 <input id="pufSecret" value="" placeholder="${isEdit ? 'Пусто — не менять' : 'Пусто — сгенерировать'}" autocomplete="off">

@@ -17,7 +17,7 @@ const path = require('path');
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'servpanel-test-'));
 process.env.SERVEPANEL_TEST = '1';
 process.env.SERVEPANEL_DATA_DIR = DATA_DIR;
-process.env.ADMIN_PASSWORD = 'test-admin-pass-123';
+process.env.ADMIN_PASSWORD = 'example-admin-pass-123';
 process.env.SERVEPANEL_AUTH_LOG = path.join(DATA_DIR, 'auth.log');
 process.env.SERVEPANEL_AUDIT_LOG = path.join(DATA_DIR, 'audit.log');
 
@@ -126,7 +126,7 @@ test('неверный пароль отклоняется и попадает �
 });
 
 test('верный пароль открывает сессию', async () => {
-    const r = await login('test-admin-pass-123');
+    const r = await login('example-admin-pass-123');
     assert.equal(r.status, 200);
     assert.equal(r.json.role, 'admin');
     assert.ok(cookie.startsWith('panel.sid='));
@@ -234,7 +234,7 @@ test('viewer может смотреть, но не может менять', as
 });
 
 test('2FA: включение, вход по коду и отключение', async () => {
-    assert.equal((await login('test-admin-pass-123')).status, 200);
+    assert.equal((await login('example-admin-pass-123')).status, 200);
 
     const setup = await request('/api/2fa/setup', { method: 'POST' });
     assert.equal(setup.status, 200);
@@ -248,17 +248,17 @@ test('2FA: включение, вход по коду и отключение', 
 
     await request('/api/logout', { method: 'POST' });
 
-    const noCode = await login('test-admin-pass-123');
+    const noCode = await login('example-admin-pass-123');
     assert.equal(noCode.status, 401);
     assert.equal(noCode.json.need2fa, true);
 
-    const withCode = await login('test-admin-pass-123', '', code);
+    const withCode = await login('example-admin-pass-123', '', code);
     assert.equal(withCode.status, 200);
 
-    const disable = await request('/api/2fa/disable', jsonBody({ password: 'test-admin-pass-123' }));
+    const disable = await request('/api/2fa/disable', jsonBody({ password: 'example-admin-pass-123' }));
     assert.equal(disable.status, 200);
 
-    const after = await login('test-admin-pass-123');
+    const after = await login('example-admin-pass-123');
     assert.equal(after.status, 200);
 });
 
@@ -1032,7 +1032,7 @@ test('Прокси: изменение требует администратор
     assert.equal(list.json.code, 'no_backend');
 
     await request('/api/logout', { method: 'POST' });
-    assert.equal((await login('test-admin-pass-123')).status, 200);
+    assert.equal((await login('example-admin-pass-123')).status, 200);
 });
 
 test('Прокси: бот выключен по умолчанию и не отдаёт токен', async () => {
@@ -1298,7 +1298,7 @@ test('Каскад: скрипт маршрутизации безопасен �
     // На входе маршруты ставятся раньше туннеля: общей проверки нет,
     // но для выхода (без клиентских интерфейсов) она остаётся.
     // Выход (без клиентских интерфейсов) обрабатывается отдельно.
-    const exitScript = internals.buildRoutingScript([], [], { raw: '45.9.16.77:3977' });
+    const exitScript = internals.buildRoutingScript([], [], { raw: '198.51.100.20:3977' });
     assert.match(exitScript, /CASC_IFACES=\(\)/);
     assert.match(exitScript, /маршруты не требуются/);
     // GNU grep понимает \b как backspace — такой шаблон не сработает.
@@ -1309,7 +1309,7 @@ test('Каскад: скрипт маршрутизации безопасен �
 
 test('Каскад: роль определяется по адресу интерфейса', () => {
     // Вход: клиентский адрес 10.9.9.4/32 (его выдаёт панель выхода).
-    const entry = '[Interface]\nPrivateKey = a\nAddress = 10.9.9.4/32\n\n[Peer]\nPublicKey = b\nAllowedIPs = 10.9.9.1/32\nEndpoint = 45.9.16.77:3977\n';
+    const entry = '[Interface]\nPrivateKey = a\nAddress = 10.9.9.4/32\n\n[Peer]\nPublicKey = b\nAllowedIPs = 10.9.9.1/32\nEndpoint = 198.51.100.20:3977\n';
     // Выход: адрес сервера 10.9.9.1/32.
     const exit = '[Interface]\nPrivateKey = c\nAddress = 10.9.9.1/32\nTable = off\n\n[Peer]\nPublicKey = d\nAllowedIPs = 10.9.9.4/32\n';
     // Интерфейс сервера-входа с клиентами.
@@ -1343,18 +1343,18 @@ test('Каскад: клиенту отдаётся конфиг для вста
     assert.ok(typeof key.json.conf === 'string');
 });
 test('Каскад: внутренний адрес берётся из туннеля, а не из маршрутов', () => {
-    const list = '1.0.0.0/8, 2.0.0.0/7, 8.8.8.8/32, 194.124.250.127/32, 2000::/3';
+    const list = '1.0.0.0/8, 2.0.0.0/7, 8.8.8.8/32, 203.0.113.10/32, 2000::/3';
     assert.equal(internals.firstTunnelIp(list), '');
     assert.equal(internals.firstTunnelIp(list + ', 10.9.9.3/32'), '10.9.9.3');
     assert.equal(internals.firstTunnelIp('10.9.9.7/32'), '10.9.9.7');
 });
 
 test('Каскад: клиентский конфиг панели распознаётся как вход', () => {
-    const panelClient = '[Interface]\nPrivateKey = a\nAddress = 10.9.9.2/32, fddd:2c4:2c4:ffff::a09:902/128\nMTU = 1280\n\n[Peer]\nPublicKey = b\nAllowedIPs = 0.0.0.0/0, ::/0, 10.9.9.3/32\nEndpoint = 194.124.250.127:3977\n';
+    const panelClient = '[Interface]\nPrivateKey = a\nAddress = 10.9.9.2/32, fddd:2c4:2c4:ffff::a09:902/128\nMTU = 1280\n\n[Peer]\nPublicKey = b\nAllowedIPs = 0.0.0.0/0, ::/0, 10.9.9.3/32\nEndpoint = 203.0.113.10:3977\n';
     assert.equal(internals.cascadeRoleFrom(panelClient), 'ru');
 });
 test('Каскад: адрес второй стороны — публичный, а не внутренний', () => {
-    const server = '[Interface]\nPrivateKey = a\nAddress = 10.9.9.1/24\nListenPort = 3977\n\n[Peer]\nPublicKey = b\nAllowedIPs = 10.9.9.2/32\nEndpoint = 45.9.16.77:3977\n';
+    const server = '[Interface]\nPrivateKey = a\nAddress = 10.9.9.1/24\nListenPort = 3977\n\n[Peer]\nPublicKey = b\nAllowedIPs = 10.9.9.2/32\nEndpoint = 198.51.100.20:3977\n';
     assert.equal(internals.cascadeRoleFrom(server), 'ru');
     // Внутренние адреса не считаются публичными.
     const local = internals.localTunnelIps ? Array.from(internals.localTunnelIps()) : [];

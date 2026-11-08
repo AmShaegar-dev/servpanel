@@ -266,8 +266,8 @@ function demoConfPath() {
 // Демо-клиенты: дают живые цифры и позволяют пройти мастер создания клиента
 // без sudo/AmneziaWG. В обычном режиме этот массив не используется.
 const demoClients = [
-    { name: 'iphone-alice', ip: '10.8.1.2', status: 'Активен', status_code: 'active', rx: 734003200, tx: 183500800, last_handshake: Math.floor(Date.now() / 1000) - 35 },
-    { name: 'macbook-bob', ip: '10.8.1.3', status: 'Активен', status_code: 'active', rx: 418381824, tx: 96468992, last_handshake: Math.floor(Date.now() / 1000) - 90 },
+    { name: 'client-01', ip: '10.8.1.2', status: 'Активен', status_code: 'active', rx: 734003200, tx: 183500800, last_handshake: Math.floor(Date.now() / 1000) - 35 },
+    { name: 'client-02', ip: '10.8.1.3', status: 'Активен', status_code: 'active', rx: 418381824, tx: 96468992, last_handshake: Math.floor(Date.now() / 1000) - 90 },
     { name: 'android-carol', ip: '10.8.1.4', status: 'Недавно', status_code: 'recent', rx: 157286400, tx: 41943040, last_handshake: Math.floor(Date.now() / 1000) - 540 },
     { name: 'router-home', ip: '10.8.1.5', status: 'Неактивен', status_code: 'inactive', rx: 17825792, tx: 6291456, last_handshake: Math.floor(Date.now() / 1000) - 86400 }
 ];
@@ -10476,8 +10476,8 @@ app.get('/api/diag/log', checkAuth, (req, res) => {
     if (DEMO_MODE) {
         return res.type('text/plain').send([
             '2026-10-20 12:00:01  interface: awg0, peers: 4',
-            '2026-10-20 12:00:04  handshake: iphone-alice 10.8.1.2',
-            '2026-10-20 12:00:07  handshake: macbook-bob 10.8.1.3',
+            '2026-10-20 12:00:04  handshake: client-01 10.8.1.2',
+            '2026-10-20 12:00:07  handshake: client-02 10.8.1.3',
             '2026-10-20 12:00:11  cascade: awg1 up, endpoint 203.0.113.10:51820',
             '2026-10-20 12:00:15  adguard: protection enabled',
             '2026-10-20 12:00:20  demo: journal is simulated'

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.0.94">
+    <meta name="panel-version" content="3.0.95">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -63,6 +63,12 @@
 
             <nav class="nav">
                 <div class="nav-group">
+                    <div class="nav-label">Панель</div>
+                    <a class="nav-item nav-item-new" href="/carbon/" title="Перейти в обновлённый Carbon-интерфейс">
+                        <span class="nav-ico">✦</span><span>Обновлённая панель</span><span class="nav-badge">NEW</span>
+                    </a>
+                </div>
+                <div class="nav-group">
                     <div class="nav-label">Обзор</div>
                     <button class="nav-item active" data-tab="tab-dashboard" data-title="Дашборд" onclick="switchTab('tab-dashboard', this)">
                         <span class="nav-ico">◉</span><span>Дашборд</span>
@@ -93,7 +99,7 @@
                     </button>
                 </div>
                 <div class="nav-group">
-                    <div class="nav-label">Инфраструктура</div>
+                    <div class="nav-label">�?нфраструктура</div>
                     <button class="nav-item" data-tab="tab-services" data-title="Службы и DNS" onclick="switchTab('tab-services', this)" id="navServices">
                         <span class="nav-ico">◎</span><span>Службы и DNS</span>
                     </button>
@@ -140,13 +146,14 @@
         <div class="main">
             <header class="topbar">
                 <div class="topbar-left">
-                    <button class="icon-btn mobile-only" onclick="toggleMenu()" title="Меню">☰</button>
+                    <button class="icon-btn mobile-only" onclick="toggleMenu()" title="Меню">�?�</button>
                     <div>
                         <div class="crumb">Servpanel <span>/</span> <span id="currentTabTitle">Дашборд</span></div>
                         <h2 class="topbar-title" id="pageTitle">Обзор</h2>
                     </div>
                 </div>
                 <div class="topbar-right">
+                    <a class="btn btn-ghost panel-switch" href="/carbon/" title="Открыть обновлённую Carbon-панель">✦ Обновлённая панель</a>
                     <button class="search-trigger" onclick="openPalette()" title="Поиск и действия">
                         <span class="search-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span><span class="search-label">Поиск и действия</span><kbd>Ctrl K</kbd>
                     </button>
@@ -167,7 +174,7 @@
                 <div id="tab-dashboard" class="tab-pane active">
                     <section class="hero">
                         <div class="hero-copy">
-                            <div class="eyebrow"><span class="status-dot" id="heroDot"></span><span id="heroEyebrow">СОСТОЯНИЕ СЕРВЕРА</span></div>
+                            <div class="eyebrow"><span class="status-dot" id="heroDot"></span><span id="heroEyebrow">СОСТОЯН�?Е СЕРВЕРА</span></div>
                             <h1 id="heroTitle">Проверяем сервер…</h1>
                             <p id="heroSub">Собираем данные о VPN, каскаде, AdGuard и защите от DPI.</p>
                             <div class="hero-pills">
@@ -218,7 +225,7 @@
                             <header class="card-head">
                                 <div>
                                     <h3>Мониторинг трафика</h3>
-                                    <p id="chartSubtitle">История: последний час</p>
+                                    <p id="chartSubtitle">�?стория: последний час</p>
                                 </div>
                                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                                     <select id="chartRange" class="select-compact" onchange="switchRange()">
@@ -286,7 +293,7 @@
                     <span id="diskTotal" style="display:none"></span>
                 </div>
 
-                <!-- КЛИЕНТЫ -->
+                <!-- КЛ�?ЕНТЫ -->
             <div id="tab-clients" class="tab-pane">
                 <div class="card" style="margin-bottom: 20px;">
                     <div class="card-head">
@@ -307,7 +314,7 @@
                 <div class="card" style="margin-bottom: 20px;">
                     <div class="card-head">
                         <div>
-                            <h3>Имя сервера</h3>
+                            <h3>�?мя сервера</h3>
                             <p>Так сервер называется в Amnezia и в именах скачиваемых конфигов.</p>
                         </div>
                         <span class="badge badge-muted">vpn://</span>
@@ -323,7 +330,7 @@
                 <div class="card advanced-only" style="margin-bottom: 20px;">
                     <h3 style="margin-bottom: 15px;">Создание клиентов (ручной режим)</h3>
                     <div class="controls-row" style="margin-bottom:0;">
-                        <input type="text" id="clientName" placeholder="Имя / Префикс (en)" style="width: 200px;">
+                        <input type="text" id="clientName" placeholder="�?мя / Префикс (en)" style="width: 200px;">
                         <input type="number" id="clientCount" placeholder="Кол-во (шт)" style="width: 120px;" title="Если указано >1, скачается ZIP архив">
                         <select id="clientExpires" style="width: 140px;">
                             <option value="">Навсегда</option><option value="1d">1 день</option><option value="7d">7 дней</option><option value="30d">30 дней</option>
@@ -369,7 +376,7 @@
                 </div>
 
                 <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px;">
-                    <h3 style="margin:0; color: var(--text-muted);">АКТИВНЫЕ КЛИЕНТЫ</h3>
+                    <h3 style="margin:0; color: var(--text-muted);">АКТ�?ВНЫЕ КЛ�?ЕНТЫ</h3>
                     <div style="background: var(--bg-panel); padding: 5px 12px; border-radius: 4px; border: 1px solid var(--border); font-size: 13px;">
                         Всего: <strong id="totalClientsCount" style="color: #fff;">0</strong> &nbsp;|&nbsp; В сети: <strong id="activeClientsCount" class="val-rx">0</strong>
                     </div>
@@ -393,7 +400,7 @@
                 </div>
             </div>
 
-            <!-- СЕТЬ И ФАЕРВОЛ -->
+            <!-- СЕТЬ �? ФАЕРВОЛ -->
             <div id="tab-network" class="tab-pane">
                 <div class="card" style="margin-bottom: 20px;">
                     <div class="card-head">
@@ -464,7 +471,7 @@
                 </div>
             </div>
 
-            <!-- ДОМЕНЫ И SSL -->
+            <!-- ДОМЕНЫ �? SSL -->
             <div id="tab-ssl" class="tab-pane">
                 <div class="card" style="margin-bottom:20px;">
                     <div class="card-head">
@@ -502,7 +509,7 @@
                     </div>
                     <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-muted); margin-bottom:12px;">
                         <input type="checkbox" id="sslPanelVpn" checked style="width:auto;">
-                        Использовать домен как адрес в новых конфигах VPN-клиентов (Endpoint)
+                        �?спользовать домен как адрес в новых конфигах VPN-клиентов (Endpoint)
                     </label>
                     <div class="controls-row" style="margin-bottom:0;">
                         <button class="btn btn-primary" id="sslBindBtn" onclick="bindPanelDomain()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg>Привязать и выпустить сертификат</button>
@@ -621,7 +628,7 @@
                     <div id="rustdeskConnection" class="wizard-summary"></div>
                     <div class="controls-row" style="margin-top:12px;flex-wrap:wrap;">
                         <button class="btn-primary" onclick="copyRustDeskConnection()">Скопировать данные</button>
-                        <a class="btn-dark" href="/api/rustdesk/instructions" target="_blank" rel="noopener" style="text-decoration:none; padding:8px 14px; display:inline-block;">Инструкция</a>
+                        <a class="btn-dark" href="/api/rustdesk/instructions" target="_blank" rel="noopener" style="text-decoration:none; padding:8px 14px; display:inline-block;">�?нструкция</a>
                         <a class="btn-dark" href="/api/rustdesk/instructions?format=txt" target="_blank" rel="noopener" style="text-decoration:none; padding:8px 14px; display:inline-block;">Скачать .txt</a>
                     </div>
                 </div>
@@ -630,7 +637,7 @@
                     <div class="card-head">
                         <div>
                             <h3>Как подключиться</h3>
-                            <p>Краткая инструкция. Полная версия открывается кнопкой «Инструкция».</p>
+                            <p>Краткая инструкция. Полная версия открывается кнопкой «�?нструкция».</p>
                         </div>
                         <span class="badge badge-muted">1-2-3</span>
                     </div>
@@ -672,11 +679,11 @@
                         <span class="badge badge-muted" id="rustdeskClientVersion">—</span>
                     </div>
                     <div id="rustdeskClients" class="controls-row" style="flex-wrap:wrap;"></div>
-                    <div class="sub-text" style="margin-top:8px;">Официальные сборки RustDesk. Источник: github.com/rustdesk/rustdesk, лицензия AGPL-3.0.</div>
+                    <div class="sub-text" style="margin-top:8px;">Официальные сборки RustDesk. �?сточник: github.com/rustdesk/rustdesk, лицензия AGPL-3.0.</div>
                 </div>
             </div>
 
-            <!-- ПРИЛОЖЕНИЕ -->
+            <!-- ПР�?ЛОЖЕН�?Е -->
             <div id="tab-app" class="tab-pane">
                 <div class="card" style="margin-bottom:20px;">
                     <div class="card-head">
@@ -801,7 +808,7 @@
                     <div class="card-head">
                         <div>
                             <h3>Cloudflare WARP для нейросетей <span class="badge badge-muted">Xray + AdGuard</span></h3>
-                            <p>Xray принимает TLS на порту 443 и по SNI направляет трафик в Cloudflare WARP. В варианте 1 весь трафик идёт через WARP, в варианте 2 Google/Gemini идут напрямую, а AI-сервисы — через WARP. Правила AdGuard панель не записывает: готовый список — в «Инструкции».</p>
+                            <p>Xray принимает TLS на порту 443 и по SNI направляет трафик в Cloudflare WARP. В варианте 1 весь трафик идёт через WARP, в варианте 2 Google/Gemini идут напрямую, а AI-сервисы — через WARP. Правила AdGuard панель не записывает: готовый список — в «�?нструкции».</p>
                         </div>
                         <span id="warpModeBadge" class="badge badge-muted" style="white-space:nowrap;">вариант —</span>
                         <span id="warpStatusBadge" class="badge badge-muted">не установлен</span>
@@ -822,21 +829,21 @@
                     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; margin:12px 0;">
                         <div style="border:1px solid var(--border); border-radius:10px; padding:14px; background:rgba(0,0,0,.12);">
                             <h4 style="margin:0 0 6px;">Вариант 1 — первая инструкция</h4>
-                            <p style="margin:0 0 10px; color:var(--text-muted); font-size:12.5px;">WARP + Xray, весь трафик через WARP. Ставит оба компонента, если их нет. Google и AI-сервисы выходят через Cloudflare WARP. Правила AdGuard — в «Инструкции».</p>
+                            <p style="margin:0 0 10px; color:var(--text-muted); font-size:12.5px;">WARP + Xray, весь трафик через WARP. Ставит оба компонента, если их нет. Google и AI-сервисы выходят через Cloudflare WARP. Правила AdGuard — в «�?нструкции».</p>
                             <button class="btn-primary" onclick="startWarpPreset('v1')">Накатить вариант 1</button>
                         </div>
                         <div style="border:1px solid var(--border); border-radius:10px; padding:14px; background:rgba(0,0,0,.12);">
                             <h4 style="margin:0 0 6px;">Вариант 2 — вторая инструкция</h4>
-                            <p style="margin:0 0 10px; color:var(--text-muted); font-size:12.5px;">Google/Gemini напрямую с IP сервера, AI-сервисы — через WARP. Ставит WARP и Xray, если их нет. Нужен свободный порт 443. Правила AdGuard — в «Инструкции».</p>
+                            <p style="margin:0 0 10px; color:var(--text-muted); font-size:12.5px;">Google/Gemini напрямую с IP сервера, AI-сервисы — через WARP. Ставит WARP и Xray, если их нет. Нужен свободный порт 443. Правила AdGuard — в «�?нструкции».</p>
                             <button class="btn-primary" onclick="startWarpPreset('v2')">Накатить вариант 2</button>
                         </div>
                     </div>
 
-                    <div class="sub-text" style="margin:0 0 10px;">Правила AdGuard панель не записывает. После установки откройте «Инструкции» и скопируйте готовый список <code>dnsrewrite</code> для выбранных сервисов в AdGuard Home → Filters → Custom filtering rules. Если WARP/Xray уже работает на EU-выходе, не устанавливайте его повторно на этом сервере — укажите в правилах публичный IP EU.</div>
+                    <div class="sub-text" style="margin:0 0 10px;">Правила AdGuard панель не записывает. После установки откройте «�?нструкции» и скопируйте готовый список <code>dnsrewrite</code> для выбранных сервисов в AdGuard Home → Filters → Custom filtering rules. Если WARP/Xray уже работает на EU-выходе, не устанавливайте его повторно на этом сервере — укажите в правилах публичный IP EU.</div>
 
                     <div class="controls-row" style="flex-wrap:wrap; gap:8px; margin-bottom:8px;">
                         <button class="btn-dark" onclick="loadWarpStatus()">↻ Проверить</button>
-                        <a class="btn-dark" href="/api/warp/instructions" target="_blank" rel="noopener" style="text-decoration:none; padding:8px 14px; display:inline-block;">Инструкции</a>
+                        <a class="btn-dark" href="/api/warp/instructions" target="_blank" rel="noopener" style="text-decoration:none; padding:8px 14px; display:inline-block;">�?нструкции</a>
                         <button class="btn-dark" onclick="uninstallModule('warp')" title="Удалить WARP, Xray, их конфиги, службы, пакеты и правило UFW">Удалить WARP с полной очисткой</button>
                     </div>
                     <div id="warpTestResult" class="sub-text" style="margin-bottom: 4px;"></div>
@@ -896,7 +903,7 @@
                 </div>
             </div>
 
-            <!-- ЗАЩИТА И CRON -->
+            <!-- ЗАЩ�?ТА �? CRON -->
             <div id="tab-security" class="tab-pane">
                 <div class="stats-cards">
                     
@@ -909,7 +916,7 @@
                             <label style="font-size: 11px; color: var(--text-muted);">Порты (через запятую, оставьте пустым для блокировки всего)</label>
                             <input type="text" id="ruDropPorts" placeholder="Например: 80,443" style="width: 100%; margin-top: 3px; margin-bottom: 10px; box-sizing: border-box;">
                             
-                            <label style="font-size: 11px; color: var(--text-muted);">Источник списка IP-адресов РФ</label>
+                            <label style="font-size: 11px; color: var(--text-muted);">�?сточник списка IP-адресов РФ</label>
                             <select id="ruDropListMode" style="width: 100%; margin-top: 3px; margin-bottom: 5px;" onchange="ruDropModeChanged()">
                                 <option value="opencck" selected>OpenCCK Russia — IP российских сервисов</option>
                                 <option value="standard">Antifilter / ipdeny — вся зона РФ (резервный)</option>
@@ -968,7 +975,7 @@
                 </div> 
             </div> 
 
-            <!-- ДИАГНОСТИКА -->
+            <!-- Д�?АГНОСТ�?КА -->
             <div id="tab-diag" class="tab-pane">
                 <div class="card" style="margin-bottom:20px;">
                     <div class="card-head">
@@ -1063,7 +1070,7 @@
                             <div class="mb-3">
                                 <label class="form-label text-warning small">Где установлена эта панель?</label>
                                 <select id="cascadeRole" class="form-select form-select-sm bg-dark text-white border-secondary">
-                                    <option value="ru">Эта панель в РОССИИ (Вход) -> Подключаем удаленный EU сервер (Выход)</option>
+                                    <option value="ru">Эта панель в РОСС�?�? (Вход) -> Подключаем удаленный EU сервер (Выход)</option>
                                     <option value="eu">Эта панель в ЕВРОПЕ (Выход) -> Подключаем удаленный RU сервер (Вход)</option>
                                 </select>
                             </div>
@@ -1127,7 +1134,7 @@
                                 </div>
                                 <div style="grid-column: span 2; font-size: 12px; color: var(--text-main); margin-top: 5px; display: flex; flex-direction: column; gap: 8px;">
                                     <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                                        <input type="checkbox" id="awgIsolation" checked> Изолировать клиентов друг от друга (isolation=on)
+                                        <input type="checkbox" id="awgIsolation" checked> �?золировать клиентов друг от друга (isolation=on)
                                     </label>
                                     <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
                                         <input type="checkbox" id="awgKeepPackages" checked> Сохранить системные пакеты (snapd и др.)
@@ -1145,7 +1152,7 @@
                             <div style="display:flex; flex-wrap:wrap; gap:8px;">
                                 <a class="btn-dark" href="https://architect.vai-rice.space/amneziawg/" target="_blank" rel="noopener" style="text-decoration:none; padding:8px 12px; display:inline-block;">🧩 Открыть Архитектор</a>
                                 <button class="btn-dark" onclick="openWizard('obf')">✦ Сгенерировать в панели</button>
-                                <button class="btn-dark" onclick="openObfTab(); setExpert(true); setTimeout(()=>document.getElementById('obfImportText')?.scrollIntoView({behavior:'smooth',block:'center'}),150)">⬆ Импорт .conf</button>
+                                <button class="btn-dark" onclick="openObfTab(); setExpert(true); setTimeout(()=>document.getElementById('obfImportText')?.scrollIntoView({behavior:'smooth',block:'center'}),150)">⬆ �?мпорт .conf</button>
                             </div>
                         </div>
 
@@ -1311,7 +1318,7 @@
             </select>
         </label>
         <label class="field"><span>IP второй стороны (SSH)</span>
-            <input id="autoCascadePeer" placeholder="45.9.16.77" autocomplete="off">
+            <input id="autoCascadePeer" placeholder="198.51.100.20" autocomplete="off">
         </label>
         <label class="field"><span>SSH-порт</span>
             <input id="autoCascadePeerPort" type="number" value="22" placeholder="22">
@@ -1342,7 +1349,7 @@
                 <option value="noise">Noise</option>
             </select>
         </label>
-        <label class="field" id="autoCascadeObfIntensityWrap" style="display:none;"><span>Интенсивность</span>
+        <label class="field" id="autoCascadeObfIntensityWrap" style="display:none;"><span>�?нтенсивность</span>
             <select id="autoCascadeObfIntensity">
                 <option value="low">Низкая</option>
                 <option value="medium" selected>Средняя</option>
@@ -1373,7 +1380,7 @@
 </div>
 <div class="card" style="margin-bottom:20px;" data-admin-only>
     <div class="card-head" style="margin-bottom:8px;">
-        <div><h3 style="margin:0;">Интерфейсы маршрутизации</h3></div>
+        <div><h3 style="margin:0;">�?нтерфейсы маршрутизации</h3></div>
         <span class="badge badge-muted">можно менять после установки</span>
     </div>
     <p style="color:var(--text-muted); font-size:13px; margin-top:0;">
@@ -1422,7 +1429,7 @@
                 </div>
             </div>
 
-            <!-- ПРОКСИ И ПОЛЬЗОВАТЕЛИ -->
+            <!-- ПРОКС�? �? ПОЛЬЗОВАТЕЛ�? -->
             <div id="tab-proxy" class="tab-pane">
                 <div class="card" style="margin-bottom:20px;">
                     <div class="card-head">
@@ -1597,7 +1604,7 @@
                 </div>
             </div>
 
-            <!-- ОБФУСКАЦИЯ -->
+            <!-- ОБФУСКАЦ�?Я -->
             <div id="tab-obf" class="tab-pane">
                 <div class="card" style="margin-bottom:20px;">
                     <div class="card-head">
@@ -1611,7 +1618,7 @@
                         <button class="btn btn-primary" onclick="openWizard('obf')">✦ Усилить обфускацию</button>
                         <button class="btn btn-soft" onclick="openObfTab(); loadObfCurrent()">Перепроверить</button>
                         <button class="btn btn-soft" onclick="syncAwgHpk()">Синхронизировать server_hpk.key</button>
-                        <button class="btn btn-ghost" onclick="setExpert(true); setTimeout(()=>document.getElementById('obfImportText')?.scrollIntoView({behavior:'smooth',block:'center'}),150)">Импорт из Архитектора</button>
+                        <button class="btn btn-ghost" onclick="setExpert(true); setTimeout(()=>document.getElementById('obfImportText')?.scrollIntoView({behavior:'smooth',block:'center'}),150)">�?мпорт из Архитектора</button>
                     </div>
                 </div>
 
@@ -1658,10 +1665,10 @@
                 </div>
 
                 <div class="card advanced-only" style="margin-bottom:20px;">
-                    <h3 style="margin-top:0;">Интеграция с Архитектором</h3>
+                    <h3 style="margin-top:0;">�?нтеграция с Архитектором</h3>
                     <p style="color:var(--text-muted); font-size:13px; margin-top:0;">
                         Сайт генерирует конфигурацию полностью в браузере. Панель не отправляет ему ключи и параметры —
-                        вы просто переносите готовый текст. Импортируются только параметры обфускации, ключи и адреса остаются вашими.
+                        вы просто переносите готовый текст. �?мпортируются только параметры обфускации, ключи и адреса остаются вашими.
                     </p>
                     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; margin:16px 0;">
                         <div style="background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:8px; padding:12px;">
@@ -1716,7 +1723,7 @@
                 </div>
             </div>
 
-            <!-- ОБНОВЛЕНИЕ -->
+            <!-- ОБНОВЛЕН�?Е -->
             <div id="tab-update" class="tab-pane">
                 <div class="card" style="margin-bottom:20px;">
                     <div class="card-head">
@@ -1747,7 +1754,7 @@
                         <button class="btn btn-primary" id="updUploadBtn" onclick="updUpload()">⬆ Установить из файла</button>
                     </div>
                     <div class="update-source">
-                        <span>Или ссылка на релиз:</span>
+                        <span>�?ли ссылка на релиз:</span>
                         <input type="text" id="updUrl" placeholder="https://example.com/servpanel-2.8.2.tar.gz" style="flex:1; min-width:240px;">
                         <button class="btn btn-dark" id="updUrlBtn" onclick="updFromUrl()">Установить по URL</button>
                     </div>
@@ -1778,7 +1785,7 @@
                 </div>
             </div>
 
-            <!-- АДМИНИСТРИРОВАНИЕ -->
+            <!-- АДМ�?Н�?СТР�?РОВАН�?Е -->
             <div id="tab-admin" class="tab-pane">
                 <div class="card" style="margin-bottom:20px;">
                     <h3 style="margin-top:0;">Двухфакторная аутентификация (TOTP)</h3>
@@ -1910,7 +1917,7 @@
         <div class="wizard">
             <header class="wizard-head">
                 <div>
-                    <div class="eyebrow">МАСТЕР НАСТРОЙКИ</div>
+                    <div class="eyebrow">МАСТЕР НАСТРОЙК�?</div>
                     <h2 id="wizardTitle">Что настроить?</h2>
                 </div>
                 <button class="icon-btn" onclick="closeWizard()" title="Закрыть">✕</button>
@@ -1942,3 +1949,4 @@
     <script src="/app.js"></script>
 </body>
 </html>
+
