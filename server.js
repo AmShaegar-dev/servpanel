@@ -1900,30 +1900,57 @@ function readIfaceBytes(name) {
 }
 
 function readMangleSplit() {
+    let direct = 0, tunnel = 0;
     try {
-        const out = sh('iptables', ['-t', 'mangle', '-L', 'PREROUTING', '-v', '-n', '-x'], { maxBuffer: 8 * 1024 * 1024 });
-        let direct = 0, tunnel = 0;
-        for (const line of String(out || '').split('\n')) {
-            const m = /^\s*\d+\s+(\d+)\s+\S+/.exec(line);
+        const out = rootShTry('bash', ['-c',
+            "iptables-save -c -t mangle 2>/dev/null || /usr/sbin/iptables-save -c -t mangle 2>/dev/null || true"
+        ], { maxBuffer: 8 * 1024 * 1024 });
+        for (const raw of String(out || '').split('\n')) {
+            const line = raw.trim();
+            const m = /^\[(\d+):(\d+)\]\s+-A\s+PREROUTING\b/.exec(line);
             if (!m) continue;
-            const bytes = Number(m[1]) || 0;
-            if (line.includes('match-set ru dst') && /\bRETURN\b/.test(line)) direct += bytes;
-            else if (/\bMARK\b/.test(line) && /0x1\b/.test(line)) tunnel += bytes;
+            const bytes = Number(m[2]) || 0;
+            if (line.includes('match-set ru dst') && /-j\s+RETURN\b/.test(line)) direct += bytes;
+            else if (/(?:--set-xmark|--set-mark)\s+0x1\b/.test(line)) tunnel += bytes;
         }
-        return { direct, tunnel, total: direct + tunnel };
-    } catch (e) { return { direct: 0, tunnel: 0, total: 0 }; }
+    } catch (e) { /* ignore */ }
+    if (!direct && !tunnel) {
+        try {
+            const out = rootShTry('iptables', ['-t', 'mangle', '-L', 'PREROUTING', '-v', '-n', '-x'], { maxBuffer: 8 * 1024 * 1024 });
+            for (const line of String(out || '').split('\n')) {
+                const m = /^\s*\d+\s+(\d+)\s+\S+/.exec(line);
+                if (!m) continue;
+                const bytes = Number(m[1]) || 0;
+                if (line.includes('match-set ru dst') && /\bRETURN\b/.test(line)) direct += bytes;
+                else if (/\bMARK\b/.test(line) && /0x1\b/.test(line)) tunnel += bytes;
+            }
+        } catch (e) { /* ignore */ }
+    }
+    return { direct, tunnel, total: direct + tunnel };
 }
 
 function readRuBlockBytes() {
+    let total = 0;
     try {
-        const out = sh('iptables', ['-L', 'ru_block', '-v', '-n', '-x'], { maxBuffer: 4 * 1024 * 1024 });
-        let total = 0;
-        for (const line of String(out || '').split('\n')) {
-            const m = /^\s*\d+\s+(\d+)/.exec(line);
-            if (m) total += Number(m[1]) || 0;
+        const out = rootShTry('bash', ['-c',
+            "iptables-save -c -t filter 2>/dev/null || /usr/sbin/iptables-save -c -t filter 2>/dev/null || true"
+        ], { maxBuffer: 8 * 1024 * 1024 });
+        for (const raw of String(out || '').split('\n')) {
+            const line = raw.trim();
+            const m = /^\[(\d+):(\d+)\]\s+-A\s+FORWARD\b/.exec(line);
+            if (m && line.includes('match-set ru_block') && /-j\s+DROP\b/.test(line)) total += Number(m[2]) || 0;
         }
-        return total;
-    } catch (e) { return 0; }
+    } catch (e) { /* ignore */ }
+    if (!total) {
+        try {
+            const out = rootShTry('iptables', ['-L', 'ru_block', '-v', '-n', '-x'], { maxBuffer: 4 * 1024 * 1024 });
+            for (const line of String(out || '').split('\n')) {
+                const m = /^\s*\d+\s+(\d+)/.exec(line);
+                if (m) total += Number(m[1]) || 0;
+            }
+        } catch (e) { /* ignore */ }
+    }
+    return total;
 }
 
 app.get('/api/traffic/distribution', checkAuth, (req, res) => {
