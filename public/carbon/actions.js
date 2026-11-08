@@ -707,6 +707,8 @@ async function carbonWarpPanel() {
     : 'WARP не установлен.';
   modal.innerHTML = `<div class="modal-card modal-wide"><div class="modal-head"><div><div class="modal-title">WARP + Xray</div><div class="modal-sub">${escHtml(summary)}</div></div><button class="icon-btn" data-warp-close>✕</button></div>
     <div class="page-actions" style="flex-wrap:wrap"><button class="btn btn-primary" data-warp-action="power-on">Включить</button><button class="btn" data-warp-action="power-off">Остановить</button><button class="btn" data-warp-action="test">Проверить WARP</button><button class="btn" data-warp-action="install-v1">Установить вариант 1</button><button class="btn" data-warp-action="install-v2">Установить вариант 2</button></div>
+    <div class="chips" data-warp-services style="margin-top:12px;flex-wrap:wrap">${(st.services || []).map(s => `<label class="chip ${s.selected ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-warp-service value="${escHtml(s.id)}" ${s.selected ? 'checked' : ''}> ${escHtml(s.label)}</label>`).join('') || '<span class="muted">Сервисы не найдены</span>'}</div>
+    <button class="btn" data-warp-save style="margin-top:10px">Сохранить сервисы</button>
     <pre class="code" data-warp-out style="margin-top:14px;padding:12px;white-space:pre-wrap;max-height:40vh;overflow:auto">Готово</pre></div>`;
   document.body.appendChild(modal);
   modal.hidden = false;
@@ -728,6 +730,13 @@ async function carbonWarpPanel() {
       }
     } catch (e) { out.textContent = e.message; }
   }));
+  modal.querySelector('[data-warp-save]')?.addEventListener('click', async () => {
+    const ids = [...modal.querySelectorAll('[data-warp-service]:checked')].map(x => x.value);
+    try {
+      await api('/api/warp/services', { method: 'POST', body: { services: ids } });
+      out.textContent = 'Сервисы сохранены: ' + (ids.join(', ') || '—');
+    } catch (e) { out.textContent = e.message; }
+  });
 }
 
 async function carbonDnsCapture() {
@@ -898,6 +907,140 @@ async function carbonRuDropUpload() {
   showToast('Загружено адресов: ' + (d.count || 0));
 }
 
+async function carbonObfImport() {
+  showCarbonForm({
+    title: 'Импорт из Архитектора',
+    sub: 'Вставьте .conf, JSON или vpn:// — панель проверит и применит параметры',
+    fields: [
+      { name: 'source', label: 'Источник', type: 'textarea', rows: 12, placeholder: '[Interface] … или JSON' },
+      { name: 'regen', label: 'Перегенерировать клиентов', type: 'checkbox', value: true },
+      { name: 'removeMissing', label: 'Удалить отсутствующие параметры', type: 'checkbox', value: true }
+    ],
+    submitText: 'Проверить и применить',
+    danger: true,
+    onSubmit: async v => {
+      if (!v.source.trim()) throw new Error('Вставьте конфиг, JSON или vpn://');
+      const analysis = await api('/api/obf/analyze', { method: 'POST', body: { source: v.source } });
+      const score = analysis.audit ? analysis.audit.score : '—';
+      if (!confirm(`Применить параметры (AWG ${analysis.version || '—'}, оценка ${score}/100)?`)) return;
+      const d = await api('/api/obf/apply', { method: 'POST', body: { source: v.source, regenClients: !!v.regen, removeMissing: !!v.removeMissing } });
+      await carbonRefresh('Применено параметров: ' + (d.applied || 0));
+    }
+  });
+}
+
+async function carbonCascadeProxy() {
+  let d = {};
+  try { d = await api('/api/cascade/proxy'); } catch (e) {}
+  showCarbonForm({
+    title: 'MTProto через EU',
+    sub: d.available === false ? 'Telemt/MTProxyL не найден' : 'Исходящие соединения прокси через EU',
+    fields: [{ name: 'enabled', label: 'Пустить прокси через EU', type: 'checkbox', value: !!d.enabled }],
+    submitText: 'Применить',
+    danger: true,
+    onSubmit: async v => {
+      const r = await api('/api/cascade/proxy', { method: 'POST', body: { enabled: !!v.enabled } });
+      await carbonRefresh(r.output || (v.enabled ? 'Прокси пущен через EU' : 'Прокси возвращён напрямую'));
+    }
+  });
+}
+
+async function carbonCascadeProxyTest() {
+  const d = await api('/api/cascade/proxy/test');
+  showCarbonTextModal('Проверка выхода прокси', JSON.stringify(d, null, 2));
+}
+
+async function carbonAwgInstall() {
+  showCarbonForm({
+    title: 'Установка AmneziaWG',
+    sub: 'Параметры установщика',
+    fields: [
+      { name: 'version', label: 'Версия AWG', type: 'select', options: ['3.1', '2.0', '1.5'] },
+      { name: 'port', label: 'Порт', value: '443' },
+      { name: 'route', label: 'Маршрут', type: 'select', options: [{ value: 'all', label: 'Весь трафик' }, { value: 'custom', label: 'Свои сети' }] },
+      { name: 'awgMode', label: 'Режим', type: 'select', options: [{ value: 'single', label: 'Один сервер' }, { value: 'cascade', label: 'Каскад' }] },
+      { name: 'cascadeRole', label: 'Роль в каскаде', type: 'select', options: [{ value: 'ru', label: 'RU-вход' }, { value: 'eu', label: 'EU-выход' }] },
+      { name: 'remoteIp', label: 'IP второй стороны', placeholder: 'Только для каскада' },
+      { name: 'remotePort', label: 'SSH-порт второй стороны', value: '22' },
+      { name: 'remotePass', label: 'Пароль root второй стороны', type: 'password' },
+      { name: 'domain', label: 'Домен для конфигов', placeholder: 'Необязательно' }
+    ],
+    submitText: 'Установить AWG',
+    danger: true,
+    onSubmit: async v => {
+      const body = {
+        module: 'awg', version: v.version, route: v.route, customRoute: '', ipv6: 'disallow', port: v.port,
+        isolation: true, keepPackages: true, noTweaks: false, awgMode: v.awgMode, cascadeRole: v.cascadeRole,
+        remoteIp: v.remoteIp, remotePort: v.remotePort, remotePass: v.remotePass, domain: v.domain
+      };
+      const d = await api('/api/install/module', { method: 'POST', body });
+      showCarbonTextModal('Установка AWG', d.logFile ? 'Запущено. Журнал: ' + d.logFile : 'Установка запущена');
+      await carbonRefresh();
+    }
+  });
+}
+
+async function carbonMtproxylInstall() {
+  showCarbonForm({
+    title: 'Установка MTProxyL',
+    sub: 'Движок Telemt и менеджер MTProxyL',
+    fields: [
+      { name: 'mplPort', label: 'Порт', value: '443' },
+      { name: 'mplSni', label: 'SNI', value: 'autoscout24.ru' },
+      { name: 'mplProxyMode', label: 'Режим', type: 'select', options: [{ value: 'mtproto', label: 'MTProto' }, { value: 'socks5', label: 'SOCKS5' }] },
+      { name: 'mplAdTag', label: 'ad_tag', placeholder: 'Необязательно' },
+      { name: 'mplApi', label: 'API менеджера', type: 'checkbox', value: true },
+      { name: 'mplWeb', label: 'Web-интерфейс', type: 'checkbox', value: false },
+      { name: 'mplForce', label: 'Переустановить принудительно', type: 'checkbox', value: false }
+    ],
+    submitText: 'Установить MTProxyL',
+    danger: true,
+    onSubmit: async v => {
+      const body = {
+        module: 'mtproxyl', mplMode: 'manager', mplEngine: 'binary', mplProxyMode: v.mplProxyMode,
+        mplPort: v.mplPort, mplSni: v.mplSni, mplAdTag: v.mplAdTag, mplApi: !!v.mplApi,
+        mplApiListen: '127.0.0.1:9190', mplWeb: !!v.mplWeb, mplForce: !!v.mplForce
+      };
+      const d = await api('/api/install/module', { method: 'POST', body });
+      showCarbonTextModal('Установка MTProxyL', d.logFile ? 'Запущено. Журнал: ' + d.logFile : 'Установка запущена');
+      await carbonRefresh();
+    }
+  });
+}
+
+async function carbonRestorePanel() {
+  showCarbonForm({
+    title: 'Восстановление панели',
+    sub: 'Архив бэкапа панели',
+    fields: [{ name: 'file', label: 'Файл .tar.gz', type: 'file', accept: '.tar.gz,.tgz,application/gzip' }],
+    submitText: 'Восстановить',
+    danger: true,
+    onSubmit: async v => {
+      if (!v.file) throw new Error('Выберите файл бэкапа');
+      const data = await fileToBase64(v.file);
+      await api('/api/restore', { method: 'POST', body: { fileData: data } });
+      showToast('Восстановление запущено');
+    }
+  });
+}
+
+async function carbonCascadeRepair() {
+  if (!confirm('Пересобрать каскад? Туннель awg1 перезапустится на несколько секунд.')) return;
+  const d = await api('/api/cascade/repair', { method: 'POST', body: {} });
+  await carbonRefresh('Каскад пересобран: ' + (d.endpoint || '—'));
+}
+
+async function carbonDiagTc() {
+  const d = await api('/api/diag/tc');
+  showCarbonTextModal('TCP-проверка', JSON.stringify(d, null, 2));
+}
+
+async function carbonDiagWan() {
+  showToast('Проверка скорости WAN…');
+  const d = await api('/api/diag/wan-speed');
+  showCarbonTextModal('Скорость WAN', JSON.stringify(d, null, 2));
+}
+
 function carbonActionName(btn) { return btn && btn.dataset ? btn.dataset.carbonAction : ''; }
 
 document.addEventListener('click', async event => {
@@ -953,9 +1096,13 @@ document.addEventListener('click', async event => {
     else if (action === 'ufw-delete') { if (confirm('Удалить правило №' + name + '?')) { await api('/api/ufw/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Правило удалено'); } }
     else if (action === 'awg-edit') await carbonAwgEdit();
     else if (action === 'server-name') await carbonServerName();
-    else if (action === 'install-mtproxyl') await carbonInstallMtproxyl();
+    else if (action === 'install-mtproxyl' || action === 'mtproxyl-install') await carbonMtproxylInstall();
+    else if (action === 'awg-install') await carbonAwgInstall();
     else if (action === 'cascade-build') await carbonCascadeBuild();
     else if (action === 'cascade-manual') await carbonCascadeManual();
+    else if (action === 'cascade-repair') await carbonCascadeRepair();
+    else if (action === 'cascade-proxy') await carbonCascadeProxy();
+    else if (action === 'cascade-proxy-test') await carbonCascadeProxyTest();
     else if (action === 'cascade-cleanup') await carbonCascadeCleanup();
     else if (action === 'adguard-stats') await carbonAdguardStats();
     else if (action === 'warp-panel') await carbonWarpPanel();
@@ -967,8 +1114,12 @@ document.addEventListener('click', async event => {
     else if (action === 'rustdesk-job') await carbonRustdeskJob(btn.dataset.act || 'update');
     else if (action === 'fail2ban') await carbonFail2ban();
     else if (action === 'diag-check') await carbonDiagCheck();
+    else if (action === 'diag-tc') await carbonDiagTc();
+    else if (action === 'diag-wan') await carbonDiagWan();
     else if (action === 'obf-generate') await carbonObfGenerate();
+    else if (action === 'obf-import') await carbonObfImport();
     else if (action === 'obf-sync') await carbonObfSync();
+    else if (action === 'restore-panel') await carbonRestorePanel();
     else if (action === 'rudrop-upload') await carbonRuDropUpload();
   } catch (e) {
     showToast(e.message || 'Ошибка');
