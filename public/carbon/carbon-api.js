@@ -127,6 +127,29 @@ function applyShellData() {
   document.querySelectorAll('.avatar').forEach(el => { el.textContent = initial; });
 }
 
+function bindMobileMenu() {
+  const btn = document.getElementById('mobileMenuBtn');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  const close = () => document.body.classList.remove('menu-open');
+  if (btn && !btn.dataset.bound) {
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', event => {
+      event.preventDefault();
+      document.body.classList.toggle('menu-open');
+    });
+  }
+  if (backdrop && !backdrop.dataset.bound) {
+    backdrop.dataset.bound = '1';
+    backdrop.addEventListener('click', close);
+  }
+  document.querySelectorAll('.sidebar .nav-item, .sidebar .user-chip a').forEach(el => {
+    if (el.dataset.menuBound) return;
+    el.dataset.menuBound = '1';
+    el.addEventListener('click', () => { if (window.innerWidth <= 900) close(); });
+  });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') close(); });
+}
+
 function bindGlobalSearch() {
   const input = document.getElementById('globalSearch');
   if (!input || input.dataset.bound) return;
@@ -284,22 +307,45 @@ function realClientsTable() {
 
 function smoothTraffic(values, range) {
   const arr = (values || []).map(v => Number(v) || 0);
-  const win = range === '7d' ? 21 : range === '24h' ? 15 : 1;
-  if (win <= 1) return arr;
+  const sigma = range === '7d' ? 10 : range === '24h' ? 6 : 0;
+  if (!sigma || !arr.length) return arr;
+  const radius = Math.ceil(sigma * 3);
+  const weights = [];
+  for (let k = -radius; k <= radius; k++) weights.push(Math.exp(-(k * k) / (2 * sigma * sigma)));
   return arr.map((_, i) => {
-    const slice = arr.slice(Math.max(0, i - win + 1), i + 1);
-    return slice.reduce((a, b) => a + b, 0) / slice.length;
+    let sum = 0, wsum = 0;
+    for (let k = -radius; k <= radius; k++) {
+      const idx = i + k;
+      if (idx < 0 || idx >= arr.length) continue;
+      const w = weights[k + radius];
+      sum += arr[idx] * w;
+      wsum += w;
+    }
+    return wsum ? sum / wsum : 0;
   });
 }
 
 function chartPath(values, max, width, height) {
   if (!values.length) return '';
   const step = width / Math.max(1, values.length - 1);
-  return values.map((v, i) => {
-    const x = (i * step).toFixed(1);
-    const y = (height - (v / max) * height).toFixed(1);
-    return (i ? 'L' : 'M') + x + ',' + y;
-  }).join(' ');
+  const pts = values.map((v, i) => ({
+    x: i * step,
+    y: Math.max(0, Math.min(height, height - (v / max) * height))
+  }));
+  if (pts.length === 1) return `M${pts[0].x},${pts[0].y}`;
+  let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] || p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+  }
+  return d;
 }
 
 function realTrafficChart() {
@@ -686,6 +732,7 @@ document.addEventListener('click', async event => {
 async function initCarbon() {
   bindRealData();
   bindGlobalSearch();
+  bindMobileMenu();
   try {
     await api('/api/security/status');
   } catch (e) {
