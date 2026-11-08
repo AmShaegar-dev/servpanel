@@ -1899,6 +1899,21 @@ function readIfaceBytes(name) {
     } catch (e) { return null; }
 }
 
+function readMangleSplit() {
+    try {
+        const out = sh('iptables', ['-t', 'mangle', '-L', 'PREROUTING', '-v', '-n', '-x'], { maxBuffer: 8 * 1024 * 1024 });
+        let direct = 0, tunnel = 0;
+        for (const line of String(out || '').split('\n')) {
+            const m = /^\s*\d+\s+(\d+)\s+\S+/.exec(line);
+            if (!m) continue;
+            const bytes = Number(m[1]) || 0;
+            if (line.includes('match-set ru dst') && /\bRETURN\b/.test(line)) direct += bytes;
+            else if (/\bMARK\b/.test(line) && /0x1\b/.test(line)) tunnel += bytes;
+        }
+        return { direct, tunnel, total: direct + tunnel };
+    } catch (e) { return { direct: 0, tunnel: 0, total: 0 }; }
+}
+
 function readRuBlockBytes() {
     try {
         const out = sh('iptables', ['-L', 'ru_block', '-v', '-n', '-x'], { maxBuffer: 4 * 1024 * 1024 });
@@ -1919,13 +1934,36 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
         const clientIface = readIfaceBytes('awg0') || readIfaceBytes('amn0');
         const tunnelRaw = tunnelIface ? tunnelIface.rx + tunnelIface.tx : 0;
         const blockedRaw = readRuBlockBytes();
-        const tunnel = Math.min(clientTotal, tunnelRaw);
-        const blocked = Math.min(Math.max(0, clientTotal - tunnel), blockedRaw);
-        const direct = Math.max(0, clientTotal - tunnel - blocked);
+        const mangle = readMangleSplit();
+        let tunnel, direct, blocked, source;
+        if (mangle.total > 0) {
+            // Счётчики mangle PREROUTING считают исходящее направление:
+            // RETURN по ipset ru — RU-направления напрямую, MARK 0x1 — в туннель.
+            // Масштабируем пропорции на полный клиентский трафик (rx+tx).
+            const k = clientTotal > 0 ? clientTotal / mangle.total : 1;
+            tunnel = Math.round(mangle.tunnel * k);
+            direct = Math.round(mangle.direct * k);
+            const blockedScaled = Math.round(blockedRaw * k);
+            blocked = Math.min(blockedScaled, Math.max(0, clientTotal - tunnel - direct));
+            source = 'mangle';
+        } else {
+            tunnel = Math.min(clientTotal, tunnelRaw);
+            blocked = Math.min(Math.max(0, clientTotal - tunnel), blockedRaw);
+            direct = Math.max(0, clientTotal - tunnel - blocked);
+            source = 'interfaces';
+        }
+        const sum = tunnel + direct + blocked;
+        if (sum > clientTotal && sum > 0) {
+            tunnel = Math.round(tunnel * clientTotal / sum);
+            direct = Math.round(direct * clientTotal / sum);
+            blocked = Math.max(0, clientTotal - tunnel - direct);
+        }
         const total = tunnel + direct + blocked;
         res.json({
             total, tunnel, direct, blocked,
             clientTotal, tunnelRaw, blockedRaw,
+            source,
+            mangle,
             interfaces: {
                 client: clientIface ? { rx: clientIface.rx, tx: clientIface.tx } : null,
                 tunnel: tunnelIface ? { rx: tunnelIface.rx, tx: tunnelIface.tx } : null

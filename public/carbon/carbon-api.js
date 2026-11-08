@@ -17,7 +17,8 @@ const carbon = {
   loaded: false,
   chartRange: '1h',
   history: null,
-  distribution: null
+  distribution: null,
+  cascadeInterfaces: null
 };
 
 async function api(path, options = {}) {
@@ -224,6 +225,7 @@ async function carbonLogin() {
     document.getElementById('carbonLogin').hidden = true;
     await loadCarbonData();
     render();
+    startDashboardLive();
     showToast('Вход выполнен: ' + carbon.user);
   } catch (e) {
     err.textContent = e.message || 'Неверный пароль';
@@ -241,7 +243,7 @@ async function carbonLogout() {
 
 async function loadCarbonData() {
   const safe = p => api(p).catch(() => null);
-  const [stats, clients, modules, services, security, interfaces, update, server, sys, ufw, cascade, cascadeProxy, obf, profiles, proxy, proxyUsers, ssl, app, rustdesk, users, audit, backup, notify, awgConfig, history, distribution] = await Promise.all([
+  const [stats, clients, modules, services, security, interfaces, update, server, sys, ufw, cascade, cascadeProxy, obf, profiles, proxy, proxyUsers, ssl, app, rustdesk, users, audit, backup, notify, awgConfig, history, distribution, cascadeInterfaces] = await Promise.all([
     safe('/api/stats'), safe('/api/clients'), safe('/api/modules'), safe('/api/services'),
     safe('/api/security/status'), safe('/api/interfaces'), safe('/api/update/info'),
     safe('/api/server-info'), safe('/api/sysinfo'), safe('/api/ufw'), safe('/api/cascade/status'),
@@ -250,7 +252,7 @@ async function loadCarbonData() {
     safe('/api/app/status'), safe('/api/rustdesk/status'), safe('/api/users'),
     safe('/api/audit?limit=50'), safe('/api/backup/auto'), safe('/api/notify/status'),
     safe('/api/awg/config'), safe('/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global'),
-    safe('/api/traffic/distribution')
+    safe('/api/traffic/distribution'), safe('/api/cascade/interfaces')
   ]);
   carbon.stats = Array.isArray(stats) ? stats : [];
   carbon.clients = Array.isArray(clients) ? clients : carbon.stats;
@@ -278,6 +280,7 @@ async function loadCarbonData() {
   carbon.awgConfig = awgConfig;
   carbon.history = history;
   carbon.distribution = distribution;
+  if (cascadeInterfaces && !cascadeInterfaces.error) carbon.cascadeInterfaces = cascadeInterfaces;
   carbon.loaded = true;
   applyShellData();
 }
@@ -364,7 +367,7 @@ function realTrafficChart() {
   const area = rxPath ? `${rxPath} L${width},${height} L0,${height} Z` : '';
   const names = { '1h': 'последний час', '24h': 'последние 24 часа', '7d': 'последние 7 суток' };
   const subline = range === '1h' && labels.length ? labels[0] + ' — ' + labels[labels.length - 1] : names[range];
-  return `<section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Трафик</div><div class="card-sub">${escHtml(subline || '')}</div></div><div class="legend"><span><i style="background:#5b8cff"></i>Rx</span><span><i style="background:var(--accent)"></i>Tx</span><div class="chips" style="margin-left:8px"><button class="chip ${range === '1h' ? 'on' : ''}" data-carbon-action="chart-range" data-range="1h">1ч</button><button class="chip ${range === '24h' ? 'on' : ''}" data-carbon-action="chart-range" data-range="24h">24ч</button><button class="chip ${range === '7d' ? 'on' : ''}" data-carbon-action="chart-range" data-range="7d">7д</button></div></div></div>${labels.length ? `<svg class="chart" viewBox="0 0 760 235" preserveAspectRatio="none" aria-label="График трафика"><g stroke="var(--line)" stroke-width="1"><line x1="0" y1="${height / 4}" x2="${width}" y2="${height / 4}"/><line x1="0" y1="${height / 2}" x2="${width}" y2="${height / 2}"/><line x1="0" y1="${height * 0.75}" x2="${width}" y2="${height * 0.75}"/></g><path d="${area}" fill="rgba(91,140,255,.10)" stroke="none"/><path d="${txPath}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" vector-effect="non-scaling-stroke"/><path d="${rxPath}" fill="none" stroke="#5b8cff" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg><div class="mini-grid" style="grid-template-columns:repeat(4,1fr);margin-top:10px">${mini('Пик Rx', fmtBytes(Math.round(max)) + '/s', 'сглажено')}${mini('Точек', String(labels.length), 'в окне')}${mini('Rx', fmtBytes(Math.round(rx.reduce((a, b) => a + b, 0) / Math.max(1, rx.length))) + '/s', 'среднее')}${mini('Tx', fmtBytes(Math.round(tx.reduce((a, b) => a + b, 0) / Math.max(1, tx.length))) + '/s', 'среднее')}</div>` : '<div class="empty-row">Нет данных истории за этот период</div>'}</section>`;
+  return `<section class="card" id="liveChartCard" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Трафик</div><div class="card-sub">${escHtml(subline || '')}</div></div><div class="legend"><span><i style="background:#5b8cff"></i>Rx</span><span><i style="background:var(--accent)"></i>Tx</span><div class="chips" style="margin-left:8px"><button class="chip ${range === '1h' ? 'on' : ''}" data-carbon-action="chart-range" data-range="1h">1ч</button><button class="chip ${range === '24h' ? 'on' : ''}" data-carbon-action="chart-range" data-range="24h">24ч</button><button class="chip ${range === '7d' ? 'on' : ''}" data-carbon-action="chart-range" data-range="7d">7д</button></div></div></div>${labels.length ? `<svg class="chart" viewBox="0 0 760 235" preserveAspectRatio="none" aria-label="График трафика"><g stroke="var(--line)" stroke-width="1"><line x1="0" y1="${height / 4}" x2="${width}" y2="${height / 4}"/><line x1="0" y1="${height / 2}" x2="${width}" y2="${height / 2}"/><line x1="0" y1="${height * 0.75}" x2="${width}" y2="${height * 0.75}"/></g><path d="${area}" fill="rgba(91,140,255,.10)" stroke="none"/><path d="${txPath}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" vector-effect="non-scaling-stroke"/><path d="${rxPath}" fill="none" stroke="#5b8cff" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg><div class="mini-grid" style="grid-template-columns:repeat(4,1fr);margin-top:10px">${mini('Пик Rx', fmtBytes(Math.round(max)) + '/s', 'сглажено')}${mini('Точек', String(labels.length), 'в окне')}${mini('Rx', fmtBytes(Math.round(rx.reduce((a, b) => a + b, 0) / Math.max(1, rx.length))) + '/s', 'среднее')}${mini('Tx', fmtBytes(Math.round(tx.reduce((a, b) => a + b, 0) / Math.max(1, tx.length))) + '/s', 'среднее')}</div>` : '<div class="empty-row">Нет данных истории за этот период</div>'}</section>`;
 }
 
 function realTrafficDistribution() {
@@ -376,9 +379,9 @@ function realTrafficDistribution() {
   const C = 2 * Math.PI * 46;
   const parts = [
     { label: 'В EU-туннель', value: tunnel, color: '#5b8cff' },
-    { label: 'Напрямую', value: direct, color: 'var(--accent)' },
-    { label: 'GeoIP blocked', value: blocked, color: '#d29922' }
+    { label: 'Напрямую', value: direct, color: 'var(--accent)' }
   ];
+  if (blocked > 0) parts.push({ label: 'GeoIP blocked', value: blocked, color: '#d29922' });
   let offset = 0;
   const rings = parts.map(p => {
     const len = total ? C * p.value / total : 0;
@@ -388,7 +391,7 @@ function realTrafficDistribution() {
   }).join('');
   const pct = v => total ? Math.round(v / total * 100) : 0;
   const legend = parts.map(p => `<div class="list-row"><b><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:7px"></span>${p.label}</b><span class="mono">${pct(p.value)}% · ${fmtBytes(p.value)}</span></div>`).join('');
-  return `<section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">RU-вход · туннель / напрямую / GeoIP</div></div>${tag(total ? 'live' : 'нет данных', total ? 'good' : 'warn')}</div>
+  return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">RU-вход · туннель / напрямую${blocked > 0 ? ' / GeoIP' : ''}</div></div>${tag(total ? 'live' : 'нет данных', total ? 'good' : 'warn')}</div>
     <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
       <div style="position:relative;width:148px;height:148px;flex:0 0 auto">
         <svg viewBox="0 0 120 120" style="width:100%;height:100%"><circle cx="60" cy="60" r="46" fill="none" stroke="var(--surface-3)" stroke-width="14"/>${rings}</svg>
@@ -396,7 +399,7 @@ function realTrafficDistribution() {
       </div>
       <div style="flex:1;min-width:160px">${legend}</div>
     </div>
-    <div class="donut-note" style="margin-top:12px">${total ? 'Данные из счётчиков awg0/awg1, клиентов и правил ru_block.' : 'Нет данных: каскад не активен или счётчики ещё не накоплены.'}</div>
+    <div class="donut-note" style="margin-top:12px">${total ? (blocked > 0 ? 'Данные из счётчиков mangle (ipset ru), awg0/awg1 и правил ru_block.' : 'Данные из счётчиков mangle (ipset ru) и awg0/awg1.') : 'Нет данных: каскад не активен или счётчики ещё не накоплены.'}</div>
   </section>`;
 }
 
@@ -409,17 +412,17 @@ function realDashboard() {
   const sys = carbon.sys || {};
   return `
     <div class="overview">
-      <div class="server-id"><span class="dot"></span><div><div class="server-name">Servpanel · ${escHtml(s.country || 'сервер')}</div><div class="server-meta">${escHtml(s.ip || 'IP —')} · uptime ${escHtml(sys.uptime || '—')} · build ${escHtml(carbon.update ? carbon.update.version : '—')}</div></div></div>
+      <div class="server-id"><span class="dot"></span><div><div class="server-name">Servpanel · ${escHtml(s.country || 'сервер')}</div><div class="server-meta">${escHtml(s.ip || 'IP —')} · uptime <span id="liveUptimeMeta">${escHtml(sys.uptime || '—')}</span> · build ${escHtml(carbon.update ? carbon.update.version : '—')}</div></div></div>
       <div class="overview-actions"><div class="live"><span class="dot"></span>API подключён</div><button class="btn" data-carbon-action="diag-check">${icon('pulse')}Проверить всё</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button><button class="btn btn-primary" data-action="open-client-modal">${icon('plus')}Добавить клиента</button></div>
     </div>
     <div class="grid">
-      ${kpi('Исходящий', fmtBytes(tx), 'TX всего', 'upload', '', 70)}
-      ${kpi('Входящий', fmtBytes(rx), 'RX всего', 'download', 'amber', 45, 'var(--accent-2)')}
-      ${kpi('Клиенты', String(clients.length), online + ' онлайн', 'users', 'neutral', clients.length ? 60 : 5, 'var(--good)')}
-      ${kpi('Uptime', escHtml(sys.uptime || '—'), 'с последнего запуска', 'pulse', 'neutral', 90, 'var(--accent-2)')}
+      ${kpi('Исходящий', `<span id="liveTx">${fmtBytes(tx)}</span>`, 'TX всего', 'upload', '', 70)}
+      ${kpi('Входящий', `<span id="liveRx">${fmtBytes(rx)}</span>`, 'RX всего', 'download', 'amber', 45, 'var(--accent-2)')}
+      ${kpi('Клиенты', `<span id="liveClients">${clients.length}</span>`, `<span id="liveOnline">${online}</span> онлайн`, 'users', 'neutral', clients.length ? 60 : 5, 'var(--good)')}
+      ${kpi('Uptime', `<span id="liveUptime">${escHtml(sys.uptime || '—')}</span>`, 'с последнего запуска', 'pulse', 'neutral', 90, 'var(--accent-2)')}
       ${realTrafficChart()}
       ${realTrafficDistribution()}
-      <section class="card chart-card" style="position:relative"><div class="card-top"><div><div class="card-title">Сервер</div><div class="card-sub">реальные данные API</div></div>${tag('live', 'good')}</div><div class="mini-grid" style="grid-template-columns:1fr 1fr;margin:0">${mini('CPU', (sys.cpu || '—') + '%', 'нагрузка')}${mini('RAM', (sys.ram || '—') + '%', 'использование')}${mini('Интерфейсы', String(carbon.interfaces.length), 'сетевые')}${mini('Модули', String(carbon.modules.filter(m => m.installed).length) + ' / ' + carbon.modules.length, 'установлено')}</div></section>
+      <section class="card chart-card" style="position:relative"><div class="card-top"><div><div class="card-title">Сервер</div><div class="card-sub">реальные данные API</div></div>${tag('live', 'good')}</div><div class="mini-grid" style="grid-template-columns:1fr 1fr;margin:0">${mini('CPU', `<span id="liveCpu">${sys.cpu || '—'}%</span>`, 'нагрузка')}${mini('RAM', `<span id="liveRam">${sys.ram || '—'}%</span>`, 'использование')}${mini('Скорость', `<span id="liveSpeed">—</span>`, 'Rx / Tx')}${mini('Интерфейсы', String(carbon.interfaces.length), 'сетевые')}${mini('Модули', String(carbon.modules.filter(m => m.installed).length) + ' / ' + carbon.modules.length, 'установлено')}</div></section>
       <section class="card donut-card"><div class="card-top"><div><div class="card-title">Службы</div><div class="card-sub">ключевые узлы</div></div>${tag(carbon.services.filter(x => x.state === 'active').length + ' / ' + carbon.services.length, 'good')}</div><div class="list">${carbon.services.slice(0, 6).map(s => `<div class="list-row"><b>${escHtml(s.name)}</b><span class="mono">${escHtml(s.state || s.status)}</span></div>`).join('') || '<div class="list-row"><b>Нет данных</b></div>'}</div></section>
       <section class="card table-card"><div class="card-top"><div><div class="card-title">Клиенты</div><div class="card-sub">активные подключения</div></div><button class="tag" data-tab="clients">Все ${icon('arrow', 'ico')}</button></div>${realClientsTable()}</section>
     </div>`;
@@ -479,10 +482,13 @@ function realNetwork() {
 function realCascade() {
   const c = carbon.cascade || {};
   const p = carbon.cascadeProxy || {};
+  const ci = carbon.cascadeInterfaces || {};
+  const ifaceList = Array.isArray(ci.available) ? ci.available : [];
+  const selectedIfaces = Array.isArray(ci.selected) && ci.selected.length ? ci.selected : (c.ifaces || []);
   return `<div class="page-head"><div><div class="page-title">Каскад RU → EU</div><div class="page-sub">Статус туннеля и MTProto через EU.</div></div><div class="page-actions"><button class="btn btn-primary" data-carbon-action="cascade-build">${icon('cascade')}Построить каскад</button><button class="btn" data-carbon-action="cascade-manual">${icon('edit')}Вручную</button><button class="btn" data-carbon-action="cascade-repair">${icon('refresh')}Пересобрать</button><button class="btn" data-carbon-action="cascade-proxy">${icon('send')}MTProto через EU</button><button class="btn" data-carbon-action="cascade-cleanup">${icon('trash')}Удалить каскад</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Настроен', c.configured ? 'да' : 'нет', 'awg1')}${mini('Активен', c.active ? 'да' : 'нет', 'туннель')}${mini('Endpoint', escHtml(c.endpoint || '—'), 'EU')}${mini('Handshake', c.handshakeAgo == null ? '—' : c.handshakeAgo + ' c', 'назад')}</div>
     <div class="grid"><section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Состояние</div><div class="card-sub">/api/cascade/status</div></div>${tag(c.active ? 'активен' : 'не активен', c.active ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>Роль</b><span class="mono">${escHtml(c.role || '—')}</span></div><div class="list-row"><b>Интерфейсы</b><span class="mono">${escHtml((c.ifaces || []).join(', ') || '—')}</span></div><div class="list-row"><b>Маршрут</b><span class="mono">${escHtml(c.tableRoute || '—')}</span></div><div class="list-row"><b>ipset</b><span class="mono">${escHtml(String(c.ipsetCount || 0))}</span></div></div></section>
-    <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">MTProto через EU</div><div class="card-sub">/api/cascade/proxy</div></div>${tag(p.enabled ? 'включено' : 'выключено', p.enabled ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>middle_proxy_nat_ip</b><span class="mono">${escHtml(p.middleProxyNatIp || p.natIp || '—')}</span></div><div class="list-row"><b>Пользователи</b><span class="mono">${escHtml((p.users || []).join(', ') || '—')}</span></div></div></section></div>`;
+    <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">MTProto через EU</div><div class="card-sub">/api/cascade/proxy</div></div>${tag(p.enabled ? 'включено' : 'выключено', p.enabled ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>middle_proxy_nat_ip</b><span class="mono">${escHtml(p.middleProxyNatIp || p.natIp || '—')}</span></div><div class="list-row"><b>Пользователи</b><span class="mono">${escHtml((p.users || []).join(', ') || '—')}</span></div></div></section><section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Интерфейсы каскада</div><div class="card-sub">ipset ru → напрямую · MARK 0x1 → EU-туннель</div></div>${tag(String(selectedIfaces.length), selectedIfaces.length ? 'good' : 'warn')}</div><div class="chips">${ifaceList.map(i => `<label class="chip ${selectedIfaces.includes(i) ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-cascade-iface value="${escHtml(i)}" ${selectedIfaces.includes(i) ? 'checked' : ''}> ${escHtml(i)}</label>`).join('') || '<span class="muted">Интерфейсы не найдены</span>'}</div><div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="cascade-ifaces-save">${icon('check')}Применить интерфейсы</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div><div class="donut-note">К выбранным интерфейсам применяются правила RU-маршрутизации: RU-направления идут напрямую, остальное — в EU-туннель.</div>${ci.reason && !ifaceList.length ? `<div class="donut-note">${escHtml(ci.reason)}</div>` : ''}</section></div>`;
 }
 
 function realObfuscation() {
@@ -766,6 +772,65 @@ document.addEventListener('click', async event => {
   }
 }, true);
 
+let carbonLiveTimer = null;
+let carbonLiveBusy = false;
+
+function setLiveText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
+async function refreshDashboardLive() {
+  if (document.hidden || carbonLiveBusy) return;
+  if (typeof state !== 'undefined' && state.tab !== 'dashboard') return;
+  if (typeof carbon === 'undefined' || !carbon.loaded) return;
+  carbonLiveBusy = true;
+  try {
+    const [stats, sys, dist, hist] = await Promise.all([
+      api('/api/stats').catch(() => null),
+      api('/api/sysinfo').catch(() => null),
+      api('/api/traffic/distribution').catch(() => null),
+      api('/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global').catch(() => null)
+    ]);
+    if (Array.isArray(stats)) carbon.clients = stats;
+    if (sys && !sys.error) carbon.sys = sys;
+    if (dist && !dist.error) carbon.distribution = dist;
+    if (hist && !hist.error) carbon.history = hist;
+    const clients = carbon.clients || [];
+    const online = clients.filter(clientStatus).length;
+    const rx = clients.reduce((a, c) => a + (Number(c.rx) || 0), 0);
+    const tx = clients.reduce((a, c) => a + (Number(c.tx) || 0), 0);
+    const system = carbon.sys || {};
+    setLiveText('liveTx', fmtBytes(tx));
+    setLiveText('liveRx', fmtBytes(rx));
+    setLiveText('liveClients', String(clients.length));
+    setLiveText('liveOnline', String(online));
+    setLiveText('liveUptime', system.uptime || '—');
+    setLiveText('liveUptimeMeta', system.uptime || '—');
+    setLiveText('liveCpu', (system.cpu || '—') + '%');
+    setLiveText('liveRam', (system.ram || '—') + '%');
+    const hRx = (carbon.history && carbon.history.rx) || [];
+    const hTx = (carbon.history && carbon.history.tx) || [];
+    const lastRx = hRx.length ? hRx[hRx.length - 1] : 0;
+    const lastTx = hTx.length ? hTx[hTx.length - 1] : 0;
+    setLiveText('liveSpeed', '↓ ' + fmtBytes(lastRx) + '/s · ↑ ' + fmtBytes(lastTx) + '/s');
+    const chart = document.getElementById('liveChartCard');
+    if (chart) chart.outerHTML = realTrafficChart();
+    const donut = document.getElementById('liveDistributionCard');
+    if (donut) donut.outerHTML = realTrafficDistribution();
+    applyShellData();
+  } catch (e) {
+    /* тихо ждём следующего тика */
+  } finally {
+    carbonLiveBusy = false;
+  }
+}
+
+function startDashboardLive() {
+  if (carbonLiveTimer) return;
+  carbonLiveTimer = setInterval(refreshDashboardLive, 5000);
+}
+
 async function initCarbon() {
   bindRealData();
   bindGlobalSearch();
@@ -786,6 +851,7 @@ async function initCarbon() {
     render();
     showToast(e.message || 'Ошибка загрузки');
   }
+  startDashboardLive();
 }
 
 if (document.readyState === 'loading') {

@@ -270,7 +270,9 @@ button{background:none;border:0;cursor:pointer}a{color:inherit;text-decoration:n
 @media(max-width:1200px){.kpi{grid-column:span 6}.chart-card,.donut-card,.events{grid-column:span 12}.mini-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:900px){
   .icon-btn.mobile-menu{display:inline-flex}
-  .sidebar{display:flex;position:fixed;left:0;top:0;bottom:0;z-index:60;width:min(280px,84vw);flex:0 0 auto;height:100dvh;transform:translateX(-100%);transition:transform .2s ease}
+  .sidebar{display:block;position:fixed;left:0;top:0;bottom:0;z-index:60;width:min(280px,84vw);flex:0 0 auto;height:100dvh;transform:translateX(-100%);transition:transform .2s ease;overflow-y:auto;overscroll-behavior:contain}
+  .sidebar .nav{overflow:visible;flex:none}
+  .sidebar-foot{margin:12px}
   body.menu-open .sidebar{transform:none}
   body.menu-open .sidebar-backdrop{display:block;position:fixed;inset:0;z-index:55;background:rgba(0,0,0,.58)}
   body.menu-open{overflow:hidden}

@@ -589,6 +589,14 @@ async function carbonInstallMtproxyl() {
   await carbonRefresh();
 }
 
+async function carbonCascadeIfacesSave() {
+  const ifaces = [...document.querySelectorAll('[data-cascade-iface]:checked')].map(x => x.value);
+  if (!ifaces.length) throw new Error('Выберите хотя бы один интерфейс');
+  await api('/api/cascade/interfaces', { method: 'POST', body: { interfaces: ifaces } });
+  carbon.cascadeInterfaces = { ...(carbon.cascadeInterfaces || {}), selected: ifaces };
+  await carbonRefresh('Интерфейсы каскада: ' + ifaces.join(', '));
+}
+
 async function carbonCascadeBuild() {
   showCarbonForm({
     title: 'Построить каскад RU → EU',
@@ -602,7 +610,7 @@ async function carbonCascadeBuild() {
       { name: 'peerPass', label: 'Пароль root', type: 'password' },
       { name: 'obfMode', label: 'Обфускация', type: 'select', options: [{ value: 'installer', label: 'Как у установщика' }, { value: 'architect', label: 'Архитектор' }, { value: 'custom', label: 'Свои параметры' }] },
       { name: 'obfProfile', label: 'Профиль Архитектора', value: 'quic' },
-      { name: 'ifaces', label: 'Клиентские интерфейсы', value: 'awg0' },
+      { name: 'ifaces', label: 'Клиентские интерфейсы', value: (carbon.cascadeInterfaces && carbon.cascadeInterfaces.selected && carbon.cascadeInterfaces.selected.length ? carbon.cascadeInterfaces.selected : ['awg0']).join(', ') },
       { name: 'extraRuNets', label: 'Доп. сети RU', placeholder: '10.0.0.0/8, 192.168.0.0/16' }
     ],
     submitText: 'Построить каскад',
@@ -646,7 +654,7 @@ async function carbonCascadeManual() {
     sub: 'Вставьте конфиг второй стороны и выберите интерфейсы',
     fields: [
       { name: 'config', label: 'Конфиг клиента EU', type: 'textarea', rows: 10 },
-      { name: 'ifaces', label: 'Клиентские интерфейсы', value: 'awg0' },
+      { name: 'ifaces', label: 'Клиентские интерфейсы', value: (carbon.cascadeInterfaces && carbon.cascadeInterfaces.selected && carbon.cascadeInterfaces.selected.length ? carbon.cascadeInterfaces.selected : ['awg0']).join(', ') },
       { name: 'extraRuNets', label: 'Доп. сети RU', placeholder: '10.0.0.0/8' },
       { name: 'peerHost', label: 'IP второй стороны', placeholder: 'Необязательно' },
       { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
@@ -1107,6 +1115,7 @@ document.addEventListener('click', async event => {
     else if (action === 'awg-install') await carbonAwgInstall();
     else if (action === 'cascade-build') await carbonCascadeBuild();
     else if (action === 'cascade-manual') await carbonCascadeManual();
+    else if (action === 'cascade-ifaces-save') await carbonCascadeIfacesSave();
     else if (action === 'cascade-repair') await carbonCascadeRepair();
     else if (action === 'cascade-proxy') await carbonCascadeProxy();
     else if (action === 'cascade-proxy-test') await carbonCascadeProxyTest();
