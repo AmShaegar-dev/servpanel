@@ -375,6 +375,7 @@ function realTrafficDistribution() {
   const tunnel = Number(d.tunnel) || 0;
   const direct = Number(d.direct) || 0;
   const blocked = Number(d.blocked) || 0;
+  const source = d.source || 'interfaces';
   const total = tunnel + direct + blocked;
   const C = 2 * Math.PI * 46;
   const parts = [
@@ -399,7 +400,7 @@ function realTrafficDistribution() {
       </div>
       <div style="flex:1;min-width:160px">${legend}</div>
     </div>
-    <div class="donut-note" style="margin-top:12px">${total ? (blocked > 0 ? 'Данные из счётчиков mangle (ipset ru), awg0/awg1 и правил ru_block.' : 'Данные из счётчиков mangle (ipset ru) и awg0/awg1.') : 'Нет данных: каскад не активен или счётчики ещё не накоплены.'}</div>
+    <div class="donut-note" style="margin-top:12px">${total ? (source === 'mangle' ? 'Данные из счётчиков mangle (ipset ru) и awg0/awg1.' : 'Счётчики mangle пока нулевые — показан расчёт по интерфейсам. Доли RU/туннель появятся после накопления трафика.') : 'Нет данных: каскад не активен или счётчики ещё не накоплены.'}</div>
   </section>`;
 }
 
