@@ -69,7 +69,7 @@ button{background:none;border:0;cursor:pointer}a{color:inherit;text-decoration:n
 .page-title{font-size:26px;font-weight:800;letter-spacing:-.04em;line-height:1.1}
 .page-sub{font-size:12.5px;color:var(--text-2);margin-top:6px;max-width:640px}
 .page-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:35px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--text-2);font-size:11.5px;font-weight:700;transition:.15s}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:35px;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--text-2);font-size:11.5px;font-weight:700;transition:.15s;white-space:nowrap}
 .btn:hover{border-color:var(--line-3);color:var(--text)}
 .btn-primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .btn-primary:hover{background:color-mix(in srgb,var(--accent) 88%,#000);border-color:color-mix(in srgb,var(--accent) 88%,#000);color:var(--accent-ink)}

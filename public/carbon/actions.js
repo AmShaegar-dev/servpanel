@@ -1041,6 +1041,13 @@ async function carbonDiagWan() {
   showCarbonTextModal('Скорость WAN', JSON.stringify(d, null, 2));
 }
 
+async function carbonChartRange(range) {
+  carbon.chartRange = range;
+  try { carbon.history = await api('/api/history?range=' + encodeURIComponent(range) + '&view=global'); }
+  catch (e) { carbon.history = null; }
+  render();
+}
+
 function carbonActionName(btn) { return btn && btn.dataset ? btn.dataset.carbonAction : ''; }
 
 document.addEventListener('click', async event => {
@@ -1116,6 +1123,7 @@ document.addEventListener('click', async event => {
     else if (action === 'diag-check') await carbonDiagCheck();
     else if (action === 'diag-tc') await carbonDiagTc();
     else if (action === 'diag-wan') await carbonDiagWan();
+    else if (action === 'chart-range') await carbonChartRange(btn.dataset.range || '1h');
     else if (action === 'obf-generate') await carbonObfGenerate();
     else if (action === 'obf-import') await carbonObfImport();
     else if (action === 'obf-sync') await carbonObfSync();

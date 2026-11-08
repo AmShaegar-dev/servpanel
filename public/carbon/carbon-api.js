@@ -14,7 +14,9 @@ const carbon = {
   update: null,
   server: null,
   sys: null,
-  loaded: false
+  loaded: false,
+  chartRange: '1h',
+  history: null
 };
 
 async function api(path, options = {}) {
@@ -215,7 +217,7 @@ async function carbonLogout() {
 
 async function loadCarbonData() {
   const safe = p => api(p).catch(() => null);
-  const [stats, clients, modules, services, security, interfaces, update, server, sys, ufw, cascade, cascadeProxy, obf, profiles, proxy, proxyUsers, ssl, app, rustdesk, users, audit, backup, notify, awgConfig] = await Promise.all([
+  const [stats, clients, modules, services, security, interfaces, update, server, sys, ufw, cascade, cascadeProxy, obf, profiles, proxy, proxyUsers, ssl, app, rustdesk, users, audit, backup, notify, awgConfig, history] = await Promise.all([
     safe('/api/stats'), safe('/api/clients'), safe('/api/modules'), safe('/api/services'),
     safe('/api/security/status'), safe('/api/interfaces'), safe('/api/update/info'),
     safe('/api/server-info'), safe('/api/sysinfo'), safe('/api/ufw'), safe('/api/cascade/status'),
@@ -223,7 +225,7 @@ async function loadCarbonData() {
     safe('/api/proxy/status'), safe('/api/proxy/users'), safe('/api/ssl/status'),
     safe('/api/app/status'), safe('/api/rustdesk/status'), safe('/api/users'),
     safe('/api/audit?limit=50'), safe('/api/backup/auto'), safe('/api/notify/status'),
-    safe('/api/awg/config')
+    safe('/api/awg/config'), safe('/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global')
   ]);
   carbon.stats = Array.isArray(stats) ? stats : [];
   carbon.clients = Array.isArray(clients) ? clients : carbon.stats;
@@ -249,6 +251,7 @@ async function loadCarbonData() {
   carbon.backup = backup;
   carbon.notify = notify;
   carbon.awgConfig = awgConfig;
+  carbon.history = history;
   carbon.loaded = true;
   applyShellData();
 }
@@ -279,6 +282,41 @@ function realClientsTable() {
     <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr><th>Клиент</th><th>IP</th><th>Статус</th><th>Трафик</th><th>Загрузка</th><th>Статус</th><th style="width:80px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
 }
 
+function smoothTraffic(values, range) {
+  const arr = (values || []).map(v => Number(v) || 0);
+  const win = range === '7d' ? 7 : range === '24h' ? 5 : 1;
+  if (win <= 1) return arr;
+  return arr.map((_, i) => {
+    const slice = arr.slice(Math.max(0, i - win + 1), i + 1);
+    return slice.reduce((a, b) => a + b, 0) / slice.length;
+  });
+}
+
+function chartPath(values, max, width, height) {
+  if (!values.length) return '';
+  const step = width / Math.max(1, values.length - 1);
+  return values.map((v, i) => {
+    const x = (i * step).toFixed(1);
+    const y = (height - (v / max) * height).toFixed(1);
+    return (i ? 'L' : 'M') + x + ',' + y;
+  }).join(' ');
+}
+
+function realTrafficChart() {
+  const h = carbon.history || {};
+  const range = carbon.chartRange || '1h';
+  const labels = Array.isArray(h.labels) ? h.labels : [];
+  const rx = smoothTraffic(h.rx, range);
+  const tx = smoothTraffic(h.tx, range);
+  const max = Math.max(1, ...rx, ...tx);
+  const width = 760, height = 190;
+  const rxPath = chartPath(rx, max, width, height);
+  const txPath = chartPath(tx, max, width, height);
+  const area = rxPath ? `${rxPath} L${width},${height} L0,${height} Z` : '';
+  const names = { '1h': 'последний час', '24h': 'последние 24 часа', '7d': 'последние 7 суток' };
+  return `<section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Трафик</div><div class="card-sub">${escHtml(names[range] || '')} · ${labels.length ? escHtml(labels[0]) + ' — ' + escHtml(labels[labels.length - 1]) : 'нет данных'}</div></div><div class="legend"><span><i style="background:#5b8cff"></i>Rx</span><span><i style="background:var(--accent)"></i>Tx</span><div class="chips" style="margin-left:8px"><button class="chip ${range === '1h' ? 'on' : ''}" data-carbon-action="chart-range" data-range="1h">1ч</button><button class="chip ${range === '24h' ? 'on' : ''}" data-carbon-action="chart-range" data-range="24h">24ч</button><button class="chip ${range === '7d' ? 'on' : ''}" data-carbon-action="chart-range" data-range="7d">7д</button></div></div></div>${labels.length ? `<svg class="chart" viewBox="0 0 760 235" preserveAspectRatio="none" aria-label="График трафика"><g stroke="var(--line)" stroke-width="1"><line x1="0" y1="${height / 4}" x2="${width}" y2="${height / 4}"/><line x1="0" y1="${height / 2}" x2="${width}" y2="${height / 2}"/><line x1="0" y1="${height * 0.75}" x2="${width}" y2="${height * 0.75}"/></g><path d="${area}" fill="rgba(91,140,255,.10)" stroke="none"/><path d="${txPath}" fill="none" stroke="var(--accent)" stroke-width="1.6" vector-effect="non-scaling-stroke"/><path d="${rxPath}" fill="none" stroke="#5b8cff" stroke-width="2" vector-effect="non-scaling-stroke"/></svg><div class="mini-grid" style="grid-template-columns:repeat(4,1fr);margin-top:10px">${mini('Пик Rx', fmtBytes(max) + '/s', 'сглажено')}${mini('Точек', String(labels.length), 'в окне')}${mini('Rx', fmtBytes(rx.reduce((a, b) => a + b, 0) / Math.max(1, rx.length)) + '/s', 'среднее')}${mini('Tx', fmtBytes(tx.reduce((a, b) => a + b, 0) / Math.max(1, tx.length)) + '/s', 'среднее')}</div>` : '<div class="empty-row">Нет данных истории за этот период</div>'}</section>`;
+}
+
 function realDashboard() {
   const clients = carbon.clients;
   const online = clients.filter(clientStatus).length;
@@ -296,6 +334,7 @@ function realDashboard() {
       ${kpi('Входящий', fmtBytes(rx), 'RX всего', 'download', 'amber', 45, 'var(--accent-2)')}
       ${kpi('Клиенты', String(clients.length), online + ' онлайн', 'users', 'neutral', clients.length ? 60 : 5, 'var(--good)')}
       ${kpi('Uptime', escHtml(sys.uptime || '—'), 'с последнего запуска', 'pulse', 'neutral', 90, 'var(--accent-2)')}
+      ${realTrafficChart()}
       <section class="card chart-card" style="position:relative"><div class="card-top"><div><div class="card-title">Сервер</div><div class="card-sub">реальные данные API</div></div>${tag('live', 'good')}</div><div class="mini-grid" style="grid-template-columns:1fr 1fr;margin:0">${mini('CPU', (sys.cpu || '—') + '%', 'нагрузка')}${mini('RAM', (sys.ram || '—') + '%', 'использование')}${mini('Интерфейсы', String(carbon.interfaces.length), 'сетевые')}${mini('Модули', String(carbon.modules.filter(m => m.installed).length) + ' / ' + carbon.modules.length, 'установлено')}</div></section>
       <section class="card donut-card"><div class="card-top"><div><div class="card-title">Службы</div><div class="card-sub">ключевые узлы</div></div>${tag(carbon.services.filter(x => x.state === 'active').length + ' / ' + carbon.services.length, 'good')}</div><div class="list">${carbon.services.slice(0, 6).map(s => `<div class="list-row"><b>${escHtml(s.name)}</b><span class="mono">${escHtml(s.state || s.status)}</span></div>`).join('') || '<div class="list-row"><b>Нет данных</b></div>'}</div></section>
       <section class="card table-card"><div class="card-top"><div><div class="card-title">Клиенты</div><div class="card-sub">активные подключения</div></div><button class="tag" data-tab="clients">Все ${icon('arrow', 'ico')}</button></div>${realClientsTable()}</section>
@@ -376,7 +415,7 @@ function realProxy() {
   const raw = carbon.proxyUsers;
   const users = Array.isArray(raw) ? raw : (raw && raw.users) || [];
   const online = users.filter(u => u.enabled !== false && Number(u.current_connections) > 0).length;
-  return `<div class="page-head"><div><div class="page-title">Прокси</div><div class="page-sub">Пользователи, лимиты и состояние MTProto.</div></div><div class="page-actions"><button class="btn btn-primary" data-carbon-action="proxy-user-add">${icon('plus')}Пользователь</button><button class="btn" data-carbon-action="proxy-settings">${icon('wrench')}Настройки</button><button class="btn" data-carbon-action="proxy-bot">${icon('bell')}Бот</button><button class="btn" data-carbon-action="proxy-api-key">${icon('key')}API-ключ</button><button class="btn" data-carbon-action="proxy-fix">${icon('shield')}Фикс</button><button class="btn" data-carbon-action="proxy-opt-apply">${icon('pulse')}Оптимизация</button><button class="btn" data-carbon-action="proxy-diag">${icon('terminal')}Диагностика</button><button class="btn" data-carbon-action="proxy-log">${icon('box')}Журнал</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button><button class="btn" data-api-action="proxy-restart">${icon('refresh')}Перезапустить</button></div></div>
+  return `<div class="page-head"><div><div class="page-title">Прокси</div><div class="page-sub">Пользователи, лимиты и состояние MTProto.</div></div><div class="page-actions"><button class="btn btn-sm btn-primary" data-carbon-action="proxy-user-add">${icon('plus')}Добавить</button><button class="btn btn-sm" data-carbon-action="proxy-settings">${icon('wrench')}Настройки</button><button class="btn btn-sm" data-carbon-action="proxy-bot">${icon('bell')}Бот</button><button class="btn btn-sm" data-carbon-action="proxy-api-key">${icon('key')}API</button><button class="btn btn-sm" data-carbon-action="proxy-fix">${icon('shield')}Фикс</button><button class="btn btn-sm" data-carbon-action="proxy-opt-apply">${icon('pulse')}Оптимизация</button><button class="btn btn-sm" data-carbon-action="proxy-diag">${icon('terminal')}Диагностика</button><button class="btn btn-sm" data-carbon-action="proxy-log">${icon('box')}Журнал</button><button class="btn btn-sm" data-api-action="refresh">${icon('refresh')}Обновить</button><button class="btn btn-sm" data-api-action="proxy-restart">${icon('refresh')}Перезапуск</button></div></div>
     <div class="mini-grid">${mini('Движок', escHtml(p.backend || '—'), 'backend')}${mini('Версия', escHtml(p.version || '—'), p.mode || 'движок')}${mini('Порт', p.port == null ? '—' : String(p.port), 'TLS')}${mini('Пользователей', String(users.length), 'всего')}${mini('Онлайн', String(online), 'сейчас')}${mini('Соединений', p.connections == null ? '—' : String(p.connections), 'всего')}${mini('Uptime', fmtUptime(p.uptime), 'без перезапуска')}${mini('API', p.limited ? 'ограничен' : 'доступен', 'управление')}</div>
     <section class="card table-card"><div class="card-top"><div><div class="card-title">Пользователи</div><div class="card-sub">/api/proxy/users</div></div>${tag(String(users.length), 'muted')}</div><div class="table-scroll"><table class="table"><thead><tr><th>Пользователь</th><th>Статус</th><th>Трафик</th><th>Соединения</th><th>Срок</th><th></th></tr></thead><tbody>${users.map(u => {
       const enabled = u.enabled !== false;
