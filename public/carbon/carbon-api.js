@@ -28,8 +28,9 @@ async function api(path, options = {}) {
   const data = type.includes('application/json') ? await res.json().catch(() => ({})) : await res.text();
   if (!res.ok) {
     if (res.status === 401) showCarbonLogin();
-    const msg = (data && data.error) || (typeof data === 'string' ? data : 'Ошибка запроса');
-    throw new Error(msg);
+    const raw = (data && data.error) || (typeof data === 'string' ? data : 'Ошибка запроса');
+    const msg = String(raw).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240);
+    throw new Error(msg || 'Ошибка запроса');
   }
   return data;
 }
@@ -45,6 +46,103 @@ function fmtBytes(n) {
 
 function escHtml(v) {
   return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+function fmtDate(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value).slice(0, 10);
+  return d.toLocaleDateString('ru-RU');
+}
+
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || 'servpanel.conf';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+async function downloadRequest(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {})
+  });
+  if (!res.ok) {
+    if (res.status === 401) showCarbonLogin();
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Ошибка загрузки файла');
+  }
+  const cd = res.headers.get('content-disposition') || '';
+  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
+  return { blob: await res.blob(), filename: m ? decodeURIComponent(m[1]) : '' };
+}
+
+function showCarbonLog(title, text) {
+  let modal = document.getElementById('carbonLogModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'carbonLogModal';
+    modal.className = 'modal';
+    modal.innerHTML = `<div class="modal-card modal-wide">
+      <div class="modal-head"><div><div class="modal-title">Журнал</div><div class="modal-sub"></div></div>
+      <button class="icon-btn" data-carbon-close-log aria-label="Закрыть">✕</button></div>
+      <pre class="code" style="margin:0;max-height:60vh;overflow:auto;padding:12px;white-space:pre-wrap"></pre>
+    </div>`;
+    document.body.appendChild(modal);
+    modal.querySelector('[data-carbon-close-log]').addEventListener('click', () => { modal.hidden = true; });
+  }
+  modal.querySelector('.modal-title').textContent = title || 'Журнал';
+  modal.querySelector('.modal-sub').textContent = '';
+  modal.querySelector('pre').textContent = text || 'Пусто';
+  modal.hidden = false;
+}
+
+function applyShellData() {
+  const users = (carbon.users && carbon.users.users) || [];
+  const current = (carbon.users && carbon.users.current) || carbon.user || '';
+  if (current) carbon.user = current;
+  const me = users.find(u => u.username === carbon.user);
+  if (me && me.role) carbon.role = me.role;
+  const initial = (carbon.user || '?').slice(0, 1).toUpperCase();
+  document.querySelectorAll('.nav-count').forEach(el => { el.textContent = String(carbon.clients.length); });
+  document.querySelectorAll('.user-name').forEach(el => { el.textContent = carbon.user || '—'; });
+  document.querySelectorAll('.user-role').forEach(el => { el.textContent = carbon.role || '—'; });
+  document.querySelectorAll('.avatar').forEach(el => { el.textContent = initial; });
+}
+
+function bindGlobalSearch() {
+  const input = document.getElementById('globalSearch');
+  if (!input || input.dataset.bound) return;
+  input.dataset.bound = '1';
+  input.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    const q = input.value.trim().toLowerCase();
+    if (!q) return;
+    const nav = [...document.querySelectorAll('.nav-item[data-tab]')]
+      .find(b => (b.textContent || '').toLowerCase().includes(q));
+    if (nav) { input.value = ''; nav.click(); return; }
+    const client = (carbon.clients || []).find(c =>
+      String(c.name || '').toLowerCase().includes(q) || String(c.ip || '').toLowerCase().includes(q));
+    if (client) {
+      input.value = '';
+      document.querySelector('.nav-item[data-tab="clients"]')?.click();
+      setTimeout(() => {
+        const search = document.getElementById('clientSearch');
+        if (search) {
+          search.value = client.name;
+          search.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }, 60);
+      return;
+    }
+    showToast('Ничего не найдено');
+  });
 }
 
 function showCarbonLogin() {
@@ -143,6 +241,7 @@ async function loadCarbonData() {
   carbon.notify = notify;
   carbon.awgConfig = awgConfig;
   carbon.loaded = true;
+  applyShellData();
 }
 
 function clientStatus(c) {
@@ -205,7 +304,7 @@ function realInstall() {
   const installed = carbon.modules.filter(m => m.installed).length;
   return `<div class="page-head"><div><div class="page-title">Установка</div><div class="page-sub">Реальные модули сервера. Установка и удаление через API.</div></div><div class="page-actions"><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Модулей', String(carbon.modules.length), 'всего')}${mini('Установлено', String(installed), 'активно')}${mini('Не установлено', String(carbon.modules.length - installed), 'доступно')}${mini('Версия панели', carbon.update ? escHtml(carbon.update.version) : '—', 'build')}</div>
-    <div class="grid">${carbon.modules.map(m => `<section class="card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">${escHtml(m.title)}</div><div class="card-sub">${escHtml(m.description || '')}</div></div>${tag(m.installed ? (m.running ? 'работает' : 'остановлен') : 'не установлен', m.installed ? (m.running ? 'good' : 'warn') : '')}</div><div class="list"><div class="list-row"><b>Порт</b><span class="mono">${escHtml(m.port || '—')}</span></div><div class="list-row"><b>Служба</b><span class="mono">${escHtml(m.service || '—')}</span></div><div class="list-row"><b>Конфиг</b><span class="mono">${escHtml(m.configPath || '—')}</span></div></div><div class="module-actions"><button class="btn ${m.installed ? '' : 'btn-primary'}" data-api-action="${m.installed ? 'uninstall-module' : 'install-module'}" data-module="${escHtml(m.id)}">${icon(m.installed ? 'trash' : 'download')}${m.installed ? 'Удалить' : 'Установить'}</button><button class="btn" data-api-action="module-logs" data-module="${escHtml(m.id)}">${icon('terminal')}Логи</button></div></section>`).join('') || '<section class="card"><div class="empty-row">Нет данных о модулях</div></section>'}</div>`;
+    <div class="grid">${carbon.modules.map(m => `<section class="card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">${escHtml(m.title)}</div><div class="card-sub">${escHtml(m.description || '')}</div></div>${tag(m.installed ? (m.running ? 'работает' : 'остановлен') : 'не установлен', m.installed ? (m.running ? 'good' : 'warn') : '')}</div><div class="list"><div class="list-row"><b>Порт</b><span class="mono">${escHtml(m.port || m.httpPort || m.tlsPort || '—')}</span></div><div class="list-row"><b>Служба</b><span class="mono">${escHtml(m.service || '—')}</span></div><div class="list-row"><b>Конфиг</b><span class="mono">${escHtml(m.configPath || '—')}</span></div></div><div class="module-actions"><button class="btn ${m.installed ? '' : 'btn-primary'}" data-api-action="${m.installed ? 'uninstall-module' : 'install-module'}" data-module="${escHtml(m.id)}">${icon(m.installed ? 'trash' : 'download')}${m.installed ? 'Удалить' : 'Установить'}</button><button class="btn" data-api-action="module-logs" data-module="${escHtml(m.id)}">${icon('terminal')}Логи</button></div></section>`).join('') || '<section class="card"><div class="empty-row">Нет данных о модулях</div></section>'}</div>`;
 }
 
 function realServices() {
@@ -235,7 +334,7 @@ function realNetwork() {
   return `<div class="page-head"><div><div class="page-title">Сеть и порты</div><div class="page-sub">Интерфейсы, UFW и конфиг AWG из API.</div></div><div class="page-actions"><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Интерфейсов', String(ifaces.length), 'системных')}${mini('UFW', rules.length ? String(rules.length) + ' правил' : 'нет данных', 'firewall')}${mini('AWG', carbon.awgConfig && carbon.awgConfig.text ? 'конфиг есть' : 'нет конфига', 'awg0')}${mini('Внешний IP', escHtml((carbon.server && carbon.server.ip) || '—'), (carbon.server && carbon.server.country) || '')}</div>
     <div class="grid"><section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Интерфейсы</div><div class="card-sub">/api/interfaces</div></div>${tag(String(ifaces.length), 'good')}</div><div class="service-list">${ifaces.map(i => `<div class="service"><div class="service-ico">${icon('globe')}</div><div><div class="service-name">${escHtml(i)}</div><div class="service-desc">системный интерфейс</div></div><div class="service-state"><span class="dot"></span>up</div></div>`).join('') || '<div class="service"><div class="service-name">Нет данных</div></div>'}</div></section>
-    <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">UFW</div><div class="card-sub">/api/ufw</div></div>${tag(rules.length ? 'active' : 'нет данных', rules.length ? 'good' : 'warn')}</div><div class="table-scroll"><table class="table" style="min-width:0"><thead><tr><th>Правило</th><th>Действие</th></tr></thead><tbody>${rules.map(r => `<tr><td class="mono">${escHtml(r.rule || r.port || r)}</td><td>${escHtml(r.action || r.status || '')}</td></tr>`).join('') || '<tr><td colspan="2">UFW недоступен</td></tr>'}</tbody></table></div></section>
+    <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">UFW</div><div class="card-sub">/api/ufw</div></div>${tag(rules.length ? 'active' : 'нет данных', rules.length ? 'good' : 'warn')}</div><div class="table-scroll"><table class="table" style="min-width:0"><thead><tr><th>Правило</th><th>Действие</th><th>Источник</th></tr></thead><tbody>${rules.map(r => `<tr><td class="mono">${escHtml(r.to || r.rule || r.port || (typeof r === 'string' ? r : ''))}</td><td>${escHtml(r.action || r.status || '')}</td><td class="mono">${escHtml(r.from || '')}</td></tr>`).join('') || '<tr><td colspan="3">UFW недоступен</td></tr>'}</tbody></table></div></section>
     <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">AmneziaWG</div><div class="card-sub">/api/awg/config</div></div>${tag('advanced', 'muted')}</div><pre class="code" style="margin:0;max-height:280px;overflow:auto;padding:12px;white-space:pre-wrap">${escHtml((carbon.awgConfig && carbon.awgConfig.text) || 'Конфиг не найден или недоступен')}</pre></section></div>`;
 }
 
@@ -259,10 +358,16 @@ function realObfuscation() {
 
 function realProxy() {
   const p = carbon.proxy || {};
-  const users = (carbon.proxyUsers && carbon.proxyUsers.users) || [];
+  const raw = carbon.proxyUsers;
+  const users = Array.isArray(raw) ? raw : (raw && raw.users) || [];
+  const online = users.filter(u => u.enabled !== false && Number(u.current_connections) > 0).length;
   return `<div class="page-head"><div><div class="page-title">Прокси</div><div class="page-sub">Пользователи и состояние MTProto.</div></div><div class="page-actions"><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button><button class="btn" data-api-action="proxy-restart">${icon('refresh')}Перезапустить</button></div></div>
-    <div class="mini-grid">${mini('Движок', escHtml(p.backend || '—'), 'backend')}${mini('Пользователей', String(users.length), 'всего')}${mini('Онлайн', String(users.filter(u => u.status === 'online' || u.online).length), 'сейчас')}${mini('API', p.limited ? 'ограничен' : 'доступен', 'управление')}</div>
-    <section class="card table-card"><div class="card-top"><div><div class="card-title">Пользователи</div><div class="card-sub">/api/proxy/users</div></div>${tag(String(users.length), 'muted')}</div><div class="table-scroll"><table class="table"><thead><tr><th>Пользователь</th><th>Статус</th><th>Трафик</th><th>Соединения</th><th>Срок</th><th></th></tr></thead><tbody>${users.map(u => `<tr><td class="name">${escHtml(u.username || u.name)}</td><td><span class="status ${u.status === 'online' ? '' : 'idle'}"><span class="dot"></span>${escHtml(u.status || '—')}</span></td><td class="mono">${fmtBytes(u.traffic || u.total || 0)}</td><td class="mono">${escHtml(String(u.connections || '—'))}</td><td class="mono">${escHtml(u.expires || '—')}</td><td><button class="row-action" data-api-action="proxy-user-delete" data-name="${escHtml(u.username || u.name)}" title="Удалить">${icon('trash')}</button></td></tr>`).join('') || '<tr><td colspan="6">Прокси-движок не найден или пользователей нет</td></tr>'}</tbody></table></div></section>`;
+    <div class="mini-grid">${mini('Движок', escHtml(p.backend || '—'), 'backend')}${mini('Пользователей', String(users.length), 'всего')}${mini('Онлайн', String(online), 'сейчас')}${mini('API', p.limited ? 'ограничен' : 'доступен', 'управление')}</div>
+    <section class="card table-card"><div class="card-top"><div><div class="card-title">Пользователи</div><div class="card-sub">/api/proxy/users</div></div>${tag(String(users.length), 'muted')}</div><div class="table-scroll"><table class="table"><thead><tr><th>Пользователь</th><th>Статус</th><th>Трафик</th><th>Соединения</th><th>Срок</th><th></th></tr></thead><tbody>${users.map(u => {
+      const enabled = u.enabled !== false;
+      const status = !enabled ? 'выключен' : (u.in_runtime ? 'включён' : 'не загружен');
+      return `<tr><td class="name">${escHtml(u.username || u.name)}</td><td><span class="status ${enabled && u.in_runtime ? '' : 'idle'}"><span class="dot"></span>${escHtml(status)}</span></td><td class="mono">${fmtBytes(u.total_octets || u.traffic || u.total || 0)}</td><td class="mono">${u.current_connections == null ? '—' : escHtml(String(u.current_connections))}</td><td class="mono">${escHtml(u.expiration_rfc3339 ? fmtDate(u.expiration_rfc3339) : '—')}</td><td><button class="row-action" data-api-action="proxy-user-delete" data-name="${escHtml(u.username || u.name)}" title="Удалить">${icon('trash')}</button></td></tr>`;
+    }).join('') || '<tr><td colspan="6">Прокси-движок не найден или пользователей нет</td></tr>'}</tbody></table></div></section>`;
 }
 
 function realDomains() {
@@ -272,8 +377,18 @@ function realDomains() {
   const sites = s.sites || [];
   return `<div class="page-head"><div><div class="page-title">Домены и SSL</div><div class="page-sub">Сертификаты и сайты Nginx из API.</div></div><div class="page-actions"><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Домен панели', escHtml(panel.domain || '—'), panel.scheme || '—')}${mini('HTTPS', panel.scheme === 'https' ? 'включён' : 'выключен', 'порт ' + (panel.publicPort || '—'))}${mini('Сертификатов', String(certs.length), 'Let\'s Encrypt')}${mini('Сайтов', String(sites.length), 'Nginx')}</div>
-    <div class="grid"><section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Сертификаты</div><div class="card-sub">/api/ssl/status</div></div>${tag(String(certs.length), 'muted')}</div><div class="list">${certs.map(c => `<div class="list-row"><b>${escHtml(c.domain || c.name)}</b><span class="mono">${escHtml(c.expires || c.notAfter || '')}</span></div>`).join('') || '<div class="list-row"><b>Сертификатов нет</b></div>'}</div></section>
-    <section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Сайты</div><div class="card-sub">Nginx</div></div>${tag(String(sites.length), 'muted')}</div><div class="list">${sites.map(x => `<div class="list-row"><b>${escHtml(x.domain || x.name)}</b><span class="mono">${escHtml(x.type || 'site')}</span></div>`).join('') || '<div class="list-row"><b>Сайтов нет</b></div>'}</div></section></div>`;
+    <div class="grid"><section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Сертификаты</div><div class="card-sub">/api/ssl/status</div></div>${tag(String(certs.length), 'muted')}</div><div class="list">${certs.map(c => {
+      const domains = Array.isArray(c.domains) ? c.domains : [];
+      const label = c.domain || domains[0] || c.name || '—';
+      const expires = c.validTo || c.notAfter || c.expires;
+      const suffix = c.daysLeft != null ? ` · ${c.daysLeft} дн.` : '';
+      return `<div class="list-row"><b>${escHtml(label)}</b><span class="mono">${escHtml(expires ? fmtDate(expires) + suffix : '')}</span></div>`;
+    }).join('') || '<div class="list-row"><b>Сертификатов нет</b></div>'}</div></section>
+    <section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Сайты</div><div class="card-sub">Nginx</div></div>${tag(String(sites.length), 'muted')}</div><div class="list">${sites.map(x => {
+      const domains = Array.isArray(x.domains) ? x.domains : [];
+      const label = x.domain || domains[0] || x.name || '—';
+      return `<div class="list-row"><b>${escHtml(label)}</b><span class="mono">${x.ssl ? 'HTTPS' : 'HTTP'}${x.enabled === false ? ' · выкл' : ''}</span></div>`;
+    }).join('') || '<div class="list-row"><b>Сайтов нет</b></div>'}</div></section></div>`;
 }
 
 function realApp() {
@@ -308,7 +423,7 @@ function realAdmin() {
   const n = carbon.notify || {};
   return `<div class="page-head"><div><div class="page-title">Администрирование</div><div class="page-sub">Пользователи, аудит, бэкапы и Telegram из API.</div></div><div class="page-actions"><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Пользователей', String(users.length), 'панели')}${mini('Аудит', String(audit.length), 'записей')}${mini('Автобэкап', b.config && b.config.enabled ? 'включён' : 'выключен', b.config ? b.config.time : '—')}${mini('Telegram', n.enabled ? 'включён' : 'выключен', n.chatId || '—')}</div>
-    <div class="grid"><section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Пользователи</div><div class="card-sub">/api/users</div></div>${tag(String(users.length), 'muted')}</div><div class="table-scroll"><table class="table"><thead><tr><th>Логин</th><th>Роль</th><th>Создан</th><th></th></tr></thead><tbody>${users.map(u => `<tr><td class="name">${escHtml(u.username)}</td><td>${escHtml(u.role)}</td><td class="mono">${escHtml(u.created || '—')}</td><td><button class="row-action" data-api-action="user-delete" data-name="${escHtml(u.username)}">${icon('trash')}</button></td></tr>`).join('') || '<tr><td colspan="4">Пользователей нет</td></tr>'}</tbody></table></div></section>
+    <div class="grid"><section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Пользователи</div><div class="card-sub">/api/users</div></div>${tag(String(users.length), 'muted')}</div><div class="table-scroll"><table class="table"><thead><tr><th>Логин</th><th>Роль</th><th>Создан</th><th></th></tr></thead><tbody>${users.map(u => `<tr><td class="name">${escHtml(u.username)}</td><td>${escHtml(u.role)}</td><td class="mono">${escHtml(u.createdAt ? fmtDate(u.createdAt) : (u.created || '—'))}</td><td><button class="row-action" data-api-action="user-delete" data-name="${escHtml(u.username)}">${icon('trash')}</button></td></tr>`).join('') || '<tr><td colspan="4">Пользователей нет</td></tr>'}</tbody></table></div></section>
     <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Аудит</div><div class="card-sub">последние действия</div></div>${tag('live', 'good')}</div><div class="list">${audit.slice(0, 8).map(e => `<div class="list-row"><b>${escHtml(e.user || '—')}</b><span class="mono">${escHtml(e.action || '')}</span></div>`).join('') || '<div class="list-row"><b>Нет записей</b></div>'}</div></section></div>`;
 }
 
@@ -338,19 +453,55 @@ document.addEventListener('click', async event => {
     await carbonLogout();
     return;
   }
+  const pwd = event.target.closest('[data-action="change-password"]');
+  if (pwd) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const next = document.getElementById('pwdNew')?.value || '';
+    const repeat = document.getElementById('pwdRepeat')?.value || '';
+    if (next.length < 12) { showToast('Новый пароль — минимум 12 символов'); return; }
+    if (next !== repeat) { showToast('Пароли не совпадают'); return; }
+    try {
+      await api('/api/users/' + encodeURIComponent(carbon.user || 'admin') + '/password', { method: 'POST', body: { password: next } });
+      const modal = document.getElementById('passwordModal');
+      if (modal) modal.hidden = true;
+      ['pwdNew', 'pwdRepeat'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      showToast('Пароль изменён');
+    } catch (e) { showToast(e.message || 'Ошибка смены пароля'); }
+    return;
+  }
   const create = event.target.closest('[data-action="create-client"]');
   if (create) {
     event.preventDefault();
     event.stopImmediatePropagation();
     const name = document.getElementById('newClientName')?.value.trim();
     if (!name) { showToast('Укажите имя клиента'); return; }
+    const days = Number(document.getElementById('newClientDays')?.value) || 0;
+    const expires = days > 0 ? Math.floor(days) + 'd' : '';
+    const count = Math.max(1, Math.min(100, parseInt(document.getElementById('newClientCount')?.value, 10) || 1));
+    const epType = document.getElementById('newClientEndpoint')?.value === 'domain' ? 'domain' : 'ip';
+    const domain = epType === 'domain' ? (document.getElementById('newClientDomain')?.value.trim() || '') : '';
+    if (epType === 'domain' && !domain) { showToast('Укажите домен для endpoint'); return; }
     try {
-      await api('/api/create', { method: 'POST', body: { name, expires: '', endpointType: 'ip' } });
-      closeClientModal();
-      await loadCarbonData();
-      render();
-      showToast('Клиент создан: ' + name);
-    } catch (e) { showToast(e.message); }
+      if (count > 1) {
+        const data = await api('/api/create-bulk', { method: 'POST', body: { prefix: name, count, expires, endpointType: epType, domain } });
+        const names = (data.configs || []).map(c => c.name);
+        if (!names.length) throw new Error('Конфиги не сгенерировались');
+        const file = await downloadRequest('/api/download-bulk', { names });
+        saveBlob(file.blob, file.filename || 'servpanel-configs.zip');
+        closeClientModal();
+        await loadCarbonData();
+        render();
+        showToast('Создано клиентов: ' + names.length);
+      } else {
+        const file = await downloadRequest('/api/create', { name, expires, endpointType: epType, domain });
+        saveBlob(file.blob, file.filename || (name + '.conf'));
+        closeClientModal();
+        await loadCarbonData();
+        render();
+        showToast('Клиент создан: ' + name);
+      }
+    } catch (e) { showToast(e.message || 'Ошибка создания клиента'); }
     return;
   }
   const btn = event.target.closest('[data-api-action]');
@@ -401,7 +552,16 @@ document.addEventListener('click', async event => {
       await api('/api/backup/run', { method: 'POST' });
       showToast('Бэкап создаётся');
     } else if (action === 'module-logs') {
-      location.href = '/#install';
+      const st = await api('/api/install/state').catch(() => null);
+      let text = 'Журнал установки пока пуст.';
+      if (st && st.logFile) {
+        try {
+          text = await api('/api/install/log?file=' + encodeURIComponent(st.logFile));
+        } catch (e) {
+          text = e.message || 'Не удалось прочитать журнал';
+        }
+      }
+      showCarbonLog('Журнал установки', typeof text === 'string' ? text : JSON.stringify(text, null, 2));
     } else if (action === 'cascade-teardown') {
       if (prompt('Удалить каскад? Введите DELETE') !== 'DELETE') return;
       await api('/api/cascade/teardown', { method: 'POST' });
@@ -446,6 +606,7 @@ document.addEventListener('click', async event => {
 
 async function initCarbon() {
   bindRealData();
+  bindGlobalSearch();
   try {
     await api('/api/security/status');
   } catch (e) {

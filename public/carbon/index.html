@@ -56,7 +56,7 @@
       <a class="nav-item" href="/" title="Вернуться в старую панель"><svg class="ico"><use href="#i-external"/></svg>Старая панель</a>
       <div class="nav-label">Обзор</div>
       <button class="nav-item active" data-tab="dashboard"><svg class="ico"><use href="#i-grid"/></svg>Дашборд<span class="nav-dot"></span></button>
-      <button class="nav-item" data-tab="clients"><svg class="ico"><use href="#i-users"/></svg>Клиенты<span class="nav-count">8</span></button>
+      <button class="nav-item" data-tab="clients"><svg class="ico"><use href="#i-users"/></svg>Клиенты<span class="nav-count">0</span></button>
       <div class="nav-label">Установка</div>
       <button class="nav-item" data-tab="install"><svg class="ico"><use href="#i-download"/></svg>Установка</button>
       <div class="nav-label">Подключение</div>
@@ -76,7 +76,7 @@
       <button class="nav-item" data-tab="admin"><svg class="ico"><use href="#i-sliders"/></svg>Администрирование</button>
     </nav>
     <div class="sidebar-foot">
-      <div class="user-chip"><div class="avatar">A</div><div><div class="user-name">admin</div><div class="user-role">administrator</div></div></div>
+      <div class="user-chip"><div class="avatar">?</div><div><div class="user-name">—</div><div class="user-role">—</div></div></div>
       <button class="nav-item nav-quiet" data-action="open-password-modal"><svg class="ico"><use href="#i-key"/></svg>Сменить пароль</button>
       <button class="nav-item nav-quiet" data-action="logout"><svg class="ico"><use href="#i-logout"/></svg>Выйти</button>
     </div>
@@ -93,14 +93,14 @@
       </div>
       <div class="top-actions">
         <a class="btn btn-sm" href="/" title="Вернуться в старую панель">↩ Старая панель</a>
-        <div class="search"><svg class="ico" style="width:15px;height:15px"><use href="#i-search"/></svg><input placeholder="Поиск и действия"></div>
+        <div class="search"><svg class="ico" style="width:15px;height:15px"><use href="#i-search"/></svg><input id="globalSearch" placeholder="Поиск и действия"></div>
         <div class="theme-toggle" aria-label="Тема">
           <button data-theme-set="dark" class="on" aria-label="Тёмная"><svg class="ico" style="width:14px;height:14px"><use href="#i-moon"/></svg></button>
           <button data-theme-set="light" aria-label="Светлая"><svg class="ico" style="width:14px;height:14px"><use href="#i-sun"/></svg></button>
         </div>
         <button class="icon-btn" aria-label="Уведомления" data-toast="Новых уведомлений нет"><span class="dot" style="background:var(--accent)"></span></button>
         <button class="icon-btn" aria-label="Выйти" data-action="logout"><svg class="ico"><use href="#i-logout"/></svg></button>
-        <div class="avatar">A</div>
+        <div class="avatar">?</div>
       </div>
     </header>
     <div class="content" id="view"></div>
@@ -115,26 +115,21 @@
     </div>
     <div class="form-grid">
       <label class="field"><span>Имя</span><input id="newClientName" placeholder="client-01"></label>
-      <label class="field"><span>Лимит соединений</span><input id="newClientConns" type="number" placeholder="8"></label>
-      <label class="field"><span>Квота, ГБ</span><input id="newClientQuota" type="number" placeholder="50"></label>
-      <label class="field"><span>Срок, дней</span><input id="newClientDays" type="number" placeholder="30"></label>
-      <label class="field"><span>Endpoint</span><select id="newClientEndpoint"><option>IP сервера</option><option>Домен</option></select></label>
+      <label class="field"><span>Срок, дней</span><input id="newClientDays" type="number" min="1" placeholder="30"></label>
+      <label class="field"><span>Endpoint</span><select id="newClientEndpoint"><option value="ip">IP сервера</option><option value="domain">Домен</option></select></label>
       <label class="field"><span>Домен</span><input id="newClientDomain" placeholder="vpn.example.com"></label>
-      <label class="field"><span>Устройство</span><select id="newClientDevice"><option>Телефон</option><option>Ноутбук</option><option>Роутер</option></select></label>
-      <label class="field"><span>Количество</span><input id="newClientCount" type="number" min="1" max="20" value="1"></label>
+      <label class="field"><span>Количество</span><input id="newClientCount" type="number" min="1" max="100" value="1"></label>
     </div>
-    <label class="switch" style="margin-top:12px"><input type="checkbox" checked> Включить клиента сразу</label>
     <div class="modal-actions"><button class="btn" data-action="close-modal">Отмена</button><button class="btn btn-primary" data-action="create-client">Создать</button></div>
   </div>
 </div>
 <div class="modal" id="passwordModal" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="passwordModalTitle">
     <div class="modal-head">
-      <div><div class="modal-title" id="passwordModalTitle">Сменить пароль</div><div class="modal-sub">Минимум 12 символов. После смены сессии будут завершены.</div></div>
+      <div><div class="modal-title" id="passwordModalTitle">Сменить пароль</div><div class="modal-sub">Для текущего пользователя. Минимум 12 символов.</div></div>
       <button class="icon-btn" data-action="close-password-modal" aria-label="Закрыть">✕</button>
     </div>
     <div class="form-grid" style="grid-template-columns:1fr">
-      <label class="field"><span>Текущий пароль</span><input id="pwdCurrent" type="password" placeholder="••••••••"></label>
       <label class="field"><span>Новый пароль</span><input id="pwdNew" type="password" placeholder="Минимум 12 символов"></label>
       <label class="field"><span>Повторите новый пароль</span><input id="pwdRepeat" type="password" placeholder="Ещё раз"></label>
     </div>
