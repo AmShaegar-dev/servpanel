@@ -1986,7 +1986,7 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             blocked = Math.max(0, clientTotal - tunnel - direct);
         }
         const total = tunnel + direct + blocked;
-        res.json({
+        const payload = {
             total, tunnel, direct, blocked,
             clientTotal, tunnelRaw, blockedRaw,
             source,
@@ -1995,7 +1995,16 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
                 client: clientIface ? { rx: clientIface.rx, tx: clientIface.tx } : null,
                 tunnel: tunnelIface ? { rx: tunnelIface.rx, tx: tunnelIface.tx } : null
             }
-        });
+        };
+        if (String(req.query.debug || '') === '1') {
+            payload.debug = {
+                isRoot: IS_ROOT,
+                mangleSave: String(rootShTry('bash', ['-c', "iptables-save -c -t mangle 2>&1 | head -100"]) || '').slice(0, 5000),
+                mangleList: String(rootShTry('iptables', ['-t', 'mangle', '-L', 'PREROUTING', '-v', '-n', '-x']) || '').slice(0, 5000),
+                ipRule: String(rootShTry('ip', ['rule', 'show']) || '').slice(0, 2000)
+            };
+        }
+        res.json(payload);
     } catch (e) { res.status(500).json({ error: 'Не удалось получить распределение трафика' }); }
 });
 
