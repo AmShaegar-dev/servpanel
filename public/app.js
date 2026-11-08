@@ -1167,6 +1167,12 @@ function showDashboard() {
     loadNetworkTools(); loadUfwData(); loadHistory(); loadStats(); loadServerInfo();
     checkSecurityStatus(); loadCascadeStatus(); loadObfCurrent(); loadObfProfiles();
     loadDashboardState();
+    const requestedTab = new URLSearchParams(location.search).get('tab');
+    if (requestedTab) {
+        const safeTab = requestedTab.replace(/[^a-z0-9_-]/gi, '');
+        const nav = document.querySelector('.nav-item[data-tab="tab-' + safeTab + '"]');
+        if (nav) switchTab(nav.dataset.tab, nav);
+    }
     if (!pollingInterval) pollingInterval = setInterval(loadStats, 2000);
     if (!historyInterval) historyInterval = setInterval(loadHistory, 10000);
     if (!window.dashboardStateInterval) window.dashboardStateInterval = setInterval(loadDashboardState, 30000);

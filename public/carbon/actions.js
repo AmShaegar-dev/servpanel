@@ -1,0 +1,976 @@
+'use strict';
+
+/* Carbon actions: real API operations without the legacy panel. */
+
+function carbonSleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function carbonRefresh(message) {
+  await loadCarbonData();
+  render();
+  if (message) showToast(message);
+}
+
+function showCarbonForm(opts) {
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  const fields = opts.fields || [];
+  const fieldHtml = fields.map(f => {
+    const name = escHtml(f.name);
+    const value = f.value == null ? '' : String(f.value);
+    if (f.type === 'checkbox') {
+      return `<label class="switch" style="margin:6px 0"><input type="checkbox" data-field="${name}" ${f.value ? 'checked' : ''}> ${escHtml(f.label)}</label>`;
+    }
+    if (f.type === 'select') {
+      const options = (f.options || []).map(o => {
+        const val = typeof o === 'string' ? o : o.value;
+        const label = typeof o === 'string' ? o : o.label;
+        return `<option value="${escHtml(val)}" ${String(val) === value ? 'selected' : ''}>${escHtml(label)}</option>`;
+      }).join('');
+      return `<label class="field"><span>${escHtml(f.label)}</span><select data-field="${name}">${options}</select></label>`;
+    }
+    if (f.type === 'textarea') {
+      return `<label class="field"><span>${escHtml(f.label)}</span><textarea data-field="${name}" rows="${f.rows || 8}" spellcheck="false" placeholder="${escHtml(f.placeholder || '')}">${escHtml(value)}</textarea></label>`;
+    }
+    if (f.type === 'file') {
+      return `<label class="field"><span>${escHtml(f.label)}</span><input type="file" data-field="${name}" accept="${escHtml(f.accept || '')}"></label>`;
+    }
+    return `<label class="field"><span>${escHtml(f.label)}</span><input type="${escHtml(f.type || 'text')}" data-field="${name}" value="${escHtml(value)}" placeholder="${escHtml(f.placeholder || '')}" ${f.min != null ? `min="${escHtml(f.min)}"` : ''} ${f.max != null ? `max="${escHtml(f.max)}"` : ''} ${f.step != null ? `step="${escHtml(f.step)}"` : ''}></label>`;
+  }).join('');
+  modal.innerHTML = `<div class="modal-card modal-wide" role="dialog" aria-modal="true">
+    <div class="modal-head"><div><div class="modal-title">${escHtml(opts.title || 'Действие')}</div><div class="modal-sub">${escHtml(opts.sub || '')}</div></div><button class="icon-btn" data-form-close aria-label="Закрыть">✕</button></div>
+    <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">${fieldHtml}</div>
+    <div data-form-error style="color:var(--bad);font-size:12px;margin-top:10px;display:none"></div>
+    <div class="modal-actions"><button class="btn" data-form-close>Отмена</button><button class="btn ${opts.danger ? 'btn-danger' : 'btn-primary'}" data-form-submit>${escHtml(opts.submitText || 'Сохранить')}</button></div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.hidden = false;
+  const close = () => modal.remove();
+  modal.querySelectorAll('[data-form-close]').forEach(b => b.addEventListener('click', close));
+  const err = modal.querySelector('[data-form-error]');
+  const submit = modal.querySelector('[data-form-submit]');
+  submit.addEventListener('click', async () => {
+    err.style.display = 'none';
+    submit.disabled = true;
+    const values = {};
+    try {
+      for (const f of fields) {
+        const el = modal.querySelector(`[data-field="${f.name}"]`);
+        if (!el) continue;
+        if (f.type === 'checkbox') values[f.name] = el.checked;
+        else if (f.type === 'file') values[f.name] = el.files && el.files[0] ? el.files[0] : null;
+        else values[f.name] = el.value;
+      }
+      await opts.onSubmit(values, (msg) => { err.textContent = msg; err.style.display = 'block'; });
+      close();
+    } catch (e) {
+      err.textContent = e.message || 'Ошибка';
+      err.style.display = 'block';
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  return modal;
+}
+
+function showCarbonTextModal(title, text) {
+  let modal = document.getElementById('carbonTextModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'carbonTextModal';
+    modal.className = 'modal';
+    modal.innerHTML = `<div class="modal-card modal-wide"><div class="modal-head"><div><div class="modal-title"></div><div class="modal-sub"></div></div><button class="icon-btn" data-text-close aria-label="Закрыть">✕</button></div><pre class="code" style="margin:0;max-height:60vh;overflow:auto;padding:12px;white-space:pre-wrap"></pre></div>`;
+    document.body.appendChild(modal);
+    modal.querySelector('[data-text-close]').addEventListener('click', () => { modal.remove(); });
+  }
+  modal.querySelector('.modal-title').textContent = title || '';
+  modal.querySelector('.modal-sub').textContent = '';
+  modal.querySelector('pre').textContent = text || 'Пусто';
+  modal.hidden = false;
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
+    reader.onload = () => {
+      const s = String(reader.result || '');
+      resolve(s.split(',')[1] || '');
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function pollUpdate() {
+  showToast('Обновление запущено');
+  for (let i = 0; i < 300; i++) {
+    await carbonSleep(1500);
+    try {
+      const d = await api('/api/update/status');
+      if (!d.running) {
+        if (d.ok) {
+          showToast('Панель обновлена, перезагрузка…');
+          await carbonSleep(2000);
+          location.reload();
+          return;
+        }
+        showToast(d.error || d.message || 'Обновление завершилось с ошибкой');
+        return;
+      }
+    } catch (e) {
+      /* panel restarting */
+    }
+  }
+  showToast('Не дождались завершения обновления');
+}
+
+async function carbonUpdateCheck() {
+  const d = await api('/api/update/check-git');
+  let text = '';
+  if (d.upToDate) text = 'Установлена последняя версия из GitHub.\nКоммит: ' + (d.commit || d.current || '—');
+  else if (d.dirty && d.dirty.length) text = 'Доступно обновление (' + d.behind + ' коммит(ов)), но есть локальные изменения.\nМожно выполнить «Сбросить и обновить».';
+  else text = 'Доступно обновление: ' + d.behind + ' коммит(ов).\nПоследний: ' + (d.commit || '—');
+  showCarbonTextModal('Проверка GitHub', text);
+}
+
+async function carbonUpdateUpload(file) {
+  if (!file) throw new Error('Выберите .tar.gz');
+  if (file.size > 10 * 1024 * 1024) throw new Error('Файл больше 10 МБ');
+  const data = await fileToBase64(file);
+  await api('/api/update/upload', { method: 'POST', body: { name: file.name, data } });
+  pollUpdate();
+}
+
+async function carbonUpdateFromUrl() {
+  showCarbonForm({
+    title: 'Обновление по URL',
+    sub: 'Ссылка на servpanel-*.tar.gz',
+    fields: [{ name: 'url', label: 'URL архива', placeholder: 'https://example.com/servpanel-3.1.0.tar.gz' }],
+    submitText: 'Скачать и установить',
+    onSubmit: async v => {
+      if (!/^https?:\/\//i.test(v.url)) throw new Error('URL должен начинаться с http:// или https://');
+      await api('/api/update/url', { method: 'POST', body: { url: v.url.trim() } });
+      pollUpdate();
+    }
+  });
+}
+
+async function carbonUpdateRollback() {
+  const backups = (carbon.update && carbon.update.backups) || [];
+  if (!backups.length) throw new Error('Резервных копий нет');
+  showCarbonForm({
+    title: 'Откат панели',
+    sub: 'Будет установлен код из выбранной резервной копии',
+    fields: [{ name: 'backup', label: 'Резервная копия', type: 'select', options: backups.map(b => ({ value: b.path || b.name, label: b.name })) }],
+    submitText: 'Откатить',
+    danger: true,
+    onSubmit: async v => {
+      await api('/api/update/rollback', { method: 'POST', body: { backup: v.backup } });
+      pollUpdate();
+    }
+  });
+}
+
+async function carbonSslDeps() {
+  if (!confirm('Установить nginx, certbot и python3-certbot-nginx?')) return;
+  await api('/api/ssl/install-deps', { method: 'POST' });
+  await carbonRefresh('Компоненты установлены');
+}
+
+async function carbonSslSite(mode) {
+  showCarbonForm({
+    title: mode === 'panel' ? 'Привязать домен к панели' : 'Создать сайт',
+    sub: mode === 'panel' ? 'Nginx и Let\'s Encrypt для панели' : 'Nginx и Let\'s Encrypt для сайта',
+    fields: [
+      { name: 'domain', label: 'Домен', placeholder: mode === 'panel' ? 'panel.example.com' : 'site.example.com' },
+      { name: 'email', label: 'Email для Let\'s Encrypt', placeholder: 'admin@example.com' },
+      ...(mode === 'panel'
+        ? [{ name: 'useForVpn', label: 'Использовать домен в новых VPN-конфигах', type: 'checkbox', value: true }]
+        : [{ name: 'www', label: 'Добавить www', type: 'checkbox', value: false }])
+    ],
+    submitText: mode === 'panel' ? 'Привязать и выпустить' : 'Создать сайт',
+    onSubmit: async v => {
+      const body = { domain: v.domain.trim(), email: v.email.trim(), mode };
+      if (mode === 'panel') body.useForVpn = !!v.useForVpn; else body.www = !!v.www;
+      const d = await api('/api/ssl/site', { method: 'POST', body });
+      await carbonRefresh('Готово: ' + (d.url || v.domain));
+    }
+  });
+}
+
+async function carbonSslRenew(name, daysLeft) {
+  let force = false;
+  if (daysLeft != null && daysLeft > 30) {
+    if (!confirm(`Сертификату осталось ${daysLeft} дн. Продлить принудительно?`)) return;
+    force = true;
+  } else if (!confirm(`Продлить сертификат ${name}?`)) return;
+  const start = await api('/api/ssl/renew', { method: 'POST', body: { name, force } });
+  if (start.demo) { showToast('Демо-режим: продление не выполняется'); return; }
+  if (start.job && start.job.running) {
+    showToast('Продление запущено, ждём…');
+    for (let i = 0; i < 120; i++) {
+      await carbonSleep(2000);
+      const s = await api('/api/ssl/renew/status?name=' + encodeURIComponent(name)).catch(() => null);
+      if (s && s.job && !s.job.running) {
+        if (s.job.error) { showToast('Ошибка: ' + s.job.error); return; }
+        if (s.job.notDue) { showToast('Продление не требуется'); return; }
+        await carbonRefresh('Сертификат обновлён');
+        return;
+      }
+    }
+  }
+  await carbonRefresh('Продление запущено');
+}
+
+async function carbonSslDelete(name) {
+  if (!confirm(`Удалить сайт ${name}? Сертификат останется на диске.`)) return;
+  await api('/api/ssl/site/' + encodeURIComponent(name), { method: 'DELETE' });
+  await carbonRefresh('Сайт удалён');
+}
+
+async function carbonUserAdd() {
+  showCarbonForm({
+    title: 'Новый пользователь панели',
+    fields: [
+      { name: 'username', label: 'Логин', placeholder: 'operator' },
+      { name: 'password', label: 'Пароль', type: 'password' },
+      { name: 'role', label: 'Роль', type: 'select', options: [{ value: 'admin', label: 'Администратор' }, { value: 'viewer', label: 'Только просмотр' }] }
+    ],
+    submitText: 'Создать',
+    onSubmit: async v => {
+      if (!v.username.trim() || !v.password) throw new Error('Укажите логин и пароль');
+      await api('/api/users', { method: 'POST', body: { username: v.username.trim(), password: v.password, role: v.role } });
+      await carbonRefresh('Пользователь создан');
+    }
+  });
+}
+
+async function carbon2faSetup() {
+  const d = await api('/api/2fa/setup', { method: 'POST' });
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `<div class="modal-card"><div class="modal-head"><div><div class="modal-title">Настройка 2FA</div><div class="modal-sub">Отсканируйте QR и введите код</div></div><button class="icon-btn" data-2fa-close>✕</button></div>
+    ${d.qr ? `<img src="${escHtml(d.qr)}" alt="QR" style="width:220px;height:220px;background:#fff;padding:8px;border-radius:10px;display:block;margin:0 auto 12px">` : ''}
+    <label class="field"><span>Секрет</span><input readonly value="${escHtml(d.secret || '')}"></label>
+    <label class="field" style="margin-top:10px"><span>Код из приложения</span><input data-2fa-code inputmode="numeric" autocomplete="one-time-code"></label>
+    <div data-2fa-error style="color:var(--bad);font-size:12px;margin-top:8px;display:none"></div>
+    <div class="modal-actions"><button class="btn" data-2fa-close>Отмена</button><button class="btn btn-primary" data-2fa-enable>Включить</button></div></div>`;
+  document.body.appendChild(modal);
+  modal.hidden = false;
+  const close = () => modal.remove();
+  modal.querySelectorAll('[data-2fa-close]').forEach(b => b.addEventListener('click', close));
+  modal.querySelector('[data-2fa-enable]').addEventListener('click', async () => {
+    const err = modal.querySelector('[data-2fa-error]');
+    try {
+      const res = await api('/api/2fa/enable', { method: 'POST', body: { code: modal.querySelector('[data-2fa-code]').value.trim() } });
+      close();
+      const codes = (res.recoveryCodes || []).join('\n');
+      showCarbonTextModal('2FA включена', codes ? 'Сохраните резервные коды:\n\n' + codes : '2FA включена');
+      await carbonRefresh();
+    } catch (e) { err.textContent = e.message; err.style.display = 'block'; }
+  });
+}
+
+async function carbon2faDisable() {
+  showCarbonForm({
+    title: 'Отключить 2FA',
+    fields: [{ name: 'password', label: 'Пароль', type: 'password' }],
+    submitText: 'Отключить',
+    danger: true,
+    onSubmit: async v => {
+      await api('/api/2fa/disable', { method: 'POST', body: { password: v.password } });
+      await carbonRefresh('2FA отключена');
+    }
+  });
+}
+
+async function carbonBackupSave() {
+  const b = carbon.backup || {};
+  const c = b.config || {};
+  showCarbonForm({
+    title: 'Автоматические бэкапы',
+    fields: [
+      { name: 'enabled', label: 'Включить автобэкап', type: 'checkbox', value: !!c.enabled },
+      { name: 'schedule', label: 'Расписание', type: 'select', value: c.schedule || 'daily', options: [{ value: 'daily', label: 'Ежедневно' }, { value: 'weekly', label: 'Еженедельно' }] },
+      { name: 'time', label: 'Время', value: c.time || '04:30' },
+      { name: 'keep', label: 'Хранить копий', type: 'number', value: c.keep || 7, min: 1, max: 100 },
+      { name: 'encrypt', label: 'Шифровать AES-256', type: 'checkbox', value: c.encrypt !== false }
+    ],
+    submitText: 'Сохранить',
+    onSubmit: async v => {
+      await api('/api/backup/auto', { method: 'POST', body: { enabled: !!v.enabled, schedule: v.schedule, time: v.time, keep: Number(v.keep) || 7, encrypt: !!v.encrypt } });
+      await carbonRefresh('Настройки бэкапа сохранены');
+    }
+  });
+}
+
+async function carbonBackupPassword() {
+  const d = await api('/api/backup/password');
+  if (!d.password) throw new Error('Пароль не задан');
+  showCarbonTextModal('Пароль архивов', d.password);
+}
+
+async function carbonNotifySave() {
+  const n = carbon.notify || {};
+  showCarbonForm({
+    title: 'Telegram-уведомления',
+    fields: [
+      { name: 'enabled', label: 'Включить уведомления', type: 'checkbox', value: !!n.enabled },
+      { name: 'token', label: 'Токен бота', type: 'password', placeholder: n.hasToken ? 'Сохранён — оставьте пустым' : '123456789:AA…' },
+      { name: 'chatId', label: 'Chat ID', value: n.chatId || '' }
+    ],
+    submitText: 'Сохранить',
+    onSubmit: async v => {
+      const body = { enabled: !!v.enabled, chatId: v.chatId.trim() };
+      if (v.token.trim()) body.token = v.token.trim();
+      await api('/api/notify/telegram', { method: 'POST', body });
+      await carbonRefresh('Настройки уведомлений сохранены');
+    }
+  });
+}
+
+async function carbonClientKey(name) {
+  const d = await api('/api/clients/' + encodeURIComponent(name) + '/key');
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `<div class="modal-card"><div class="modal-head"><div><div class="modal-title">Ключ: ${escHtml(name)}</div><div class="modal-sub">Импорт по ссылке или QR</div></div><button class="icon-btn" data-key-close>✕</button></div>
+    ${d.qr ? `<img src="${escHtml(d.qr)}" alt="QR" style="width:220px;height:220px;background:#fff;padding:8px;border-radius:10px;display:block;margin:0 auto 12px">` : ''}
+    <textarea readonly rows="5" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:11px">${escHtml(d.uri || '')}</textarea>
+    <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap"><div class="page-actions"><button class="btn" data-key-copy>Скопировать vpn://</button></div><div class="page-actions"><a class="btn" href="/api/download/${encodeURIComponent(name)}">Скачать .conf</a><a class="btn" href="/api/clients/${encodeURIComponent(name)}/export">Инструкция</a></div></div></div>`;
+  document.body.appendChild(modal);
+  modal.hidden = false;
+  const close = () => modal.remove();
+  modal.querySelector('[data-key-close]').addEventListener('click', close);
+  modal.querySelector('[data-key-copy]').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(d.uri || ''); showToast('Скопировано'); } catch (e) { showToast('Не удалось скопировать'); }
+  });
+}
+
+async function carbonClientRename(name) {
+  showCarbonForm({
+    title: 'Переименовать клиента',
+    fields: [{ name: 'newName', label: 'Новое имя', value: name }],
+    submitText: 'Переименовать',
+    onSubmit: async v => {
+      if (!/^[A-Za-z0-9_-]{1,63}$/.test(v.newName)) throw new Error('Разрешены буквы, цифры, _ и -, до 63 символов');
+      await api('/api/clients/' + encodeURIComponent(name) + '/rename', { method: 'POST', body: { newName: v.newName } });
+      await carbonRefresh('Клиент переименован');
+    }
+  });
+}
+
+async function carbonClientBulkRename() {
+  showCarbonForm({
+    title: 'Массовое переименование',
+    fields: [
+      { name: 'search', label: 'Найти в имени', placeholder: 'old-' },
+      { name: 'replace', label: 'Заменить на', placeholder: 'new-' }
+    ],
+    submitText: 'Переименовать',
+    onSubmit: async v => {
+      if (!v.search) throw new Error('Укажите, что искать');
+      const d = await api('/api/clients/rename-bulk', { method: 'POST', body: { search: v.search, replace: v.replace } });
+      await carbonRefresh(`Переименовано: ${(d.renamed || []).length}, пропущено: ${(d.skipped || []).length}`);
+    }
+  });
+}
+
+function carbonProxyUserForm(name) {
+  const u = name ? ((carbon.proxyUsers && (Array.isArray(carbon.proxyUsers) ? carbon.proxyUsers : carbon.proxyUsers.users)) || []).find(x => x.username === name) || {} : {};
+  const mbps = bps => bps == null ? '' : String(Math.round(Number(bps) / 1000000 * 10) / 10);
+  const gb = b => b == null ? '' : String(Math.round(Number(b) / (1024 ** 3) * 10) / 10);
+  showCarbonForm({
+    title: name ? 'Пользователь ' + name : 'Новый пользователь прокси',
+    fields: [
+      ...(name ? [] : [{ name: 'username', label: 'Имя', placeholder: 'client-01' }]),
+      { name: 'secret', label: 'Секрет (32 hex)', placeholder: 'Необязательно' },
+      { name: 'conns', label: 'TCP-соединений', type: 'number', value: u.max_tcp_conns == null ? '' : u.max_tcp_conns, min: 0 },
+      { name: 'ips', label: 'Уникальных IP', type: 'number', value: u.max_unique_ips == null ? '' : u.max_unique_ips, min: 0 },
+      { name: 'quota', label: 'Квота, ГБ', type: 'number', value: gb(u.data_quota_bytes), min: 0, step: '0.1' },
+      { name: 'up', label: 'Скорость отдачи, Мбит/с', type: 'number', value: mbps(u.rate_limit_up_bps), min: 0, step: '0.1' },
+      { name: 'down', label: 'Скорость загрузки, Мбит/с', type: 'number', value: mbps(u.rate_limit_down_bps), min: 0, step: '0.1' },
+      { name: 'expiry', label: 'Действует до', type: 'date', value: u.expiration_rfc3339 ? String(u.expiration_rfc3339).slice(0, 10) : '' },
+      { name: 'tag', label: 'ad_tag (32 hex)', value: u.user_ad_tag || '' },
+      { name: 'notes', label: 'Заметка', value: u.notes || '' },
+      { name: 'enabled', label: 'Пользователь включён', type: 'checkbox', value: u.enabled !== false }
+    ],
+    submitText: name ? 'Сохранить' : 'Создать',
+    onSubmit: async v => {
+      const payload = {};
+      if (!name) {
+        if (!/^[A-Za-z0-9_.-]{1,64}$/.test(v.username)) throw new Error('Имя: A-Z, a-z, 0-9, _, ., - до 64 символов');
+        payload.username = v.username;
+      }
+      if (v.secret) {
+        if (!/^[0-9a-fA-F]{32}$/.test(v.secret)) throw new Error('Секрет — 32 hex-символа');
+        payload.secret = v.secret.toLowerCase();
+      }
+      const num = x => x === '' ? null : Number(x);
+      payload.max_tcp_conns = num(v.conns);
+      payload.max_unique_ips = num(v.ips);
+      payload.data_quota_bytes = v.quota === '' ? null : Math.round(Number(v.quota) * (1024 ** 3));
+      payload.rate_limit_up_bps = v.up === '' ? null : Math.round(Number(v.up) * 1000000);
+      payload.rate_limit_down_bps = v.down === '' ? null : Math.round(Number(v.down) * 1000000);
+      payload.expiration_rfc3339 = v.expiry ? new Date(v.expiry + 'T23:59:59Z').toISOString().replace(/\.\d{3}Z$/, '+00:00') : null;
+      if (v.tag && !/^[0-9a-fA-F]{32}$/.test(v.tag)) throw new Error('ad_tag — 32 hex-символа');
+      payload.user_ad_tag = v.tag ? v.tag.toLowerCase() : null;
+      payload.notes = v.notes || null;
+      payload.enabled = !!v.enabled;
+      if (name) await api('/api/proxy/users/' + encodeURIComponent(name), { method: 'PATCH', body: payload });
+      else await api('/api/proxy/users', { method: 'POST', body: payload });
+      await carbonRefresh(name ? 'Пользователь обновлён' : 'Пользователь создан');
+    }
+  });
+}
+
+async function carbonProxyUserAction(name, action) {
+  const labels = { enable: 'включён', disable: 'выключен', 'rotate-secret': 'секрет обновлён', 'reset-quota': 'квота сброшена', 'reset-traffic': 'трафик сброшен' };
+  if (action === 'rotate-secret' && !confirm(`Выдать новый секрет для «${name}»? Старые ссылки перестанут работать.`)) return;
+  const d = await api('/api/proxy/users/' + encodeURIComponent(name) + '/' + action, { method: 'POST', body: {} });
+  if (action === 'rotate-secret') {
+    const secret = (d && (d.secret || (d.user && d.user.secret))) || '';
+    if (secret) showCarbonTextModal('Новый секрет · ' + name, secret);
+  }
+  await carbonRefresh('Пользователь ' + (labels[action] || 'обновлён'));
+}
+
+async function carbonProxyLinks(name) {
+  const d = await api('/api/proxy/users/' + encodeURIComponent(name) + '/links');
+  const links = Array.isArray(d.links) ? d.links : [];
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `<div class="modal-card"><div class="modal-head"><div><div class="modal-title">Ссылки: ${escHtml(name)}</div><div class="modal-sub">tg:// для Telegram</div></div><button class="icon-btn" data-links-close>✕</button></div>
+    ${links.map(l => `<label class="field" style="margin-bottom:8px"><span>Ссылка</span><input readonly value="${escHtml(l)}"></label>`).join('') || '<p>Ссылок нет. Проверьте, что пользователь включён, а движок запущен.</p>'}
+    ${d.qr ? `<img src="${escHtml(d.qr)}" alt="QR" style="width:200px;height:200px;background:#fff;padding:8px;border-radius:10px;display:block;margin:12px auto 0">` : ''}
+    <div class="modal-actions"><button class="btn" data-links-close>Закрыть</button></div></div>`;
+  document.body.appendChild(modal);
+  modal.hidden = false;
+  modal.querySelectorAll('[data-links-close]').forEach(b => b.addEventListener('click', () => modal.remove()));
+}
+
+async function carbonProxySettings() {
+  let s = {};
+  try { s = await api('/api/proxy/settings'); } catch (e) {}
+  showCarbonForm({
+    title: 'Настройки прокси',
+    fields: [
+      { name: 'hostType', label: 'Адрес в ссылках', type: 'select', value: s.hostType || 'ip', options: [{ value: 'ip', label: 'IP сервера' }, { value: 'domain', label: 'Домен' }] },
+      { name: 'domain', label: 'Домен', value: s.domain || s.detectedDomain || '' },
+      { name: 'port', label: 'Порт', type: 'number', value: s.port || 443, min: 1, max: 65535 },
+      { name: 'sni', label: 'SNI', value: s.sni || '', placeholder: 'vimeo.com' }
+    ],
+    submitText: 'Применить',
+    onSubmit: async v => {
+      const body = { hostType: v.hostType, domain: v.hostType === 'domain' ? v.domain.trim() : '' };
+      if (Number(v.port) && Number(v.port) !== Number(s.port)) body.port = Number(v.port);
+      if (v.sni.trim() && v.sni.trim() !== String(s.sni || '')) body.sni = v.sni.trim();
+      await api('/api/proxy/settings', { method: 'POST', body });
+      await carbonRefresh('Настройки прокси применены');
+    }
+  });
+}
+
+async function carbonProxyFix() {
+  const d = await api('/api/proxy/fix');
+  showCarbonForm({
+    title: 'Фикс прокси',
+    sub: d.installed ? 'Установлен: ' + (d.type || '') : 'Фикс не установлен',
+    fields: [
+      { name: 'type', label: 'Тип', type: 'select', value: d.type || 'v3', options: [{ value: 'v3', label: 'v3 iptables' }, { value: 'v2', label: 'v2 iptables' }, { value: 'nft', label: 'v3 nftables' }, { value: 'v4', label: 'v4 Zapret2' }] },
+      { name: 'port', label: 'Порт', type: 'number', value: d.port || 443, min: 1, max: 65535 }
+    ],
+    submitText: 'Установить фикс',
+    danger: true,
+    onSubmit: async v => {
+      const r = await api('/api/proxy/fix', { method: 'POST', body: { type: v.type, port: Number(v.port) } });
+      showCarbonTextModal('Фикс прокси', r.output || 'Готово');
+      await carbonRefresh('Фикс установлен');
+    }
+  });
+}
+
+async function carbonProxyOptimization(action) {
+  if (!confirm(action === 'apply' ? 'Применить оптимизацию? Служба будет перезапущена.' : 'Откатить оптимизацию?')) return;
+  const d = await api('/api/proxy/optimization', { method: 'POST', body: { action } });
+  showCarbonTextModal('Оптимизация прокси', d.output || 'Готово');
+  await carbonRefresh(action === 'apply' ? 'Оптимизация применена' : 'Оптимизация откатана');
+}
+
+async function carbonProxyApiKey() {
+  if (!confirm('Перевыпустить API-ключ MTProxyL? Старый перестанет работать.')) return;
+  const d = await api('/api/proxy/api-key', { method: 'POST', body: {} });
+  showCarbonTextModal('API-ключ MTProxyL', typeof d === 'string' ? d : JSON.stringify(d, null, 2));
+}
+
+async function carbonProxyBot() {
+  let s = {};
+  try { s = await api('/api/proxy/bot'); } catch (e) {}
+  showCarbonForm({
+    title: 'Telegram-бот прокси',
+    fields: [
+      { name: 'enabled', label: 'Включить бота', type: 'checkbox', value: !!s.enabled },
+      { name: 'autoClaim', label: 'Автоопределение админа по /start', type: 'checkbox', value: s.autoClaim !== false },
+      { name: 'token', label: 'Токен', type: 'password', placeholder: s.tokenSet ? 'Сохранён — оставьте пустым' : '123456789:AA…' },
+      { name: 'admins', label: 'Админы (ID через запятую)', value: (s.admins || []).join(', ') }
+    ],
+    submitText: 'Сохранить',
+    onSubmit: async v => {
+      const body = { enabled: !!v.enabled, autoClaim: !!v.autoClaim, admins: String(v.admins || '').split(/[,\s;]+/).filter(Boolean) };
+      if (v.token.trim()) body.token = v.token.trim();
+      await api('/api/proxy/bot', { method: 'POST', body });
+      await carbonRefresh('Настройки бота сохранены');
+    }
+  });
+}
+
+async function carbonProxyDiag() {
+  const d = await api('/api/proxy/diag');
+  const text = (d.checks || []).map(c => (c.ok ? '✓ ' : '✗ ') + c.name + (c.detail ? ': ' + c.detail : '')).join('\n');
+  showCarbonTextModal('Диагностика прокси', text || 'Проверки не выполнены');
+}
+
+async function carbonProxyLog() {
+  const d = await api('/api/proxy/log');
+  const text = typeof d === 'string' ? d : (d.log || d.text || JSON.stringify(d, null, 2));
+  showCarbonTextModal('Журнал прокси', text);
+}
+
+async function carbonUfwAdd() {
+  showCarbonForm({
+    title: 'Открыть порт UFW',
+    fields: [
+      { name: 'port', label: 'Порт', placeholder: '443' },
+      { name: 'proto', label: 'Протокол', type: 'select', options: [{ value: 'tcp', label: 'TCP' }, { value: 'udp', label: 'UDP' }] },
+      { name: 'iface', label: 'Интерфейс', type: 'select', options: [{ value: '', label: 'Все' }, ...(carbon.interfaces || []).map(i => ({ value: i, label: i }))] }
+    ],
+    submitText: 'Добавить',
+    onSubmit: async v => {
+      if (!v.port) throw new Error('Укажите порт');
+      await api('/api/ufw', { method: 'POST', body: { port: v.port, proto: v.proto, iface: v.iface } });
+      await carbonRefresh('Правило UFW добавлено');
+    }
+  });
+}
+
+async function carbonAwgEdit() {
+  const a = carbon.awgConfig || {};
+  showCarbonForm({
+    title: 'Редактор AWG',
+    sub: a.file || 'awg0.conf',
+    fields: [{ name: 'content', label: 'Конфигурация', type: 'textarea', rows: 18, value: a.content || a.text || '' }],
+    submitText: 'Сохранить и перезапустить',
+    danger: true,
+    onSubmit: async v => {
+      if (!v.content.trim()) throw new Error('Пустой конфиг');
+      await api('/api/awg/config', { method: 'POST', body: { content: v.content, file: a.file } });
+      await carbonRefresh('Конфиг сохранён, AWG перезапущен');
+    }
+  });
+}
+
+async function carbonServerName() {
+  let s = {};
+  try { s = await api('/api/awg/server-name'); } catch (e) {}
+  showCarbonForm({
+    title: 'Имя сервера',
+    sub: 'Используется в именах конфигов',
+    fields: [{ name: 'name', label: 'Имя', value: s.name || '' }],
+    submitText: 'Сохранить',
+    onSubmit: async v => {
+      await api('/api/awg/server-name', { method: 'POST', body: { name: v.name.trim() } });
+      await carbonRefresh('Имя сервера сохранено');
+    }
+  });
+}
+
+async function carbonInstallMtproxyl() {
+  if (!confirm('Установить MTProxyL? Это отдельный движок прокси.')) return;
+  const d = await api('/api/install/module', { method: 'POST', body: { module: 'mtproxyl' } });
+  showCarbonTextModal('Установка MTProxyL', d.logFile ? 'Запущено. Журнал: ' + d.logFile : 'Установка запущена');
+  await carbonRefresh();
+}
+
+async function carbonCascadeBuild() {
+  showCarbonForm({
+    title: 'Построить каскад RU → EU',
+    sub: 'Панель по SSH настроит вторую сторону. Это может занять 5–15 минут.',
+    fields: [
+      { name: 'role', label: 'Роль этого сервера', type: 'select', options: [{ value: 'ru', label: 'Вход (RU)' }, { value: 'eu', label: 'Выход (EU)' }] },
+      { name: 'version', label: 'Версия AWG', type: 'select', options: ['3.1', '2.0', '1.5'] },
+      { name: 'peerHost', label: 'IP второй стороны', placeholder: '203.0.113.20' },
+      { name: 'peerPort', label: 'SSH-порт', value: '22' },
+      { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
+      { name: 'peerPass', label: 'Пароль root', type: 'password' },
+      { name: 'obfMode', label: 'Обфускация', type: 'select', options: [{ value: 'installer', label: 'Как у установщика' }, { value: 'architect', label: 'Архитектор' }, { value: 'custom', label: 'Свои параметры' }] },
+      { name: 'obfProfile', label: 'Профиль Архитектора', value: 'quic' },
+      { name: 'ifaces', label: 'Клиентские интерфейсы', value: 'awg0' },
+      { name: 'extraRuNets', label: 'Доп. сети RU', placeholder: '10.0.0.0/8, 192.168.0.0/16' }
+    ],
+    submitText: 'Построить каскад',
+    danger: true,
+    onSubmit: async v => {
+      if (!v.peerHost || !v.peerPass) throw new Error('Укажите IP второй стороны и пароль root');
+      const body = {
+        role: v.role, version: v.version, peerHost: v.peerHost.trim(), peerPort: v.peerPort || '22',
+        peerUser: v.peerUser || 'root', peerPass: v.peerPass,
+        obfMode: v.obfMode, obfProfile: v.obfProfile, obfIntensity: 'medium',
+        obfSource: '', ifaces: String(v.ifaces || '').split(/[\s,]+/).filter(Boolean),
+        extraRuNets: String(v.extraRuNets || '').split(/[\s,]+/).filter(Boolean)
+      };
+      await api('/api/cascade/ssh-install', { method: 'POST', body });
+      showCarbonTextModal('Сборка каскада', 'Задача запущена, ждём шаги…');
+      for (let i = 0; i < 900; i++) {
+        await carbonSleep(2000);
+        let job = null;
+        try { job = await api('/api/cascade/ssh-progress'); } catch (e) {
+          showCarbonTextModal('Сборка каскада', 'Панель перезагружается, ждём…');
+          continue;
+        }
+        const steps = (job && job.steps) || [];
+        const text = steps.map(s => s.title + ': ' + (s.text || '')).join('\n');
+        showCarbonTextModal('Сборка каскада', text || 'Выполняется…');
+        if (job && job.running === false && job.done) {
+          if (job.error) { showToast('Каскад не собрался: ' + job.error); return; }
+          showCarbonTextModal('Каскад настроен', text + '\n\nГотово.');
+          await carbonRefresh('Каскад настроен');
+          return;
+        }
+      }
+      showToast('Сборка идёт дольше 30 минут — проверьте журнал');
+    }
+  });
+}
+
+async function carbonCascadeManual() {
+  showCarbonForm({
+    title: 'Каскад вручную',
+    sub: 'Вставьте конфиг второй стороны и выберите интерфейсы',
+    fields: [
+      { name: 'config', label: 'Конфиг клиента EU', type: 'textarea', rows: 10 },
+      { name: 'ifaces', label: 'Клиентские интерфейсы', value: 'awg0' },
+      { name: 'extraRuNets', label: 'Доп. сети RU', placeholder: '10.0.0.0/8' },
+      { name: 'peerHost', label: 'IP второй стороны', placeholder: 'Необязательно' },
+      { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
+      { name: 'peerPass', label: 'Пароль root', type: 'password' },
+      { name: 'peerClient', label: 'Имя клиента', value: 'ru_host' }
+    ],
+    submitText: 'Настроить каскад',
+    danger: true,
+    onSubmit: async v => {
+      if (!v.config.trim() && !(v.peerHost.trim() && v.peerUser.trim())) throw new Error('Вставьте конфиг или заполните данные второй стороны');
+      const d = await api('/api/cascade/setup', {
+        method: 'POST',
+        body: {
+          config: v.config, ifaces: String(v.ifaces || '').split(/[\s,]+/).filter(Boolean),
+          extraRuNets: v.extraRuNets, peerHost: v.peerHost.trim(), peerUser: v.peerUser.trim(),
+          peerPass: v.peerPass, peerClient: v.peerClient.trim()
+        }
+      });
+      await carbonRefresh('Каскад настроен: ' + (d.role === 'ru' ? 'RU' : 'EU') + ' · ' + (d.endpoint || '—'));
+    }
+  });
+}
+
+async function carbonCascadeCleanup() {
+  if (!confirm('Удалить каскад на этом сервере? Клиенты VPN не пострадают.')) return;
+  const d = await api('/api/cascade/cleanup', { method: 'POST', body: {} });
+  const text = (d.steps || []).map(s => s.title + ': ' + s.text).join('\n') || 'Готово';
+  showCarbonTextModal('Удаление каскада', text);
+  await carbonRefresh('Каскад удалён');
+}
+
+async function carbonAdguardStats() {
+  let auto = null;
+  try { auto = await api('/api/adguard/autodetect'); } catch (e) {}
+  showCarbonForm({
+    title: 'AdGuard Home',
+    sub: auto && auto.found ? 'Найден: ' + auto.url : 'Укажите адрес API',
+    fields: [
+      { name: 'url', label: 'URL API', value: auto && auto.url ? auto.url : '', placeholder: 'http://127.0.0.1:3001' },
+      { name: 'user', label: 'Логин', value: auto && auto.user ? auto.user : '' },
+      { name: 'pass', label: 'Пароль', type: 'password' }
+    ],
+    submitText: 'Проверить',
+    onSubmit: async v => {
+      const d = await api('/api/adguard/stats', { method: 'POST', body: { url: v.url.trim(), user: v.user.trim(), pass: v.pass } });
+      showCarbonTextModal('AdGuard: статистика', 'Запросов: ' + (d.num_dns_queries ?? '—') + '\nЗаблокировано: ' + (d.num_blocked_filtering ?? '—') + '\nSafebrowsing: ' + (d.num_replaced_safebrowsing ?? '—'));
+    }
+  });
+}
+
+async function carbonWarpPanel() {
+  let st = {};
+  try { st = await api('/api/warp/status'); } catch (e) {}
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  const summary = st.installed
+    ? `Режим: ${st.mode || '—'} · Xray: ${st.xrayActive ? 'активен' : 'остановлен'} (${st.listenIp || '—'}:${st.listenPort || '—'}) · WARP: ${st.connected ? 'Connected' : 'не подключён'} · SOCKS: ${st.socksPort || '—'}`
+    : 'WARP не установлен.';
+  modal.innerHTML = `<div class="modal-card modal-wide"><div class="modal-head"><div><div class="modal-title">WARP + Xray</div><div class="modal-sub">${escHtml(summary)}</div></div><button class="icon-btn" data-warp-close>✕</button></div>
+    <div class="page-actions" style="flex-wrap:wrap"><button class="btn btn-primary" data-warp-action="power-on">Включить</button><button class="btn" data-warp-action="power-off">Остановить</button><button class="btn" data-warp-action="test">Проверить WARP</button><button class="btn" data-warp-action="install-v1">Установить вариант 1</button><button class="btn" data-warp-action="install-v2">Установить вариант 2</button></div>
+    <pre class="code" data-warp-out style="margin-top:14px;padding:12px;white-space:pre-wrap;max-height:40vh;overflow:auto">Готово</pre></div>`;
+  document.body.appendChild(modal);
+  modal.hidden = false;
+  modal.querySelector('[data-warp-close]').addEventListener('click', () => modal.remove());
+  const out = modal.querySelector('[data-warp-out]');
+  modal.querySelectorAll('[data-warp-action]').forEach(b => b.addEventListener('click', async () => {
+    const a = b.dataset.warpAction;
+    try {
+      if (a === 'power-on' || a === 'power-off') {
+        const d = await api('/api/warp/power', { method: 'POST', body: { enable: a === 'power-on' } });
+        out.textContent = JSON.stringify(d, null, 2);
+      } else if (a === 'test') {
+        const d = await api('/api/warp/test', { method: 'POST', body: { socksPort: st.socksPort || '40000' } });
+        out.textContent = JSON.stringify(d, null, 2);
+      } else if (a.startsWith('install')) {
+        if (!confirm('Установить/переустановить WARP + Xray?')) return;
+        const d = await api('/api/install/module', { method: 'POST', body: { module: 'warp', warpMode: a === 'install-v1' ? 'v1' : 'v2', listenIp: '0.0.0.0', listenPort: '443', socksPort: '40000' } });
+        out.textContent = d.logFile ? 'Установка запущена. Журнал: ' + d.logFile : 'Установка запущена';
+      }
+    } catch (e) { out.textContent = e.message; }
+  }));
+}
+
+async function carbonDnsCapture() {
+  let status = {};
+  try { status = await api('/api/tools/status'); } catch (e) {}
+  const dns = status.dns || {};
+  showCarbonForm({
+    title: 'DNS-перехват',
+    fields: [
+      { name: 'enable', label: 'Включить перехват', type: 'checkbox', value: !!(dns.enabled) },
+      { name: 'ifaces', label: 'Интерфейсы', value: (dns.ifaces || carbon.interfaces || []).join(', ') },
+      { name: 'target', label: 'DNS-сервер', value: dns.target || '10.8.0.1' }
+    ],
+    submitText: 'Применить',
+    onSubmit: async v => {
+      const body = {
+        enable: !!v.enable,
+        ifaces: String(v.ifaces || '').split(/[\s,]+/).filter(Boolean),
+        target: v.target.trim(),
+        oldIfaces: dns.ifaces || [],
+        oldTarget: dns.target || ''
+      };
+      await api('/api/tools/dns', { method: 'POST', body });
+      await carbonRefresh('Правила DNS обновлены');
+    }
+  });
+}
+
+async function carbonAppMetrics() {
+  const m = (carbon.app && carbon.app.metrics) || {};
+  showCarbonForm({
+    title: 'Метрики приложения',
+    fields: [
+      { name: 'enabled', label: 'Включить метрики', type: 'checkbox', value: !!m.enabled },
+      { name: 'host', label: 'Адрес', value: m.host || '127.0.0.1' },
+      { name: 'port', label: 'Внутренний порт', type: 'number', value: m.port || 9101, min: 1, max: 65535 },
+      { name: 'publicPort', label: 'Внешний порт', type: 'number', value: m.publicPort || 9101, min: 1, max: 65535 },
+      { name: 'format', label: 'Формат', type: 'select', value: m.format || 'json', options: [{ value: 'json', label: 'JSON' }, { value: 'prometheus', label: 'Prometheus' }] },
+      { name: 'token', label: 'Токен (пусто — не менять)', type: 'password', placeholder: m.tokenSet ? 'Сохранён' : '' }
+    ],
+    submitText: 'Сохранить',
+    onSubmit: async v => {
+      const body = { enabled: !!v.enabled, host: v.host.trim(), port: Number(v.port), publicPort: Number(v.publicPort), format: v.format, token: v.token.trim() };
+      const d = await api('/api/app/metrics', { method: 'POST', body });
+      await carbonRefresh(d.generatedToken ? 'Метрики включены, токен создан' : 'Метрики сохранены');
+    }
+  });
+}
+
+async function carbonAppMetricsToken() {
+  if (!confirm('Сгенерировать новый токен метрик? Старый перестанет работать.')) return;
+  const d = await api('/api/app/metrics/token', { method: 'POST' });
+  const token = (d.status && d.status.metrics && d.status.metrics.token) || d.token || '';
+  showCarbonTextModal('Новый токен метрик', token || 'Токен создан');
+  await carbonRefresh();
+}
+
+async function carbonRustdeskSettings() {
+  const r = carbon.rustdesk || {};
+  showCarbonForm({
+    title: 'Настройки RustDesk',
+    fields: [
+      { name: 'hostType', label: 'Адрес', type: 'select', value: r.hostType || 'domain', options: [{ value: 'domain', label: 'Домен' }, { value: 'ip', label: 'IP' }] },
+      { name: 'domain', label: 'Домен', value: r.domain || r.host || '' },
+      { name: 'openPorts', label: 'Открыть порты UFW', type: 'checkbox', value: true },
+      { name: 'webClient', label: 'Web-клиент', type: 'checkbox', value: !!(r.settings && r.settings.webClient) }
+    ],
+    submitText: 'Сохранить',
+    onSubmit: async v => {
+      await api('/api/rustdesk/settings', { method: 'POST', body: { hostType: v.hostType, domain: v.domain.trim(), openPorts: !!v.openPorts, webClient: !!v.webClient } });
+      await carbonRefresh('Настройки RustDesk сохранены');
+    }
+  });
+}
+
+async function carbonRustdeskJob(action) {
+  const msg = action === 'uninstall' ? 'Полностью удалить RustDesk Server?' : action === 'install' ? 'Установить RustDesk Server?' : 'Обновить RustDesk Server с GitHub?';
+  if (!confirm(msg)) return;
+  await api('/api/rustdesk/' + action, { method: 'POST', body: {} });
+  showCarbonTextModal('RustDesk', 'Выполняется…');
+  for (let i = 0; i < 300; i++) {
+    await carbonSleep(2000);
+    let d = null;
+    try { d = await api('/api/rustdesk/job'); } catch (e) { continue; }
+    const job = d && d.job;
+    if (!job) continue;
+    showCarbonTextModal('RustDesk: ' + action, (job.log || []).join('\n') || (job.running ? 'Выполняется…' : 'Готово'));
+    if (!job.running) {
+      await carbonRefresh(job.ok ? 'RustDesk: готово' : 'RustDesk: ошибка');
+      return;
+    }
+  }
+}
+
+async function carbonFail2ban() {
+  let d = {};
+  try { d = await api('/api/fail2ban/status'); } catch (e) {}
+  const text = d.installed
+    ? 'Jail: ' + (d.jail ? 'активен' : 'не найден') + '\nНеудачных попыток: ' + (d.currentlyFailed || 0) + ' / всего ' + (d.totalFailed || 0) + '\nЗабанено: ' + ((d.banned || []).join(', ') || '—') + '\nЛог: ' + (d.log || '—')
+    : 'fail2ban не установлен.';
+  showCarbonForm({
+    title: 'Fail2Ban',
+    sub: 'Статус и разблокировка IP',
+    fields: [{ name: 'status', label: 'Статус', type: 'textarea', rows: 6, value: text }, { name: 'ip', label: 'Разблокировать IP', placeholder: '198.51.100.7' }],
+    submitText: 'Разблокировать',
+    onSubmit: async v => {
+      if (!v.ip.trim()) return;
+      await api('/api/fail2ban/unban', { method: 'POST', body: { ip: v.ip.trim() } });
+      await carbonRefresh('IP разблокирован');
+    }
+  });
+}
+
+async function carbonDiagCheck() {
+  const services = carbon.services || [];
+  const active = services.filter(s => s.state === 'active').length;
+  const c = carbon.cascade || {};
+  const p = carbon.proxy || {};
+  const s = carbon.ssl || {};
+  const mods = carbon.modules || [];
+  const inst = mods.filter(m => m.installed).length;
+  const sec = carbon.security || {};
+  const lines = [
+    'Службы: ' + active + ' / ' + services.length + ' активны',
+    'Каскад: ' + (c.active ? 'активен' : 'не активен') + (c.endpoint ? ' · ' + c.endpoint : ''),
+    'Прокси: ' + (p.running === false ? 'остановлен' : 'доступен') + (p.backend ? ' · ' + p.backend : ''),
+    'Модули: ' + inst + ' / ' + mods.length + ' установлены',
+    'HTTPS: ' + (sec.https ? 'включён' : 'выключен') + ' · сертификатов: ' + ((s.certificates || []).length),
+    '2FA: ' + (sec.totpEnabled ? 'включена' : 'выключена'),
+    'Версия: ' + ((carbon.update && carbon.update.version) || '—')
+  ];
+  showCarbonTextModal('Проверка сервера', lines.join('\n'));
+}
+
+async function carbonObfGenerate() {
+  const profiles = (carbon.profiles && (carbon.profiles.builtin || []).concat(carbon.profiles.custom || [])) || [];
+  showCarbonForm({
+    title: 'Сгенерировать обфускацию',
+    sub: 'Новые H1–H4, S1–S4, Jc/Jmin/Jmax и HPK',
+    fields: [
+      { name: 'preset', label: 'Профиль', type: 'select', options: profiles.map(p => ({ value: p.name, label: p.title || p.name })) },
+      { name: 'sni', label: 'SNI', placeholder: 'ozon.ru' },
+      { name: 'regen', label: 'Перегенерировать клиентов', type: 'checkbox', value: true }
+    ],
+    submitText: 'Сгенерировать и применить',
+    danger: true,
+    onSubmit: async v => {
+      const preview = await api('/api/obf/generate', { method: 'POST', body: { preset: v.preset, sni: v.sni.trim() } });
+      await api('/api/obf/apply', { method: 'POST', body: { params: preview.params, regenClients: !!v.regen, removeMissing: true } });
+      await carbonRefresh('Обфускация применена');
+    }
+  });
+}
+
+async function carbonObfSync() {
+  if (!confirm('Синхронизировать server_hpk.key с клиентскими конфигами?')) return;
+  await api('/api/obf/sync-hpk', { method: 'POST', body: {} });
+  await carbonRefresh('HPK синхронизирован');
+}
+
+async function carbonRuDropUpload() {
+  const input = document.getElementById('carbonRuDropFile');
+  const file = input && input.files && input.files[0];
+  if (!file) throw new Error('Выберите файл со списком');
+  if (file.size > 10 * 1024 * 1024) throw new Error('Файл больше 10 МБ');
+  const data = await fileToBase64(file);
+  const d = await api('/api/tools/rudrop/upload', { method: 'POST', body: { name: file.name, data } });
+  showToast('Загружено адресов: ' + (d.count || 0));
+}
+
+function carbonActionName(btn) { return btn && btn.dataset ? btn.dataset.carbonAction : ''; }
+
+document.addEventListener('click', async event => {
+  const btn = event.target.closest('[data-carbon-action]');
+  if (!btn) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const action = carbonActionName(btn);
+  const name = btn.dataset.name || '';
+  try {
+    if (action === 'update-check') await carbonUpdateCheck();
+    else if (action === 'update-git') { if (confirm('Обновить панель с GitHub? Перед обновлением создаётся бэкап.')) { await api('/api/update/git', { method: 'POST', body: {} }); pollUpdate(); } }
+    else if (action === 'update-git-force') { if (confirm('Сбросить локальные изменения кода и обновить с GitHub?')) { await api('/api/update/git-force', { method: 'POST', body: {} }); pollUpdate(); } }
+    else if (action === 'update-url') await carbonUpdateFromUrl();
+    else if (action === 'update-upload') {
+      const input = document.getElementById('carbonUpdateFile');
+      await carbonUpdateUpload(input && input.files && input.files[0]);
+    }
+    else if (action === 'update-rollback') await carbonUpdateRollback();
+    else if (action === 'ssl-deps') await carbonSslDeps();
+    else if (action === 'ssl-bind') await carbonSslSite('panel');
+    else if (action === 'ssl-site') await carbonSslSite('site');
+    else if (action === 'ssl-renew') await carbonSslRenew(name, btn.dataset.days == null ? null : Number(btn.dataset.days));
+    else if (action === 'ssl-delete') await carbonSslDelete(name);
+    else if (action === 'user-add') await carbonUserAdd();
+    else if (action === 'user-delete') { if (confirm('Удалить пользователя ' + name + '?')) { await api('/api/users/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Пользователь удалён'); } }
+    else if (action === '2fa-setup') await carbon2faSetup();
+    else if (action === '2fa-disable') await carbon2faDisable();
+    else if (action === 'backup-save') await carbonBackupSave();
+    else if (action === 'backup-run') { if (confirm('Создать резервную копию сейчас?')) { await api('/api/backup/run', { method: 'POST' }); await carbonRefresh('Бэкап создаётся'); } }
+    else if (action === 'backup-password') await carbonBackupPassword();
+    else if (action === 'notify-save') await carbonNotifySave();
+    else if (action === 'notify-test') { await api('/api/notify/test', { method: 'POST' }); showToast('Тестовое сообщение отправлено'); }
+    else if (action === 'client-key') await carbonClientKey(name);
+    else if (action === 'client-rename') await carbonClientRename(name);
+    else if (action === 'client-bulk-rename') await carbonClientBulkRename();
+    else if (action === 'client-delete') { if (confirm('Удалить клиента ' + name + '?')) { await api('/api/delete/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Клиент удалён'); } }
+    else if (action === 'proxy-user-add') carbonProxyUserForm(null);
+    else if (action === 'proxy-user-edit') carbonProxyUserForm(name);
+    else if (action === 'proxy-user-delete') { if (confirm('Удалить пользователя ' + name + '?')) { await api('/api/proxy/users/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Пользователь удалён'); } }
+    else if (action === 'proxy-user-action') await carbonProxyUserAction(name, btn.dataset.act || '');
+    else if (action === 'proxy-user-links') await carbonProxyLinks(name);
+    else if (action === 'proxy-settings') await carbonProxySettings();
+    else if (action === 'proxy-fix') await carbonProxyFix();
+    else if (action === 'proxy-opt-apply') await carbonProxyOptimization('apply');
+    else if (action === 'proxy-opt-rollback') await carbonProxyOptimization('rollback');
+    else if (action === 'proxy-bot') await carbonProxyBot();
+    else if (action === 'proxy-api-key') await carbonProxyApiKey();
+    else if (action === 'proxy-bot-test') { await api('/api/proxy/bot/test', { method: 'POST', body: {} }); showToast('Тест отправлен'); }
+    else if (action === 'proxy-diag') await carbonProxyDiag();
+    else if (action === 'proxy-log') await carbonProxyLog();
+    else if (action === 'ufw-add') await carbonUfwAdd();
+    else if (action === 'ufw-delete') { if (confirm('Удалить правило №' + name + '?')) { await api('/api/ufw/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Правило удалено'); } }
+    else if (action === 'awg-edit') await carbonAwgEdit();
+    else if (action === 'server-name') await carbonServerName();
+    else if (action === 'install-mtproxyl') await carbonInstallMtproxyl();
+    else if (action === 'cascade-build') await carbonCascadeBuild();
+    else if (action === 'cascade-manual') await carbonCascadeManual();
+    else if (action === 'cascade-cleanup') await carbonCascadeCleanup();
+    else if (action === 'adguard-stats') await carbonAdguardStats();
+    else if (action === 'warp-panel') await carbonWarpPanel();
+    else if (action === 'dns-capture') await carbonDnsCapture();
+    else if (action === 'app-metrics') await carbonAppMetrics();
+    else if (action === 'app-metrics-token') await carbonAppMetricsToken();
+    else if (action === 'rustdesk-settings') await carbonRustdeskSettings();
+    else if (action === 'rustdesk-ports') { await api('/api/rustdesk/ports', { method: 'POST', body: {} }); await carbonRefresh('Порты RustDesk открыты'); }
+    else if (action === 'rustdesk-job') await carbonRustdeskJob(btn.dataset.act || 'update');
+    else if (action === 'fail2ban') await carbonFail2ban();
+    else if (action === 'diag-check') await carbonDiagCheck();
+    else if (action === 'obf-generate') await carbonObfGenerate();
+    else if (action === 'obf-sync') await carbonObfSync();
+    else if (action === 'rudrop-upload') await carbonRuDropUpload();
+  } catch (e) {
+    showToast(e.message || 'Ошибка');
+  }
+}, true);
