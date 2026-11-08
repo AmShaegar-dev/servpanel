@@ -653,7 +653,7 @@ async function loadHistory() {
                 const smoothSeries = (arr) => {
                     const src = Array.isArray(arr) ? arr : [];
                     if (currentChartRange !== '24h' && currentChartRange !== '7d') return src;
-                    const win = currentChartRange === '7d' ? 7 : 5;
+                    const win = currentChartRange === '7d' ? 21 : 15;
                     return src.map((_, i) => {
                         const part = src.slice(Math.max(0, i - win + 1), i + 1);
                         return part.reduce((a, b) => a + (Number(b) || 0), 0) / part.length;
