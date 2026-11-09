@@ -1961,6 +1961,11 @@ function ensureSplitAccounting(clients, force) {
         splitAccountingDebug = { error: '', hasRu: null, ifaces, ips, added: 0, existing: 0, steps: [], chain: '' };
         const hasRu = !!rootShTry('ipset', ['list', 'ru']).trim();
         splitAccountingDebug.hasRu = hasRu;
+        const chainNow = String(rootShTry('iptables', ['-t', 'mangle', '-S', 'AWG_SPLIT']) || '');
+        // Старые правила с комментариями sp:* мешали новому формату — чистим один раз.
+        if (chainNow.includes('--comment "sp:')) {
+            try { rootSh('iptables', ['-t', 'mangle', '-F', 'AWG_SPLIT']); } catch (e) { /* ignore */ }
+        }
         for (const ip of ips) {
             if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(ip)) continue;
             if (hasRu) {
