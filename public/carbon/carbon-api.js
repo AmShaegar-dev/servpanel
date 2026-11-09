@@ -273,51 +273,89 @@ async function loadCarbonData() {
 }
 
 let secondaryLoading = null;
+
+function assignCarbonPath(path, data) {
+  if (!data) return false;
+  const p = String(path).split('?')[0];
+  if (p === '/api/clients') { if (Array.isArray(data)) carbon.clients = data; else return false; }
+  else if (p === '/api/ufw') carbon.ufw = data;
+  else if (p === '/api/cascade/status') carbon.cascade = data;
+  else if (p === '/api/cascade/proxy') carbon.cascadeProxy = data;
+  else if (p === '/api/obf/current') carbon.obf = data;
+  else if (p === '/api/obf/profiles') carbon.profiles = data;
+  else if (p === '/api/ssl/status') carbon.ssl = data;
+  else if (p === '/api/app/status') carbon.app = data;
+  else if (p === '/api/rustdesk/status') carbon.rustdesk = data;
+  else if (p === '/api/users') carbon.users = data;
+  else if (p === '/api/audit') carbon.audit = data;
+  else if (p === '/api/backup/auto') carbon.backup = data;
+  else if (p === '/api/notify/status') carbon.notify = data;
+  else if (p === '/api/awg/config') carbon.awgConfig = data;
+  else if (p === '/api/history') carbon.history = data;
+  else if (p === '/api/traffic/distribution') carbon.distribution = data;
+  else if (p === '/api/cascade/interfaces') { if (!data.error) carbon.cascadeInterfaces = data; else return false; }
+  else if (p === '/api/cascade/schedule') { if (!data.error) carbon.cascadeSchedule = data; else return false; }
+  else return false;
+  return true;
+}
+
+const SECONDARY_PATHS = [
+  '/api/clients', '/api/ufw', '/api/cascade/status', '/api/cascade/proxy',
+  '/api/obf/current', '/api/obf/profiles', '/api/ssl/status', '/api/app/status',
+  '/api/rustdesk/status', '/api/users', '/api/audit?limit=50', '/api/backup/auto',
+  '/api/notify/status', '/api/awg/config',
+  '/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global',
+  '/api/traffic/distribution', '/api/cascade/interfaces', '/api/cascade/schedule'
+];
+
 function loadSecondaryCarbonData() {
   if (secondaryLoading) return secondaryLoading;
-  const safe = (p, ms = 4000) => Promise.race([
+  const safe = (p, ms = 15000) => Promise.race([
     api(p).catch(() => null),
     new Promise(resolve => setTimeout(() => resolve(null), ms))
   ]);
-  secondaryLoading = Promise.all([
-    safe('/api/clients'), safe('/api/ufw'), safe('/api/cascade/status'),
-    safe('/api/cascade/proxy'), safe('/api/obf/current'), safe('/api/obf/profiles'),
-    safe('/api/ssl/status'), safe('/api/app/status'), safe('/api/rustdesk/status'),
-    safe('/api/users'), safe('/api/audit?limit=50'), safe('/api/backup/auto'),
-    safe('/api/notify/status'), safe('/api/awg/config'),
-    safe('/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global'),
-    safe('/api/traffic/distribution'), safe('/api/cascade/interfaces'), safe('/api/cascade/schedule')
-  ]).then(([clients, ufw, cascade, cascadeProxy, obf, profiles, ssl, app, rustdesk, users, audit, backup, notify, awgConfig, history, distribution, cascadeInterfaces, cascadeSchedule]) => {
+  secondaryLoading = Promise.all(SECONDARY_PATHS.map(p => safe(p))).then(results => {
     secondaryLoading = null;
-    if (Array.isArray(clients)) carbon.clients = clients;
-    if (ufw) carbon.ufw = ufw;
-    if (cascade) carbon.cascade = cascade;
-    if (cascadeProxy) carbon.cascadeProxy = cascadeProxy;
-    if (obf) carbon.obf = obf;
-    if (profiles) carbon.profiles = profiles;
-    if (ssl) carbon.ssl = ssl;
-    if (app) carbon.app = app;
-    if (rustdesk) carbon.rustdesk = rustdesk;
-    if (users) carbon.users = users;
-    if (audit) carbon.audit = audit;
-    if (backup) carbon.backup = backup;
-    if (notify) carbon.notify = notify;
-    if (awgConfig) carbon.awgConfig = awgConfig;
-    if (history) carbon.history = history;
-    if (distribution) carbon.distribution = distribution;
-    if (cascadeInterfaces && !cascadeInterfaces.error) carbon.cascadeInterfaces = cascadeInterfaces;
-    if (cascadeSchedule && !cascadeSchedule.error) carbon.cascadeSchedule = cascadeSchedule;
+    SECONDARY_PATHS.forEach((p, i) => assignCarbonPath(p, results[i]));
     applyShellData();
     if (typeof state !== 'undefined' && state.tab === 'dashboard') {
       const chart = document.getElementById('liveChartCard');
       if (chart) chart.outerHTML = realTrafficChart();
       const donut = document.getElementById('liveDistributionCard');
       if (donut) donut.outerHTML = realTrafficDistribution();
-    } else if (typeof state !== 'undefined') {
-      render();
+    } else if (typeof state !== 'undefined' && typeof ensureTabData === 'function') {
+      ensureTabData(state.tab);
     }
   }).catch(() => { secondaryLoading = null; });
   return secondaryLoading;
+}
+
+const TAB_DATA = {
+  clients: ['/api/clients'],
+  network: ['/api/interfaces', '/api/ufw', '/api/awg/config'],
+  cascade: ['/api/cascade/status', '/api/cascade/proxy', '/api/cascade/interfaces', '/api/cascade/schedule'],
+  obf: ['/api/obf/current', '/api/obf/profiles'],
+  security: ['/api/security/status', '/api/ufw'],
+  admin: ['/api/users', '/api/audit?limit=50', '/api/backup/auto', '/api/notify/status'],
+  ssl: ['/api/ssl/status'],
+  app: ['/api/app/status'],
+  rustdesk: ['/api/rustdesk/status'],
+  update: ['/api/update/info']
+};
+const tabDataBusy = {};
+
+function ensureTabData(tab) {
+  if (tab === 'proxy') { ensureProxyData(); return; }
+  const paths = TAB_DATA[tab];
+  if (!paths || tabDataBusy[tab]) return;
+  tabDataBusy[tab] = true;
+  Promise.all(paths.map(p => api(p).catch(() => null))).then(results => {
+    tabDataBusy[tab] = false;
+    let got = false;
+    paths.forEach((p, i) => { if (assignCarbonPath(p, results[i])) got = true; });
+    applyShellData();
+    if (got && typeof state !== 'undefined' && state.tab === tab) render();
+  }).catch(() => { tabDataBusy[tab] = false; });
 }
 
 function clientStatus(c) {
