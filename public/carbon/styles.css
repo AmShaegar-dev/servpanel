@@ -93,6 +93,14 @@ button{background:none;border:0;cursor:pointer}a{color:inherit;text-decoration:n
 .carbon-loading{animation:carbonPulse 1.2s ease-in-out infinite}
 .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:20px;min-width:0}
+#view > .mini-grid{margin-bottom:16px}
+.share-legend{display:flex;flex-direction:column;gap:2px;margin-top:2px}
+.share-legend-item{display:flex;align-items:center;gap:8px;width:100%;background:none;border:0;padding:5px 6px;border-radius:8px;color:var(--text-2);cursor:pointer;text-align:left}
+.share-legend-item:hover{background:var(--surface-2)}
+.share-legend-item.active{background:var(--surface-3);color:var(--text)}
+.share-legend-item i{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+.share-legend-item b{font-size:11px;font-weight:700;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.share-legend-item span{font:500 9px/1 var(--mono);color:var(--text-3);white-space:nowrap}
 .card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:15px}
 .card-title{font-size:13px;font-weight:800;letter-spacing:-.01em}
 .card-sub{font:500 9px/1.4 var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--text-3);margin-top:4px}
@@ -270,7 +278,7 @@ button{background:none;border:0;cursor:pointer}a{color:inherit;text-decoration:n
 .toast.show{opacity:1;transform:none}
 .footnote{display:flex;justify-content:space-between;gap:14px;margin-top:26px;padding-top:18px;border-top:1px solid var(--line);font:500 9px/1.5 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);flex-wrap:wrap}
 .footnote b{color:var(--text-2);font-weight:500}
-@media(max-width:1200px){.kpi{grid-column:span 6}.chart-card,.donut-card,.events{grid-column:span 12}.mini-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:1200px){.kpi{grid-column:span 6}.chart-card,.donut-card,.events{grid-column:span 12}.mini-grid{grid-template-columns:repeat(2,1fr)}.client-share-card,.client-table-card{grid-column:span 12 !important}}
 @media(max-width:900px){
   .icon-btn.mobile-menu{display:inline-flex}
   .sidebar{display:block;position:fixed;left:0;top:0;bottom:0;z-index:60;width:min(280px,84vw);flex:0 0 auto;height:100dvh;transform:translateX(-100%);transition:transform .2s ease;overflow-y:auto;overscroll-behavior:contain}

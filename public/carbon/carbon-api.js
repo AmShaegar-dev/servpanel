@@ -316,12 +316,23 @@ function loadDashboardExtras() {
     dashboardExtrasLoading = null;
     paths.forEach((p, i) => assignCarbonPath(p, results[i]));
     if (typeof state !== 'undefined' && state.tab === 'dashboard') {
-      const chart = document.getElementById('liveChartCard');
-      if (chart) chart.outerHTML = realTrafficChart();
-      const donut = document.getElementById('liveDistributionCard');
-      if (donut) donut.outerHTML = realTrafficDistribution();
+      updateDashboardSystem();
+      updateDashboardDonut();
     }
   }).catch(() => { dashboardExtrasLoading = null; });
+  // Если /api/stats не успел за первый проход, повторяем отдельно,
+  // иначе нижняя таблица клиентов останется пустой.
+  if (!carbon.clients.length) {
+    api('/api/stats').then(stats => {
+      if (!Array.isArray(stats)) return;
+      carbon.clients = stats;
+      carbonLastStatsAt = Date.now();
+      if (typeof state !== 'undefined' && state.tab === 'dashboard') {
+        updateDashboardClients();
+        applyShellData();
+      }
+    }).catch(() => null);
+  }
   return dashboardExtrasLoading;
 }
 
@@ -436,9 +447,61 @@ function realTrafficChart() {
   const rxPath = chartPath(rx, max, width, height);
   const txPath = chartPath(tx, max, width, height);
   const area = rxPath ? `${rxPath} L${width},${height} L0,${height} Z` : '';
-  const names = { '1h': 'последний час', '24h': 'последние 24 часа', '7d': 'последние 7 суток' };
-  const subline = range === '1h' && labels.length ? labels[0] + ' — ' + labels[labels.length - 1] : names[range];
-  return `<section class="card" id="liveChartCard" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Трафик</div><div class="card-sub">${escHtml(subline || '')}</div></div><div class="legend"><span><i style="background:#5b8cff"></i>Rx</span><span><i style="background:var(--accent)"></i>Tx</span><div class="chips" style="margin-left:8px"><button class="chip ${range === '1h' ? 'on' : ''}" data-carbon-action="chart-range" data-range="1h">1ч</button><button class="chip ${range === '24h' ? 'on' : ''}" data-carbon-action="chart-range" data-range="24h">24ч</button><button class="chip ${range === '7d' ? 'on' : ''}" data-carbon-action="chart-range" data-range="7d">7д</button></div></div></div>${labels.length ? `<svg class="chart" viewBox="0 0 760 235" preserveAspectRatio="none" aria-label="График трафика"><g stroke="var(--line)" stroke-width="1"><line x1="0" y1="${height / 4}" x2="${width}" y2="${height / 4}"/><line x1="0" y1="${height / 2}" x2="${width}" y2="${height / 2}"/><line x1="0" y1="${height * 0.75}" x2="${width}" y2="${height * 0.75}"/></g><path d="${area}" fill="rgba(91,140,255,.10)" stroke="none"/><path d="${txPath}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" vector-effect="non-scaling-stroke"/><path d="${rxPath}" fill="none" stroke="#5b8cff" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg><div class="mini-grid" style="grid-template-columns:repeat(4,1fr);margin-top:10px">${mini('Пик Rx', fmtBytes(Math.round(max)) + '/s', 'сглажено')}${mini('Точек', String(labels.length), 'в окне')}${mini('Rx', fmtBytes(Math.round(rx.reduce((a, b) => a + b, 0) / Math.max(1, rx.length))) + '/s', 'среднее')}${mini('Tx', fmtBytes(Math.round(tx.reduce((a, b) => a + b, 0) / Math.max(1, tx.length))) + '/s', 'среднее')}</div>` : '<div class="empty-row">Нет данных истории за этот период</div>'}</section>`;
+  const names = { '5m': 'последние 5 минут', '1h': 'последний час', '3h': 'последние 3 часа', '24h': 'последние 24 часа', '7d': 'последние 7 суток' };
+  const subline = labels.length ? labels[0] + ' — ' + labels[labels.length - 1] : names[range];
+  const chip = (value, label) => `<button class="chip ${range === value ? 'on' : ''}" data-carbon-action="chart-range" data-range="${value}">${label}</button>`;
+  return `<section class="card" id="liveChartCard" style="grid-column:span 7;position:relative"><div class="card-top"><div><div class="card-title">Трафик</div><div class="card-sub">${escHtml(subline || '')}</div></div><div class="legend"><span><i style="background:#5b8cff"></i>Rx</span><span><i style="background:var(--accent)"></i>Tx</span><div class="chips" style="margin-left:8px">${chip('5m', '5м')}${chip('1h', '1ч')}${chip('3h', '3ч')}${chip('24h', '24ч')}${chip('7d', '7д')}</div></div></div>${labels.length ? `<svg class="chart" viewBox="0 0 760 235" preserveAspectRatio="none" aria-label="График трафика" onmousemove="carbonChartHover(event)" onmouseleave="carbonChartLeave()"><rect x="0" y="0" width="760" height="235" fill="transparent" pointer-events="all"/><g stroke="var(--line)" stroke-width="1"><line x1="0" y1="${height / 4}" x2="${width}" y2="${height / 4}"/><line x1="0" y1="${height / 2}" x2="${width}" y2="${height / 2}"/><line x1="0" y1="${height * 0.75}" x2="${width}" y2="${height * 0.75}"/></g><path d="${area}" fill="rgba(91,140,255,.10)" stroke="none"/><path d="${txPath}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" vector-effect="non-scaling-stroke"/><path d="${rxPath}" fill="none" stroke="#5b8cff" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/><g id="chartCross" style="display:none;pointer-events:none"><line id="chartCrossLine" x1="0" y1="0" x2="0" y2="${height}" stroke="var(--text-3)" stroke-width="1" stroke-dasharray="4 4"/><circle id="chartDotRx" r="3.5" fill="#5b8cff" stroke="var(--surface-1)" stroke-width="2"/><circle id="chartDotTx" r="3.5" fill="var(--accent)" stroke="var(--surface-1)" stroke-width="2"/></g></svg><div class="mini-grid" style="grid-template-columns:repeat(4,1fr);margin-top:10px">${mini('Пик Rx', fmtBytes(Math.round(max)) + '/s', 'сглажено')}${mini('Точек', String(labels.length), 'в окне')}${mini('Rx', fmtBytes(Math.round(rx.reduce((a, b) => a + b, 0) / Math.max(1, rx.length))) + '/s', 'среднее')}${mini('Tx', fmtBytes(Math.round(tx.reduce((a, b) => a + b, 0) / Math.max(1, tx.length))) + '/s', 'среднее')}</div>` : '<div class="empty-row">Нет данных истории за этот период</div>'}<div id="chartTip" style="position:absolute;display:none;z-index:6;pointer-events:none;background:var(--surface-1);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.55;box-shadow:0 8px 24px rgba(0,0,0,.35);white-space:nowrap"></div></section>`;
+}
+
+function carbonChartHover(event) {
+  const svg = event.target && event.target.closest ? event.target.closest('svg') : null;
+  const card = svg ? svg.closest('#liveChartCard') : null;
+  if (!svg || !card) return;
+  const h = carbon.history || {};
+  const labels = Array.isArray(h.labels) ? h.labels : [];
+  const range = carbon.chartRange || '1h';
+  const rx = smoothTraffic(h.rx, range);
+  const tx = smoothTraffic(h.tx, range);
+  const n = Math.max(rx.length, tx.length, labels.length);
+  if (!n) return;
+  const rect = svg.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width)));
+  const i = Math.min(n - 1, Math.round(ratio * (n - 1)));
+  const rxVal = Number(rx[i]) || 0;
+  const txVal = Number(tx[i]) || 0;
+  const max = Math.max(1, ...rx, ...tx);
+  const height = 190;
+  const x = ratio * 760;
+  const yRx = height - (rxVal / max) * height;
+  const yTx = height - (txVal / max) * height;
+  const cross = card.querySelector('#chartCross');
+  if (cross) cross.style.display = '';
+  const line = card.querySelector('#chartCrossLine');
+  if (line) { line.setAttribute('x1', x); line.setAttribute('x2', x); }
+  const dotRx = card.querySelector('#chartDotRx');
+  if (dotRx) { dotRx.setAttribute('cx', x); dotRx.setAttribute('cy', yRx); }
+  const dotTx = card.querySelector('#chartDotTx');
+  if (dotTx) { dotTx.setAttribute('cx', x); dotTx.setAttribute('cy', yTx); }
+  const tip = card.querySelector('#chartTip');
+  if (!tip) return;
+  tip.style.display = 'block';
+  tip.innerHTML = `<b>${escHtml(labels[i] || '')}</b><br>Rx: ${fmtBytes(rxVal)}/s<br>Tx: ${fmtBytes(txVal)}/s`;
+  const cardRect = card.getBoundingClientRect();
+  let left = event.clientX - cardRect.left + 14;
+  let top = event.clientY - cardRect.top + 14;
+  if (left + 160 > cardRect.width) left = Math.max(6, cardRect.width - 166);
+  if (top + 76 > cardRect.height) top = Math.max(6, event.clientY - cardRect.top - 82);
+  tip.style.left = left + 'px';
+  tip.style.top = top + 'px';
+}
+
+function carbonChartLeave() {
+  const card = document.getElementById('liveChartCard');
+  if (!card) return;
+  const cross = card.querySelector('#chartCross');
+  if (cross) cross.style.display = 'none';
+  const tip = card.querySelector('#chartTip');
+  if (tip) tip.style.display = 'none';
 }
 
 function realTrafficDistribution() {
@@ -521,11 +584,38 @@ function realDashboard() {
     </div>`;
 }
 
+const CLIENT_SHARE_COLORS = ['#5b8cff', '#f2b84b', '#26c281', '#e15b64', '#a06bff', '#4cc9f0', '#ff8a5b', '#8bd450', '#d29922', '#ff6bcb'];
+
+function clientTrafficValue(c) {
+  const total = Number(c && c.total_octets);
+  if (Number.isFinite(total) && total > 0) return total;
+  return (Number(c && c.rx) || 0) + (Number(c && c.tx) || 0);
+}
+
+function realClientShareCard() {
+  const rows = (carbon.clients || [])
+    .map(c => ({ name: c.name || '—', value: clientTrafficValue(c) }))
+    .sort((a, b) => b.value - a.value);
+  const total = rows.reduce((a, x) => a + x.value, 0);
+  if (!rows.length) {
+    return `<section class="card client-share-card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">Фильтрация</div><div class="card-sub">Доля трафика по клиентам</div></div>${tag('0', 'muted')}</div><div class="empty-row">Клиентов пока нет</div></section>`;
+  }
+  const segments = rows.map((x, i) => {
+    const pct = total ? x.value / total * 100 : 0;
+    return `<span data-client-share="${escHtml(x.name)}" title="${escHtml(x.name)} · ${fmtBytes(x.value)} (${pct.toFixed(1)}%)" style="width:${pct.toFixed(3)}%;min-width:${x.value > 0 ? '2px' : '0'};background:${CLIENT_SHARE_COLORS[i % CLIENT_SHARE_COLORS.length]};cursor:pointer;display:block"></span>`;
+  }).join('');
+  const legend = rows.map((x, i) => {
+    const pct = total ? Math.round(x.value / total * 100) : 0;
+    return `<button type="button" class="share-legend-item" data-client-share="${escHtml(x.name)}"><i style="background:${CLIENT_SHARE_COLORS[i % CLIENT_SHARE_COLORS.length]}"></i><b>${escHtml(x.name)}</b><span>${pct}% · ${fmtBytes(x.value)}</span></button>`;
+  }).join('');
+  return `<section class="card client-share-card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">Фильтрация</div><div class="card-sub">Доля трафика по клиентам · нажмите на сегмент</div></div>${tag(String(rows.length), 'muted')}</div><div style="display:flex;height:14px;border-radius:99px;overflow:hidden;background:var(--surface-3);margin:4px 0 14px">${segments}</div><div class="share-legend">${legend}</div></section>`;
+}
+
 function realClients() {
   const online = carbon.clients.filter(clientStatus).length;
   return `<div class="page-head"><div><div class="page-title">Клиенты</div><div class="page-sub">Реальный список из API. Создание, удаление и статусы.</div></div><div class="page-actions"><button class="btn" data-carbon-action="client-bulk-rename">${icon('edit')}Массовое переименование</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button><button class="btn btn-primary" data-action="open-client-modal">${icon('plus')}Добавить клиента</button></div></div>
     <div class="mini-grid">${mini('Всего клиентов', String(carbon.clients.length), 'в панели')}${mini('Онлайн', String(online), 'активные')}${mini('Трафик RX', fmtBytes(carbon.clients.reduce((a, c) => a + (Number(c.rx) || 0), 0)), 'всего')}${mini('Трафик TX', fmtBytes(carbon.clients.reduce((a, c) => a + (Number(c.tx) || 0), 0)), 'всего')}</div>
-    <section class="card table-card"><div class="card-top"><div><div class="card-title">Все клиенты</div><div class="card-sub">API /api/clients</div></div></div>${realClientsTable()}</section>`;
+    <div class="grid" style="align-items:start">${realClientShareCard()}<section class="card table-card client-table-card" style="grid-column:span 8"><div class="card-top"><div><div class="card-title">Все клиенты</div><div class="card-sub">API /api/clients</div></div></div>${realClientsTable()}</section></div>`;
 }
 
 function realInstall() {
@@ -893,8 +983,11 @@ document.addEventListener('click', async event => {
   }
 }, true);
 
-let carbonLiveTimer = null;
-let carbonLiveBusy = false;
+let carbonFastTimer = null;
+let carbonStatsTimer = null;
+let carbonFastBusy = false;
+let carbonStatsBusy = false;
+let carbonDistTick = 0;
 let carbonLastStatsAt = 0;
 
 function setLiveText(id, value) {
@@ -902,58 +995,91 @@ function setLiveText(id, value) {
   if (el) el.textContent = value;
 }
 
-async function refreshDashboardLive() {
-  if (document.hidden || carbonLiveBusy) return;
+function updateDashboardClients() {
+  const clients = carbon.clients || [];
+  const online = clients.filter(clientStatus).length;
+  const rx = clients.reduce((a, c) => a + (Number(c.rx) || 0), 0);
+  const tx = clients.reduce((a, c) => a + (Number(c.tx) || 0), 0);
+  setLiveText('liveTx', fmtBytes(tx));
+  setLiveText('liveRx', fmtBytes(rx));
+  setLiveText('liveClients', String(clients.length));
+  setLiveText('liveOnline', String(online));
+  const tbody = document.querySelector('#view #clientsTable tbody');
+  if (tbody) tbody.innerHTML = realClientRows();
+}
+
+function updateDashboardSystem() {
+  const system = carbon.sys || {};
+  setLiveText('liveUptime', system.uptime || '—');
+  setLiveText('liveUptimeMeta', system.uptime || '—');
+  setLiveText('liveCpu', (system.cpu || '—') + '%');
+  setLiveText('liveRam', (system.ram || '—') + '%');
+  const hRx = (carbon.history && carbon.history.rx) || [];
+  const hTx = (carbon.history && carbon.history.tx) || [];
+  const lastRx = hRx.length ? hRx[hRx.length - 1] : 0;
+  const lastTx = hTx.length ? hTx[hTx.length - 1] : 0;
+  setLiveText('liveSpeed', '↓ ' + fmtBytes(lastRx) + '/s · ↑ ' + fmtBytes(lastTx) + '/s');
+  const chart = document.getElementById('liveChartCard');
+  if (chart && !chart.matches(':hover')) chart.outerHTML = realTrafficChart();
+}
+
+function updateDashboardDonut() {
+  const donut = document.getElementById('liveDistributionCard');
+  if (donut && !donut.matches(':hover')) donut.outerHTML = realTrafficDistribution();
+}
+
+async function refreshDashboardFast() {
+  if (document.hidden || carbonFastBusy) return;
   if (typeof state !== 'undefined' && state.tab !== 'dashboard') return;
   if (typeof carbon === 'undefined' || !carbon.loaded) return;
-  carbonLiveBusy = true;
+  carbonFastBusy = true;
   try {
-    // /api/stats (manage stats) на медленных VPS занимает 2-3 секунды.
-    // Опрашиваем его реже, а быстрые sysinfo/history/distribution — каждые 5 с.
-    const needStats = Date.now() - carbonLastStatsAt >= 15000;
-    const [stats, sys, dist, hist] = await Promise.all([
-      needStats ? api('/api/stats').catch(() => null) : Promise.resolve(null),
+    // CPU/RAM/uptime и скорость — быстрый опрос каждые 2.5 с.
+    // Диаграмму распределения обновляем реже, чтобы не грузить сервер.
+    carbonDistTick++;
+    const wantDist = carbonDistTick % 2 === 0;
+    const [sys, hist, dist] = await Promise.all([
       api('/api/sysinfo').catch(() => null),
-      api('/api/traffic/distribution').catch(() => null),
-      api('/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global').catch(() => null)
+      api('/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global').catch(() => null),
+      wantDist ? api('/api/traffic/distribution').catch(() => null) : Promise.resolve(null)
     ]);
-    if (Array.isArray(stats)) { carbon.clients = stats; carbonLastStatsAt = Date.now(); }
     if (sys && !sys.error) carbon.sys = sys;
-    if (dist && !dist.error) carbon.distribution = dist;
     if (hist && !hist.error) carbon.history = hist;
-    const clients = carbon.clients || [];
-    const online = clients.filter(clientStatus).length;
-    const rx = clients.reduce((a, c) => a + (Number(c.rx) || 0), 0);
-    const tx = clients.reduce((a, c) => a + (Number(c.tx) || 0), 0);
-    const system = carbon.sys || {};
-    setLiveText('liveTx', fmtBytes(tx));
-    setLiveText('liveRx', fmtBytes(rx));
-    setLiveText('liveClients', String(clients.length));
-    setLiveText('liveOnline', String(online));
-    setLiveText('liveUptime', system.uptime || '—');
-    setLiveText('liveUptimeMeta', system.uptime || '—');
-    setLiveText('liveCpu', (system.cpu || '—') + '%');
-    setLiveText('liveRam', (system.ram || '—') + '%');
-    const hRx = (carbon.history && carbon.history.rx) || [];
-    const hTx = (carbon.history && carbon.history.tx) || [];
-    const lastRx = hRx.length ? hRx[hRx.length - 1] : 0;
-    const lastTx = hTx.length ? hTx[hTx.length - 1] : 0;
-    setLiveText('liveSpeed', '↓ ' + fmtBytes(lastRx) + '/s · ↑ ' + fmtBytes(lastTx) + '/s');
-    const chart = document.getElementById('liveChartCard');
-    if (chart) chart.outerHTML = realTrafficChart();
-    const donut = document.getElementById('liveDistributionCard');
-    if (donut) donut.outerHTML = realTrafficDistribution();
-    applyShellData();
+    if (dist && !dist.error) carbon.distribution = dist;
+    updateDashboardSystem();
+    if (dist && !dist.error) updateDashboardDonut();
   } catch (e) {
     /* тихо ждём следующего тика */
   } finally {
-    carbonLiveBusy = false;
+    carbonFastBusy = false;
+  }
+}
+
+async function refreshDashboardStats() {
+  if (document.hidden || carbonStatsBusy) return;
+  if (typeof state !== 'undefined' && state.tab !== 'dashboard') return;
+  if (typeof carbon === 'undefined' || !carbon.loaded) return;
+  carbonStatsBusy = true;
+  try {
+    // manage stats на медленных VPS идёт 2-4 с — отдельный редкий опрос.
+    const stats = await api('/api/stats').catch(() => null);
+    if (Array.isArray(stats)) {
+      carbon.clients = stats;
+      carbonLastStatsAt = Date.now();
+      updateDashboardClients();
+      applyShellData();
+    }
+  } catch (e) {
+    /* тихо ждём следующего тика */
+  } finally {
+    carbonStatsBusy = false;
   }
 }
 
 function startDashboardLive() {
-  if (carbonLiveTimer) return;
-  carbonLiveTimer = setInterval(refreshDashboardLive, 5000);
+  if (carbonFastTimer) return;
+  carbonFastTimer = setInterval(refreshDashboardFast, 2500);
+  carbonStatsTimer = setInterval(refreshDashboardStats, 15000);
 }
 
 function renderCarbonLoading() {
@@ -967,7 +1093,11 @@ async function initCarbon() {
   bindMobileMenu();
   renderCarbonLoading();
   try {
-    await api('/api/security/status');
+    const sec = await api('/api/security/status');
+    if (sec && sec.user) {
+      carbon.user = sec.user;
+      carbon.role = sec.role || carbon.role;
+    }
   } catch (e) {
     if (String(e.message).includes('Unauthorized') || String(e.message).includes('401')) {
       showCarbonLogin();
