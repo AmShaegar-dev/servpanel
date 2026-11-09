@@ -563,6 +563,23 @@ function warpDomainList() {
     } catch (e) { return []; }
 }
 
+function warpOverrides() {
+    try {
+        const raw = JSON.parse(fs.readFileSync(WARP_ROUTES_FILE, 'utf8').replace(/^\uFEFF/, ''));
+        const src = raw && raw.overrides && typeof raw.overrides === 'object' ? raw.overrides : {};
+        const out = {};
+        for (const [id, v] of Object.entries(src)) {
+            if (!WARP_SERVICE_CATALOG.some(s => s.id === id)) continue;
+            const label = String(v && v.label || '').slice(0, 80);
+            const domains = [...new Set((Array.isArray(v && v.domains) ? v.domains : [])
+                .map(d => String(d).trim().toLowerCase())
+                .filter(d => HOST_RE.test(d)))];
+            if (label && domains.length) out[id] = { label, domains };
+        }
+        return out;
+    } catch (e) { return {}; }
+}
+
 function warpCustomCatalog() {
     try {
         const raw = JSON.parse(fs.readFileSync(WARP_ROUTES_FILE, 'utf8').replace(/^\uFEFF/, ''));
@@ -581,7 +598,12 @@ function warpCustomCatalog() {
 }
 
 function warpCatalog() {
-    return [...WARP_SERVICE_CATALOG, ...warpCustomCatalog()];
+    const overrides = warpOverrides();
+    const builtins = WARP_SERVICE_CATALOG.map(s => {
+        const o = overrides[s.id];
+        return o ? { ...s, label: o.label, domains: o.domains, overridden: true } : s;
+    });
+    return [...builtins, ...warpCustomCatalog()];
 }
 
 function warpRoutes() {
@@ -621,7 +643,7 @@ function writeWarpRoutes(routes) {
         const v = routes && routes[s.id];
         clean[s.id] = ['warp', 'direct', 'off'].includes(v) ? v : 'direct';
     }
-    writeJson(WARP_ROUTES_FILE, { routes: clean, custom: warpCustomCatalog().map(c => ({ id: c.id, label: c.label, domains: c.domains })), updatedAt: new Date().toISOString() }, 0o600);
+    writeJson(WARP_ROUTES_FILE, { routes: clean, custom: warpCustomCatalog().map(c => ({ id: c.id, label: c.label, domains: c.domains })), overrides: warpOverrides(), updatedAt: new Date().toISOString() }, 0o600);
     return clean;
 }
 
@@ -5906,6 +5928,17 @@ app.post('/api/warp/custom', checkAuth, requireAdmin, (req, res) => {
     try { raw = JSON.parse(fs.readFileSync(WARP_ROUTES_FILE, 'utf8').replace(/^\uFEFF/, '')); } catch (e) { raw = {}; }
     const custom = Array.isArray(raw.custom) ? raw.custom : [];
     let id = String(body.id || '').trim();
+    if (id && !id.startsWith('custom-')) {
+        const base = WARP_SERVICE_CATALOG.find(s => s.id === id);
+        if (!base) return res.status(404).json({ error: 'Сервис не найден' });
+        const overrides = warpOverrides();
+        overrides[id] = { label, domains };
+        const routes = warpRoutes();
+        if (!routes[id]) routes[id] = 'direct';
+        writeJson(WARP_ROUTES_FILE, { routes, custom: warpCustomCatalog().map(c => ({ id: c.id, label: c.label, domains: c.domains })), overrides, updatedAt: new Date().toISOString() }, 0o600);
+        auditLog(req, `WARP: изменён сервис ${label} (${domains.length} доменов)`);
+        return res.json({ success: true, id, label, domains, overridden: true });
+    }
     if (!id) {
         const base = 'custom-' + (label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'service');
         id = base;
@@ -5918,7 +5951,7 @@ app.post('/api/warp/custom', checkAuth, requireAdmin, (req, res) => {
     else custom.push({ id, label, domains });
     const routes = warpRoutes();
     if (!routes[id]) routes[id] = 'direct';
-    writeJson(WARP_ROUTES_FILE, { routes, custom, updatedAt: new Date().toISOString() }, 0o600);
+    writeJson(WARP_ROUTES_FILE, { routes, custom, overrides: warpOverrides(), updatedAt: new Date().toISOString() }, 0o600);
     auditLog(req, `WARP: свой сервис ${label} (${domains.length} доменов)`);
     res.json({ success: true, id, label, domains });
 });
@@ -5931,7 +5964,7 @@ app.delete('/api/warp/custom/:id', checkAuth, requireAdmin, (req, res) => {
     const custom = (Array.isArray(raw.custom) ? raw.custom : []).filter(c => c.id !== id);
     const routes = warpRoutes();
     delete routes[id];
-    writeJson(WARP_ROUTES_FILE, { routes, custom, updatedAt: new Date().toISOString() }, 0o600);
+    writeJson(WARP_ROUTES_FILE, { routes, custom, overrides: warpOverrides(), updatedAt: new Date().toISOString() }, 0o600);
     auditLog(req, `WARP: удалён свой сервис ${id}`);
     res.json({ success: true });
 });
