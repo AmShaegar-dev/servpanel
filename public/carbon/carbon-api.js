@@ -399,14 +399,30 @@ function clientTrafficValue(c) {
   return (Number(c && c.rx) || 0) + (Number(c && c.tx) || 0);
 }
 
+function lastHandshakeText(ts) {
+  const sec = Number(ts) || 0;
+  if (!sec) return '—';
+  const diff = Math.max(0, Math.floor(Date.now() / 1000) - sec);
+  if (diff < 60) return diff + ' сек. назад';
+  if (diff < 3600) return Math.floor(diff / 60) + ' мин. назад';
+  if (diff < 86400) return Math.floor(diff / 3600) + ' ч. назад';
+  return Math.floor(diff / 86400) + ' дн. назад';
+}
+
+function lastHandshakeTitle(ts) {
+  const sec = Number(ts) || 0;
+  return sec ? new Date(sec * 1000).toLocaleString('ru-RU') : 'Нет данных';
+}
+
 function realClientRows() {
-  if (!carbon.clients.length) return `<tr class="empty-row"><td colspan="7">Клиентов пока нет. Создайте первого.</td></tr>`;
+  if (!carbon.clients.length) return `<tr class="empty-row"><td colspan="8">Клиентов пока нет. Создайте первого.</td></tr>`;
   const d = carbon.distribution || {};
   const isEu = (d.role || 'ru') === 'eu';
   const pctText = v => v >= 10 ? Math.round(v) + '%' : v >= 0.1 ? v.toFixed(1) + '%' : '0%';
   return carbon.clients.map(c => {
     const online = clientStatus(c);
     const traffic = clientTrafficValue(c);
+    const handshake = Number(c.last_handshake || c.latest_handshake) || 0;
     const cascade = Number(c.split_cascade) || 0;
     const direct = Number(c.split_direct) || 0;
     const splitTotal = cascade + direct;
@@ -426,6 +442,7 @@ function realClientRows() {
       <td class="mono">${escHtml(c.ip || '—')}</td>
       <td>${escHtml(clientStateText(c, online))}</td>
       <td class="mono">${fmtBytes(traffic)}</td>
+      <td class="mono" title="${escHtml(lastHandshakeTitle(handshake))}">${escHtml(lastHandshakeText(handshake))}</td>
       <td>${splitCell}</td>
       <td><span class="status ${online ? '' : 'idle'}"><span class="dot"></span>${online ? 'в сети' : 'не в сети'}</span></td>
       <td><div class="page-actions"><button class="row-action" data-carbon-action="client-key" data-name="${escHtml(c.name)}" title="Ключ и QR">${icon('key')}</button><button class="row-action" data-carbon-action="client-rename" data-name="${escHtml(c.name)}" title="Переименовать">${icon('edit')}</button><button class="row-action" data-copy="${escHtml(c.ip || '')}" title="Скопировать IP">${icon('copy')}</button><button class="row-action" data-carbon-action="client-delete" data-name="${escHtml(c.name)}" title="Удалить">${icon('trash')}</button></div></td>
@@ -435,7 +452,7 @@ function realClientRows() {
 
 function realClientsTable() {
   return `<div class="table-tools"><div class="table-search">${icon('search')}<input id="clientSearch" placeholder="Имя или IP" aria-label="Фильтр клиентов"></div><button class="tag" data-toast="Клиентов: ${carbon.clients.length}">Все клиенты ${icon('arrow', 'ico')}</button></div>
-    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr><th>Клиент</th><th>IP</th><th>Состояние</th><th>Трафик</th><th>Каскад / RU</th><th>Связь</th><th style="width:80px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
+    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr><th>Клиент</th><th>IP</th><th>Состояние</th><th>Трафик</th><th>Последнее рукопожатие</th><th>Каскад / RU</th><th>Связь</th><th style="width:80px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
 }
 
 function smoothTraffic(values, range) {
