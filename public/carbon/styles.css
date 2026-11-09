@@ -88,6 +88,9 @@ button{background:none;border:0;cursor:pointer}a{color:inherit;text-decoration:n
 .overview-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .live{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:99px;background:var(--surface);font:500 10px/1 var(--mono);letter-spacing:.06em;color:var(--text-2)}
 .dot{width:6px;height:6px;border-radius:50%;background:var(--good)}
+.carbon-loading{display:flex;align-items:center;justify-content:center;min-height:50vh;color:var(--text-3);font:500 11px/1.4 var(--mono);letter-spacing:.1em;text-transform:uppercase}
+@keyframes carbonPulse{0%,100%{opacity:.45}50%{opacity:1}}
+.carbon-loading{animation:carbonPulse 1.2s ease-in-out infinite}
 .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:20px;min-width:0}
 .card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:15px}

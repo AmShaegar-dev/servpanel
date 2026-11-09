@@ -1,5 +1,7 @@
 'use strict';
 
+window.__CARBON_API__ = true;
+
 /* Carbon SPA API bridge. Keeps the final layout while using the real panel API. */
 
 const carbon = {
@@ -242,7 +244,10 @@ async function carbonLogout() {
 }
 
 async function loadCarbonData() {
-  const safe = p => api(p).catch(() => null);
+  const safe = (p, ms = 4000) => Promise.race([
+    api(p).catch(() => null),
+    new Promise(resolve => setTimeout(() => resolve(null), ms))
+  ]);
   const [stats, clients, modules, services, security, interfaces, update, server, sys, ufw, cascade, cascadeProxy, obf, profiles, proxy, proxyUsers, ssl, app, rustdesk, users, audit, backup, notify, awgConfig, history, distribution, cascadeInterfaces] = await Promise.all([
     safe('/api/stats'), safe('/api/clients'), safe('/api/modules'), safe('/api/services'),
     safe('/api/security/status'), safe('/api/interfaces'), safe('/api/update/info'),
@@ -832,10 +837,16 @@ function startDashboardLive() {
   carbonLiveTimer = setInterval(refreshDashboardLive, 5000);
 }
 
+function renderCarbonLoading() {
+  const view = document.getElementById('view');
+  if (view) view.innerHTML = '<div class="carbon-loading">Загрузка данных…</div>';
+}
+
 async function initCarbon() {
   bindRealData();
   bindGlobalSearch();
   bindMobileMenu();
+  renderCarbonLoading();
   try {
     await api('/api/security/status');
   } catch (e) {
