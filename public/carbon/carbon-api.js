@@ -555,6 +555,7 @@ function ensureProxyData() {
 
 function realProxy() {
   ensureProxyData();
+  const proxyLoading = !carbon.proxy && !carbon.proxyUsers && proxyEnsureInFlight;
   const p = carbon.proxy || {};
   const raw = carbon.proxyUsers;
   const users = Array.isArray(raw) ? raw : (raw && raw.users) || [];
@@ -565,7 +566,7 @@ function realProxy() {
       const enabled = u.enabled !== false;
       const status = !enabled ? 'выключен' : (u.in_runtime ? 'включён' : 'не загружен');
       return `<tr><td class="name">${escHtml(u.username || u.name)}</td><td><span class="status ${enabled && u.in_runtime ? '' : 'idle'}"><span class="dot"></span>${escHtml(status)}</span></td><td class="mono">${fmtBytes(u.total_octets || u.traffic || u.total || 0)}</td><td class="mono">${u.current_connections == null ? '—' : escHtml(String(u.current_connections))}</td><td class="mono">${escHtml(u.expiration_rfc3339 ? fmtDate(u.expiration_rfc3339) : '—')}</td><td><div class="page-actions"><button class="row-action" data-carbon-action="proxy-user-edit" data-name="${escHtml(u.username || u.name)}" title="Изменить">${icon('edit')}</button><button class="row-action" data-carbon-action="proxy-user-links" data-name="${escHtml(u.username || u.name)}" title="Ссылки и QR">${icon('link')}</button><button class="row-action" data-carbon-action="proxy-user-action" data-act="${enabled ? 'disable' : 'enable'}" data-name="${escHtml(u.username || u.name)}" title="${enabled ? 'Выключить' : 'Включить'}">${icon(enabled ? 'stop' : 'play')}</button><button class="row-action" data-carbon-action="proxy-user-action" data-act="rotate-secret" data-name="${escHtml(u.username || u.name)}" title="Новый секрет">${icon('refresh')}</button><button class="row-action" data-carbon-action="proxy-user-delete" data-name="${escHtml(u.username || u.name)}" title="Удалить">${icon('trash')}</button></div></td></tr>`;
-    }).join('') || '<tr><td colspan="6">Прокси-движок не найден или пользователей нет</td></tr>'}</tbody></table></div></section>`;
+    }).join('') || `<tr><td colspan="6">${proxyLoading ? 'Загрузка данных прокси…' : 'Прокси-движок не найден или пользователей нет'}</td></tr>`}</tbody></table></div></section>`;
 }
 
 function realDomains() {
