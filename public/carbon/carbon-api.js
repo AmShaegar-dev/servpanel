@@ -267,17 +267,24 @@ async function loadCarbonData() {
   if (sys) carbon.sys = sys;
   carbon.loaded = true;
   applyShellData();
-  // 2. Прокси — первым в очереди, затем остальные разделы.
+  // 2. Диаграмма, история и прокси — в фоне, без очереди из всех разделов.
+  loadDashboardExtras();
   loadProxyData();
-  loadSecondaryCarbonData();
 }
 
-let secondaryLoading = null;
+let dashboardExtrasLoading = null;
 
 function assignCarbonPath(path, data) {
   if (!data) return false;
   const p = String(path).split('?')[0];
-  if (p === '/api/clients') { if (Array.isArray(data)) carbon.clients = data; else return false; }
+  if (p === '/api/stats') { if (Array.isArray(data)) { carbon.stats = data; carbon.clients = data; } else return false; }
+  else if (p === '/api/sysinfo') carbon.sys = data;
+  else if (p === '/api/modules') { carbon.modules = data.modules || carbon.modules; }
+  else if (p === '/api/services') { if (Array.isArray(data)) carbon.services = data; else return false; }
+  else if (p === '/api/security/status') carbon.security = data;
+  else if (p === '/api/interfaces') { if (Array.isArray(data)) carbon.interfaces = data; else return false; }
+  else if (p === '/api/update/info') carbon.update = data;
+  else if (p === '/api/clients') { if (Array.isArray(data)) carbon.clients = data; else return false; }
   else if (p === '/api/ufw') carbon.ufw = data;
   else if (p === '/api/cascade/status') carbon.cascade = data;
   else if (p === '/api/cascade/proxy') carbon.cascadeProxy = data;
@@ -299,45 +306,36 @@ function assignCarbonPath(path, data) {
   return true;
 }
 
-const SECONDARY_PATHS = [
-  '/api/clients', '/api/ufw', '/api/cascade/status', '/api/cascade/proxy',
-  '/api/obf/current', '/api/obf/profiles', '/api/ssl/status', '/api/app/status',
-  '/api/rustdesk/status', '/api/users', '/api/audit?limit=50', '/api/backup/auto',
-  '/api/notify/status', '/api/awg/config',
-  '/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global',
-  '/api/traffic/distribution', '/api/cascade/interfaces', '/api/cascade/schedule'
-];
-
-function loadSecondaryCarbonData() {
-  if (secondaryLoading) return secondaryLoading;
-  const safe = (p, ms = 15000) => Promise.race([
-    api(p).catch(() => null),
-    new Promise(resolve => setTimeout(() => resolve(null), ms))
-  ]);
-  secondaryLoading = Promise.all(SECONDARY_PATHS.map(p => safe(p))).then(results => {
-    secondaryLoading = null;
-    SECONDARY_PATHS.forEach((p, i) => assignCarbonPath(p, results[i]));
-    applyShellData();
+function loadDashboardExtras() {
+  if (dashboardExtrasLoading) return dashboardExtrasLoading;
+  const paths = [
+    '/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global',
+    '/api/traffic/distribution'
+  ];
+  dashboardExtrasLoading = Promise.all(paths.map(p => api(p).catch(() => null))).then(results => {
+    dashboardExtrasLoading = null;
+    paths.forEach((p, i) => assignCarbonPath(p, results[i]));
     if (typeof state !== 'undefined' && state.tab === 'dashboard') {
       const chart = document.getElementById('liveChartCard');
       if (chart) chart.outerHTML = realTrafficChart();
       const donut = document.getElementById('liveDistributionCard');
       if (donut) donut.outerHTML = realTrafficDistribution();
-    } else if (typeof state !== 'undefined' && typeof ensureTabData === 'function') {
-      ensureTabData(state.tab);
     }
-  }).catch(() => { secondaryLoading = null; });
-  return secondaryLoading;
+  }).catch(() => { dashboardExtrasLoading = null; });
+  return dashboardExtrasLoading;
 }
 
 const TAB_DATA = {
+  dashboard: ['/api/stats', '/api/sysinfo', '/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global', '/api/traffic/distribution'],
   clients: ['/api/clients'],
+  install: ['/api/modules'],
   network: ['/api/interfaces', '/api/ufw', '/api/awg/config'],
   cascade: ['/api/cascade/status', '/api/cascade/proxy', '/api/cascade/interfaces', '/api/cascade/schedule'],
-  obf: ['/api/obf/current', '/api/obf/profiles'],
+  obfuscation: ['/api/obf/current', '/api/obf/profiles'],
+  services: ['/api/services'],
+  domains: ['/api/ssl/status'],
   security: ['/api/security/status', '/api/ufw'],
   admin: ['/api/users', '/api/audit?limit=50', '/api/backup/auto', '/api/notify/status'],
-  ssl: ['/api/ssl/status'],
   app: ['/api/app/status'],
   rustdesk: ['/api/rustdesk/status'],
   update: ['/api/update/info']
