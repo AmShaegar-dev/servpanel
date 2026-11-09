@@ -140,8 +140,7 @@ const WARP_SERVICE_CATALOG = [
             'api.openai.com', 'auth.openai.com', 'auth0.openai.com', 'platform.openai.com',
             'android.chat.openai.com', 'ios.chat.openai.com', 'tcr9i.chat.openai.com',
             'webrtc.chatgpt.com', 'operator.chatgpt.com', 'ab.chatgpt.com', 'cdn.oaistatic.com',
-            'files.oaiusercontent.com', 'videos.openai.com', 'sora.chatgpt.com',
-            'www.openai.com', 'www.chatgpt.com']
+            'files.oaiusercontent.com', 'videos.openai.com', 'sora.chatgpt.com']
     },
     {
         id: 'claude', group: 'AI', label: 'Claude / Anthropic',
@@ -149,7 +148,7 @@ const WARP_SERVICE_CATALOG = [
             'api.console.anthropic.com', 'console.anthropic.com', 'platform.claude.com',
             'auth.anthropic.com', 'support.anthropic.com', 'status.anthropic.com',
             'statsig.anthropic.com', 'cdn.anthropic.com', 'a-cdn.anthropic.com', 's-cdn.anthropic.com',
-            'a.claude.ai', 'a-api.anthropic.com', 'www.claude.ai', 'www.anthropic.com', 'workos.imgix.net']
+            'a.claude.ai', 'a-api.anthropic.com', 'workos.imgix.net']
     },
     {
         id: 'gemini', group: 'AI', label: 'Gemini / Google AI',
@@ -172,7 +171,7 @@ const WARP_SERVICE_CATALOG = [
     {
         id: 'grok', group: 'AI', label: 'Grok / xAI',
         domains: ['x.ai', 'grok.com', 'api.x.ai', 'assets.x.ai', 'accounts.x.ai', 'grok.x.ai',
-            'assets.grok.com', 'www.grok.com', 'www.x.ai']
+            'assets.grok.com']
     },
     {
         id: 'copilot', group: 'AI', label: 'Copilot / Microsoft',
@@ -189,7 +188,7 @@ const WARP_SERVICE_CATALOG = [
         id: 'elevenlabs', group: 'AI', label: 'ElevenLabs',
         domains: ['elevenlabs.io', 'api.elevenlabs.io', 'api.us.elevenlabs.io',
             'eleven-public-cdn.elevenlabs.io', 'elevenreader.io', 'help.elevenlabs.io',
-            'payload.elevenlabs.io', 'try.elevenlabs.io', 'www.elevenlabs.io']
+            'payload.elevenlabs.io', 'try.elevenlabs.io']
     },
     {
         id: 'codeium', group: 'AI', label: 'Codeium / Windsurf',
@@ -206,7 +205,7 @@ const WARP_SERVICE_CATALOG = [
             'gtm.deepl.com', 'home.deepl.com', 'hs.deepl.com', 'ita-free.app.deepl.com',
             'ita-free.www.deepl.com', 'login-wall.deepl.com', 'oneshot-free.www.deepl.com',
             'ott.deepl.com', 's.deepl.com', 'shield.deepl.com', 'sl.deepl.com', 'static.deepl.com',
-            'support.deepl.com', 'w.deepl.com', 'write-free.www.deepl.com', 'www.deepl.com', 'www2.deepl.com']
+            'support.deepl.com', 'w.deepl.com', 'write-free.www.deepl.com', 'www2.deepl.com']
     },
     {
         id: 'trae', group: 'AI', label: 'Trae',
@@ -216,8 +215,7 @@ const WARP_SERVICE_CATALOG = [
     {
         id: 'jetbrains', group: 'AI', label: 'JetBrains AI',
         domains: ['account.jetbrains.com', 'api.jetbrains.ai', 'datalore.jetbrains.com',
-            'jetbrains.com', 'jetbrains.space', 'myjetbrains.com', 'plugins.jetbrains.com',
-            'www.jetbrains.com', 'www.jetbrains.space']
+            'jetbrains.com', 'jetbrains.space', 'myjetbrains.com', 'plugins.jetbrains.com']
     },
     {
         id: 'deepseek', group: 'AI', label: 'DeepSeek',
@@ -225,7 +223,7 @@ const WARP_SERVICE_CATALOG = [
     },
     {
         id: 'perplexity', group: 'AI', label: 'Perplexity',
-        domains: ['perplexity.ai', 'www.perplexity.ai', 'api.perplexity.ai']
+        domains: ['perplexity.ai', 'api.perplexity.ai']
     }
 ];
 
@@ -416,6 +414,16 @@ function fetchInsecure(url, opts = {}, ms = 8000) {
 const NAME_RE = /^[A-Za-z0-9_-]{1,63}$/;
 const IFACE_RE = /^[A-Za-z0-9_.:@-]{1,32}$/;
 const HOST_RE = /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/;
+
+function normalizeWarpDomain(d) {
+    return String(d || '').trim().toLowerCase().replace(/^www\./, '');
+}
+
+function normalizeWarpDomains(list) {
+    return [...new Set((Array.isArray(list) ? list : [])
+        .map(normalizeWarpDomain)
+        .filter(d => d && HOST_RE.test(d)))];
+}
 const IPV4_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 const CIDR_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}\/(3[0-2]|[12]?\d)$/;
 const SERVICE_RE = /^[A-Za-z0-9@_.-]{1,64}$/;
@@ -558,7 +566,7 @@ function warpDomainList() {
         return [...new Set(fs.readFileSync(WARP_DOMAINS_FILE, 'utf8')
             .replace(/^\uFEFF/, '')
             .split(/\r?\n/)
-            .map(s => s.trim())
+            .map(d => normalizeWarpDomain(d))
             .filter(s => s && !s.startsWith('#') && HOST_RE.test(s)))];
     } catch (e) { return []; }
 }
@@ -571,9 +579,7 @@ function warpOverrides() {
         for (const [id, v] of Object.entries(src)) {
             if (!WARP_SERVICE_CATALOG.some(s => s.id === id)) continue;
             const label = String(v && v.label || '').slice(0, 80);
-            const domains = [...new Set((Array.isArray(v && v.domains) ? v.domains : [])
-                .map(d => String(d).trim().toLowerCase())
-                .filter(d => HOST_RE.test(d)))];
+            const domains = normalizeWarpDomains(v && v.domains);
             if (label && domains.length) out[id] = { label, domains };
         }
         return out;
@@ -591,7 +597,7 @@ function warpCustomCatalog() {
                 label: String(c.label).slice(0, 80),
                 group: 'Свои',
                 custom: true,
-                domains: [...new Set(c.domains.map(d => String(d).trim().toLowerCase()).filter(d => HOST_RE.test(d)))]
+                domains: normalizeWarpDomains(c.domains)
             }))
             .filter(c => c.domains.length);
     } catch (e) { return []; }
@@ -601,7 +607,8 @@ function warpCatalog() {
     const overrides = warpOverrides();
     const builtins = WARP_SERVICE_CATALOG.map(s => {
         const o = overrides[s.id];
-        return o ? { ...s, label: o.label, domains: o.domains, overridden: true } : s;
+        const domains = normalizeWarpDomains(o ? o.domains : s.domains);
+        return o ? { ...s, label: o.label, domains, overridden: true } : { ...s, domains };
     });
     return [...builtins, ...warpCustomCatalog()];
 }
@@ -5919,9 +5926,7 @@ app.post('/api/warp/custom', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     const label = String(body.label || '').trim().slice(0, 80);
     if (!label) return res.status(400).json({ error: 'Укажите название сервиса' });
-    const domains = [...new Set(String(body.domains || '').split(/[\s,;]+/)
-        .map(d => d.trim().toLowerCase())
-        .filter(d => d && HOST_RE.test(d)))];
+    const domains = normalizeWarpDomains(String(body.domains || '').split(/[\s,;]+/));
     if (!domains.length) return res.status(400).json({ error: 'Укажите хотя бы один домен' });
     if (domains.length > 200) return res.status(400).json({ error: 'Слишком много доменов (максимум 200)' });
     let raw = {};

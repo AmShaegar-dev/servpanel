@@ -183,16 +183,7 @@ windsurf-stable.codeium.com
 windsurf-telemetry.codeium.com
 workos.imgix.net
 write-free.www.deepl.com
-www.anthropic.com
-www.chatgpt.com
-www.claude.ai
-www.deepl.com
-www.elevenlabs.io
-www.grok.com
-www.jetbrains.com
-www.jetbrains.space
-www.openai.com
-www.x.ai
+x.ai
 www2.deepl.com
 xboxdesignlab.xbox.com
 xgpuweb.gssv-play-prod.xboxlive.com
