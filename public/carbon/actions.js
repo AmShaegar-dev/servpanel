@@ -870,6 +870,20 @@ async function carbonRustdeskJob(action) {
   }
 }
 
+async function carbonFail2banRefresh() {
+  const d = await api('/api/fail2ban/status');
+  carbon.fail2ban = d;
+  render();
+  showToast('Список Fail2Ban обновлён');
+}
+
+async function carbonFail2banUnban(ip) {
+  if (!ip) throw new Error('Не указан IP');
+  await api('/api/fail2ban/unban', { method: 'POST', body: { ip } });
+  await carbonFail2banRefresh();
+  showToast('IP разблокирован: ' + ip);
+}
+
 async function carbonFail2ban() {
   let d = {};
   try { d = await api('/api/fail2ban/status'); } catch (e) {}
@@ -1112,8 +1126,8 @@ async function carbonCascadeScheduleSave() {
 }
 
 async function carbonRuDropRefresh() {
-  const sel = document.getElementById('carbonGeoIfaces');
-  const ifaces = sel ? [...sel.selectedOptions].map(o => o.value) : [];
+  const box = document.getElementById('carbonGeoIfaces');
+  const ifaces = box ? [...box.querySelectorAll('input[type=checkbox]:checked')].map(x => x.value) : [];
   if (!ifaces.length) throw new Error('Выберите хотя бы один интерфейс');
   const body = {
     enable: true,
@@ -1129,25 +1143,32 @@ async function carbonRuDropRefresh() {
   await carbonRefresh(`GeoIP: ${count} адресов (+${added})` + (d && d.warning ? '. ' + d.warning : ''));
 }
 
+let carbonBusyCount = 0;
+function carbonBusyPill(show) {
+  let el = document.getElementById('carbonBusyPill');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'carbonBusyPill';
+    el.className = 'busy-pill';
+    el.innerHTML = '<span class="busy-ring"></span><span>Применение…</span>';
+    document.body.appendChild(el);
+  }
+  el.classList.toggle('show', show);
+}
+
 function carbonBusyStart(btn) {
   if (!btn || btn.dataset.carbonBusy === '1') return () => {};
   btn.dataset.carbonBusy = '1';
   btn.classList.add('is-busy');
   btn.setAttribute('aria-busy', 'true');
-  const card = btn.closest('.card, .modal-card');
-  if (card) {
-    card.dataset.busyCount = String((Number(card.dataset.busyCount) || 0) + 1);
-    card.classList.add('card-busy');
-  }
+  carbonBusyCount++;
+  carbonBusyPill(true);
   return () => {
     btn.dataset.carbonBusy = '';
     btn.classList.remove('is-busy');
     btn.removeAttribute('aria-busy');
-    if (card) {
-      const left = Math.max(0, (Number(card.dataset.busyCount) || 1) - 1);
-      card.dataset.busyCount = String(left);
-      if (!left) card.classList.remove('card-busy');
-    }
+    carbonBusyCount = Math.max(0, carbonBusyCount - 1);
+    if (!carbonBusyCount) carbonBusyPill(false);
   };
 }
 
@@ -1230,6 +1251,8 @@ document.addEventListener('click', async event => {
     else if (action === 'rustdesk-ports') { await api('/api/rustdesk/ports', { method: 'POST', body: {} }); await carbonRefresh('Порты RustDesk открыты'); }
     else if (action === 'rustdesk-job') await carbonRustdeskJob(btn.dataset.act || 'update');
     else if (action === 'fail2ban') await carbonFail2ban();
+    else if (action === 'fail2ban-refresh') await carbonFail2banRefresh();
+    else if (action === 'fail2ban-unban') await carbonFail2banUnban(name);
     else if (action === 'diag-check') await carbonDiagCheck();
     else if (action === 'diag-tc') await carbonDiagTc();
     else if (action === 'diag-wan') await carbonDiagWan();

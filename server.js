@@ -1936,6 +1936,7 @@ function readMangleSplit() {
 // ---------------------------------------------------------------------------
 let splitAccountingSig = '';
 let splitAccountingAt = 0;
+let splitAccountingDebug = { error: '', hasRu: null, ifaces: [], ips: [], added: 0, chain: '' };
 
 function iptablesHas(args) {
     try { rootSh('iptables', args); return true; } catch (e) { return false; }
@@ -1956,26 +1957,30 @@ function ensureSplitAccounting(clients) {
             try { rootSh('iptables', ['-t', 'mangle', '-D', 'PREROUTING', '-i', iface, '-j', 'AWG_SPLIT']); } catch (e) { /* ignore */ }
             rootSh('iptables', ['-t', 'mangle', '-I', 'PREROUTING', '1', '-i', iface, '-j', 'AWG_SPLIT']);
         }
+        splitAccountingDebug = { error: '', hasRu: null, ifaces, ips, added: 0, chain: '' };
         if (sig === splitAccountingSig && now - splitAccountingAt < 60000) return;
         const hasRu = !!rootShTry('ipset', ['list', 'ru']).trim();
+        splitAccountingDebug.hasRu = hasRu;
         for (const ip of ips) {
             if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(ip)) continue;
             if (hasRu) {
-                const ruRule = ['-s', ip, '-m', 'set', '--match-set', 'ru', 'dst', '-m', 'comment', '--comment', `sp:ru:${ip}`, '-j', 'RETURN'];
+                const ruRule = ['-s', ip, '-m', 'set', '--match-set', 'ru', 'dst', '-j', 'RETURN'];
                 if (!iptablesHas(['-t', 'mangle', '-C', 'AWG_SPLIT', ...ruRule])) {
                     rootSh('iptables', ['-t', 'mangle', '-A', 'AWG_SPLIT', ...ruRule]);
+                    splitAccountingDebug.added++;
                 }
             }
-            const euRule = ['-s', ip, '-m', 'comment', '--comment', `sp:eu:${ip}`, '-j', 'RETURN'];
+            const euRule = ['-s', ip, '-j', 'RETURN'];
             if (!iptablesHas(['-t', 'mangle', '-C', 'AWG_SPLIT', ...euRule])) {
                 rootSh('iptables', ['-t', 'mangle', '-A', 'AWG_SPLIT', ...euRule]);
+                splitAccountingDebug.added++;
             }
         }
         const current = new Set(ips);
         const chain = rootShTry('iptables', ['-t', 'mangle', '-S', 'AWG_SPLIT']);
         for (const raw of String(chain || '').split('\n')) {
             const line = raw.trim();
-            const m = /--comment\s+"sp:(?:ru|eu):([^"]+)"/.exec(line);
+            const m = /^-A\s+AWG_SPLIT\s+-s\s+([0-9.]+)(?:\/32)?\b/.exec(line);
             if (!m || current.has(m[1])) continue;
             const spec = line.replace(/^-A\s+AWG_SPLIT\s+/, '');
             const args = iptablesSpecTokens(spec);
@@ -1983,7 +1988,10 @@ function ensureSplitAccounting(clients) {
         }
         splitAccountingSig = sig;
         splitAccountingAt = now;
-    } catch (e) { /* ignore */ }
+        splitAccountingDebug.chain = String(rootShTry('iptables', ['-t', 'mangle', '-S', 'AWG_SPLIT']) || '').slice(0, 2000);
+    } catch (e) {
+        splitAccountingDebug.error = e.message || String(e);
+    }
 }
 
 function readSplitCounters() {
@@ -1995,13 +2003,12 @@ function readSplitCounters() {
         ], { maxBuffer: 8 * 1024 * 1024 });
         for (const raw of String(out || '').split('\n')) {
             const line = raw.trim();
-            const m = /^\[(\d+):(\d+)\]\s+-A\s+AWG_SPLIT\b/.exec(line);
+            const m = /^\[(\d+):(\d+)\]\s+-A\s+AWG_SPLIT\s+-s\s+([0-9.]+)(?:\/32)?\b/.exec(line);
             if (!m) continue;
             const bytes = Number(m[2]) || 0;
-            const c = /--comment\s+"sp:(ru|eu):([^"]+)"/.exec(line);
-            if (!c) continue;
-            const map = c[1] === 'ru' ? ru : eu;
-            map[c[2]] = (map[c[2]] || 0) + bytes;
+            const ip = m[3];
+            if (line.includes('--match-set ru dst')) ru[ip] = (ru[ip] || 0) + bytes;
+            else eu[ip] = (eu[ip] || 0) + bytes;
         }
     } catch (e) { /* ignore */ }
     return { ru, eu };
@@ -3138,7 +3145,7 @@ function readIptablesRules() {
 
 app.get('/api/iptables', checkAuth, (req, res) => {
     try {
-        res.json({ chains: IPTABLES_CHAINS, rules: readIptablesRules() });
+        res.json({ chains: IPTABLES_CHAINS, rules: readIptablesRules(), splitDebug: splitAccountingDebug });
     } catch (e) {
         res.status(500).json({ error: 'Не удалось прочитать iptables: ' + e.message });
     }
