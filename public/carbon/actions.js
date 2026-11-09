@@ -756,7 +756,7 @@ async function carbonWarpPanel() {
     ? `Режим: ${st.mode || '—'} · Xray: ${st.xrayActive ? 'активен' : 'остановлен'} (${st.listenIp || '—'}:${st.listenPort || '—'}) · WARP: ${st.connected ? 'Connected' : 'не подключён'} · SOCKS: ${st.socksPort || '—'}`
     : 'WARP не установлен.';
   const rows = (st.services || []).map(s => {
-    const warp = st.mode === 'v1' ? true : !!s.selected;
+    const warp = st.mode === 'v1' ? true : (s.id === 'gemini' ? false : !!s.selected);
     return `<div class="warp-route-row"><b>${escHtml(s.label)}</b><label><input type="radio" name="warp-route-${escHtml(s.id)}" data-warp-route data-service-id="${escHtml(s.id)}" value="warp" ${warp ? 'checked' : ''}></label><label><input type="radio" name="warp-route-${escHtml(s.id)}" data-warp-route data-service-id="${escHtml(s.id)}" value="direct" ${!warp ? 'checked' : ''}></label></div>`;
   }).join('');
   modal.innerHTML = `<div class="modal-card modal-wide"><div class="modal-head"><div><div class="modal-title">WARP + Xray</div><div class="modal-sub">${escHtml(summary)}</div></div><button class="icon-btn" data-warp-close>✕</button></div>

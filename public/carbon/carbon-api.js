@@ -624,7 +624,7 @@ function realServices() {
   const wservices = Array.isArray(wst.services) ? wst.services : [];
   const allWarp = wst.mode === 'v1';
   const routeRows = wservices.map(s => {
-    const warp = allWarp || s.selected;
+    const warp = allWarp || (s.id !== 'gemini' && s.selected);
     return `<tr><td>${escHtml(s.label)}</td><td class="mono">${warp ? '✓' : '—'}</td><td class="mono">${warp ? '—' : '✓'}</td></tr>`;
   }).join('');
   return `<div class="page-head"><div><div class="page-title">Службы и DNS</div><div class="page-sub">Системные службы. Перезапуск через API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="adguard-stats">${icon('shield')}AdGuard</button><button class="btn" data-carbon-action="warp-panel">${icon('globe')}WARP/Xray</button><button class="btn" data-carbon-action="dns-capture">${icon('link')}DNS-перехват</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
