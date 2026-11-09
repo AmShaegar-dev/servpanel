@@ -24,7 +24,8 @@ const carbon = {
   cascadeSchedule: null,
   iptables: null,
   toolsStatus: null,
-  fail2ban: null
+  fail2ban: null,
+  warp: null
 };
 
 async function api(path, options = {}) {
@@ -292,6 +293,7 @@ function assignCarbonPath(path, data) {
   else if (p === '/api/iptables') carbon.iptables = data;
   else if (p === '/api/tools/status') carbon.toolsStatus = data;
   else if (p === '/api/fail2ban/status') carbon.fail2ban = data;
+  else if (p === '/api/warp/status') carbon.warp = data;
   else if (p === '/api/cascade/status') carbon.cascade = data;
   else if (p === '/api/cascade/proxy') carbon.cascadeProxy = data;
   else if (p === '/api/obf/current') carbon.obf = data;
@@ -349,7 +351,7 @@ const TAB_DATA = {
   network: ['/api/interfaces', '/api/ufw', '/api/iptables', '/api/awg/config'],
   cascade: ['/api/cascade/status', '/api/cascade/proxy', '/api/cascade/interfaces', '/api/cascade/schedule'],
   obfuscation: ['/api/obf/current', '/api/obf/profiles'],
-  services: ['/api/services'],
+  services: ['/api/services', '/api/warp/status'],
   domains: ['/api/ssl/status'],
   security: ['/api/security/status', '/api/ufw', '/api/tools/status', '/api/fail2ban/status'],
   admin: ['/api/users', '/api/audit?limit=50', '/api/backup/auto', '/api/notify/status'],
@@ -614,14 +616,18 @@ function realClients() {
 
 function realInstall() {
   const installed = carbon.modules.filter(m => m.installed).length;
-  return `<div class="page-head"><div><div class="page-title">Установка</div><div class="page-sub">Реальные модули сервера. Установка и удаление через API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="awg-install">${icon('download')}AWG</button><button class="btn" data-carbon-action="cascade-build">${icon('cascade')}Каскад</button><button class="btn" data-carbon-action="mtproxyl-install">${icon('download')}MTProxyL</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
+  return `<div class="page-head"><div><div class="page-title">Установка</div><div class="page-sub">Реальные модули сервера. Установка и удаление через API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="awg-install">${icon('download')}AWG</button><button class="btn" data-carbon-action="cascade-build">${icon('cascade')}Каскад</button><button class="btn" data-carbon-action="proxy-install">${icon('download')}Прокси</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Модулей', String(carbon.modules.length), 'всего')}${mini('Установлено', String(installed), 'активно')}${mini('Не установлено', String(carbon.modules.length - installed), 'доступно')}${mini('Версия панели', carbon.update ? escHtml(carbon.update.version) : '—', 'build')}</div>
     <div class="grid">${carbon.modules.map(m => `<section class="card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">${escHtml(m.title)}</div><div class="card-sub">${escHtml(m.description || '')}</div></div>${tag(m.installed ? (m.running ? 'работает' : 'остановлен') : 'не установлен', m.installed ? (m.running ? 'good' : 'warn') : '')}</div><div class="list"><div class="list-row"><b>Порт</b><span class="mono">${escHtml(m.port || m.httpPort || m.tlsPort || '—')}</span></div><div class="list-row"><b>Служба</b><span class="mono">${escHtml(m.service || '—')}</span></div><div class="list-row"><b>Конфиг</b><span class="mono">${escHtml(m.configPath || '—')}</span></div></div><div class="module-actions"><button class="btn ${m.installed ? '' : 'btn-primary'}" data-api-action="${m.installed ? 'uninstall-module' : 'install-module'}" data-module="${escHtml(m.id)}">${icon(m.installed ? 'trash' : 'download')}${m.installed ? 'Удалить' : 'Установить'}</button><button class="btn" data-api-action="module-logs" data-module="${escHtml(m.id)}">${icon('terminal')}Логи</button></div></section>`).join('') || '<section class="card"><div class="empty-row">Нет данных о модулях</div></section>'}</div>`;
 }
 
 function realServices() {
-  return `<div class="page-head"><div><div class="page-title">Службы и DNS</div><div class="page-sub">Реальные systemd-службы. Перезапуск через API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="adguard-stats">${icon('shield')}AdGuard</button><button class="btn" data-carbon-action="warp-panel">${icon('globe')}WARP/Xray</button><button class="btn" data-carbon-action="dns-capture">${icon('link')}DNS-перехват</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
-    <section class="card table-card"><div class="card-top"><div><div class="card-title">Системные службы</div><div class="card-sub">/api/services</div></div>${tag(carbon.services.filter(s => s.state === 'active').length + ' / ' + carbon.services.length, 'good')}</div><div class="table-scroll"><table class="table"><thead><tr><th>Служба</th><th>Описание</th><th>Состояние</th><th>Автозапуск</th><th></th></tr></thead><tbody>${carbon.services.map(s => `<tr><td class="name">${escHtml(s.name)}</td><td>${escHtml(s.desc || '')}</td><td><span class="status ${s.state === 'active' ? '' : 'idle'}"><span class="dot"></span>${escHtml(s.state || s.status)}</span></td><td class="mono">${s.enabled ? 'enabled' : 'disabled'}</td><td><button class="row-action" data-api-action="restart-service" data-name="${escHtml(s.name)}" title="Перезапустить">${icon('refresh')}</button></td></tr>`).join('') || '<tr><td colspan="5">Нет данных</td></tr>'}</tbody></table></div></section>`;
+  const wst = carbon.warp || {};
+  const wservices = Array.isArray(wst.services) ? wst.services : [];
+  const chips = wservices.map(s => `<label class="chip ${s.selected ? 'on' : ''}" data-warp-group="${escHtml(s.group || '')}" style="cursor:pointer"><input type="checkbox" data-warp-service value="${escHtml(s.id)}" ${s.selected ? 'checked' : ''} onchange="this.closest('label').classList.toggle('on',this.checked)"> ${escHtml(s.label)}</label>`).join('');
+  return `<div class="page-head"><div><div class="page-title">Службы и DNS</div><div class="page-sub">Системные службы. Перезапуск через API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="adguard-stats">${icon('shield')}AdGuard</button><button class="btn" data-carbon-action="warp-panel">${icon('globe')}WARP/Xray</button><button class="btn" data-carbon-action="dns-capture">${icon('link')}DNS-перехват</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
+    <section class="card table-card"><div class="card-top"><div><div class="card-title">Системные службы</div><div class="card-sub">/api/services</div></div>${tag(carbon.services.filter(s => s.state === 'active').length + ' / ' + carbon.services.length, 'good')}</div><div class="table-scroll"><table class="table"><thead><tr><th>Служба</th><th>Назначение</th><th>Состояние</th><th>Автозапуск</th><th></th></tr></thead><tbody>${carbon.services.map(s => `<tr><td class="name">${escHtml(s.name)}</td><td>${escHtml(s.desc || '')}</td><td><span class="status ${s.state === 'active' ? '' : 'idle'}"><span class="dot"></span>${escHtml(s.state || s.status)}</span></td><td class="mono">${s.enabled ? 'enabled' : 'disabled'}</td><td><button class="row-action" data-api-action="restart-service" data-name="${escHtml(s.name)}" title="Перезапустить">${icon('refresh')}</button></td></tr>`).join('') || '<tr><td colspan="5">Служб нет</td></tr>'}</tbody></table></div></section>
+    <section class="card" style="margin-top:16px"><div class="card-top"><div><div class="card-title">WARP + Xray: сервисы</div><div class="card-sub">Выбранные сервисы идут через WARP, остальные — напрямую</div></div><div class="page-actions">${tag(wst.connected ? 'WARP подключён' : (wst.installed ? 'WARP не подключён' : 'WARP не установлен'), wst.connected ? 'good' : 'warn')}<button class="btn btn-sm" data-carbon-action="warp-services-ai">Все AI</button><button class="btn btn-sm" data-carbon-action="warp-services-none">Снять все</button><button class="btn btn-sm btn-primary" data-carbon-action="warp-services-save">Сохранить</button></div></div><div class="chips" id="carbonWarpServices">${chips || '<span class="muted">Сервисы не найдены</span>'}</div></section>`;
 }
 
 function realSecurity() {

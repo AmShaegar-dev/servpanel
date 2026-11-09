@@ -729,6 +729,24 @@ async function carbonAdguardStats() {
   });
 }
 
+async function carbonWarpServicesSave() {
+  const services = [...document.querySelectorAll('#carbonWarpServices input[data-warp-service]:checked')].map(x => x.value);
+  await api('/api/warp/services', { method: 'POST', body: { services } });
+  try { carbon.warp = await api('/api/warp/status'); } catch (e) { /* ignore */ }
+  render();
+  showToast('Сервисы WARP сохранены: ' + services.length);
+}
+
+function carbonWarpServicesSelect(mode) {
+  document.querySelectorAll('#carbonWarpServices label.chip').forEach(label => {
+    const input = label.querySelector('input[data-warp-service]');
+    if (!input) return;
+    if (mode === 'ai' && String(label.dataset.warpGroup || '').toLowerCase() === 'ai') input.checked = true;
+    if (mode === 'none') input.checked = false;
+    label.classList.toggle('on', input.checked);
+  });
+}
+
 async function carbonWarpPanel() {
   let st = {};
   try { st = await api('/api/warp/status'); } catch (e) {}
@@ -1038,6 +1056,139 @@ async function carbonAwgInstall() {
   });
 }
 
+async function carbonProxyInstall() {
+  showCarbonForm({
+    title: 'Установка прокси',
+    sub: 'Движок, SNI и порт. Дальше — параметры выбранного движка.',
+    fields: [
+      { name: 'kind', label: 'Движок', type: 'select', options: [
+        { value: 'telemt', label: 'Telemt (рекомендуется)' },
+        { value: 'zig', label: 'MTProto.zig' },
+        { value: 'mtproxyl', label: 'MTProxyL (Telemt + API)' },
+        { value: 'fix', label: 'Только фикс MEKO' }
+      ] },
+      { name: 'domain', label: 'SNI-домен', value: 'ozon.ru' },
+      { name: 'port', label: 'Порт', value: '443' }
+    ],
+    submitText: 'Далее',
+    onSubmit: async v => {
+      if (v.kind === 'mtproxyl') return carbonProxyInstallMpl(v);
+      return carbonProxyInstallMt(v);
+    }
+  });
+}
+
+async function carbonProxyInstallMt(v) {
+  const label = { telemt: 'Telemt', zig: 'MTProto.zig', fix: 'MEKO FIX' }[v.kind] || v.kind;
+  showCarbonForm({
+    title: 'MTProto: ' + label,
+    sub: 'SNI: ' + (v.domain || 'ozon.ru') + ' · порт ' + (v.port || '443'),
+    fields: [
+      { name: 'version', label: 'Версия Telemt', placeholder: 'пусто — последняя' },
+      { name: 'fix', label: 'Установить MEKO FIX', type: 'checkbox', value: true },
+      { name: 'fixType', label: 'Тип фикса', type: 'select', options: [{ value: 'v3', label: 'v3 — рекомендуется' }, { value: 'v2', label: 'v2 — TTL + Length' }, { value: 'v4', label: 'v4 — Zapret2' }, { value: 'nft', label: 'nft — Docker' }] },
+      { name: 'fixPort', label: 'Порт фикса', placeholder: 'как порт прокси' },
+      { name: 'adTag', label: 'ad_tag', placeholder: '32 hex-символа' },
+      { name: 'mtUser', label: 'Первый пользователь', placeholder: 'необязательно' },
+      { name: 'mtUserSecret', label: 'Секрет пользователя', placeholder: 'пусто — сгенерировать' },
+      { name: 'publicHost', label: 'Публичный адрес', placeholder: 'пусто — определить' },
+      { name: 'web', label: 'WEB-режим (Telemt)', type: 'checkbox', value: false },
+      { name: 'webHost', label: 'Домен WEB', placeholder: 'web.example.com' },
+      { name: 'webUser', label: 'WEB-пользователь', value: 'webuser' },
+      { name: 'webSecret', label: 'WEB-секрет', placeholder: 'пусто — сгенерировать' }
+    ],
+    submitText: 'Установить',
+    danger: true,
+    onSubmit: async d => {
+      const body = {
+        module: 'mtproto',
+        kind: v.kind,
+        mtDomain: v.domain || 'ozon.ru',
+        mtPort: v.port || '443',
+        mtVersion: d.version || '',
+        fixType: d.fixType || 'v3',
+        fixPort: d.fixPort || '',
+        noFix: v.kind === 'fix' ? false : !d.fix,
+        adTag: d.adTag || '',
+        mtUser: d.web ? '' : (d.mtUser || ''),
+        mtUserSecret: d.web ? '' : (d.mtUserSecret || ''),
+        publicHost: d.publicHost || '',
+        web: v.kind === 'telemt' && !!d.web,
+        webHost: v.kind === 'telemt' ? (d.webHost || '') : '',
+        webUser: d.webUser || 'webuser',
+        webSecret: d.webSecret || '',
+        nginx: true
+      };
+      const r = await api('/api/install/module', { method: 'POST', body });
+      showCarbonTextModal('Установка ' + label, r.logFile ? 'Запущено. Журнал: ' + r.logFile : 'Установка запущена');
+      await carbonRefresh('Установка прокси запущена');
+    }
+  });
+}
+
+async function carbonProxyInstallMpl(v) {
+  showCarbonForm({
+    title: 'Установка MTProxyL',
+    sub: 'Telemt + менеджер MTProxyL · порт ' + (v.port || '443'),
+    fields: [
+      { name: 'mplMode', label: 'Режим', type: 'select', options: [{ value: 'manager', label: 'Manager — новый прокси' }, { value: 'reanimator', label: 'Reanimator — реанимация' }] },
+      { name: 'mplEngine', label: 'Движок', type: 'select', options: [{ value: 'binary', label: 'Бинарник (systemd)' }, { value: 'docker', label: 'Docker' }] },
+      { name: 'mplProxyMode', label: 'Режим прокси', type: 'select', options: [{ value: 'mtproto', label: 'MTProto' }, { value: 'web', label: 'WEB' }, { value: 'combined', label: 'MTProto + WEB' }] },
+      { name: 'mplPort', label: 'Порт', value: v.port || '443' },
+      { name: 'mplSni', label: 'SNI', value: v.domain || 'autoscout24.ru' },
+      { name: 'mplHost', label: 'Публичный адрес', placeholder: 'пусто — определить' },
+      { name: 'mplZapret2', label: 'Zapret2 MTProto fix', type: 'checkbox', value: false },
+      { name: 'mplSynLimiter', label: 'NFT SYN limiter', type: 'select', options: [{ value: 'meko', label: 'meko — рекомендуется' }, { value: 'classic', label: 'classic' }, { value: 'off', label: 'off' }] },
+      { name: 'mplMeko', label: 'Обходы By-MEKO', type: 'checkbox', value: false },
+      { name: 'mplUser', label: 'Первый пользователь', placeholder: 'необязательно' },
+      { name: 'mplUserSecret', label: 'Секрет пользователя', placeholder: 'пусто — сгенерировать' },
+      { name: 'mplSecret', label: 'Основной секрет', placeholder: '32 hex-символа' },
+      { name: 'mplAdTag', label: 'ad_tag', placeholder: '32 hex-символа' },
+      { name: 'mplSelfmask', label: 'Домен Selfmask', placeholder: 'пусто — не устанавливать' },
+      { name: 'mplSelfmaskCert', label: 'Сертификат Selfmask', type: 'select', options: [{ value: 'letsencrypt', label: "Let's Encrypt" }, { value: 'selfsigned', label: 'Самоподписанный' }] },
+      { name: 'mplSelfmaskEmail', label: "E-mail для Let's Encrypt", placeholder: 'admin@example.com' },
+      { name: 'mplWeb', label: 'WEB Proxy', type: 'checkbox', value: false },
+      { name: 'mplWebDomain', label: 'Домен WEB Proxy', placeholder: 'web.example.com' },
+      { name: 'mplWebCarrier', label: 'Carrier', type: 'select', options: [{ value: 'https', label: 'https' }, { value: 'http', label: 'http' }] },
+      { name: 'mplApi', label: 'API MTProxyL', type: 'checkbox', value: true },
+      { name: 'mplApiListen', label: 'API listen', value: '127.0.0.1:9190' },
+      { name: 'mplForce', label: 'Переустановить принудительно', type: 'checkbox', value: false }
+    ],
+    submitText: 'Установить MTProxyL',
+    danger: true,
+    onSubmit: async d => {
+      const body = {
+        module: 'mtproxyl',
+        mplMode: d.mplMode || 'manager',
+        mplEngine: d.mplEngine || 'binary',
+        mplProxyMode: d.mplProxyMode || 'mtproto',
+        mplPort: d.mplPort || '443',
+        mplSni: d.mplSni || 'autoscout24.ru',
+        mplHost: d.mplHost || '',
+        mplZapret2: !!d.mplZapret2,
+        mplSynLimiter: d.mplSynLimiter || 'meko',
+        mplMeko: !!d.mplMeko,
+        mplUser: d.mplUser || '',
+        mplUserSecret: d.mplUserSecret || '',
+        mplSecret: d.mplSecret || '',
+        mplAdTag: d.mplAdTag || '',
+        mplSelfmask: d.mplSelfmask || '',
+        mplSelfmaskCert: d.mplSelfmaskCert || 'letsencrypt',
+        mplSelfmaskEmail: d.mplSelfmaskEmail || '',
+        mplWeb: !!d.mplWeb,
+        mplWebDomain: d.mplWebDomain || '',
+        mplWebCarrier: d.mplWebCarrier || 'https',
+        mplApi: !!d.mplApi,
+        mplApiListen: d.mplApiListen || '127.0.0.1:9190',
+        mplForce: !!d.mplForce
+      };
+      const r = await api('/api/install/module', { method: 'POST', body });
+      showCarbonTextModal('Установка MTProxyL', r.logFile ? 'Запущено. Журнал: ' + r.logFile : 'Установка запущена');
+      await carbonRefresh('Установка MTProxyL запущена');
+    }
+  });
+}
+
 async function carbonMtproxylInstall() {
   showCarbonForm({
     title: 'Установка MTProxyL',
@@ -1235,6 +1386,7 @@ document.addEventListener('click', async event => {
     else if (action === 'iptables-delete') { if (confirm('Удалить правило iptables?')) { await api('/api/iptables/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Правило iptables удалено'); } }
     else if (action === 'awg-edit') await carbonAwgEdit();
     else if (action === 'server-name') await carbonServerName();
+    else if (action === 'proxy-install') await carbonProxyInstall();
     else if (action === 'install-mtproxyl' || action === 'mtproxyl-install') await carbonMtproxylInstall();
     else if (action === 'awg-install') await carbonAwgInstall();
     else if (action === 'cascade-build') await carbonCascadeBuild();
@@ -1248,6 +1400,9 @@ document.addEventListener('click', async event => {
     else if (action === 'cascade-cleanup') await carbonCascadeCleanup();
     else if (action === 'adguard-stats') await carbonAdguardStats();
     else if (action === 'warp-panel') await carbonWarpPanel();
+    else if (action === 'warp-services-save') await carbonWarpServicesSave();
+    else if (action === 'warp-services-ai') carbonWarpServicesSelect('ai');
+    else if (action === 'warp-services-none') carbonWarpServicesSelect('none');
     else if (action === 'dns-capture') await carbonDnsCapture();
     else if (action === 'app-metrics') await carbonAppMetrics();
     else if (action === 'app-metrics-token') await carbonAppMetricsToken();
