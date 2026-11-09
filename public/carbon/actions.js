@@ -710,6 +710,67 @@ async function carbonCascadeCleanup() {
   await carbonRefresh('Каскад удалён');
 }
 
+async function carbonAdguardConfig() {
+  let st = {};
+  try { st = await api('/api/warp/status'); carbon.warp = st; } catch (e) { st = carbon.warp || {}; }
+  const isIp = v => /^\d{1,3}(\.\d{1,3}){3}$/.test(String(v || '').trim()) && String(v).split('.').every(x => Number(x) <= 255);
+  let defaultIp = carbon.server && carbon.server.ip;
+  if (!isIp(defaultIp)) {
+    try {
+      const info = await api('/api/server-info');
+      carbon.server = { ...(carbon.server || {}), ...(info || {}) };
+      defaultIp = info && info.ip;
+    } catch (e) { /* ignore */ }
+  }
+  if (!isIp(defaultIp)) defaultIp = location.hostname || '';
+  const services = (Array.isArray(st.services) ? st.services : []).filter(s => Array.isArray(s.domains) && s.domains.length);
+  const selectedIds = new Set(services.filter(s => s.route === 'warp' || (s.route == null && s.selected)).map(s => s.id));
+  const chips = services.map(s => `<label class="chip ${selectedIds.has(s.id) ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-adg-service value="${escHtml(s.id)}" ${selectedIds.has(s.id) ? 'checked' : ''} onchange="this.closest('label').classList.toggle('on',this.checked)"> ${escHtml(s.label)}</label>`).join('');
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `<div class="modal-card modal-wide"><div class="modal-head"><div><div class="modal-title">Конфиг для AdGuard Home</div><div class="modal-sub">Пользовательские правила: домены выбранных сервисов → IP сервера</div></div><button class="icon-btn" data-adg-close>✕</button></div>
+    <label class="field"><span>IP для A-записи</span><input id="carbonAdgIp" value="${escHtml(defaultIp)}" placeholder="203.0.113.10"></label>
+    <div class="card-sub" style="margin:14px 0 8px">Сервисы</div>
+    <div class="chips" id="carbonAdgServices">${chips || '<span class="muted">Сервисы не найдены</span>'}</div>
+    <div class="page-actions" style="margin-top:12px"><button class="btn btn-sm" data-adg-all>Все</button><button class="btn btn-sm" data-adg-none>Снять все</button><button class="btn btn-primary" data-adg-build>Сформировать</button><button class="btn" data-adg-copy>${icon('copy')}Копировать</button><button class="btn" data-adg-download>${icon('download')}Скачать .txt</button></div>
+    <pre class="code" data-adg-out style="margin-top:14px;padding:12px;white-space:pre-wrap;max-height:45vh;overflow:auto">Нажмите «Сформировать»</pre></div>`;
+  document.body.appendChild(modal);
+  modal.hidden = false;
+  modal.querySelector('[data-adg-close]').addEventListener('click', () => modal.remove());
+  const ipInput = modal.querySelector('#carbonAdgIp');
+  const out = modal.querySelector('[data-adg-out]');
+  const boxes = [...modal.querySelectorAll('[data-adg-service]')];
+  const build = () => {
+    const ip = ipInput.value.trim() || defaultIp;
+    const ids = new Set(boxes.filter(x => x.checked).map(x => x.value));
+    const names = services.filter(s => ids.has(s.id)).map(s => s.label);
+    const domains = [...new Set(services.filter(s => ids.has(s.id)).flatMap(s => s.domains || []))];
+    if (!domains.length) { out.textContent = 'Выберите хотя бы один сервис'; return ''; }
+    const text = `# AdGuard Home — пользовательские правила\n# IP: ${ip}\n# Сервисы: ${names.join(', ')}\n\n` + domains.map(d => `||${d}^$dnsrewrite=NOERROR;A;${ip}`).join('\n') + '\n';
+    out.textContent = text;
+    return text;
+  };
+  modal.querySelector('[data-adg-all]').addEventListener('click', () => { boxes.forEach(x => { x.checked = true; x.closest('label').classList.add('on'); }); build(); });
+  modal.querySelector('[data-adg-none]').addEventListener('click', () => { boxes.forEach(x => { x.checked = false; x.closest('label').classList.remove('on'); }); build(); });
+  boxes.forEach(x => x.addEventListener('change', build));
+  modal.querySelector('[data-adg-build]').addEventListener('click', build);
+  modal.querySelector('[data-adg-copy]').addEventListener('click', () => { const t = build(); if (t) copyText(t); });
+  modal.querySelector('[data-adg-download]').addEventListener('click', () => {
+    const t = build();
+    if (!t) return;
+    const blob = new Blob([t], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'adguard-home-rules.txt';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    showToast('Файл adguard-home-rules.txt скачан');
+  });
+  build();
+}
+
 async function carbonAdguardStats() {
   let auto = null;
   try { auto = await api('/api/adguard/autodetect'); } catch (e) {}
@@ -1476,6 +1537,7 @@ document.addEventListener('click', async event => {
     else if (action === 'cascade-proxy-test') await carbonCascadeProxyTest();
     else if (action === 'cascade-cleanup') await carbonCascadeCleanup();
     else if (action === 'adguard-stats') await carbonAdguardStats();
+    else if (action === 'adguard-config') await carbonAdguardConfig();
     else if (action === 'warp-panel') await carbonWarpPanel();
     else if (action === 'warp-services-save') await carbonWarpServicesSave();
     else if (action === 'warp-services-ai') carbonWarpServicesSelect('ai');
