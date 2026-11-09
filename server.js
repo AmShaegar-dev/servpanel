@@ -830,6 +830,7 @@ function isApiRequest(req) {
 // Переменные окружения задают значения по умолчанию для первого запуска,
 // дальше приоритет у файла .app_settings.json (как у .panel_port).
 let lastClientsSnapshot = [];
+let lastTrafficSplit = null;
 let metricsServer = null;
 let metricsSettings = null;
 let metricsRuntime = { running: false, port: null, tls: false, error: '' };
@@ -1964,20 +1965,26 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
         const mangle = readMangleSplit();
         let tunnel, direct, blocked, source;
         if (mangle.total > 0) {
-            // Счётчики mangle PREROUTING считают исходящее направление:
-            // RETURN по ipset ru — RU-направления напрямую, MARK 0x1 — в туннель.
-            // Масштабируем пропорции на полный клиентский трафик (rx+tx).
             const k = clientTotal > 0 ? clientTotal / mangle.total : 1;
             tunnel = Math.round(mangle.tunnel * k);
             direct = Math.round(mangle.direct * k);
             const blockedScaled = Math.round(blockedRaw * k);
             blocked = Math.min(blockedScaled, Math.max(0, clientTotal - tunnel - direct));
             source = 'mangle';
+        } else if (lastTrafficSplit && lastTrafficSplit.total > 0) {
+            // Счётчики пересозданы вместе с правилами. Не показываем ложные 100% EU,
+            // а масштабируем последние известные доли на текущий трафик.
+            const prevTotal = lastTrafficSplit.total;
+            const k = clientTotal > 0 ? clientTotal / prevTotal : 1;
+            tunnel = Math.round(lastTrafficSplit.tunnel * k);
+            direct = Math.round(lastTrafficSplit.direct * k);
+            blocked = Math.round(lastTrafficSplit.blocked * k);
+            source = 'cached';
         } else {
-            tunnel = Math.min(clientTotal, tunnelRaw);
-            blocked = Math.min(Math.max(0, clientTotal - tunnel), blockedRaw);
-            direct = Math.max(0, clientTotal - tunnel - blocked);
-            source = 'interfaces';
+            tunnel = 0;
+            direct = 0;
+            blocked = 0;
+            source = 'unavailable';
         }
         const sum = tunnel + direct + blocked;
         if (sum > clientTotal && sum > 0) {
@@ -1986,6 +1993,9 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             blocked = Math.max(0, clientTotal - tunnel - direct);
         }
         const total = tunnel + direct + blocked;
+        if (source === 'mangle' && total > 0) {
+            lastTrafficSplit = { tunnel, direct, blocked, total, at: Date.now() };
+        }
         const payload = {
             total, tunnel, direct, blocked,
             clientTotal, tunnelRaw, blockedRaw,

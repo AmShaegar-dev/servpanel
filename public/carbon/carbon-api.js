@@ -380,35 +380,45 @@ function realTrafficDistribution() {
   const tunnel = Number(d.tunnel) || 0;
   const direct = Number(d.direct) || 0;
   const blocked = Number(d.blocked) || 0;
-  const source = d.source || 'interfaces';
+  const source = d.source || 'unavailable';
   const total = tunnel + direct + blocked;
-  const C = 2 * Math.PI * 46;
   const parts = [
-    { label: 'В EU-туннель', value: tunnel, color: '#5b8cff' },
-    { label: 'Напрямую', value: direct, color: 'var(--accent)' }
+    { key: 'tunnel', label: 'В EU-туннель', short: 'в EU-туннеле', value: tunnel, color: '#5b8cff' },
+    { key: 'direct', label: 'RU выход', short: 'в RU-выходе', value: direct, color: 'var(--accent)' }
   ];
-  if (blocked > 0) parts.push({ label: 'GeoIP blocked', value: blocked, color: '#d29922' });
+  if (blocked > 0) parts.push({ key: 'blocked', label: 'GeoIP blocked', short: 'заблокировано', value: blocked, color: '#d29922' });
+  const C = 2 * Math.PI * 46;
   let offset = 0;
   const rings = parts.map(p => {
     const len = total ? C * p.value / total : 0;
-    const el = `<circle cx="60" cy="60" r="46" fill="none" stroke="${p.color}" stroke-width="14" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-offset}" transform="rotate(-90 60 60)"/>`;
+    const el = `<circle cx="60" cy="60" r="46" fill="none" stroke="${p.color}" stroke-width="12" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-offset}" transform="rotate(-90 60 60)"/>`;
     offset += len;
     return el;
   }).join('');
   const pct = v => total ? Math.round(v / total * 100) : 0;
-  const legend = parts.map(p => `<div class="list-row"><b><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:7px"></span>${p.label}</b><span class="mono">${pct(p.value)}% · ${fmtBytes(p.value)}</span></div>`).join('');
-  return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">RU-вход · туннель / напрямую${blocked > 0 ? ' / GeoIP' : ''}</div></div>${tag(total ? 'live' : 'нет данных', total ? 'good' : 'warn')}</div>
-    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-      <div style="position:relative;width:148px;height:148px;flex:0 0 auto">
-        <svg viewBox="0 0 120 120" style="width:100%;height:100%"><circle cx="60" cy="60" r="46" fill="none" stroke="var(--surface-3)" stroke-width="14"/>${rings}</svg>
-        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center"><b style="font-size:15px">${fmtBytes(total)}</b><span style="font:500 9px/1.4 var(--mono);color:var(--text-3)">всего</span></div>
+  const main = parts.reduce((a, b) => b.value > a.value ? b : a, parts[0]);
+  const mainPct = pct(main.value);
+  const legend = parts.map((p, i) => `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;${i < parts.length - 1 ? 'border-bottom:1px solid var(--line);' : ''}"><span style="display:flex;align-items:center;gap:8px;min-width:0"><i style="width:9px;height:9px;border-radius:50%;background:${p.color};display:inline-block;flex:0 0 auto"></i><b style="font-size:12px;font-weight:700">${p.label}</b></span><span class="mono" style="font-size:11px;color:var(--text-2);white-space:nowrap">${pct(p.value)}% · ${fmtBytes(p.value)}</span></div>`).join('');
+  const tagText = total ? (source === 'cached' ? 'последние' : 'live') : 'нет данных';
+  const tagTone = total ? (source === 'cached' ? 'warn' : 'good') : 'warn';
+  const note = total
+    ? (source === 'mangle' ? 'Данные из счётчиков mangle (ipset ru) и awg0/awg1.' : source === 'cached' ? 'Счётчики маршрутизации пересозданы — показаны последние известные доли.' : 'Данные из счётчиков маршрутизации.')
+    : 'Нет данных: счётчики маршрутизации ещё не накоплены.';
+  return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">RU-вход · туннель / RU выход${blocked > 0 ? ' / GeoIP' : ''}</div></div>${tag(tagText, tagTone)}</div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+      <div style="position:relative;width:196px;height:196px;flex:0 0 auto">
+        <svg viewBox="0 0 120 120" style="width:100%;height:100%"><circle cx="60" cy="60" r="46" fill="none" stroke="var(--surface-3)" stroke-width="12"/>${rings}</svg>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">
+          <b style="font-size:30px;line-height:1;font-weight:800;letter-spacing:-.04em">${mainPct}%</b>
+          <span style="font:500 9px/1.4 var(--mono);color:var(--text-3);text-transform:uppercase;letter-spacing:.08em;margin-top:5px">${main.short}</span>
+          <span style="font:500 9px/1.4 var(--mono);color:var(--text-3);margin-top:4px">${fmtBytes(total)}</span>
+        </div>
       </div>
-      <div style="flex:1;min-width:160px">${legend}</div>
+      <div style="width:100%;margin-top:10px">${legend}</div>
     </div>
-    <div class="donut-note" style="margin-top:12px">${total ? (source === 'mangle' ? 'Данные из счётчиков mangle (ipset ru) и awg0/awg1.' : 'Счётчики mangle пока нулевые — показан расчёт по интерфейсам. Доли RU/туннель появятся после накопления трафика.') : 'Нет данных: каскад не активен или счётчики ещё не накоплены.'}</div>
+    <div class="donut-note" style="margin-top:12px">${note}</div>
   </section>`;
 }
-
 function realDashboard() {
   const clients = carbon.clients;
   const online = clients.filter(clientStatus).length;
