@@ -132,6 +132,7 @@ const WARP_STATE_FILE = '/root/awg/warp-adguard.json';
 const WARP_LOG = '/var/log/warp_install.log';
 const WARP_DOMAINS_FILE = path.join(APP_DIR, 'warp-domains.txt');
 const WARP_SERVICES_FILE = path.join(DATA_DIR, '.warp_services.json');
+const WARP_ROUTES_FILE = path.join(DATA_DIR, '.warp_routes.json');
 const WARP_SERVICE_CATALOG = [
     {
         id: 'chatgpt', group: 'AI', label: 'ChatGPT / OpenAI',
@@ -562,31 +563,86 @@ function warpDomainList() {
     } catch (e) { return []; }
 }
 
-function warpServiceIds() {
-    const all = WARP_SERVICE_CATALOG.map(s => s.id);
-    const defaults = WARP_SERVICE_CATALOG.filter(s => s.group === 'AI').map(s => s.id);
+function warpCustomCatalog() {
+    try {
+        const raw = JSON.parse(fs.readFileSync(WARP_ROUTES_FILE, 'utf8').replace(/^\uFEFF/, ''));
+        if (!Array.isArray(raw.custom)) return [];
+        return raw.custom
+            .filter(c => c && typeof c.id === 'string' && typeof c.label === 'string' && Array.isArray(c.domains))
+            .map(c => ({
+                id: c.id,
+                label: String(c.label).slice(0, 80),
+                group: 'Свои',
+                custom: true,
+                domains: [...new Set(c.domains.map(d => String(d).trim().toLowerCase()).filter(d => HOST_RE.test(d)))]
+            }))
+            .filter(c => c.domains.length);
+    } catch (e) { return []; }
+}
+
+function warpCatalog() {
+    return [...WARP_SERVICE_CATALOG, ...warpCustomCatalog()];
+}
+
+function warpRoutes() {
+    const catalog = warpCatalog();
+    const defaults = {};
+    for (const s of WARP_SERVICE_CATALOG) defaults[s.id] = s.group === 'AI' ? 'warp' : 'direct';
+    for (const s of warpCustomCatalog()) defaults[s.id] = 'direct';
+    const applySelected = selected => {
+        const picked = new Set((selected || []).map(String));
+        const out = {};
+        for (const s of catalog) out[s.id] = (picked.has(s.id) && s.id !== 'gemini') ? 'warp' : 'direct';
+        return out;
+    };
+    try {
+        const raw = JSON.parse(fs.readFileSync(WARP_ROUTES_FILE, 'utf8').replace(/^\uFEFF/, ''));
+        if (raw && raw.routes && typeof raw.routes === 'object') {
+            const out = {};
+            for (const s of catalog) {
+                const v = raw.routes[s.id];
+                out[s.id] = ['warp', 'direct', 'off'].includes(v) ? v : defaults[s.id];
+            }
+            return out;
+        }
+        if (raw && Array.isArray(raw.services)) return applySelected(raw.services);
+    } catch (e) { /* ignore */ }
     try {
         const raw = JSON.parse(fs.readFileSync(WARP_SERVICES_FILE, 'utf8').replace(/^\uFEFF/, ''));
-        const list = Array.isArray(raw.services) ? raw.services : [];
-        const picked = [...new Set(list.map(String).filter(id => all.includes(id)))];
-        return picked.length ? picked : defaults;
-    } catch (e) {
-        return defaults;
+        if (Array.isArray(raw.services)) return applySelected(raw.services);
+    } catch (e) { /* ignore */ }
+    return defaults;
+}
+
+function writeWarpRoutes(routes) {
+    const catalog = warpCatalog();
+    const clean = {};
+    for (const s of catalog) {
+        const v = routes && routes[s.id];
+        clean[s.id] = ['warp', 'direct', 'off'].includes(v) ? v : 'direct';
     }
+    writeJson(WARP_ROUTES_FILE, { routes: clean, custom: warpCustomCatalog().map(c => ({ id: c.id, label: c.label, domains: c.domains })), updatedAt: new Date().toISOString() }, 0o600);
+    return clean;
+}
+
+function warpServiceIds() {
+    const routes = warpRoutes();
+    return Object.keys(routes).filter(id => routes[id] === 'warp');
 }
 
 function writeWarpServiceIds(ids) {
-    const all = WARP_SERVICE_CATALOG.map(s => s.id);
-    const picked = [...new Set((Array.isArray(ids) ? ids : []).map(String).filter(id => all.includes(id)))];
-    writeJson(WARP_SERVICES_FILE, { services: picked, updatedAt: new Date().toISOString() }, 0o600);
-    return picked;
+    const selected = new Set((Array.isArray(ids) ? ids : []).map(String));
+    const routes = warpRoutes();
+    for (const id of Object.keys(routes)) routes[id] = selected.has(id) ? 'warp' : 'direct';
+    const saved = writeWarpRoutes(routes);
+    return Object.keys(saved).filter(id => saved[id] === 'warp');
 }
 
 function warpSelectedDomains() {
-    const picked = new Set(warpServiceIds());
+    const routes = warpRoutes();
     const out = [];
-    for (const svc of WARP_SERVICE_CATALOG) {
-        if (!picked.has(svc.id)) continue;
+    for (const svc of warpCatalog()) {
+        if (routes[svc.id] !== 'warp') continue;
         for (const d of svc.domains) if (HOST_RE.test(d)) out.push(d);
     }
     return [...new Set(out)];
@@ -5702,6 +5758,7 @@ app.get('/api/adguard/autodetect', checkAuth, async (req, res) => {
 app.get('/api/warp/status', checkAuth, (req, res) => {
     const cfg = warpConfig();
     const selected = warpServiceIds();
+    const routes = warpRoutes();
     const selectedDomains = warpSelectedDomains();
     const adguard = warpAdguardState();
 
@@ -5716,7 +5773,7 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
             domains: selectedDomains.length,
             selectedDomains: selectedDomains.length,
             selectedServices: selected,
-            services: WARP_SERVICE_CATALOG.map(s => ({ ...s, selected: selected.includes(s.id) })),
+            services: warpCatalog().map(s => ({ ...s, selected: routes[s.id] === 'warp', route: routes[s.id] })),
             checks: [
                 { id: 'warp', title: 'WARP установлен', ok: false, detail: 'демо-режим' },
                 { id: 'connected', title: 'WARP подключён', ok: false, detail: 'демо-режим' },
@@ -5776,7 +5833,7 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
         domains: selectedDomains.length,
         selectedDomains: selectedDomains.length,
         selectedServices: selected,
-        services: WARP_SERVICE_CATALOG.map(s => ({ ...s, selected: selected.includes(s.id) })),
+        services: warpCatalog().map(s => ({ ...s, selected: routes[s.id] === 'warp', route: routes[s.id] })),
         checks,
         adguard
     });
@@ -5789,9 +5846,10 @@ app.get('/api/warp/domains', checkAuth, (req, res) => {
 
 app.get('/api/warp/services', checkAuth, (req, res) => {
     const selected = warpServiceIds();
+    const routes = warpRoutes();
     res.json({
         selected,
-        services: WARP_SERVICE_CATALOG.map(s => ({ ...s, selected: selected.includes(s.id) })),
+        services: warpCatalog().map(s => ({ ...s, selected: routes[s.id] === 'warp', route: routes[s.id] })),
         domains: warpSelectedDomains()
     });
 });
@@ -5804,9 +5862,74 @@ app.post('/api/warp/services', checkAuth, requireAdmin, (req, res) => {
     res.json({ success: true, selected, domains: warpSelectedDomains() });
 });
 
+app.get('/api/warp/routes', checkAuth, (req, res) => {
+    const routes = warpRoutes();
+    res.json({
+        routes,
+        custom: warpCustomCatalog(),
+        services: warpCatalog().map(s => ({ ...s, selected: routes[s.id] === 'warp', route: routes[s.id] }))
+    });
+});
+
+app.post('/api/warp/routes', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    const routes = writeWarpRoutes(body.routes || {});
+    auditLog(req, 'WARP: маршруты сервисов обновлены');
+    res.json({
+        success: true,
+        routes,
+        domains: warpSelectedDomains(),
+        services: warpCatalog().map(s => ({ ...s, selected: routes[s.id] === 'warp', route: routes[s.id] }))
+    });
+});
+
+app.post('/api/warp/custom', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    const label = String(body.label || '').trim().slice(0, 80);
+    if (!label) return res.status(400).json({ error: 'Укажите название сервиса' });
+    const domains = [...new Set(String(body.domains || '').split(/[\s,;]+/)
+        .map(d => d.trim().toLowerCase())
+        .filter(d => d && HOST_RE.test(d)))];
+    if (!domains.length) return res.status(400).json({ error: 'Укажите хотя бы один домен' });
+    if (domains.length > 200) return res.status(400).json({ error: 'Слишком много доменов (максимум 200)' });
+    let raw = {};
+    try { raw = JSON.parse(fs.readFileSync(WARP_ROUTES_FILE, 'utf8').replace(/^\uFEFF/, '')); } catch (e) { raw = {}; }
+    const custom = Array.isArray(raw.custom) ? raw.custom : [];
+    let id = String(body.id || '').trim();
+    if (!id) {
+        const base = 'custom-' + (label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'service');
+        id = base;
+        let n = 2;
+        while (custom.some(c => c.id === id)) id = base + '-' + n++;
+    }
+    if (!/^custom-[a-z0-9-]{1,60}$/.test(id)) return res.status(400).json({ error: 'Некорректный идентификатор сервиса' });
+    const found = custom.find(c => c.id === id);
+    if (found) { found.label = label; found.domains = domains; }
+    else custom.push({ id, label, domains });
+    const routes = warpRoutes();
+    if (!routes[id]) routes[id] = 'direct';
+    writeJson(WARP_ROUTES_FILE, { routes, custom, updatedAt: new Date().toISOString() }, 0o600);
+    auditLog(req, `WARP: свой сервис ${label} (${domains.length} доменов)`);
+    res.json({ success: true, id, label, domains });
+});
+
+app.delete('/api/warp/custom/:id', checkAuth, requireAdmin, (req, res) => {
+    const id = String(req.params.id || '');
+    if (!/^custom-[a-z0-9-]{1,60}$/.test(id)) return res.status(400).json({ error: 'Некорректный идентификатор сервиса' });
+    let raw = {};
+    try { raw = JSON.parse(fs.readFileSync(WARP_ROUTES_FILE, 'utf8').replace(/^\uFEFF/, '')); } catch (e) { raw = {}; }
+    const custom = (Array.isArray(raw.custom) ? raw.custom : []).filter(c => c.id !== id);
+    const routes = warpRoutes();
+    delete routes[id];
+    writeJson(WARP_ROUTES_FILE, { routes, custom, updatedAt: new Date().toISOString() }, 0o600);
+    auditLog(req, `WARP: удалён свой сервис ${id}`);
+    res.json({ success: true });
+});
+
 app.get('/api/warp/instructions', checkAuth, (req, res) => {
     const cfg = warpConfig();
     const selected = warpServiceIds();
+    const routes = warpRoutes();
     const selectedDomains = warpSelectedDomains();
     const allDomains = warpDomainList();
     const publicIp = rustdeskPublicIp() || 'IP_СЕРВЕРА';
@@ -5815,7 +5938,7 @@ app.get('/api/warp/instructions', checkAuth, (req, res) => {
     const allRules = allDomains.map(rule).join('\n');
     const routingDomains = selectedDomains.length ? selectedDomains : allDomains;
     const routingDomainsJson = routingDomains.map(d => `"domain:${d}"`).join(', ');
-    const serviceNames = WARP_SERVICE_CATALOG
+    const serviceNames = warpCatalog()
         .filter(s => selected.includes(s.id))
         .map(s => s.label)
         .join(', ') || 'не выбраны';

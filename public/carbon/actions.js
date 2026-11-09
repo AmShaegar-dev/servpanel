@@ -756,14 +756,15 @@ async function carbonWarpPanel() {
     ? `Режим: ${st.mode || '—'} · Xray: ${st.xrayActive ? 'активен' : 'остановлен'} (${st.listenIp || '—'}:${st.listenPort || '—'}) · WARP: ${st.connected ? 'Connected' : 'не подключён'} · SOCKS: ${st.socksPort || '—'}`
     : 'WARP не установлен.';
   const rows = (st.services || []).map(s => {
-    const warp = st.mode === 'v1' ? true : (s.id === 'gemini' ? false : !!s.selected);
-    return `<div class="warp-route-row"><b>${escHtml(s.label)}</b><label><input type="radio" name="warp-route-${escHtml(s.id)}" data-warp-route data-service-id="${escHtml(s.id)}" value="warp" ${warp ? 'checked' : ''}></label><label><input type="radio" name="warp-route-${escHtml(s.id)}" data-warp-route data-service-id="${escHtml(s.id)}" value="direct" ${!warp ? 'checked' : ''}></label></div>`;
+    const route = s.route || (s.id === 'gemini' ? 'direct' : (s.selected ? 'warp' : 'direct'));
+    const radio = (value, label) => `<label title="${label}"><input type="radio" name="warp-route-${escHtml(s.id)}" data-warp-route data-service-id="${escHtml(s.id)}" value="${value}" ${route === value ? 'checked' : ''}></label>`;
+    return `<div class="warp-route-row"><span class="warp-service-name"><b>${escHtml(s.label)}</b>${s.custom ? `<button class="row-action" data-warp-custom-delete="${escHtml(s.id)}" title="Удалить сервис">${icon('trash')}</button>` : ''}</span>${radio('warp', 'В WARP')}${radio('direct', 'Напрямую')}${radio('off', 'Отключено')}</div>`;
   }).join('');
   modal.innerHTML = `<div class="modal-card modal-wide"><div class="modal-head"><div><div class="modal-title">WARP + Xray</div><div class="modal-sub">${escHtml(summary)}</div></div><button class="icon-btn" data-warp-close>✕</button></div>
-    <div class="page-actions" style="flex-wrap:wrap"><button class="btn btn-primary" data-warp-action="power-on">Включить</button><button class="btn" data-warp-action="power-off">Остановить</button><button class="btn" data-warp-action="test">Проверить WARP</button></div>
-    <div class="donut-note" style="margin-top:12px">Слева — трафик идёт через WARP. Справа — напрямую с IP сервера, как Gemini сейчас.</div>
-    <div class="page-actions" style="margin-top:12px"><button class="btn btn-sm" data-warp-preset="all-warp">Все в WARP</button><button class="btn btn-sm" data-warp-preset="v2">Вариант 2: Gemini напрямую</button><button class="btn btn-sm" data-warp-preset="all-direct">Все напрямую</button></div>
-    <div class="warp-route-table" style="margin-top:12px"><div class="warp-route-row head"><span>Сервис</span><span>В WARP</span><span>Напрямую</span></div>${rows || '<div class="empty-row">Сервисы не найдены</div>'}</div>
+    <div class="page-actions" style="flex-wrap:wrap"><button class="btn btn-primary" data-warp-action="power-on">Включить</button><button class="btn" data-warp-action="power-off">Остановить</button><button class="btn" data-warp-action="test">Проверить WARP</button><button class="btn" data-warp-custom>Сервисы</button></div>
+    <div class="donut-note" style="margin-top:12px">Слева — через WARP. По центру — напрямую с IP сервера (как Gemini). Справа — сервис отключён.</div>
+    <div class="page-actions" style="margin-top:12px"><button class="btn btn-sm" data-warp-preset="all-warp">Все в WARP</button><button class="btn btn-sm" data-warp-preset="v2">Вариант 2: Gemini напрямую</button><button class="btn btn-sm" data-warp-preset="all-direct">Все напрямую</button><button class="btn btn-sm" data-warp-preset="all-off">Все отключить</button></div>
+    <div class="warp-route-table" style="margin-top:12px"><div class="warp-route-row head"><span>Сервис</span><span>В WARP</span><span>Напрямую</span><span>Отключено</span></div>${rows || '<div class="empty-row">Сервисы не найдены</div>'}</div>
     <div class="page-actions" style="margin-top:14px"><button class="btn btn-primary" data-warp-apply>Применить</button></div>
     <pre class="code" data-warp-out style="margin-top:14px;padding:12px;white-space:pre-wrap;max-height:36vh;overflow:auto">Готово</pre></div>`;
   document.body.appendChild(modal);
@@ -774,25 +775,55 @@ async function carbonWarpPanel() {
   modal.querySelectorAll('[data-warp-preset]').forEach(b => b.addEventListener('click', () => {
     const mode = b.dataset.warpPreset;
     radios.forEach(x => {
-      const isWarp = x.value === 'warp';
-      if (mode === 'all-warp') x.checked = isWarp;
-      else if (mode === 'all-direct') x.checked = !isWarp;
-      else if (mode === 'v2') x.checked = x.dataset.serviceId === 'gemini' ? !isWarp : isWarp;
+      if (mode === 'all-warp') x.checked = x.value === 'warp';
+      else if (mode === 'all-direct') x.checked = x.value === 'direct';
+      else if (mode === 'all-off') x.checked = x.value === 'off';
+      else if (mode === 'v2') x.checked = x.dataset.serviceId === 'gemini' ? x.value === 'direct' : x.value === 'warp';
     });
+  }));
+  modal.querySelector('[data-warp-custom]').addEventListener('click', () => {
+    showCarbonForm({
+      title: 'Свой сервис',
+      sub: 'Название и домены через запятую или с новой строки',
+      fields: [
+        { name: 'label', label: 'Название', placeholder: 'Например, My AI' },
+        { name: 'domains', label: 'Домены', type: 'textarea', rows: 6, placeholder: 'example.com\napi.example.com' }
+      ],
+      submitText: 'Добавить',
+      onSubmit: async v => {
+        if (!v.label.trim()) throw new Error('Укажите название');
+        await api('/api/warp/custom', { method: 'POST', body: { label: v.label.trim(), domains: v.domains } });
+        modal.remove();
+        await carbonWarpPanel();
+      }
+    });
+  });
+  modal.querySelectorAll('[data-warp-custom-delete]').forEach(b => b.addEventListener('click', async () => {
+    const id = b.dataset.warpCustomDelete;
+    if (!confirm('Удалить свой сервис?')) return;
+    try {
+      await api('/api/warp/custom/' + encodeURIComponent(id), { method: 'DELETE' });
+      modal.remove();
+      await carbonWarpPanel();
+    } catch (e) { out.textContent = e.message; }
   }));
   modal.querySelector('[data-warp-apply]').addEventListener('click', async () => {
     try {
-      const serviceIds = [...new Set(radios.map(x => x.dataset.serviceId))];
-      const warpIds = radios.filter(x => x.value === 'warp' && x.checked).map(x => x.dataset.serviceId);
-      const allWarp = serviceIds.length > 0 && serviceIds.every(id => warpIds.includes(id));
+      const routes = {};
+      radios.forEach(x => { if (x.checked) routes[x.dataset.serviceId] = x.value; });
+      const ids = Object.keys(routes);
+      const warpIds = ids.filter(id => routes[id] === 'warp');
+      const allWarp = ids.length > 0 && ids.every(id => routes[id] === 'warp');
       const mode = allWarp ? 'v1' : 'v2';
       const text = mode === 'v1'
         ? 'Все сервисы пойдут через WARP. Продолжить?'
-        : 'Через WARP пойдут только сервисы из левой колонки, остальные — напрямую с IP сервера. Продолжить?';
+        : 'Маршруты будут применены: WARP, напрямую и отключённые. Продолжить?';
       if (!confirm(text)) return;
-      await api('/api/warp/services', { method: 'POST', body: { services: warpIds } });
+      await api('/api/warp/routes', { method: 'POST', body: { routes } });
       const d = await api('/api/install/module', { method: 'POST', body: { module: 'warp', warpMode: mode, listenIp: '0.0.0.0', listenPort: '443', socksPort: st.socksPort || '40000' } });
-      out.textContent = d.logFile ? 'Установка запущена. Журнал: ' + d.logFile : 'Установка запущена';
+      carbon.warp = await api('/api/warp/status').catch(() => null);
+      render();
+      out.textContent = d.logFile ? 'Маршруты сохранены, установка запущена. Журнал: ' + d.logFile : 'Маршруты сохранены, установка запущена';
     } catch (e) { out.textContent = e.message; }
   });
   modal.querySelectorAll('[data-warp-action]').forEach(b => b.addEventListener('click', async () => {

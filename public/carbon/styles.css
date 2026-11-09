@@ -114,10 +114,11 @@ button{background:none;border:0;cursor:pointer}a{color:inherit;text-decoration:n
 .rustdesk-group{margin-bottom:14px}
 .rustdesk-group:last-child{margin-bottom:0}
 .warp-route-table{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;overflow:hidden}
-.warp-route-row{display:grid;grid-template-columns:1fr 90px 100px;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.warp-route-row{display:grid;grid-template-columns:1fr 80px 90px 90px;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line)}
 .warp-route-row:last-child{border-bottom:0}
 .warp-route-row.head{background:var(--surface-2);font:500 9px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)}
 .warp-route-row b{font-size:12px;font-weight:600;color:var(--text)}
+.warp-service-name{display:flex;align-items:center;gap:6px;min-width:0}
 .warp-route-row label{display:flex;justify-content:center;cursor:pointer}
 .warp-route-row input[type=radio]{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
 .card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:15px}
