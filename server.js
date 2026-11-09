@@ -205,7 +205,7 @@ const WARP_SERVICE_CATALOG = [
             'gtm.deepl.com', 'home.deepl.com', 'hs.deepl.com', 'ita-free.app.deepl.com',
             'ita-free.www.deepl.com', 'login-wall.deepl.com', 'oneshot-free.www.deepl.com',
             'ott.deepl.com', 's.deepl.com', 'shield.deepl.com', 'sl.deepl.com', 'static.deepl.com',
-            'support.deepl.com', 'w.deepl.com', 'write-free.www.deepl.com', 'www2.deepl.com']
+            'support.deepl.com', 'w.deepl.com', 'write-free.www.deepl.com']
     },
     {
         id: 'trae', group: 'AI', label: 'Trae',
@@ -416,7 +416,7 @@ const IFACE_RE = /^[A-Za-z0-9_.:@-]{1,32}$/;
 const HOST_RE = /^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/;
 
 function normalizeWarpDomain(d) {
-    return String(d || '').trim().toLowerCase().replace(/^www\./, '');
+    return String(d || '').trim().toLowerCase().replace(/^www\d*\./, '');
 }
 
 function normalizeWarpDomains(list) {

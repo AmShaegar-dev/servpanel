@@ -184,7 +184,6 @@ windsurf-telemetry.codeium.com
 workos.imgix.net
 write-free.www.deepl.com
 x.ai
-www2.deepl.com
 xboxdesignlab.xbox.com
 xgpuweb.gssv-play-prod.xboxlive.com
 xgpuwebf2p.gssv-play-prod.xboxlive.com

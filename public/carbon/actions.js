@@ -745,7 +745,7 @@ async function carbonAdguardConfig() {
     const ids = new Set(boxes.filter(x => x.checked).map(x => x.value));
     const names = services.filter(s => ids.has(s.id)).map(s => s.label);
     const domains = [...new Set(services.filter(s => ids.has(s.id)).flatMap(s => s.domains || [])
-      .map(d => String(d).trim().replace(/^www\./i, ''))
+      .map(d => String(d).trim().replace(/^www\d*\./i, ''))
       .filter(Boolean))];
     if (!domains.length) { out.textContent = 'Выберите хотя бы один сервис'; return ''; }
     const text = `# AdGuard Home — пользовательские правила\n# IP: ${ip}\n# Сервисы: ${names.join(', ')}\n\n` + domains.map(d => `||${d}^$dnsrewrite=NOERROR;A;${ip}`).join('\n') + '\n';
