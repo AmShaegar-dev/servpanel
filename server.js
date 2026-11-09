@@ -648,6 +648,16 @@ function warpSelectedDomains() {
     return [...new Set(out)];
 }
 
+function warpBlockedDomains() {
+    const routes = warpRoutes();
+    const out = [];
+    for (const svc of warpCatalog()) {
+        if (routes[svc.id] !== 'off') continue;
+        for (const d of svc.domains) if (HOST_RE.test(d)) out.push(d);
+    }
+    return [...new Set(out)];
+}
+
 function warpAdguardState() {
     try { return JSON.parse(fs.readFileSync(WARP_STATE_FILE, 'utf8').replace(/^\uFEFF/, '')); }
     catch (e) { return null; }
@@ -5936,8 +5946,16 @@ app.get('/api/warp/instructions', checkAuth, (req, res) => {
     const rule = d => `||${d}^$dnsrewrite=NOERROR;A;${publicIp}`;
     const selectedRules = selectedDomains.map(rule).join('\n');
     const allRules = allDomains.map(rule).join('\n');
-    const routingDomains = selectedDomains.length ? selectedDomains : allDomains;
+    const routingDomains = selectedDomains;
     const routingDomainsJson = routingDomains.map(d => `"domain:${d}"`).join(', ');
+    const blockedDomains = warpBlockedDomains();
+    const blockedJson = blockedDomains.map(d => `"domain:${d}"`).join(', ');
+    const v2Rules = [
+        `{"type":"field","domain":["domain:google.com","domain:googleapis.com","domain:gstatic.com","domain:googleusercontent.com","domain:gvt1.com","domain:google-analytics.com","domain:googletagmanager.com","domain:gemini.google","domain:deepmind.google"],"outboundTag":"direct"}`,
+        blockedJson ? `{"type":"field","domain":[${blockedJson}],"outboundTag":"block"}` : '',
+        routingDomainsJson ? `{"type":"field","domain":[${routingDomainsJson}],"outboundTag":"warp"}` : '',
+        `{"type":"field","network":"tcp,udp","outboundTag":"direct"}`
+    ].filter(Boolean).join(',\n      ');
     const serviceNames = warpCatalog()
         .filter(s => selected.includes(s.id))
         .map(s => s.label)
@@ -6039,28 +6057,7 @@ ${listenLine}      "port": ${cfg.listenPort},
   ],
   "routing": {
     "domainStrategy": "AsIs",
-    "rules": [
-      {
-        "type": "field",
-        "domain": [
-          "domain:google.com", "domain:googleapis.com", "domain:gstatic.com",
-          "domain:googleusercontent.com", "domain:gvt1.com",
-          "domain:google-analytics.com", "domain:googletagmanager.com",
-          "domain:gemini.google", "domain:deepmind.google"
-        ],
-        "outboundTag": "direct"
-      },
-      {
-        "type": "field",
-        "domain": [${routingDomainsJson}],
-        "outboundTag": "warp"
-      },
-      {
-        "type": "field",
-        "network": "tcp,udp",
-        "outboundTag": "direct"
-      }
-    ]
+    "rules": [${v2Rules}]
   }
 }`;
 
@@ -9294,6 +9291,7 @@ function installEnv(data) {
     // Домены уже провалидированы каталогом, поэтому это безопасная строка.
     env.WARP_AI_DOMAINS = warpSelectedDomains().join(',');
     env.WARP_AI_DOMAINS_FILE = WARP_DOMAINS_FILE;
+    env.WARP_BLOCK_DOMAINS = warpBlockedDomains().join(',');
 
     // MTProto / WEB-прокси (MEKO). Значения проверяются здесь и в скрипте,
     // чтобы установщик MEKO не задавал ни одного вопроса.

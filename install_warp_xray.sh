@@ -275,12 +275,16 @@ import json, os, sys
 path = sys.argv[1]
 with open(path, encoding='utf-8') as f:
     cfg = json.load(f)
-ai = [d.strip().lower() for d in os.environ.get('WARP_AI_DOMAINS', '').split(',') if d.strip()]
-if not ai:
+ai_raw = os.environ.get('WARP_AI_DOMAINS')
+if ai_raw is None:
+    ai = []
     fallback = os.environ.get('WARP_AI_DOMAINS_FILE', '')
     if fallback and os.path.exists(fallback):
         with open(fallback, encoding='utf-8') as f:
             ai = [line.strip().lower() for line in f if line.strip() and not line.strip().startswith('#')]
+else:
+    ai = [d.strip().lower() for d in ai_raw.split(',') if d.strip()]
+blocked = [d.strip().lower() for d in os.environ.get('WARP_BLOCK_DOMAINS', '').split(',') if d.strip()]
 google = [
     "domain:google.com", "domain:googleapis.com", "domain:gstatic.com",
     "domain:googleusercontent.com", "domain:gvt1.com",
@@ -288,13 +292,15 @@ google = [
     "domain:gemini.google", "domain:deepmind.google"
 ]
 rules = [{"type": "field", "domain": google, "outboundTag": "direct"}]
+if blocked:
+    rules.append({"type": "field", "domain": ["domain:" + d for d in blocked], "outboundTag": "block"})
 if ai:
     rules.append({"type": "field", "domain": ["domain:" + d for d in ai], "outboundTag": "warp"})
 rules.append({"type": "field", "network": "tcp,udp", "outboundTag": "direct"})
 cfg["routing"] = {"domainStrategy": "AsIs", "rules": rules}
 with open(path, 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2, ensure_ascii=False)
-print("routing v2: Google direct, AI warp, default direct; AI domains:", len(ai))
+print("routing v2: Google direct, blocked:", len(blocked), "AI warp:", len(ai), "default direct")
 PY
 fi
 
