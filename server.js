@@ -1942,7 +1942,7 @@ function iptablesHas(args) {
     try { rootSh('iptables', args); return true; } catch (e) { return false; }
 }
 
-function ensureSplitAccounting(clients) {
+function ensureSplitAccounting(clients, force) {
     if (TEST_MODE) return;
     if (cascadeRole() !== 'ru' || !existingCascadeConf()) return;
     const ips = [...new Set((clients || []).map(c => String(c.ip || '').trim()).filter(Boolean))].sort();
@@ -1957,8 +1957,8 @@ function ensureSplitAccounting(clients) {
             try { rootSh('iptables', ['-t', 'mangle', '-D', 'PREROUTING', '-i', iface, '-j', 'AWG_SPLIT']); } catch (e) { /* ignore */ }
             rootSh('iptables', ['-t', 'mangle', '-I', 'PREROUTING', '1', '-i', iface, '-j', 'AWG_SPLIT']);
         }
-        splitAccountingDebug = { error: '', hasRu: null, ifaces, ips, added: 0, chain: '' };
-        if (sig === splitAccountingSig && now - splitAccountingAt < 60000) return;
+        if (!force && sig === splitAccountingSig && now - splitAccountingAt < 60000) return;
+        splitAccountingDebug = { error: '', hasRu: null, ifaces, ips, added: 0, existing: 0, steps: [], chain: '' };
         const hasRu = !!rootShTry('ipset', ['list', 'ru']).trim();
         splitAccountingDebug.hasRu = hasRu;
         for (const ip of ips) {
@@ -1966,15 +1966,15 @@ function ensureSplitAccounting(clients) {
             if (hasRu) {
                 const ruRule = ['-s', ip, '-m', 'set', '--match-set', 'ru', 'dst', '-j', 'RETURN'];
                 if (!iptablesHas(['-t', 'mangle', '-C', 'AWG_SPLIT', ...ruRule])) {
-                    rootSh('iptables', ['-t', 'mangle', '-A', 'AWG_SPLIT', ...ruRule]);
-                    splitAccountingDebug.added++;
-                }
+                    try { rootSh('iptables', ['-t', 'mangle', '-A', 'AWG_SPLIT', ...ruRule]); splitAccountingDebug.added++; splitAccountingDebug.steps.push('add ru ' + ip); }
+                    catch (e) { splitAccountingDebug.steps.push('fail ru ' + ip + ': ' + e.message); throw e; }
+                } else splitAccountingDebug.existing++;
             }
             const euRule = ['-s', ip, '-j', 'RETURN'];
             if (!iptablesHas(['-t', 'mangle', '-C', 'AWG_SPLIT', ...euRule])) {
-                rootSh('iptables', ['-t', 'mangle', '-A', 'AWG_SPLIT', ...euRule]);
-                splitAccountingDebug.added++;
-            }
+                try { rootSh('iptables', ['-t', 'mangle', '-A', 'AWG_SPLIT', ...euRule]); splitAccountingDebug.added++; splitAccountingDebug.steps.push('add eu ' + ip); }
+                catch (e) { splitAccountingDebug.steps.push('fail eu ' + ip + ': ' + e.message); throw e; }
+            } else splitAccountingDebug.existing++;
         }
         const current = new Set(ips);
         const chain = rootShTry('iptables', ['-t', 'mangle', '-S', 'AWG_SPLIT']);
@@ -3148,6 +3148,15 @@ app.get('/api/iptables', checkAuth, (req, res) => {
         res.json({ chains: IPTABLES_CHAINS, rules: readIptablesRules(), splitDebug: splitAccountingDebug });
     } catch (e) {
         res.status(500).json({ error: 'Не удалось прочитать iptables: ' + e.message });
+    }
+});
+
+app.post('/api/iptables/split-test', checkAuth, requireAdmin, (req, res) => {
+    try {
+        ensureSplitAccounting(lastClientsSnapshot, true);
+        res.json({ debug: splitAccountingDebug, chain: String(rootShTry('iptables', ['-t', 'mangle', '-S', 'AWG_SPLIT']) || '') });
+    } catch (e) {
+        res.status(500).json({ error: e.message, debug: splitAccountingDebug });
     }
 });
 
