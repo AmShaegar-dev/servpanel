@@ -583,20 +583,16 @@ function realDashboard() {
   const tx = clients.reduce((a, c) => a + (Number(c.tx) || 0), 0);
   const s = carbon.server || {};
   const sys = carbon.sys || {};
-  const trafficTotal = rx + tx;
-  const txPct = trafficTotal ? tx / trafficTotal * 100 : 0;
-  const rxPct = trafficTotal ? rx / trafficTotal * 100 : 0;
-  const onlinePct = clients.length ? online / clients.length * 100 : 0;
   return `
     <div class="overview">
       <div class="server-id"><span class="dot"></span><div><div class="server-name">Servpanel · ${escHtml(s.country || 'сервер')}</div><div class="server-meta">${escHtml(s.ip || 'IP —')} · uptime <span id="liveUptimeMeta">${escHtml(sys.uptime || '—')}</span> · build ${escHtml(carbon.update ? carbon.update.version : '—')}</div></div></div>
       <div class="overview-actions"><div class="live"><span class="dot"></span>API подключён</div><button class="btn" data-carbon-action="diag-check">${icon('pulse')}Проверить всё</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button><button class="btn btn-primary" data-action="open-client-modal">${icon('plus')}Добавить клиента</button></div>
     </div>
     <div class="grid">
-      ${kpi('Исходящий', `<span id="liveTx">${fmtBytes(tx)}</span>`, 'TX всего', 'upload', '', txPct, '', 'kpiTxBar')}
-      ${kpi('Входящий', `<span id="liveRx">${fmtBytes(rx)}</span>`, 'RX всего', 'download', 'amber', rxPct, 'var(--accent-2)', 'kpiRxBar')}
-      ${kpi('Клиенты', `<span id="liveClients">${clients.length}</span>`, `<span id="liveOnline">${online}</span> онлайн`, 'users', 'neutral', onlinePct, 'var(--good)', 'kpiClientsBar')}
-      ${kpi('Uptime', `<span id="liveUptime">${escHtml(sys.uptime || '—')}</span>`, 'с последнего запуска', 'pulse', 'neutral', null)}
+      ${kpi('Исходящий', `<span id="liveTx">${fmtBytes(tx)}</span>`, 'TX всего', 'upload', '')}
+      ${kpi('Входящий', `<span id="liveRx">${fmtBytes(rx)}</span>`, 'RX всего', 'download', 'amber')}
+      ${kpi('Клиенты', `<span id="liveClients">${clients.length}</span>`, `<span id="liveOnline">${online}</span> онлайн`, 'users', 'neutral')}
+      ${kpi('Uptime', `<span id="liveUptime">${escHtml(sys.uptime || '—')}</span>`, 'с последнего запуска', 'pulse', 'neutral')}
       ${realTrafficChart()}
       ${realTrafficDistribution()}
       <section class="card chart-card" style="position:relative"><div class="card-top"><div><div class="card-title">Сервер</div><div class="card-sub">реальные данные API</div></div>${tag('live', 'good')}</div><div class="mini-grid" style="grid-template-columns:1fr 1fr;margin:0">${mini('CPU', `<span id="liveCpu">${sys.cpu || '—'}%</span>`, 'нагрузка')}${mini('RAM', `<span id="liveRam">${sys.ram || '—'}%</span>`, 'использование')}${mini('Скорость', `<span id="liveSpeed">—</span>`, 'Rx / Tx')}${mini('Интерфейсы', String(carbon.interfaces.length), 'сетевые')}${mini('Модули', String(carbon.modules.filter(m => m.installed).length) + ' / ' + carbon.modules.length, 'установлено')}</div></section>
@@ -1047,14 +1043,6 @@ function updateDashboardClients() {
   setLiveText('liveRx', fmtBytes(rx));
   setLiveText('liveClients', String(clients.length));
   setLiveText('liveOnline', String(online));
-  const total = rx + tx;
-  const setBar = (id, pct) => {
-    const el = document.getElementById(id);
-    if (el) el.style.width = pct.toFixed(1) + '%';
-  };
-  setBar('kpiTxBar', total ? tx / total * 100 : 0);
-  setBar('kpiRxBar', total ? rx / total * 100 : 0);
-  setBar('kpiClientsBar', clients.length ? online / clients.length * 100 : 0);
   const tbody = document.querySelector('#view #clientsTable tbody');
   if (tbody) tbody.innerHTML = realClientRows();
 }
