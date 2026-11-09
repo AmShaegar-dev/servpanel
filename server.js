@@ -5950,9 +5950,10 @@ app.get('/api/warp/instructions', checkAuth, (req, res) => {
     const routingDomainsJson = routingDomains.map(d => `"domain:${d}"`).join(', ');
     const blockedDomains = warpBlockedDomains();
     const blockedJson = blockedDomains.map(d => `"domain:${d}"`).join(', ');
+    const googleDirect = routes['gemini'] !== 'warp';
     const v2Rules = [
-        `{"type":"field","domain":["domain:google.com","domain:googleapis.com","domain:gstatic.com","domain:googleusercontent.com","domain:gvt1.com","domain:google-analytics.com","domain:googletagmanager.com","domain:gemini.google","domain:deepmind.google"],"outboundTag":"direct"}`,
         blockedJson ? `{"type":"field","domain":[${blockedJson}],"outboundTag":"block"}` : '',
+        googleDirect ? `{"type":"field","domain":["domain:google.com","domain:googleapis.com","domain:gstatic.com","domain:googleusercontent.com","domain:gvt1.com","domain:google-analytics.com","domain:googletagmanager.com","domain:gemini.google","domain:deepmind.google"],"outboundTag":"direct"}` : '',
         routingDomainsJson ? `{"type":"field","domain":[${routingDomainsJson}],"outboundTag":"warp"}` : '',
         `{"type":"field","network":"tcp,udp","outboundTag":"direct"}`
     ].filter(Boolean).join(',\n      ');
@@ -9292,6 +9293,7 @@ function installEnv(data) {
     env.WARP_AI_DOMAINS = warpSelectedDomains().join(',');
     env.WARP_AI_DOMAINS_FILE = WARP_DOMAINS_FILE;
     env.WARP_BLOCK_DOMAINS = warpBlockedDomains().join(',');
+    env.WARP_GOOGLE_DIRECT = warpRoutes()['gemini'] === 'warp' ? '0' : '1';
 
     // MTProto / WEB-прокси (MEKO). Значения проверяются здесь и в скрипте,
     // чтобы установщик MEKO не задавал ни одного вопроса.

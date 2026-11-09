@@ -285,15 +285,18 @@ if ai_raw is None:
 else:
     ai = [d.strip().lower() for d in ai_raw.split(',') if d.strip()]
 blocked = [d.strip().lower() for d in os.environ.get('WARP_BLOCK_DOMAINS', '').split(',') if d.strip()]
+google_direct = os.environ.get('WARP_GOOGLE_DIRECT', '1') != '0'
 google = [
     "domain:google.com", "domain:googleapis.com", "domain:gstatic.com",
     "domain:googleusercontent.com", "domain:gvt1.com",
     "domain:google-analytics.com", "domain:googletagmanager.com",
     "domain:gemini.google", "domain:deepmind.google"
 ]
-rules = [{"type": "field", "domain": google, "outboundTag": "direct"}]
+rules = []
 if blocked:
     rules.append({"type": "field", "domain": ["domain:" + d for d in blocked], "outboundTag": "block"})
+if google_direct:
+    rules.append({"type": "field", "domain": google, "outboundTag": "direct"})
 if ai:
     rules.append({"type": "field", "domain": ["domain:" + d for d in ai], "outboundTag": "warp"})
 rules.append({"type": "field", "network": "tcp,udp", "outboundTag": "direct"})
