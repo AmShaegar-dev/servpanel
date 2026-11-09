@@ -87,7 +87,8 @@ button{background:none;border:0;cursor:pointer}a{color:inherit;text-decoration:n
 .row-action.is-busy::after{width:11px;height:11px;border-width:1.5px}
 .card.card-busy,.modal-card.card-busy{position:relative}
 .card.card-busy::before,.modal-card.card-busy::before{content:"";position:absolute;inset:0;border-radius:inherit;background:color-mix(in srgb,var(--surface) 55%,transparent);z-index:8;pointer-events:none}
-.card.card-busy::after,.modal-card.card-busy::after{content:"";position:absolute;top:50%;left:50%;width:28px;height:28px;margin:-14px 0 0 -14px;border-radius:50%;border:3px solid color-mix(in srgb,var(--accent) 22%,transparent);border-top-color:var(--accent);animation:carbonSpin .75s linear infinite;z-index:9;pointer-events:none}
+.card.card-busy::after,.modal-card.card-busy::after{content:"";position:absolute;top:16px;right:16px;width:28px;height:28px;border-radius:50%;border:3px solid color-mix(in srgb,var(--accent) 22%,transparent);border-top-color:var(--accent);animation:carbonSpin .75s linear infinite;z-index:9;pointer-events:none}
+.modal-card.card-busy::after{right:60px}
 .overview{display:flex;align-items:center;justify-content:space-between;gap:18px;margin:2px 0 22px;flex-wrap:wrap}
 .server-id{display:flex;align-items:center;gap:12px;min-width:0}
 .server-id>.dot{width:9px;height:9px;box-shadow:0 0 0 4px color-mix(in srgb,var(--good) 14%,transparent);flex:0 0 auto}
