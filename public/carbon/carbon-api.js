@@ -249,12 +249,12 @@ async function loadCarbonData() {
     api(p).catch(() => null),
     new Promise(resolve => setTimeout(() => resolve(null), ms))
   ]);
-  const [stats, clients, modules, services, security, interfaces, update, server, sys, ufw, cascade, cascadeProxy, obf, profiles, proxy, proxyUsers, ssl, app, rustdesk, users, audit, backup, notify, awgConfig, history, distribution, cascadeInterfaces, cascadeSchedule] = await Promise.all([
+  const [stats, clients, modules, services, security, interfaces, update, server, sys, ufw, cascade, cascadeProxy, obf, profiles, ssl, app, rustdesk, users, audit, backup, notify, awgConfig, history, distribution, cascadeInterfaces, cascadeSchedule] = await Promise.all([
     safe('/api/stats'), safe('/api/clients'), safe('/api/modules'), safe('/api/services'),
     safe('/api/security/status'), safe('/api/interfaces'), safe('/api/update/info'),
     safe('/api/server-info'), safe('/api/sysinfo'), safe('/api/ufw'), safe('/api/cascade/status'),
     safe('/api/cascade/proxy'), safe('/api/obf/current'), safe('/api/obf/profiles'),
-    safe('/api/proxy/status'), safe('/api/proxy/users'), safe('/api/ssl/status'),
+    safe('/api/ssl/status'),
     safe('/api/app/status'), safe('/api/rustdesk/status'), safe('/api/users'),
     safe('/api/audit?limit=50'), safe('/api/backup/auto'), safe('/api/notify/status'),
     safe('/api/awg/config'), safe('/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global'),
@@ -274,8 +274,6 @@ async function loadCarbonData() {
   carbon.cascadeProxy = cascadeProxy;
   carbon.obf = obf;
   carbon.profiles = profiles;
-  carbon.proxy = proxy;
-  carbon.proxyUsers = proxyUsers;
   carbon.ssl = ssl;
   carbon.app = app;
   carbon.rustdesk = rustdesk;
@@ -290,6 +288,9 @@ async function loadCarbonData() {
   if (cascadeSchedule && !cascadeSchedule.error) carbon.cascadeSchedule = cascadeSchedule;
   carbon.loaded = true;
   applyShellData();
+  // Прокси-движок опрашивается отдельно: проверка telemt/sudo занимает
+  // несколько секунд и не должна задерживать отрисовку дашборда.
+  loadProxyData();
 }
 
 function clientStatus(c) {
@@ -531,7 +532,29 @@ function realObfuscation() {
     <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Профили</div><div class="card-sub">встроенные и сохранённые</div></div>${tag(String(profiles.length), 'muted')}</div><div class="list">${profiles.slice(0, 8).map(p => `<div class="list-row"><b>${escHtml(p.title || p.name)}</b><span class="mono">${escHtml(String(p.score || ''))}</span><button class="row-action" data-api-action="obf-apply" data-profile="${escHtml(p.name)}" title="Применить">${icon('check')}</button></div>`).join('') || '<div class="list-row"><b>Нет профилей</b></div>'}</div></section></div>`;
 }
 
+let proxyEnsureInFlight = false;
+function loadProxyData() {
+  if (proxyEnsureInFlight) return;
+  proxyEnsureInFlight = true;
+  Promise.all([
+    api('/api/proxy/status').catch(() => null),
+    api('/api/proxy/users').catch(() => null)
+  ]).then(([status, users]) => {
+    proxyEnsureInFlight = false;
+    const got = !!(status || users);
+    if (status) carbon.proxy = status;
+    if (users) carbon.proxyUsers = users;
+    if (got && typeof state !== 'undefined' && state.tab === 'proxy') render();
+  }).catch(() => { proxyEnsureInFlight = false; });
+}
+
+function ensureProxyData() {
+  if (carbon.proxy && carbon.proxyUsers) return;
+  loadProxyData();
+}
+
 function realProxy() {
+  ensureProxyData();
   const p = carbon.proxy || {};
   const raw = carbon.proxyUsers;
   const users = Array.isArray(raw) ? raw : (raw && raw.users) || [];
