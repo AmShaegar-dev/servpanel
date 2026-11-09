@@ -386,7 +386,7 @@ function clientTrafficValue(c) {
 }
 
 function realClientRows() {
-  if (!carbon.clients.length) return `<tr class="empty-row"><td colspan="8">Клиентов пока нет. Создайте первого.</td></tr>`;
+  if (!carbon.clients.length) return `<tr class="empty-row"><td colspan="7">Клиентов пока нет. Создайте первого.</td></tr>`;
   const d = carbon.distribution || {};
   const isEu = (d.role || 'ru') === 'eu';
   const pctText = v => v >= 10 ? Math.round(v) + '%' : v >= 0.1 ? v.toFixed(1) + '%' : '0%';
@@ -412,7 +412,6 @@ function realClientRows() {
       <td class="mono">${escHtml(c.ip || '—')}</td>
       <td>${escHtml(c.status || (online ? 'Активен' : 'Неактивен'))}</td>
       <td class="mono">${fmtBytes(traffic)}</td>
-      <td><div class="bar"><span style="width:${online ? 100 : 15}%"></span></div></td>
       <td>${splitCell}</td>
       <td><span class="status ${online ? '' : 'idle'}"><span class="dot"></span>${online ? 'online' : 'offline'}</span></td>
       <td><div class="page-actions"><button class="row-action" data-carbon-action="client-key" data-name="${escHtml(c.name)}" title="Ключ и QR">${icon('key')}</button><button class="row-action" data-carbon-action="client-rename" data-name="${escHtml(c.name)}" title="Переименовать">${icon('edit')}</button><button class="row-action" data-copy="${escHtml(c.ip || '')}" title="Скопировать IP">${icon('copy')}</button><button class="row-action" data-carbon-action="client-delete" data-name="${escHtml(c.name)}" title="Удалить">${icon('trash')}</button></div></td>
@@ -422,7 +421,7 @@ function realClientRows() {
 
 function realClientsTable() {
   return `<div class="table-tools"><div class="table-search">${icon('search')}<input id="clientSearch" placeholder="Имя или IP" aria-label="Фильтр клиентов"></div><button class="tag" data-toast="Клиентов: ${carbon.clients.length}">Все клиенты ${icon('arrow', 'ico')}</button></div>
-    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr><th>Клиент</th><th>IP</th><th>Статус</th><th>Трафик</th><th>Загрузка</th><th>Каскад / RU</th><th>Статус</th><th style="width:80px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
+    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr><th>Клиент</th><th>IP</th><th>Состояние</th><th>Трафик</th><th>Каскад / RU</th><th>Связь</th><th style="width:80px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
 }
 
 function smoothTraffic(values, range) {
