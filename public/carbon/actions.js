@@ -1152,6 +1152,8 @@ async function carbonProxyInstallMpl(v) {
       { name: 'mplWebCarrier', label: 'Carrier', type: 'select', options: [{ value: 'https', label: 'https' }, { value: 'http', label: 'http' }] },
       { name: 'mplApi', label: 'API MTProxyL', type: 'checkbox', value: true },
       { name: 'mplApiListen', label: 'API listen', value: '127.0.0.1:9190' },
+      { name: 'mplTgbotToken', label: 'Telegram-бот: токен', placeholder: 'необязательно' },
+      { name: 'mplTgbotAdmin', label: 'Telegram-бот: admin ID', placeholder: 'необязательно' },
       { name: 'mplForce', label: 'Переустановить принудительно', type: 'checkbox', value: false }
     ],
     submitText: 'Установить MTProxyL',
@@ -1180,6 +1182,8 @@ async function carbonProxyInstallMpl(v) {
         mplWebCarrier: d.mplWebCarrier || 'https',
         mplApi: !!d.mplApi,
         mplApiListen: d.mplApiListen || '127.0.0.1:9190',
+        mplTgbotToken: d.mplTgbotToken || '',
+        mplTgbotAdmin: d.mplTgbotAdmin || '',
         mplForce: !!d.mplForce
       };
       const r = await api('/api/install/module', { method: 'POST', body });
