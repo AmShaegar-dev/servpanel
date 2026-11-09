@@ -10507,13 +10507,93 @@ app.get('/api/proxy/log', checkAuth, requireAdmin, (req, res) => {
     res.json(out);
 });
 
+async function proxyRestartHard() {
+    let backend = '';
+    try { backend = String((await proxyUsers.detect(true)).backend || ''); } catch (e) { backend = ''; }
+    if (backend === 'telemt') {
+        try {
+            sh('systemctl', ['restart', 'telemt'], { timeout: 30000 });
+            return { restarted: true, hard: true, backend };
+        } catch (e) { /* fall back to API reload */ }
+    }
+    return await proxyUsers.restart();
+}
+
 app.post('/api/proxy/restart', checkAuth, requireAdmin, async (req, res) => {
     try {
-        const result = await proxyUsers.restart();
+        const result = await proxyRestartHard();
         auditLog(req, 'Прокси: перезапуск движка');
         res.json(result || { restarted: true });
     } catch (e) { proxyError(res, e); }
 });
+
+// Сторож MTProto-прокси: если служба активна, а API не отвечает несколько
+// проверок подряд, перезапускаем движок. После восстановления каскада также
+// перезапускаем telemt, чтобы он пересоздал upstream-сокеты через awg1.
+const proxyWatch = { fails: 0, cascadeDown: false, lastRestart: 0, tick: 0, busy: false };
+
+async function proxyWatchdog() {
+    if (DEMO_MODE || TEST_MODE || proxyWatch.busy) return;
+    proxyWatch.busy = true;
+    proxyWatch.tick++;
+    try {
+        const active = ['telemt', 'mtproxyl'].filter(unit => {
+            try { return String(sh('systemctl', ['is-active', unit], { timeout: 5000 }) || '').trim() === 'active'; } catch (e) { return false; }
+        });
+        if (!active.length) {
+            proxyWatch.fails = 0;
+            proxyWatch.cascadeDown = false;
+            return;
+        }
+        const st = await proxyUsers.status();
+        let apiBad = !st || st.running === false || !!st.error;
+        if (!apiBad && st.limited && st.backend === 'telemt') {
+            let hasApi = false;
+            try {
+                const cfg = proxyUsers.configPath();
+                hasApi = !!(cfg && /\[server\.api\]/.test(fs.readFileSync(cfg, 'utf8')));
+            } catch (e) { /* ignore */ }
+            apiBad = hasApi;
+        }
+        proxyWatch.fails = apiBad ? proxyWatch.fails + 1 : 0;
+        let needRestart = proxyWatch.fails >= 3;
+        if (proxyWatch.tick % 2 === 0) {
+            try {
+                if (!fs.existsSync(PROXY_CASCADE_FLAG_FILE)) {
+                    proxyWatch.cascadeDown = false;
+                } else {
+                    const h = cascadeHealth();
+                    if (h && h.checks && h.checks.config) {
+                        if (!h.ok) proxyWatch.cascadeDown = true;
+                        else if (proxyWatch.cascadeDown) {
+                            proxyWatch.cascadeDown = false;
+                            needRestart = true;
+                        }
+                    } else {
+                        proxyWatch.cascadeDown = false;
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        }
+        if (needRestart && Date.now() - proxyWatch.lastRestart > 5 * 60 * 1000) {
+            proxyWatch.fails = 0;
+            proxyWatch.lastRestart = Date.now();
+            try {
+                await proxyRestartHard();
+                console.log('[proxy-watchdog] прокси перезапущен после зависания');
+            } catch (e) {
+                console.error('[proxy-watchdog] перезапуск не удался:', e.message);
+            }
+        }
+    } catch (e) { /* ignore */ } finally {
+        proxyWatch.busy = false;
+    }
+}
+
+if (!TEST_MODE) {
+    setTimeout(proxyWatchdog, 30000);
+    setInterval(proxyWatchdog, 60000);
+}
 
 // Ключ API MTProxyL нельзя прочитать повторно (хранится SHA-256), поэтому
 // панель выдаёт новый ключ и сохраняет его у себя.

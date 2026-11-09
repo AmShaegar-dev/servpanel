@@ -121,6 +121,15 @@ button{background:none;border:0;cursor:pointer}a{color:inherit;text-decoration:n
 .warp-service-name{display:flex;align-items:center;gap:6px;min-width:0}
 .warp-route-row label{display:flex;justify-content:center;cursor:pointer}
 .warp-route-row input[type=radio]{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
+.warp-radio span{display:none}
+@media(max-width:700px){
+  .warp-route-row{grid-template-columns:repeat(3,1fr);gap:6px;padding:8px 10px}
+  .warp-route-row.head{display:none}
+  .warp-service-name{grid-column:1/-1;flex-wrap:wrap;min-width:0}
+  .warp-service-name b{min-width:0;overflow-wrap:anywhere}
+  .warp-radio{flex-direction:column;gap:4px}
+  .warp-radio span{display:inline;font:500 8px/1 var(--mono);letter-spacing:.04em;color:var(--text-3);text-align:center}
+}
 .card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:15px}
 .card-title{font-size:13px;font-weight:800;letter-spacing:-.01em}
 .card-sub{font:500 9px/1.4 var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--text-3);margin-top:4px}

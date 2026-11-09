@@ -820,7 +820,7 @@ async function carbonWarpPanel() {
     : 'WARP не установлен.';
   const rows = (st.services || []).map(s => {
     const route = s.route || (s.id === 'gemini' ? 'direct' : (s.selected ? 'warp' : 'direct'));
-    const radio = (value, label) => `<label title="${label}"><input type="radio" name="warp-route-${escHtml(s.id)}" data-warp-route data-service-id="${escHtml(s.id)}" value="${value}" ${route === value ? 'checked' : ''}></label>`;
+    const radio = (value, label) => `<label class="warp-radio" title="${label}"><input type="radio" name="warp-route-${escHtml(s.id)}" data-warp-route data-service-id="${escHtml(s.id)}" value="${value}" ${route === value ? 'checked' : ''}><span>${label}</span></label>`;
     return `<div class="warp-route-row"><span class="warp-service-name"><b>${escHtml(s.label)}</b>${s.overridden ? '<span class="tag">изменён</span>' : ''}<button class="row-action" data-warp-custom-edit="${escHtml(s.id)}" title="Редактировать сервис">${icon('edit')}</button>${s.overridden ? `<button class="row-action" data-warp-custom-reset="${escHtml(s.id)}" title="Сбросить к стандартным">${icon('refresh')}</button>` : ''}${s.custom ? `<button class="row-action" data-warp-custom-delete="${escHtml(s.id)}" title="Удалить сервис">${icon('trash')}</button>` : ''}</span>${radio('warp', 'В WARP')}${radio('direct', 'Напрямую')}${radio('off', 'Отключено')}</div>`;
   }).join('');
   modal.innerHTML = `<div class="modal-card modal-wide"><div class="modal-head"><div><div class="modal-title">WARP + Xray</div><div class="modal-sub">${escHtml(summary)}</div></div><button class="icon-btn" data-warp-close>✕</button></div>

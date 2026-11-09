@@ -615,7 +615,7 @@ function realDashboard() {
   const sys = carbon.sys || {};
   return `
     <div class="overview">
-      <div class="server-id"><span class="dot"></span><div><div class="server-name">Servpanel · ${escHtml(s.country || 'сервер')}</div><div class="server-meta">${escHtml(s.ip || 'IP —')} · uptime <span id="liveUptimeMeta">${escHtml(sys.uptime || '—')}</span> · build ${escHtml(carbon.update ? carbon.update.version : '—')}</div></div></div>
+      <div class="server-id"><span class="dot"></span><div><div class="server-name">Servpanel · ${escHtml(s.country || 'сервер')}</div><div class="server-meta">${escHtml(s.ip || 'IP —')} · build ${escHtml(carbon.update ? carbon.update.version : '—')}</div></div></div>
       <div class="overview-actions"><div class="live"><span class="dot"></span>API подключён</div><button class="btn" data-carbon-action="diag-check">${icon('pulse')}Проверить всё</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button><button class="btn btn-primary" data-action="open-client-modal">${icon('plus')}Добавить клиента</button></div>
     </div>
     <div class="grid">
@@ -1094,7 +1094,6 @@ function updateDashboardClients() {
 function updateDashboardSystem() {
   const system = carbon.sys || {};
   setLiveText('liveUptime', system.uptime || '—');
-  setLiveText('liveUptimeMeta', system.uptime || '—');
   setLiveText('liveCpu', (system.cpu || '—') + '%');
   setLiveText('liveRam', (system.ram || '—') + '%');
   const hRx = (carbon.history && carbon.history.rx) || [];
