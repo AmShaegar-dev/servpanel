@@ -1882,7 +1882,7 @@ const HISTORY_SHORT_POINTS = 8640;             // 24 часа по 10 секун
 const HISTORY_LONG_BUCKET = 30;                // 30 сэмплов = 5 минут
 const HISTORY_LONG_POINTS = 2016;              // 7 суток по 5 минут
 const HISTORY_RANGES = { '5m': 300, '1h': 3600, '3h': 10800, '24h': 86400, '7d': 604800 };
-const HISTORY_RENDER_POINTS = 360;             // столько точек максимум рисует график
+const HISTORY_RENDER_POINTS = 500;             // столько точек максимум рисует график
 const HISTORY_FILE = path.join(DATA_DIR, '.traffic_history.json');
 const HISTORY_SAVE_EVERY = 6;                  // сохранять файл раз в минуту
 
@@ -1984,10 +1984,32 @@ function historyFormatLabel(ms, rangeSec) {
     return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// Дополняет короткий ряд до maxPoints линейной интерполяцией: форма линии
+// не меняется, но график всегда получает одинаковое число точек.
+function historyInterpolate(list, maxPoints) {
+    if (list.length >= maxPoints || list.length < 2) return list;
+    const out = [];
+    const step = (list.length - 1) / (maxPoints - 1);
+    for (let i = 0; i < maxPoints; i++) {
+        const pos = i * step;
+        const i0 = Math.floor(pos);
+        const i1 = Math.min(list.length - 1, i0 + 1);
+        const frac = pos - i0;
+        const a = list[i0], b = list[i1];
+        out.push({
+            t: a.t + (b.t - a.t) * frac,
+            rx: a.rx + (b.rx - a.rx) * frac,
+            tx: a.tx + (b.tx - a.tx) * frac
+        });
+    }
+    return out;
+}
+
 // Усредняет точки по равным корзинам, чтобы на график ушло не больше maxPoints.
 function historyDownsample(samples, fromMs, toMs, maxPoints) {
     const list = samples.filter(s => s && s.t >= fromMs && s.t <= toMs);
-    if (list.length <= maxPoints) return list;
+    if (!list.length) return list;
+    if (list.length <= maxPoints) return historyInterpolate(list, maxPoints);
     const bucketMs = (toMs - fromMs) / maxPoints;
     const out = [];
     let curIdx = -1, sumRx = 0, sumTx = 0, cnt = 0, curT = 0;
@@ -2000,7 +2022,7 @@ function historyDownsample(samples, fromMs, toMs, maxPoints) {
         sumRx += s.rx; sumTx += s.tx; cnt++; curT = s.t;
     }
     if (cnt) out.push({ t: curT, rx: sumRx / cnt, tx: sumTx / cnt });
-    return out;
+    return out.length === maxPoints ? out : historyInterpolate(out, maxPoints);
 }
 
 function readIfaceBytes(name) {
