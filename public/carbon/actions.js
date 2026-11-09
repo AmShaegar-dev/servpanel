@@ -816,7 +816,7 @@ async function carbonWarpPanel() {
   const modal = document.createElement('div');
   modal.className = 'modal';
   const summary = st.installed
-    ? `Xray: ${st.xrayActive ? 'активен' : 'остановлен'} (${st.listenIp || '—'}:${st.listenPort || '—'}) · WARP: ${st.connected ? 'Connected' : 'не подключён'} · SOCKS: ${st.socksPort || '—'}`
+    ? `Xray: ${st.xrayActive ? 'активен' : 'остановлен'} (${st.listenIp || '—'}:${st.listenPort || '—'}) · WARP: ${st.connected ? 'подключён' : 'не подключён'} · SOCKS: ${st.socksPort || '—'}`
     : 'WARP не установлен.';
   const rows = (st.services || []).map(s => {
     const route = s.route || (s.id === 'gemini' ? 'direct' : (s.selected ? 'warp' : 'direct'));

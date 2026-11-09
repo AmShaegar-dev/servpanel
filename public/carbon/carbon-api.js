@@ -379,6 +379,20 @@ function clientStatus(c) {
   return c.status_code === 'active' || c.status_code === 'recent';
 }
 
+const CLIENT_STATE_RU = {
+  active: 'Активен',
+  recent: 'Недавно',
+  inactive: 'Неактивен',
+  online: 'В сети',
+  offline: 'Не в сети',
+  idle: 'Неактивен'
+};
+
+function clientStateText(c, online) {
+  const raw = String(c.status || '').trim();
+  return CLIENT_STATE_RU[raw.toLowerCase()] || raw || (online ? 'Активен' : 'Неактивен');
+}
+
 function clientTrafficValue(c) {
   const total = Number(c && c.total_octets);
   if (Number.isFinite(total) && total > 0) return total;
@@ -410,10 +424,10 @@ function realClientRows() {
     return `<tr data-name="${escHtml(c.name)}" data-ip="${escHtml(c.ip)}">
       <td class="name">${escHtml(c.name)}</td>
       <td class="mono">${escHtml(c.ip || '—')}</td>
-      <td>${escHtml(c.status || (online ? 'Активен' : 'Неактивен'))}</td>
+      <td>${escHtml(clientStateText(c, online))}</td>
       <td class="mono">${fmtBytes(traffic)}</td>
       <td>${splitCell}</td>
-      <td><span class="status ${online ? '' : 'idle'}"><span class="dot"></span>${online ? 'online' : 'offline'}</span></td>
+      <td><span class="status ${online ? '' : 'idle'}"><span class="dot"></span>${online ? 'в сети' : 'не в сети'}</span></td>
       <td><div class="page-actions"><button class="row-action" data-carbon-action="client-key" data-name="${escHtml(c.name)}" title="Ключ и QR">${icon('key')}</button><button class="row-action" data-carbon-action="client-rename" data-name="${escHtml(c.name)}" title="Переименовать">${icon('edit')}</button><button class="row-action" data-copy="${escHtml(c.ip || '')}" title="Скопировать IP">${icon('copy')}</button><button class="row-action" data-carbon-action="client-delete" data-name="${escHtml(c.name)}" title="Удалить">${icon('trash')}</button></div></td>
     </tr>`;
   }).join('');
@@ -614,6 +628,20 @@ function realInstall() {
     <div class="grid">${carbon.modules.map(m => `<section class="card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">${escHtml(m.title)}</div><div class="card-sub">${escHtml(m.description || '')}</div></div>${tag(m.installed ? (m.running ? 'работает' : 'остановлен') : 'не установлен', m.installed ? (m.running ? 'good' : 'warn') : '')}</div><div class="list"><div class="list-row"><b>Порт</b><span class="mono">${escHtml(m.port || m.httpPort || m.tlsPort || '—')}</span></div><div class="list-row"><b>Служба</b><span class="mono">${escHtml(m.service || '—')}</span></div><div class="list-row"><b>Конфиг</b><span class="mono">${escHtml(m.configPath || '—')}</span></div></div><div class="module-actions"><button class="btn ${m.installed ? '' : 'btn-primary'}" data-api-action="${m.installed ? 'uninstall-module' : 'install-module'}" data-module="${escHtml(m.id)}">${icon(m.installed ? 'trash' : 'download')}${m.installed ? 'Удалить' : 'Установить'}</button><button class="btn" data-api-action="module-logs" data-module="${escHtml(m.id)}">${icon('terminal')}Логи</button></div></section>`).join('') || '<section class="card"><div class="empty-row">Нет данных о модулях</div></section>'}</div>`;
 }
 
+const SERVICE_STATE_RU = {
+  active: 'активна',
+  inactive: 'остановлена',
+  failed: 'ошибка',
+  activating: 'запускается',
+  deactivating: 'останавливается',
+  unknown: 'неизвестно'
+};
+
+function serviceStateText(s) {
+  const raw = String(s.state || s.status || '').trim();
+  return SERVICE_STATE_RU[raw.toLowerCase()] || raw || '—';
+}
+
 function realServices() {
   const wst = carbon.warp || {};
   const wservices = Array.isArray(wst.services) ? wst.services : [];
@@ -622,7 +650,7 @@ function realServices() {
     return `<tr><td>${escHtml(s.label)}${s.custom ? ' <span class="tag" style="margin-left:6px">свой</span>' : (s.overridden ? ' <span class="tag" style="margin-left:6px">изменён</span>' : '')}</td><td class="mono">${route === 'warp' ? '✓' : '—'}</td><td class="mono">${route === 'direct' ? '✓' : '—'}</td><td class="mono">${route === 'off' ? '✓' : '—'}</td></tr>`;
   }).join('');
   return `<div class="page-head"><div><div class="page-title">Службы и DNS</div><div class="page-sub">Системные службы. Перезапуск через API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="adguard-stats">${icon('shield')}AdGuard</button><button class="btn" data-carbon-action="adguard-config">${icon('download')}Конфиг AdGuard Home</button><button class="btn" data-carbon-action="warp-panel">${icon('globe')}WARP/Xray</button><button class="btn" data-carbon-action="dns-capture">${icon('link')}DNS-перехват</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
-    <section class="card table-card"><div class="card-top"><div><div class="card-title">Системные службы</div><div class="card-sub">/api/services</div></div>${tag(carbon.services.filter(s => s.state === 'active').length + ' / ' + carbon.services.length, 'good')}</div><div class="table-scroll"><table class="table"><thead><tr><th>Служба</th><th>Назначение</th><th>Состояние</th><th>Автозапуск</th><th></th></tr></thead><tbody>${carbon.services.map(s => `<tr><td class="name">${escHtml(s.name)}</td><td>${escHtml(s.desc || '')}</td><td><span class="status ${s.state === 'active' ? '' : 'idle'}"><span class="dot"></span>${escHtml(s.state || s.status)}</span></td><td class="mono">${s.enabled ? 'enabled' : 'disabled'}</td><td><button class="row-action" data-api-action="restart-service" data-name="${escHtml(s.name)}" title="Перезапустить">${icon('refresh')}</button></td></tr>`).join('') || '<tr><td colspan="5">Служб нет</td></tr>'}</tbody></table></div></section>
+    <section class="card table-card"><div class="card-top"><div><div class="card-title">Системные службы</div><div class="card-sub">/api/services</div></div>${tag(carbon.services.filter(s => s.state === 'active').length + ' / ' + carbon.services.length, 'good')}</div><div class="table-scroll"><table class="table"><thead><tr><th>Служба</th><th>Назначение</th><th>Состояние</th><th>Автозапуск</th><th></th></tr></thead><tbody>${carbon.services.map(s => `<tr><td class="name">${escHtml(s.name)}</td><td>${escHtml(s.desc || '')}</td><td><span class="status ${s.state === 'active' ? '' : 'idle'}"><span class="dot"></span>${escHtml(serviceStateText(s))}</span></td><td class="mono">${s.enabled ? 'включён' : 'выключен'}</td><td><button class="row-action" data-api-action="restart-service" data-name="${escHtml(s.name)}" title="Перезапустить">${icon('refresh')}</button></td></tr>`).join('') || '<tr><td colspan="5">Служб нет</td></tr>'}</tbody></table></div></section>
     <section class="card" style="margin-top:16px"><div class="card-top"><div><div class="card-title">WARP + Xray: маршруты</div><div class="card-sub">Маршруты: WARP / напрямую / отключено</div></div><div class="page-actions">${tag(wst.connected ? 'WARP подключён' : (wst.installed ? 'WARP не подключён' : 'WARP не установлен'), wst.connected ? 'good' : 'warn')}<button class="btn btn-sm" data-carbon-action="warp-panel">Настроить</button></div></div><div class="table-scroll"><table class="table"><thead><tr><th>Сервис</th><th>В WARP</th><th>Напрямую</th><th>Отключено</th></tr></thead><tbody>${routeRows || '<tr><td colspan="4">Сервисы не найдены</td></tr>'}</tbody></table></div><div class="donut-note" style="margin-top:10px">Gemini сейчас напрямую с IP сервера. Маршруты и свои сервисы — в окне «Настроить».</div></section>`;
 }
 
