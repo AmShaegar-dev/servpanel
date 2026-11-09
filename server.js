@@ -2131,6 +2131,13 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
         }
         const mangle = readMangleSplit();
         let tunnel, direct, blocked, source;
+        let splitTotals = null, splitCascade = 0, splitDirect = 0, splitTotal = 0;
+        if (mangle.total === 0) {
+            splitTotals = readSplitCounters();
+            splitCascade = Object.values(splitTotals.eu).reduce((a, b) => a + b, 0);
+            splitDirect = Object.values(splitTotals.ru).reduce((a, b) => a + b, 0);
+            splitTotal = splitCascade + splitDirect;
+        }
         if (mangle.total > 0) {
             const k = clientTotal > 0 ? clientTotal / mangle.total : 1;
             tunnel = Math.round(mangle.tunnel * k);
@@ -2138,6 +2145,14 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             const blockedScaled = Math.round(blockedRaw * k);
             blocked = Math.min(blockedScaled, Math.max(0, clientTotal - tunnel - direct));
             source = 'mangle';
+        } else if (splitTotal > 0) {
+            const k = clientTotal > 0 ? clientTotal / splitTotal : 1;
+            tunnel = Math.round(splitCascade * k);
+            direct = Math.round(splitDirect * k);
+            const blockedScaled = Math.round(blockedRaw * k);
+            blocked = Math.min(blockedScaled, Math.max(0, clientTotal - tunnel - direct));
+            source = 'split';
+            lastTrafficSplit = { total: clientTotal, tunnel, direct, blocked };
         } else if (lastTrafficSplit && lastTrafficSplit.total > 0) {
             // Счётчики пересозданы вместе с правилами. Не показываем ложные 100% EU,
             // а масштабируем последние известные доли на текущий трафик.

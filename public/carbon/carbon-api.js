@@ -389,7 +389,8 @@ function realClientRows() {
   const gCascade = Number(d.tunnel) || 0;
   const gDirect = Number(d.direct) || 0;
   const gTotal = gCascade + gDirect;
-  const fallbackCascade = gTotal > 0 ? gCascade / gTotal * 100 : 50;
+  const hasGlobal = gTotal > 0;
+  const fallbackCascade = hasGlobal ? gCascade / gTotal * 100 : 0;
   const isEu = (d.role || 'ru') === 'eu';
   const pctText = v => v >= 10 ? Math.round(v) + '%' : v >= 0.1 ? v.toFixed(1) + '%' : '0%';
   return carbon.clients.map(c => {
@@ -398,14 +399,18 @@ function realClientRows() {
     const cascade = Number(c.split_cascade) || 0;
     const direct = Number(c.split_direct) || 0;
     const splitTotal = cascade + direct;
-    const cascadePct = splitTotal > 0 ? cascade / splitTotal * 100 : fallbackCascade;
+    const hasSplit = splitTotal > 0;
+    const hasData = hasSplit || hasGlobal;
+    const cascadePct = hasSplit ? cascade / splitTotal * 100 : fallbackCascade;
     const directPct = 100 - cascadePct;
-    const title = splitTotal > 0
+    const title = hasSplit
       ? `Каскад: ${fmtBytes(cascade)} · RU: ${fmtBytes(direct)}`
-      : 'Нет данных по клиенту — показано общее соотношение';
+      : (hasGlobal ? 'Нет данных по клиенту — показано общее соотношение' : 'Нет данных');
     const splitCell = isEu
       ? '<span class="muted">—</span>'
-      : `<div class="split-bar" title="${escHtml(title)}"><span style="width:${cascadePct.toFixed(1)}%;background:#5b8cff"></span><span style="width:${directPct.toFixed(1)}%;background:var(--accent)"></span></div><span class="share-pct">${pctText(cascadePct)} / ${pctText(directPct)}</span>`;
+      : hasData
+        ? `<div class="split-bar" title="${escHtml(title)}"><span style="width:${cascadePct.toFixed(1)}%;background:#5b8cff"></span><span style="width:${directPct.toFixed(1)}%;background:var(--accent)"></span></div><span class="share-pct">${pctText(cascadePct)} / ${pctText(directPct)}</span>`
+        : `<div class="split-bar" title="Нет данных"><span style="width:100%;background:var(--surface-3)"></span></div><span class="share-pct">нет данных</span>`;
     return `<tr data-name="${escHtml(c.name)}" data-ip="${escHtml(c.ip)}">
       <td class="name">${escHtml(c.name)}</td>
       <td class="mono">${escHtml(c.ip || '—')}</td>
