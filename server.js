@@ -1962,6 +1962,35 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
         const clientIface = readIfaceBytes('awg0') || readIfaceBytes('amn0');
         const tunnelRaw = tunnelIface ? tunnelIface.rx + tunnelIface.tx : 0;
         const blockedRaw = readRuBlockBytes();
+        const role = existingCascadeConf() ? cascadeRole() : 'ru';
+        if (role === 'eu') {
+            const passed = clientIface ? clientIface.total : (tunnelIface ? tunnelIface.total : 0);
+            const blocked = blockedRaw;
+            const total = passed + blocked;
+            const payload = {
+                role: 'eu',
+                mode: 'exit',
+                total,
+                passed,
+                blocked,
+                clientTotal,
+                blockedRaw,
+                source: 'eu',
+                interfaces: {
+                    client: clientIface ? { rx: clientIface.rx, tx: clientIface.tx } : null,
+                    tunnel: tunnelIface ? { rx: tunnelIface.rx, tx: tunnelIface.tx } : null
+                }
+            };
+            if (String(req.query.debug || '') === '1') {
+                payload.debug = {
+                    isRoot: IS_ROOT,
+                    mangleSave: String(rootShTry('bash', ['-c', "iptables-save -c -t mangle 2>&1 | head -100"]) || '').slice(0, 5000),
+                    mangleList: String(rootShTry('iptables', ['-t', 'mangle', '-L', 'PREROUTING', '-v', '-n', '-x']) || '').slice(0, 5000),
+                    ipRule: String(rootShTry('ip', ['rule', 'show']) || '').slice(0, 2000)
+                };
+            }
+            return res.json(payload);
+        }
         const mangle = readMangleSplit();
         let tunnel, direct, blocked, source;
         if (mangle.total > 0) {
@@ -1997,6 +2026,8 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             lastTrafficSplit = { tunnel, direct, blocked, total, at: Date.now() };
         }
         const payload = {
+            role: 'ru',
+            mode: 'entry',
             total, tunnel, direct, blocked,
             clientTotal, tunnelRaw, blockedRaw,
             source,
@@ -4923,6 +4954,50 @@ app.post('/api/cascade/interfaces', checkAuth, requireAdmin, async (req, res) =>
         res.json({ success: true, interfaces: ifaces, output: String(r.out || '').slice(-1200) });
     } catch (e) {
         res.status(500).json({ error: 'Не удалось применить интерфейсы: ' + e.message });
+    }
+});
+
+function routingTimerSeconds() {
+    try {
+        const text = fs.readFileSync('/etc/systemd/system/awg-routing.timer', 'utf8');
+        const m = /OnUnitActiveSec=(\d+)s/.exec(text);
+        return m ? Number(m[1]) || 0 : 0;
+    } catch (e) { return 0; }
+}
+
+app.get('/api/cascade/schedule', checkAuth, requireAdmin, (req, res) => {
+    if (!fs.existsSync(ROUTING_SCRIPT)) {
+        return res.json({ applicable: false, reason: 'Маршрутизация настраивается на входе (RU).' });
+    }
+    let active = false;
+    try { active = String(shTry('systemctl', ['is-active', 'awg-routing.timer']) || '').trim() === 'active'; } catch (e) { /* ignore */ }
+    res.json({ applicable: true, seconds: routingTimerSeconds(), active });
+});
+
+app.post('/api/cascade/schedule', checkAuth, requireAdmin, (req, res) => {
+    if (!fs.existsSync(ROUTING_SCRIPT)) {
+        return res.status(400).json({ error: 'Маршрутизация настраивается на входе (RU).' });
+    }
+    const intervals = { '5m': 300, '1h': 3600, '6h': 21600, '24h': 86400, off: 0 };
+    const key = String((req.body && req.body.interval) || '5m');
+    if (!Object.prototype.hasOwnProperty.call(intervals, key)) {
+        return res.status(400).json({ error: 'Недопустимый интервал' });
+    }
+    const seconds = intervals[key];
+    try {
+        if (!seconds) {
+            sh('sudo', ['systemctl', 'disable', '--now', 'awg-routing.timer']);
+            auditLog(req, 'Автообновление списков каскада выключено');
+            return res.json({ success: true, active: false, seconds: 0 });
+        }
+        const unit = `[Unit]\nDescription=Refresh AmneziaWG cascade routing\n\n[Timer]\nOnBootSec=30s\nOnUnitActiveSec=${seconds}s\n\n[Install]\nWantedBy=timers.target\n`;
+        writeRootFile('/etc/systemd/system/awg-routing.timer', unit, '0644');
+        sh('sudo', ['systemctl', 'daemon-reload']);
+        sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
+        auditLog(req, `Автообновление списков каскада: ${key}`);
+        res.json({ success: true, active: true, seconds });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось изменить расписание: ' + e.message });
     }
 });
 

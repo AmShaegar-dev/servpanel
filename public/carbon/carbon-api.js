@@ -20,7 +20,8 @@ const carbon = {
   chartRange: '1h',
   history: null,
   distribution: null,
-  cascadeInterfaces: null
+  cascadeInterfaces: null,
+  cascadeSchedule: null
 };
 
 async function api(path, options = {}) {
@@ -248,7 +249,7 @@ async function loadCarbonData() {
     api(p).catch(() => null),
     new Promise(resolve => setTimeout(() => resolve(null), ms))
   ]);
-  const [stats, clients, modules, services, security, interfaces, update, server, sys, ufw, cascade, cascadeProxy, obf, profiles, proxy, proxyUsers, ssl, app, rustdesk, users, audit, backup, notify, awgConfig, history, distribution, cascadeInterfaces] = await Promise.all([
+  const [stats, clients, modules, services, security, interfaces, update, server, sys, ufw, cascade, cascadeProxy, obf, profiles, proxy, proxyUsers, ssl, app, rustdesk, users, audit, backup, notify, awgConfig, history, distribution, cascadeInterfaces, cascadeSchedule] = await Promise.all([
     safe('/api/stats'), safe('/api/clients'), safe('/api/modules'), safe('/api/services'),
     safe('/api/security/status'), safe('/api/interfaces'), safe('/api/update/info'),
     safe('/api/server-info'), safe('/api/sysinfo'), safe('/api/ufw'), safe('/api/cascade/status'),
@@ -257,7 +258,7 @@ async function loadCarbonData() {
     safe('/api/app/status'), safe('/api/rustdesk/status'), safe('/api/users'),
     safe('/api/audit?limit=50'), safe('/api/backup/auto'), safe('/api/notify/status'),
     safe('/api/awg/config'), safe('/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global'),
-    safe('/api/traffic/distribution'), safe('/api/cascade/interfaces')
+    safe('/api/traffic/distribution'), safe('/api/cascade/interfaces'), safe('/api/cascade/schedule')
   ]);
   carbon.stats = Array.isArray(stats) ? stats : [];
   carbon.clients = Array.isArray(clients) ? clients : carbon.stats;
@@ -286,6 +287,7 @@ async function loadCarbonData() {
   carbon.history = history;
   carbon.distribution = distribution;
   if (cascadeInterfaces && !cascadeInterfaces.error) carbon.cascadeInterfaces = cascadeInterfaces;
+  if (cascadeSchedule && !cascadeSchedule.error) carbon.cascadeSchedule = cascadeSchedule;
   carbon.loaded = true;
   applyShellData();
 }
@@ -377,16 +379,24 @@ function realTrafficChart() {
 
 function realTrafficDistribution() {
   const d = carbon.distribution || {};
+  const role = d.role || 'ru';
+  const isEu = role === 'eu';
   const tunnel = Number(d.tunnel) || 0;
   const direct = Number(d.direct) || 0;
+  const passed = Number(d.passed) || 0;
   const blocked = Number(d.blocked) || 0;
   const source = d.source || 'unavailable';
-  const total = tunnel + direct + blocked;
-  const parts = [
-    { key: 'tunnel', label: 'В EU-туннель', short: 'в EU-туннеле', value: tunnel, color: '#5b8cff' },
-    { key: 'direct', label: 'RU выход', short: 'в RU-выходе', value: direct, color: 'var(--accent)' }
-  ];
-  if (blocked > 0) parts.push({ key: 'blocked', label: 'GeoIP blocked', short: 'заблокировано', value: blocked, color: '#d29922' });
+  const total = isEu ? passed + blocked : tunnel + direct + blocked;
+  const parts = isEu
+    ? [
+        { key: 'passed', label: 'Прошло через EU', short: 'прошло', value: passed, color: '#5b8cff' },
+        { key: 'blocked', label: 'GeoIP blocked', short: 'заблокировано', value: blocked, color: '#d29922' }
+      ]
+    : [
+        { key: 'tunnel', label: 'В EU-туннель', short: 'в EU-туннеле', value: tunnel, color: '#5b8cff' },
+        { key: 'direct', label: 'RU выход', short: 'в RU-выходе', value: direct, color: 'var(--accent)' }
+      ];
+  if (!isEu && blocked > 0) parts.push({ key: 'blocked', label: 'GeoIP blocked', short: 'заблокировано', value: blocked, color: '#d29922' });
   const C = 2 * Math.PI * 46;
   let offset = 0;
   const rings = parts.map(p => {
@@ -402,9 +412,9 @@ function realTrafficDistribution() {
   const tagText = total ? (source === 'cached' ? 'последние' : 'live') : 'нет данных';
   const tagTone = total ? (source === 'cached' ? 'warn' : 'good') : 'warn';
   const note = total
-    ? (source === 'mangle' ? 'Данные из счётчиков mangle (ipset ru) и awg0/awg1.' : source === 'cached' ? 'Счётчики маршрутизации пересозданы — показаны последние известные доли.' : 'Данные из счётчиков маршрутизации.')
+    ? (isEu ? 'Данные из интерфейса awg0 и правил GeoIP.' : (source === 'mangle' ? 'Данные из счётчиков mangle (ipset ru) и awg0/awg1.' : source === 'cached' ? 'Счётчики маршрутизации пересозданы — показаны последние известные доли.' : 'Данные из счётчиков маршрутизации.'))
     : 'Нет данных: счётчики маршрутизации ещё не накоплены.';
-  return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">RU-вход · туннель / RU выход${blocked > 0 ? ' / GeoIP' : ''}</div></div>${tag(tagText, tagTone)}</div>
+  return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">${isEu ? 'EU-выход · прошло / GeoIP blocked' : 'RU-вход · туннель / RU выход'}${!isEu && blocked > 0 ? ' / GeoIP' : ''}</div></div>${tag(tagText, tagTone)}</div>
     <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
       <div style="position:relative;width:196px;height:196px;flex:0 0 auto">
         <svg viewBox="0 0 120 120" style="width:100%;height:100%"><circle cx="60" cy="60" r="46" fill="none" stroke="var(--surface-3)" stroke-width="12"/>${rings}</svg>
@@ -468,7 +478,7 @@ function realSecurity() {
   const active = (carbon.interfaces || []).map(i => `<option value="${escHtml(i)}">${escHtml(i)}</option>`).join('');
   return `<div class="page-head"><div><div class="page-title">Защита и GeoIP</div><div class="page-sub">Реальные настройки безопасности и GeoIP.</div></div><div class="page-actions"><button class="btn" data-carbon-action="fail2ban">${icon('shield')}Fail2Ban</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Панель', sec.https ? 'HTTPS' : 'HTTP', 'порт ' + (sec.panelPublicPort || '—'))}${mini('2FA', sec.totpEnabled ? 'включена' : 'выключена', 'TOTP')}${mini('Пользователи', String(sec.users || 0), 'панели')}${mini('Node', sec.node || '—', 'runtime')}</div>
-    <section class="card"><div class="card-top"><div><div class="card-title">GeoIP: блокировка RU</div><div class="card-sub">Правила применяются к выбранным интерфейсам целиком</div></div>${tag('API', 'good')}</div><div class="form-grid"><label class="field"><span>Интерфейсы</span><select id="carbonGeoIfaces" multiple size="5">${active}</select></label><label class="field"><span>Расписание</span><select id="carbonGeoSchedule"><option value="weekly">Раз в неделю</option><option value="daily">Каждый день</option><option value="none">Не обновлять</option></select></label><label class="field"><span>Источник списка</span><select id="carbonGeoListMode"><option value="antifilter">Antifilter / ipdeny</option><option value="opencck">OpenCCK</option><option value="custom">Свой URL</option></select></label><label class="field"><span>Свой URL списка</span><input id="carbonGeoCustomUrl" placeholder="https://example.com/ru.txt"></label><label class="field"><span>Порты (пусто — все)</span><input id="carbonGeoPorts" placeholder="443, 80"></label><label class="field"><span>Файл со списком</span><input id="carbonRuDropFile" type="file" accept=".txt,.list,.cidr"></label></div><div class="page-actions" style="margin-top:14px"><button class="btn btn-primary" data-api-action="geoip-enable">${icon('shield')}Включить</button><button class="btn btn-danger" data-api-action="geoip-disable">${icon('stop')}Отключить</button><button class="btn" data-carbon-action="rudrop-upload">${icon('upload')}Загрузить список</button></div><div class="donut-note">Порты не используются — блокировка только по интерфейсам, если поле портов пустое.</div></section>`;
+    <section class="card"><div class="card-top"><div><div class="card-title">GeoIP: блокировка RU</div><div class="card-sub">Правила применяются к выбранным интерфейсам целиком</div></div>${tag('API', 'good')}</div><div class="form-grid"><label class="field"><span>Интерфейсы</span><select id="carbonGeoIfaces" multiple size="5">${active}</select></label><label class="field"><span>Расписание</span><select id="carbonGeoSchedule"><option value="weekly">Раз в неделю</option><option value="daily">Каждый день</option><option value="none">Не обновлять</option></select></label><label class="field"><span>Источник списка</span><select id="carbonGeoListMode"><option value="antifilter">Antifilter / ipdeny</option><option value="opencck">OpenCCK</option><option value="custom">Свой URL</option></select></label><label class="field"><span>Свой URL списка</span><input id="carbonGeoCustomUrl" placeholder="https://example.com/ru.txt"></label><label class="field"><span>Порты (пусто — все)</span><input id="carbonGeoPorts" placeholder="443, 80"></label><label class="field"><span>Файл со списком</span><input id="carbonRuDropFile" type="file" accept=".txt,.list,.cidr"></label></div><div class="page-actions" style="margin-top:14px"><button class="btn btn-primary" data-api-action="geoip-enable">${icon('shield')}Включить</button><button class="btn btn-danger" data-api-action="geoip-disable">${icon('stop')}Отключить</button><button class="btn" data-carbon-action="rudrop-refresh">${icon('refresh')}Обновить список</button><button class="btn" data-carbon-action="rudrop-upload">${icon('upload')}Загрузить список</button></div><div class="donut-note">Порты не используются — блокировка только по интерфейсам, если поле портов пустое.</div></section>`;
 }
 
 function realUpdate() {
@@ -501,10 +511,15 @@ function realCascade() {
   const ci = carbon.cascadeInterfaces || {};
   const ifaceList = Array.isArray(ci.available) ? ci.available : [];
   const selectedIfaces = Array.isArray(ci.selected) && ci.selected.length ? ci.selected : (c.ifaces || []);
+  const cs = carbon.cascadeSchedule || {};
+  const csSeconds = Number(cs.seconds) || 0;
+  const csOptions = [[300, '5m', 'Каждые 5 минут'], [3600, '1h', 'Каждый час'], [21600, '6h', 'Каждые 6 часов'], [86400, '24h', 'Раз в сутки'], [0, 'off', 'Выключено']]
+    .map(([sec, val, label]) => `<option value="${val}" ${csSeconds === sec ? 'selected' : ''}>${label}</option>`).join('');
+  const csCard = cs.applicable === false ? '' : `<section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Обновление списков RU</div><div class="card-sub">Ручное обновление и автообновление ipset ru</div></div>${tag(cs.active ? 'авто' : 'выкл', cs.active ? 'good' : 'warn')}</div><div class="form-grid" style="grid-template-columns:minmax(220px,320px)"><label class="field"><span>Автообновление</span><select id="carbonCascadeSchedule">${csOptions}</select></label></div><div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="cascade-list-refresh">${icon('refresh')}Обновить список RU</button><button class="btn" data-carbon-action="cascade-schedule-save">${icon('check')}Сохранить расписание</button></div><div class="donut-note">Скрипт скачивает свежий список RU и пересобирает ipset и маршруты.</div></section>`;
   return `<div class="page-head"><div><div class="page-title">Каскад RU → EU</div><div class="page-sub">Статус туннеля и MTProto через EU.</div></div><div class="page-actions"><button class="btn btn-primary" data-carbon-action="cascade-build">${icon('cascade')}Построить каскад</button><button class="btn" data-carbon-action="cascade-manual">${icon('edit')}Вручную</button><button class="btn" data-carbon-action="cascade-repair">${icon('refresh')}Пересобрать</button><button class="btn" data-carbon-action="cascade-proxy">${icon('send')}MTProto через EU</button><button class="btn" data-carbon-action="cascade-cleanup">${icon('trash')}Удалить каскад</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Настроен', c.configured ? 'да' : 'нет', 'awg1')}${mini('Активен', c.active ? 'да' : 'нет', 'туннель')}${mini('Endpoint', escHtml(c.endpoint || '—'), 'EU')}${mini('Handshake', c.handshakeAgo == null ? '—' : c.handshakeAgo + ' c', 'назад')}</div>
     <div class="grid"><section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Состояние</div><div class="card-sub">/api/cascade/status</div></div>${tag(c.active ? 'активен' : 'не активен', c.active ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>Роль</b><span class="mono">${escHtml(c.role || '—')}</span></div><div class="list-row"><b>Интерфейсы</b><span class="mono">${escHtml((c.ifaces || []).join(', ') || '—')}</span></div><div class="list-row"><b>Маршрут</b><span class="mono">${escHtml(c.tableRoute || '—')}</span></div><div class="list-row"><b>ipset</b><span class="mono">${escHtml(String(c.ipsetCount || 0))}</span></div></div></section>
-    <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">MTProto через EU</div><div class="card-sub">/api/cascade/proxy</div></div>${tag(p.enabled ? 'включено' : 'выключено', p.enabled ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>middle_proxy_nat_ip</b><span class="mono">${escHtml(p.middleProxyNatIp || p.natIp || '—')}</span></div><div class="list-row"><b>Пользователи</b><span class="mono">${escHtml((p.users || []).join(', ') || '—')}</span></div></div></section><section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Интерфейсы каскада</div><div class="card-sub">ipset ru → напрямую · MARK 0x1 → EU-туннель</div></div>${tag(String(selectedIfaces.length), selectedIfaces.length ? 'good' : 'warn')}</div><div class="chips">${ifaceList.map(i => `<label class="chip ${selectedIfaces.includes(i) ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-cascade-iface value="${escHtml(i)}" ${selectedIfaces.includes(i) ? 'checked' : ''}> ${escHtml(i)}</label>`).join('') || '<span class="muted">Интерфейсы не найдены</span>'}</div><div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="cascade-ifaces-save">${icon('check')}Применить интерфейсы</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div><div class="donut-note">К выбранным интерфейсам применяются правила RU-маршрутизации: RU-направления идут напрямую, остальное — в EU-туннель.</div>${ci.reason && !ifaceList.length ? `<div class="donut-note">${escHtml(ci.reason)}</div>` : ''}</section></div>`;
+    <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">MTProto через EU</div><div class="card-sub">/api/cascade/proxy</div></div>${tag(p.enabled ? 'включено' : 'выключено', p.enabled ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>middle_proxy_nat_ip</b><span class="mono">${escHtml(p.middleProxyNatIp || p.natIp || '—')}</span></div><div class="list-row"><b>Пользователи</b><span class="mono">${escHtml((p.users || []).join(', ') || '—')}</span></div></div></section><section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Интерфейсы каскада</div><div class="card-sub">ipset ru → напрямую · MARK 0x1 → EU-туннель</div></div>${tag(String(selectedIfaces.length), selectedIfaces.length ? 'good' : 'warn')}</div><div class="chips">${ifaceList.map(i => `<label class="chip ${selectedIfaces.includes(i) ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-cascade-iface value="${escHtml(i)}" ${selectedIfaces.includes(i) ? 'checked' : ''}> ${escHtml(i)}</label>`).join('') || '<span class="muted">Интерфейсы не найдены</span>'}</div><div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="cascade-ifaces-save">${icon('check')}Применить интерфейсы</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div><div class="donut-note">К выбранным интерфейсам применяются правила RU-маршрутизации: RU-направления идут напрямую, остальное — в EU-туннель.</div>${ci.reason && !ifaceList.length ? `<div class="donut-note">${escHtml(ci.reason)}</div>` : ''}</section>${csCard}</div>`;
 }
 
 function realObfuscation() {

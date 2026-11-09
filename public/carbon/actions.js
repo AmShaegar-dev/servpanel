@@ -1056,6 +1056,35 @@ async function carbonChartRange(range) {
   render();
 }
 
+async function carbonCascadeListRefresh() {
+  const d = await api('/api/cascade/refresh', { method: 'POST', body: {} });
+  showCarbonTextModal('Обновление списка RU', String((d && d.output) || 'Готово').slice(-4000));
+  await carbonRefresh('Список RU обновлён');
+}
+
+async function carbonCascadeScheduleSave() {
+  const sel = document.getElementById('carbonCascadeSchedule');
+  const interval = sel ? sel.value : '5m';
+  await api('/api/cascade/schedule', { method: 'POST', body: { interval } });
+  await carbonRefresh('Расписание обновления списков сохранено');
+}
+
+async function carbonRuDropRefresh() {
+  const sel = document.getElementById('carbonGeoIfaces');
+  const ifaces = sel ? [...sel.selectedOptions].map(o => o.value) : [];
+  if (!ifaces.length) throw new Error('Выберите хотя бы один интерфейс');
+  const body = {
+    enable: true,
+    ifaces,
+    schedule: document.getElementById('carbonGeoSchedule')?.value || 'weekly',
+    listMode: document.getElementById('carbonGeoListMode')?.value || 'antifilter',
+    customUrl: document.getElementById('carbonGeoCustomUrl')?.value.trim() || '',
+    ports: document.getElementById('carbonGeoPorts')?.value.trim() || ''
+  };
+  const d = await api('/api/tools/rudrop', { method: 'POST', body });
+  await carbonRefresh('Список GeoIP обновлён' + (d && d.warning ? ': ' + d.warning : ''));
+}
+
 function carbonActionName(btn) { return btn && btn.dataset ? btn.dataset.carbonAction : ''; }
 
 document.addEventListener('click', async event => {
@@ -1116,6 +1145,8 @@ document.addEventListener('click', async event => {
     else if (action === 'cascade-build') await carbonCascadeBuild();
     else if (action === 'cascade-manual') await carbonCascadeManual();
     else if (action === 'cascade-ifaces-save') await carbonCascadeIfacesSave();
+    else if (action === 'cascade-list-refresh') await carbonCascadeListRefresh();
+    else if (action === 'cascade-schedule-save') await carbonCascadeScheduleSave();
     else if (action === 'cascade-repair') await carbonCascadeRepair();
     else if (action === 'cascade-proxy') await carbonCascadeProxy();
     else if (action === 'cascade-proxy-test') await carbonCascadeProxyTest();
@@ -1138,6 +1169,7 @@ document.addEventListener('click', async event => {
     else if (action === 'obf-sync') await carbonObfSync();
     else if (action === 'restore-panel') await carbonRestorePanel();
     else if (action === 'rudrop-upload') await carbonRuDropUpload();
+    else if (action === 'rudrop-refresh') await carbonRuDropRefresh();
   } catch (e) {
     showToast(e.message || 'Ошибка');
   }
