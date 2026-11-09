@@ -750,20 +750,69 @@ function carbonWarpServicesSelect(mode) {
 async function carbonWarpPanel() {
   let st = {};
   try { st = await api('/api/warp/status'); } catch (e) {}
+  const mode = st.mode === 'v1' ? 'v1' : 'v2';
   const modal = document.createElement('div');
   modal.className = 'modal';
   const summary = st.installed
     ? `Режим: ${st.mode || '—'} · Xray: ${st.xrayActive ? 'активен' : 'остановлен'} (${st.listenIp || '—'}:${st.listenPort || '—'}) · WARP: ${st.connected ? 'Connected' : 'не подключён'} · SOCKS: ${st.socksPort || '—'}`
     : 'WARP не установлен.';
   modal.innerHTML = `<div class="modal-card modal-wide"><div class="modal-head"><div><div class="modal-title">WARP + Xray</div><div class="modal-sub">${escHtml(summary)}</div></div><button class="icon-btn" data-warp-close>✕</button></div>
-    <div class="page-actions" style="flex-wrap:wrap"><button class="btn btn-primary" data-warp-action="power-on">Включить</button><button class="btn" data-warp-action="power-off">Остановить</button><button class="btn" data-warp-action="test">Проверить WARP</button><button class="btn" data-warp-action="install-v1">Установить вариант 1</button><button class="btn" data-warp-action="install-v2">Установить вариант 2</button></div>
-    <div class="chips" data-warp-services style="margin-top:12px;flex-wrap:wrap">${(st.services || []).map(s => `<label class="chip ${s.selected ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-warp-service value="${escHtml(s.id)}" ${s.selected ? 'checked' : ''}> ${escHtml(s.label)}</label>`).join('') || '<span class="muted">Сервисы не найдены</span>'}</div>
-    <button class="btn" data-warp-save style="margin-top:10px">Сохранить сервисы</button>
+    <div class="page-actions" style="flex-wrap:wrap"><button class="btn btn-primary" data-warp-action="power-on">Включить</button><button class="btn" data-warp-action="power-off">Остановить</button><button class="btn" data-warp-action="test">Проверить WARP</button></div>
+    <label class="field" style="margin-top:14px"><span>Режим работы</span><select id="warpModeSelect"><option value="v1" ${mode === 'v1' ? 'selected' : ''}>Вариант 1 — весь трафик через WARP</option><option value="v2" ${mode === 'v2' ? 'selected' : ''}>Вариант 2 — AI через WARP, Google/Gemini напрямую</option></select></label>
+    <label class="switch" style="margin:12px 0"><input type="checkbox" id="warpGoogleDirect" ${mode === 'v2' ? 'checked' : ''}> Google/Gemini — напрямую с IP сервера</label>
+    <div class="donut-note">Вариант 1: весь трафик идёт через WARP, список сервисов не используется. Вариант 2: через WARP идут только отмеченные сервисы; Google/Gemini — напрямую, если включён переключатель выше.</div>
+    <div class="card-sub" style="margin:14px 0 8px">Сервисы через WARP (вариант 2)</div>
+    <div class="chips" data-warp-services style="flex-wrap:wrap">${(st.services || []).map(s => `<label class="chip ${s.selected ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-warp-service value="${escHtml(s.id)}" ${s.selected ? 'checked' : ''} onchange="this.closest('label').classList.toggle('on',this.checked)"> ${escHtml(s.label)}</label>`).join('') || '<span class="muted">Сервисы не найдены</span>'}</div>
+    <div class="page-actions" style="margin-top:10px"><button class="btn btn-sm" data-warp-select-ai>Все AI</button><button class="btn btn-sm" data-warp-select-none>Снять все</button><button class="btn" data-warp-save>Сохранить сервисы</button><button class="btn btn-primary" data-warp-apply>Применить режим</button></div>
     <pre class="code" data-warp-out style="margin-top:14px;padding:12px;white-space:pre-wrap;max-height:40vh;overflow:auto">Готово</pre></div>`;
   document.body.appendChild(modal);
   modal.hidden = false;
   modal.querySelector('[data-warp-close]').addEventListener('click', () => modal.remove());
   const out = modal.querySelector('[data-warp-out]');
+  const modeSel = modal.querySelector('#warpModeSelect');
+  const googleDirect = modal.querySelector('#warpGoogleDirect');
+  const boxes = [...modal.querySelectorAll('[data-warp-service]')];
+  const refreshChips = () => {
+    boxes.forEach(x => {
+      const label = x.closest('label');
+      const disable = modeSel.value === 'v1' || (x.value === 'gemini' && googleDirect.checked);
+      x.disabled = disable;
+      if (disable) x.checked = false;
+      label.classList.toggle('on', x.checked);
+      label.style.opacity = disable ? '.5' : '1';
+    });
+  };
+  modeSel.addEventListener('change', refreshChips);
+  googleDirect.addEventListener('change', refreshChips);
+  modal.querySelector('[data-warp-select-ai]').addEventListener('click', () => {
+    boxes.forEach(x => { if (!x.disabled) { x.checked = true; x.closest('label').classList.add('on'); } });
+  });
+  modal.querySelector('[data-warp-select-none]').addEventListener('click', () => {
+    boxes.forEach(x => { if (!x.disabled) { x.checked = false; x.closest('label').classList.remove('on'); } });
+  });
+  const selectedIds = () => boxes.filter(x => x.checked && !x.disabled).map(x => x.value);
+  modal.querySelector('[data-warp-save]').addEventListener('click', async () => {
+    try {
+      const ids = selectedIds();
+      await api('/api/warp/services', { method: 'POST', body: { services: ids } });
+      out.textContent = 'Сервисы сохранены: ' + (ids.join(', ') || '—');
+    } catch (e) { out.textContent = e.message; }
+  });
+  modal.querySelector('[data-warp-apply]').addEventListener('click', async () => {
+    try {
+      const m = modeSel.value;
+      let ids = selectedIds();
+      if (m === 'v1') ids = [];
+      if (m === 'v2' && !ids.length) throw new Error('Выберите хотя бы один сервис для WARP');
+      const text = m === 'v1'
+        ? 'Вариант 1: весь трафик пойдёт через WARP. Продолжить?'
+        : 'Вариант 2: выбранные сервисы пойдут через WARP, Google/Gemini — напрямую с IP сервера. Продолжить?';
+      if (!confirm(text)) return;
+      await api('/api/warp/services', { method: 'POST', body: { services: ids } });
+      const d = await api('/api/install/module', { method: 'POST', body: { module: 'warp', warpMode: m, listenIp: '0.0.0.0', listenPort: '443', socksPort: st.socksPort || '40000' } });
+      out.textContent = d.logFile ? 'Установка запущена. Журнал: ' + d.logFile : 'Установка запущена';
+    } catch (e) { out.textContent = e.message; }
+  });
   modal.querySelectorAll('[data-warp-action]').forEach(b => b.addEventListener('click', async () => {
     const a = b.dataset.warpAction;
     try {
@@ -773,20 +822,10 @@ async function carbonWarpPanel() {
       } else if (a === 'test') {
         const d = await api('/api/warp/test', { method: 'POST', body: { socksPort: st.socksPort || '40000' } });
         out.textContent = JSON.stringify(d, null, 2);
-      } else if (a.startsWith('install')) {
-        if (!confirm('Установить/переустановить WARP + Xray?')) return;
-        const d = await api('/api/install/module', { method: 'POST', body: { module: 'warp', warpMode: a === 'install-v1' ? 'v1' : 'v2', listenIp: '0.0.0.0', listenPort: '443', socksPort: '40000' } });
-        out.textContent = d.logFile ? 'Установка запущена. Журнал: ' + d.logFile : 'Установка запущена';
       }
     } catch (e) { out.textContent = e.message; }
   }));
-  modal.querySelector('[data-warp-save]')?.addEventListener('click', async () => {
-    const ids = [...modal.querySelectorAll('[data-warp-service]:checked')].map(x => x.value);
-    try {
-      await api('/api/warp/services', { method: 'POST', body: { services: ids } });
-      out.textContent = 'Сервисы сохранены: ' + (ids.join(', ') || '—');
-    } catch (e) { out.textContent = e.message; }
-  });
+  refreshChips();
 }
 
 async function carbonDnsCapture() {
