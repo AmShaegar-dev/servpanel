@@ -830,7 +830,24 @@ function isApiRequest(req) {
 // Переменные окружения задают значения по умолчанию для первого запуска,
 // дальше приоритет у файла .app_settings.json (как у .panel_port).
 let lastClientsSnapshot = [];
-let lastTrafficSplit = null;
+const TRAFFIC_SPLIT_FILE = path.join(DATA_DIR, '.traffic_split.json');
+let lastTrafficSplit = (() => {
+    try {
+        const j = JSON.parse(fs.readFileSync(TRAFFIC_SPLIT_FILE, 'utf8'));
+        if (j && Number(j.total) > 0) return j;
+    } catch (e) { /* кэша ещё нет */ }
+    return null;
+})();
+let trafficSplitSavedAt = 0;
+function saveTrafficSplitCache() {
+    if (!lastTrafficSplit || !lastTrafficSplit.total) return;
+    const now = Date.now();
+    if (now - trafficSplitSavedAt < 30000) return;
+    trafficSplitSavedAt = now;
+    try {
+        fs.writeFileSync(TRAFFIC_SPLIT_FILE, JSON.stringify({ ...lastTrafficSplit, at: now }), 'utf8');
+    } catch (e) { /* ignore */ }
+}
 let metricsServer = null;
 let metricsSettings = null;
 let metricsRuntime = { running: false, port: null, tls: false, error: '' };
@@ -2153,6 +2170,7 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             blocked = Math.min(blockedScaled, Math.max(0, clientTotal - tunnel - direct));
             source = 'split';
             lastTrafficSplit = { total: clientTotal, tunnel, direct, blocked };
+            saveTrafficSplitCache();
         } else if (lastTrafficSplit && lastTrafficSplit.total > 0) {
             // Счётчики пересозданы вместе с правилами. Не показываем ложные 100% EU,
             // а масштабируем последние известные доли на текущий трафик.
@@ -2177,6 +2195,7 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
         const total = tunnel + direct + blocked;
         if (source === 'mangle' && total > 0) {
             lastTrafficSplit = { tunnel, direct, blocked, total, at: Date.now() };
+            saveTrafficSplitCache();
         }
         const payload = {
             role: 'ru',
