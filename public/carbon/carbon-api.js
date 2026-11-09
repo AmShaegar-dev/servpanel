@@ -21,7 +21,8 @@ const carbon = {
   history: null,
   distribution: null,
   cascadeInterfaces: null,
-  cascadeSchedule: null
+  cascadeSchedule: null,
+  iptables: null
 };
 
 async function api(path, options = {}) {
@@ -286,6 +287,7 @@ function assignCarbonPath(path, data) {
   else if (p === '/api/update/info') carbon.update = data;
   else if (p === '/api/clients') { if (Array.isArray(data)) carbon.clients = data; else return false; }
   else if (p === '/api/ufw') carbon.ufw = data;
+  else if (p === '/api/iptables') carbon.iptables = data;
   else if (p === '/api/cascade/status') carbon.cascade = data;
   else if (p === '/api/cascade/proxy') carbon.cascadeProxy = data;
   else if (p === '/api/obf/current') carbon.obf = data;
@@ -340,7 +342,7 @@ const TAB_DATA = {
   dashboard: ['/api/stats', '/api/sysinfo', '/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global', '/api/traffic/distribution'],
   clients: ['/api/clients'],
   install: ['/api/modules'],
-  network: ['/api/interfaces', '/api/ufw', '/api/awg/config'],
+  network: ['/api/interfaces', '/api/ufw', '/api/iptables', '/api/awg/config'],
   cascade: ['/api/cascade/status', '/api/cascade/proxy', '/api/cascade/interfaces', '/api/cascade/schedule'],
   obfuscation: ['/api/obf/current', '/api/obf/profiles'],
   services: ['/api/services'],
@@ -371,17 +373,33 @@ function clientStatus(c) {
   return c.status_code === 'active' || c.status_code === 'recent';
 }
 
+const CLIENT_SHARE_COLORS = ['#5b8cff', '#f2b84b', '#26c281', '#e15b64', '#a06bff', '#4cc9f0', '#ff8a5b', '#8bd450', '#d29922', '#ff6bcb'];
+
+function clientTrafficValue(c) {
+  const total = Number(c && c.total_octets);
+  if (Number.isFinite(total) && total > 0) return total;
+  return (Number(c && c.rx) || 0) + (Number(c && c.tx) || 0);
+}
+
 function realClientRows() {
-  if (!carbon.clients.length) return `<tr class="empty-row"><td colspan="7">Клиентов пока нет. Создайте первого.</td></tr>`;
-  return carbon.clients.map(c => {
+  if (!carbon.clients.length) return `<tr class="empty-row"><td colspan="8">Клиентов пока нет. Создайте первого.</td></tr>`;
+  const values = carbon.clients.map(clientTrafficValue);
+  const total = values.reduce((a, b) => a + b, 0);
+  const max = Math.max(1, ...values);
+  return carbon.clients.map((c, idx) => {
     const online = clientStatus(c);
-    const total = (Number(c.rx) || 0) + (Number(c.tx) || 0);
+    const traffic = values[idx] || 0;
+    const width = traffic > 0 ? Math.max(2, traffic / max * 100) : 0;
+    const sharePct = total ? traffic / total * 100 : 0;
+    const shareText = sharePct >= 10 ? Math.round(sharePct) + '%' : sharePct >= 0.1 ? sharePct.toFixed(1) + '%' : '0%';
+    const color = CLIENT_SHARE_COLORS[idx % CLIENT_SHARE_COLORS.length];
     return `<tr data-name="${escHtml(c.name)}" data-ip="${escHtml(c.ip)}">
       <td class="name">${escHtml(c.name)}</td>
       <td class="mono">${escHtml(c.ip || '—')}</td>
       <td>${escHtml(c.status || (online ? 'Активен' : 'Неактивен'))}</td>
-      <td class="mono">${fmtBytes(total)}</td>
+      <td class="mono">${fmtBytes(traffic)}</td>
       <td><div class="bar"><span style="width:${online ? 100 : 15}%"></span></div></td>
+      <td><div class="bar"><span style="width:${width}%;background:${color}"></span></div><span class="share-pct">${shareText}</span></td>
       <td><span class="status ${online ? '' : 'idle'}"><span class="dot"></span>${online ? 'online' : 'offline'}</span></td>
       <td><div class="page-actions"><button class="row-action" data-carbon-action="client-key" data-name="${escHtml(c.name)}" title="Ключ и QR">${icon('key')}</button><button class="row-action" data-carbon-action="client-rename" data-name="${escHtml(c.name)}" title="Переименовать">${icon('edit')}</button><button class="row-action" data-copy="${escHtml(c.ip || '')}" title="Скопировать IP">${icon('copy')}</button><button class="row-action" data-carbon-action="client-delete" data-name="${escHtml(c.name)}" title="Удалить">${icon('trash')}</button></div></td>
     </tr>`;
@@ -390,26 +408,19 @@ function realClientRows() {
 
 function realClientsTable() {
   return `<div class="table-tools"><div class="table-search">${icon('search')}<input id="clientSearch" placeholder="Имя или IP" aria-label="Фильтр клиентов"></div><button class="tag" data-toast="Клиентов: ${carbon.clients.length}">Все клиенты ${icon('arrow', 'ico')}</button></div>
-    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr><th>Клиент</th><th>IP</th><th>Статус</th><th>Трафик</th><th>Загрузка</th><th>Статус</th><th style="width:80px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
+    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr><th>Клиент</th><th>IP</th><th>Статус</th><th>Трафик</th><th>Загрузка</th><th>Фильтрация</th><th>Статус</th><th style="width:80px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
 }
 
 function smoothTraffic(values, range) {
   const arr = (values || []).map(v => Number(v) || 0);
-  const sigma = range === '7d' ? 10 : range === '24h' ? 6 : 0;
-  if (!sigma || !arr.length) return arr;
-  const radius = Math.ceil(sigma * 3);
-  const weights = [];
-  for (let k = -radius; k <= radius; k++) weights.push(Math.exp(-(k * k) / (2 * sigma * sigma)));
+  if (!arr.length) return arr;
+  // Как в старой панели: без сглаживания на 5м/1ч/3ч и лёгкое
+  // скользящее среднее только на 24ч/7д, чтобы не «съедать» пики.
+  const win = range === '7d' ? 21 : range === '24h' ? 15 : 0;
+  if (!win) return arr;
   return arr.map((_, i) => {
-    let sum = 0, wsum = 0;
-    for (let k = -radius; k <= radius; k++) {
-      const idx = i + k;
-      if (idx < 0 || idx >= arr.length) continue;
-      const w = weights[k + radius];
-      sum += arr[idx] * w;
-      wsum += w;
-    }
-    return wsum ? sum / wsum : 0;
+    const part = arr.slice(Math.max(0, i - win + 1), i + 1);
+    return part.reduce((a, b) => a + b, 0) / Math.max(1, part.length);
   });
 }
 
@@ -422,16 +433,8 @@ function chartPath(values, max, width, height) {
   }));
   if (pts.length === 1) return `M${pts[0].x},${pts[0].y}`;
   let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[i - 1] || pts[i];
-    const p1 = pts[i];
-    const p2 = pts[i + 1];
-    const p3 = pts[i + 2] || p2;
-    const c1x = p1.x + (p2.x - p0.x) / 6;
-    const c1y = p1.y + (p2.y - p0.y) / 6;
-    const c2x = p2.x - (p3.x - p1.x) / 6;
-    const c2y = p2.y - (p3.y - p1.y) / 6;
-    d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+  for (let i = 1; i < pts.length; i++) {
+    d += ` L${pts[i].x.toFixed(1)},${pts[i].y.toFixed(1)}`;
   }
   return d;
 }
@@ -584,38 +587,11 @@ function realDashboard() {
     </div>`;
 }
 
-const CLIENT_SHARE_COLORS = ['#5b8cff', '#f2b84b', '#26c281', '#e15b64', '#a06bff', '#4cc9f0', '#ff8a5b', '#8bd450', '#d29922', '#ff6bcb'];
-
-function clientTrafficValue(c) {
-  const total = Number(c && c.total_octets);
-  if (Number.isFinite(total) && total > 0) return total;
-  return (Number(c && c.rx) || 0) + (Number(c && c.tx) || 0);
-}
-
-function realClientShareCard() {
-  const rows = (carbon.clients || [])
-    .map(c => ({ name: c.name || '—', value: clientTrafficValue(c) }))
-    .sort((a, b) => b.value - a.value);
-  const total = rows.reduce((a, x) => a + x.value, 0);
-  if (!rows.length) {
-    return `<section class="card client-share-card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">Фильтрация</div><div class="card-sub">Доля трафика по клиентам</div></div>${tag('0', 'muted')}</div><div class="empty-row">Клиентов пока нет</div></section>`;
-  }
-  const segments = rows.map((x, i) => {
-    const pct = total ? x.value / total * 100 : 0;
-    return `<span data-client-share="${escHtml(x.name)}" title="${escHtml(x.name)} · ${fmtBytes(x.value)} (${pct.toFixed(1)}%)" style="width:${pct.toFixed(3)}%;min-width:${x.value > 0 ? '2px' : '0'};background:${CLIENT_SHARE_COLORS[i % CLIENT_SHARE_COLORS.length]};cursor:pointer;display:block"></span>`;
-  }).join('');
-  const legend = rows.map((x, i) => {
-    const pct = total ? Math.round(x.value / total * 100) : 0;
-    return `<button type="button" class="share-legend-item" data-client-share="${escHtml(x.name)}"><i style="background:${CLIENT_SHARE_COLORS[i % CLIENT_SHARE_COLORS.length]}"></i><b>${escHtml(x.name)}</b><span>${pct}% · ${fmtBytes(x.value)}</span></button>`;
-  }).join('');
-  return `<section class="card client-share-card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">Фильтрация</div><div class="card-sub">Доля трафика по клиентам · нажмите на сегмент</div></div>${tag(String(rows.length), 'muted')}</div><div style="display:flex;height:14px;border-radius:99px;overflow:hidden;background:var(--surface-3);margin:4px 0 14px">${segments}</div><div class="share-legend">${legend}</div></section>`;
-}
-
 function realClients() {
   const online = carbon.clients.filter(clientStatus).length;
   return `<div class="page-head"><div><div class="page-title">Клиенты</div><div class="page-sub">Реальный список из API. Создание, удаление и статусы.</div></div><div class="page-actions"><button class="btn" data-carbon-action="client-bulk-rename">${icon('edit')}Массовое переименование</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button><button class="btn btn-primary" data-action="open-client-modal">${icon('plus')}Добавить клиента</button></div></div>
     <div class="mini-grid">${mini('Всего клиентов', String(carbon.clients.length), 'в панели')}${mini('Онлайн', String(online), 'активные')}${mini('Трафик RX', fmtBytes(carbon.clients.reduce((a, c) => a + (Number(c.rx) || 0), 0)), 'всего')}${mini('Трафик TX', fmtBytes(carbon.clients.reduce((a, c) => a + (Number(c.tx) || 0), 0)), 'всего')}</div>
-    <div class="grid" style="align-items:start">${realClientShareCard()}<section class="card table-card client-table-card" style="grid-column:span 8"><div class="card-top"><div><div class="card-title">Все клиенты</div><div class="card-sub">API /api/clients</div></div></div>${realClientsTable()}</section></div>`;
+    <section class="card table-card"><div class="card-top"><div><div class="card-title">Все клиенты</div><div class="card-sub">API /api/clients</div></div></div>${realClientsTable()}</section>`;
 }
 
 function realInstall() {
@@ -654,12 +630,19 @@ function realNetwork() {
   const ifaces = carbon.interfaces || [];
   const ufw = carbon.ufw || {};
   const rules = Array.isArray(ufw.rules) ? ufw.rules : (Array.isArray(ufw) ? ufw : []);
+  const ip = carbon.iptables || {};
+  const ipRules = Array.isArray(ip.rules) ? ip.rules : [];
   const awgText = (carbon.awgConfig && (carbon.awgConfig.content || carbon.awgConfig.text)) || '';
-  return `<div class="page-head"><div><div class="page-title">Сеть и порты</div><div class="page-sub">Интерфейсы, UFW и конфиг AWG из API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="ufw-add">${icon('plus')}Правило UFW</button><button class="btn" data-carbon-action="awg-edit">${icon('edit')}Редактор AWG</button><button class="btn" data-carbon-action="server-name">${icon('server')}Имя сервера</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
-    <div class="mini-grid">${mini('Интерфейсов', String(ifaces.length), 'системных')}${mini('UFW', rules.length ? String(rules.length) + ' правил' : 'нет данных', 'firewall')}${mini('AWG', awgText ? 'конфиг есть' : 'нет конфига', 'awg0')}${mini('Внешний IP', escHtml((carbon.server && carbon.server.ip) || '—'), (carbon.server && carbon.server.country) || '')}</div>
-    <div class="grid"><section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Интерфейсы</div><div class="card-sub">/api/interfaces</div></div>${tag(String(ifaces.length), 'good')}</div><div class="service-list">${ifaces.map(i => `<div class="service"><div class="service-ico">${icon('globe')}</div><div><div class="service-name">${escHtml(i)}</div><div class="service-desc">системный интерфейс</div></div><div class="service-state"><span class="dot"></span>up</div></div>`).join('') || '<div class="service"><div class="service-name">Нет данных</div></div>'}</div></section>
-    <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">UFW</div><div class="card-sub">/api/ufw</div></div>${tag(rules.length ? 'active' : 'нет данных', rules.length ? 'good' : 'warn')}</div><div class="table-scroll"><table class="table" style="min-width:0"><thead><tr><th>Правило</th><th>Действие</th><th>Источник</th><th></th></tr></thead><tbody>${rules.map(r => `<tr><td class="mono">${escHtml(r.to || r.rule || r.port || (typeof r === 'string' ? r : ''))}</td><td>${escHtml(r.action || r.status || '')}</td><td class="mono">${escHtml(r.from || '')}</td><td>${r.id != null ? `<button class="row-action" data-carbon-action="ufw-delete" data-name="${escHtml(String(r.id))}" title="Удалить">${icon('trash')}</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="4">UFW недоступен</td></tr>'}</tbody></table></div></section>
-    <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">AmneziaWG</div><div class="card-sub">/api/awg/config</div></div><div class="page-actions">${tag('advanced', 'muted')}<button class="btn btn-sm" data-carbon-action="awg-edit">${icon('edit')}Редактировать</button></div></div><pre class="code" style="margin:0;max-height:280px;overflow:auto;padding:12px;white-space:pre-wrap">${escHtml(awgText || 'Конфиг не найден или недоступен')}</pre></section></div>`;
+  const ufwRows = rules.map(r => `<tr><td><span class="tag good">UFW</span></td><td class="mono">${escHtml(r.to || r.rule || r.port || (typeof r === 'string' ? r : ''))}</td><td>${escHtml(r.action || r.status || '')}</td><td class="mono">${escHtml(r.from || '')}</td><td>${r.id != null ? `<button class="row-action" data-carbon-action="ufw-delete" data-name="${escHtml(String(r.id))}" title="Удалить">${icon('trash')}</button>` : ''}</td></tr>`).join('');
+  const ipRows = ipRules.map(r => `<tr><td><span class="tag warn">iptables</span></td><td class="mono" style="white-space:normal;word-break:break-word">${escHtml(r.spec || '')}</td><td>${escHtml(r.target || '-')}</td><td class="mono">${escHtml(r.chain || '')}</td><td>${r.deletable ? `<button class="row-action" data-carbon-action="iptables-delete" data-name="${escHtml(r.id || '')}" title="Удалить">${icon('trash')}</button>` : '<span class="tag" title="Правило управляется UFW">UFW</span>'}</td></tr>`).join('');
+  const ruleRows = ufwRows + ipRows;
+  return `<div class="page-head"><div><div class="page-title">Сеть и порты</div><div class="page-sub">Интерфейсы, UFW, iptables и конфиг AWG.</div></div><div class="page-actions"><button class="btn" data-carbon-action="ufw-add">${icon('plus')}Добавить UFW</button><button class="btn" data-carbon-action="iptables-add">${icon('plus')}Добавить iptables</button><button class="btn" data-carbon-action="awg-edit">${icon('edit')}Редактор AWG</button><button class="btn" data-carbon-action="server-name">${icon('server')}Имя сервера</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
+    <div class="mini-grid">${mini('Интерфейсов', String(ifaces.length), 'системных')}${mini('UFW', rules.length ? String(rules.length) + ' правил' : 'нет правил', 'firewall')}${mini('iptables', ipRules.length ? String(ipRules.length) + ' правил' : 'нет правил', 'filter')}${mini('Публичный IP', escHtml((carbon.server && carbon.server.ip) || '-'), (carbon.server && carbon.server.country) || '')}</div>
+    <div class="grid">
+      <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Интерфейсы</div><div class="card-sub">/api/interfaces</div></div>${tag(String(ifaces.length), 'good')}</div><div class="iface-list">${ifaces.map(i => `<div class="iface-row"><span class="dot"></span><b>${escHtml(i)}</b><span class="mono">up</span></div>`).join('') || '<div class="empty-row">Интерфейсов нет</div>'}</div></section>
+      <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Правила firewall</div><div class="card-sub">UFW и iptables · базовые цепочки INPUT / FORWARD / OUTPUT</div></div>${tag(String(rules.length + ipRules.length), rules.length + ipRules.length ? 'good' : 'warn')}</div><div class="table-scroll"><table class="table" style="min-width:0"><thead><tr><th>Источник</th><th>Правило</th><th>Действие</th><th>Цепочка / откуда</th><th></th></tr></thead><tbody>${ruleRows || '<tr><td colspan="5">Правил нет</td></tr>'}</tbody></table></div><div class="donut-note" style="margin-top:12px">Правила UFW защищены от удаления. Правила iptables применяются сразу; для сохранения после перезагрузки используйте netfilter-persistent.</div></section>
+      <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">AmneziaWG</div><div class="card-sub">/api/awg/config</div></div><div class="page-actions">${tag('advanced', 'muted')}<button class="btn btn-sm" data-carbon-action="awg-edit">${icon('edit')}Редактировать</button></div></div><pre class="code" style="margin:0;max-height:280px;overflow:auto;padding:12px;white-space:pre-wrap">${escHtml(awgText || 'Конфиг не загружен или отсутствует')}</pre></section>
+    </div>`;
 }
 
 function realCascade() {
@@ -884,6 +867,7 @@ document.addEventListener('click', async event => {
   event.preventDefault();
   event.stopImmediatePropagation();
   const action = btn.dataset.apiAction;
+  const finishBusy = typeof carbonBusyStart === 'function' ? carbonBusyStart(btn) : () => {};
   try {
     if (action === 'refresh') {
       btn.disabled = true;
@@ -980,6 +964,7 @@ document.addEventListener('click', async event => {
     showToast(e.message || 'Ошибка');
   } finally {
     btn.disabled = false;
+    finishBusy();
   }
 }, true);
 

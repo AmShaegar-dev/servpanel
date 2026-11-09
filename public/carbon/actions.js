@@ -51,6 +51,7 @@ function showCarbonForm(opts) {
   submit.addEventListener('click', async () => {
     err.style.display = 'none';
     submit.disabled = true;
+    const finishBusy = carbonBusyStart(submit);
     const values = {};
     try {
       for (const f of fields) {
@@ -67,6 +68,7 @@ function showCarbonForm(opts) {
       err.style.display = 'block';
     } finally {
       submit.disabled = false;
+      finishBusy();
     }
   });
   return modal;
@@ -547,6 +549,28 @@ async function carbonUfwAdd() {
       if (!v.port) throw new Error('Укажите порт');
       await api('/api/ufw', { method: 'POST', body: { port: v.port, proto: v.proto, iface: v.iface } });
       await carbonRefresh('Правило UFW добавлено');
+    }
+  });
+}
+
+async function carbonIptablesAdd() {
+  showCarbonForm({
+    title: 'Добавить правило iptables',
+    sub: 'Цепочка filter, вставка в начало',
+    fields: [
+      { name: 'chain', label: 'Цепочка', type: 'select', options: ['INPUT', 'FORWARD', 'OUTPUT'].map(x => ({ value: x, label: x })) },
+      { name: 'proto', label: 'Протокол', type: 'select', options: [{ value: 'tcp', label: 'TCP' }, { value: 'udp', label: 'UDP' }, { value: 'icmp', label: 'ICMP' }, { value: 'any', label: 'Любой' }] },
+      { name: 'port', label: 'Порт', placeholder: '443' },
+      { name: 'src', label: 'Источник (IP/CIDR)', placeholder: '0.0.0.0/0' },
+      { name: 'dst', label: 'Назначение (IP/CIDR)', placeholder: '0.0.0.0/0' },
+      { name: 'action', label: 'Действие', type: 'select', options: ['ACCEPT', 'DROP', 'REJECT'].map(x => ({ value: x, label: x })) },
+      { name: 'comment', label: 'Комментарий', placeholder: 'servpanel' },
+      { name: 'insert', label: 'Вставить в начало цепочки', type: 'checkbox', value: true }
+    ],
+    submitText: 'Добавить',
+    onSubmit: async v => {
+      await api('/api/iptables', { method: 'POST', body: v });
+      await carbonRefresh('Правило iptables добавлено');
     }
   });
 }
@@ -1058,8 +1082,19 @@ async function carbonChartRange(range) {
 
 async function carbonCascadeListRefresh() {
   const d = await api('/api/cascade/refresh', { method: 'POST', body: {} });
-  showCarbonTextModal('Обновление списка RU', String((d && d.output) || 'Готово').slice(-4000));
-  await carbonRefresh('Список RU обновлён');
+  const count = Number(d && d.count) || 0;
+  const added = Number(d && d.added) || 0;
+  const removed = Number(d && d.removed) || 0;
+  const zoneLines = Number(d && d.zoneLines) || 0;
+  const lines = [
+    count > 0 ? 'Список RU обновлён.' : 'Список RU не обновлён: в ipset ru 0 правил.',
+    `Правил в списке сейчас: ${count}`,
+    `Добавлено: ${added}`,
+    removed > 0 ? `Удалено: ${removed}` : '',
+    zoneLines > 0 ? `Строк в загруженном списке: ${zoneLines}` : ''
+  ].filter(Boolean).join('\n');
+  showCarbonTextModal(count > 0 ? 'Обновление списка RU' : 'Список RU не обновлён', lines);
+  await carbonRefresh(`Список RU: ${count} правил (+${added})`);
 }
 
 async function carbonCascadeScheduleSave() {
@@ -1082,7 +1117,31 @@ async function carbonRuDropRefresh() {
     ports: document.getElementById('carbonGeoPorts')?.value.trim() || ''
   };
   const d = await api('/api/tools/rudrop', { method: 'POST', body });
-  await carbonRefresh('Список GeoIP обновлён' + (d && d.warning ? ': ' + d.warning : ''));
+  const count = Number(d && d.count) || 0;
+  const added = Number(d && d.added) || 0;
+  await carbonRefresh(`GeoIP: ${count} адресов (+${added})` + (d && d.warning ? '. ' + d.warning : ''));
+}
+
+function carbonBusyStart(btn) {
+  if (!btn || btn.dataset.carbonBusy === '1') return () => {};
+  btn.dataset.carbonBusy = '1';
+  btn.classList.add('is-busy');
+  btn.setAttribute('aria-busy', 'true');
+  const card = btn.closest('.card, .modal-card');
+  if (card) {
+    card.dataset.busyCount = String((Number(card.dataset.busyCount) || 0) + 1);
+    card.classList.add('card-busy');
+  }
+  return () => {
+    btn.dataset.carbonBusy = '';
+    btn.classList.remove('is-busy');
+    btn.removeAttribute('aria-busy');
+    if (card) {
+      const left = Math.max(0, (Number(card.dataset.busyCount) || 1) - 1);
+      card.dataset.busyCount = String(left);
+      if (!left) card.classList.remove('card-busy');
+    }
+  };
 }
 
 function carbonActionName(btn) { return btn && btn.dataset ? btn.dataset.carbonAction : ''; }
@@ -1094,6 +1153,7 @@ document.addEventListener('click', async event => {
   event.stopImmediatePropagation();
   const action = carbonActionName(btn);
   const name = btn.dataset.name || '';
+  const finishBusy = carbonBusyStart(btn);
   try {
     if (action === 'update-check') await carbonUpdateCheck();
     else if (action === 'update-git') { if (confirm('Обновить панель с GitHub? Перед обновлением создаётся бэкап.')) { await api('/api/update/git', { method: 'POST', body: {} }); pollUpdate(); } }
@@ -1138,6 +1198,8 @@ document.addEventListener('click', async event => {
     else if (action === 'proxy-log') await carbonProxyLog();
     else if (action === 'ufw-add') await carbonUfwAdd();
     else if (action === 'ufw-delete') { if (confirm('Удалить правило №' + name + '?')) { await api('/api/ufw/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Правило удалено'); } }
+    else if (action === 'iptables-add') await carbonIptablesAdd();
+    else if (action === 'iptables-delete') { if (confirm('Удалить правило iptables?')) { await api('/api/iptables/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Правило iptables удалено'); } }
     else if (action === 'awg-edit') await carbonAwgEdit();
     else if (action === 'server-name') await carbonServerName();
     else if (action === 'install-mtproxyl' || action === 'mtproxyl-install') await carbonMtproxylInstall();
@@ -1172,5 +1234,7 @@ document.addEventListener('click', async event => {
     else if (action === 'rudrop-refresh') await carbonRuDropRefresh();
   } catch (e) {
     showToast(e.message || 'Ошибка');
+  } finally {
+    finishBusy();
   }
 }, true);

@@ -1930,6 +1930,23 @@ function readMangleSplit() {
     return { direct, tunnel, total: direct + tunnel };
 }
 
+function readIpsetEntries(name) {
+    const entries = new Set();
+    try {
+        const out = rootShTry('ipset', ['list', name], { maxBuffer: 8 * 1024 * 1024 });
+        let members = false;
+        for (const raw of String(out || '').split('\n')) {
+            const line = raw.trim();
+            if (!line) continue;
+            if (/^Members:$/.test(line)) { members = true; continue; }
+            if (!members) continue;
+            if (/^\d+\s+entr/.test(line)) continue;
+            entries.add(line);
+        }
+    } catch (e) { /* ignore */ }
+    return entries;
+}
+
 function readRuBlockBytes() {
     let total = 0;
     try {
@@ -2962,6 +2979,119 @@ app.delete('/api/ufw/:id', checkAuth, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// iptables: базовые цепочки filter. Показываем INPUT/FORWARD/OUTPUT,
+// правила UFW (переходы в ufw-*) защищены от удаления.
+// ---------------------------------------------------------------------------
+const IPTABLES_CHAINS = ['INPUT', 'FORWARD', 'OUTPUT'];
+
+function iptablesSpecTokens(spec) {
+    const out = [];
+    let cur = '', quote = null, esc = false;
+    for (const ch of String(spec || '')) {
+        if (esc) { cur += ch; esc = false; continue; }
+        if (ch === '\\') { esc = true; continue; }
+        if (quote) {
+            if (ch === quote) quote = null; else cur += ch;
+            continue;
+        }
+        if (ch === '"' || ch === "'") { quote = ch; continue; }
+        if (/\s/.test(ch)) {
+            if (cur) { out.push(cur); cur = ''; }
+            continue;
+        }
+        cur += ch;
+    }
+    if (cur) out.push(cur);
+    return out;
+}
+
+function readIptablesRules() {
+    const rules = [];
+    for (const chain of IPTABLES_CHAINS) {
+        let text = '';
+        try { text = rootShTry('iptables', ['-S', chain], { maxBuffer: 4 * 1024 * 1024 }); } catch (e) { text = ''; }
+        for (const raw of String(text || '').split('\n')) {
+            const spec = raw.trim();
+            if (!spec.startsWith('-A ')) continue;
+            const parts = iptablesSpecTokens(spec);
+            if (parts[0] !== '-A' || parts[1] !== chain) continue;
+            const j = parts.indexOf('-j');
+            const target = j >= 0 ? (parts[j + 1] || '') : '';
+            const ufwManaged = /^ufw-/.test(target);
+            rules.push({
+                id: crypto.createHash('sha1').update(spec).digest('hex').slice(0, 16),
+                chain,
+                spec,
+                target: target || '-',
+                deletable: !ufwManaged,
+                ufwManaged
+            });
+        }
+    }
+    return rules;
+}
+
+app.get('/api/iptables', checkAuth, (req, res) => {
+    try {
+        res.json({ chains: IPTABLES_CHAINS, rules: readIptablesRules() });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось прочитать iptables: ' + e.message });
+    }
+});
+
+app.post('/api/iptables', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    const chain = String(body.chain || 'INPUT').toUpperCase();
+    if (!IPTABLES_CHAINS.includes(chain)) return res.status(400).json({ error: 'Недопустимая цепочка' });
+    const proto = String(body.proto || 'tcp').toLowerCase();
+    if (!['tcp', 'udp', 'icmp', 'any'].includes(proto)) return res.status(400).json({ error: 'Недопустимый протокол' });
+    const action = String(body.action || 'ACCEPT').toUpperCase();
+    if (!['ACCEPT', 'DROP', 'REJECT'].includes(action)) return res.status(400).json({ error: 'Недопустимое действие' });
+    const port = String(body.port || '').trim();
+    if (port && !isPort(port)) return res.status(400).json({ error: 'Некорректный порт (1-65535)' });
+    if (port && !['tcp', 'udp'].includes(proto)) return res.status(400).json({ error: 'Порт можно указать только для TCP/UDP' });
+    const ipRe = /^(?:\d{1,3}\.){3}\d{1,3}(?:\/\d{1,2})?$/;
+    const src = String(body.src || '').trim();
+    const dst = String(body.dst || '').trim();
+    if (src && !ipRe.test(src)) return res.status(400).json({ error: 'Некорректный адрес источника' });
+    if (dst && !ipRe.test(dst)) return res.status(400).json({ error: 'Некорректный адрес назначения' });
+    const comment = String(body.comment || '').trim().slice(0, 64).replace(/[^A-Za-z0-9 _.\-]/g, '');
+    const insert = body.insert !== false;
+    const args = ['iptables', insert ? '-I' : '-A', chain];
+    if (insert) args.push('1');
+    if (proto !== 'any') args.push('-p', proto);
+    if (src) args.push('-s', src);
+    if (dst) args.push('-d', dst);
+    if (port) args.push('--dport', port);
+    if (comment) args.push('-m', 'comment', '--comment', comment);
+    args.push('-j', action);
+    try {
+        sh('sudo', args);
+        auditLog(req, `iptables: добавлено ${chain} ${proto} ${src || 'any'} -> ${dst || 'any'}${port ? ':' + port : ''} ${action}`);
+        res.json({ success: true, spec: args.slice(1).join(' ') });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось добавить правило iptables' });
+    }
+});
+
+app.delete('/api/iptables/:id', checkAuth, requireAdmin, (req, res) => {
+    const id = String(req.params.id || '');
+    if (!/^[a-f0-9]{8,40}$/.test(id)) return res.status(400).json({ error: 'Некорректный идентификатор правила' });
+    try {
+        const rule = readIptablesRules().find(r => r.id === id);
+        if (!rule) return res.status(404).json({ error: 'Правило не найдено (список изменился)' });
+        if (!rule.deletable) return res.status(400).json({ error: 'Правило управляется UFW и защищено от удаления' });
+        const parts = iptablesSpecTokens(rule.spec);
+        if (parts[0] !== '-A' || !IPTABLES_CHAINS.includes(parts[1])) return res.status(400).json({ error: 'Некорректное правило' });
+        sh('sudo', ['iptables', '-D', rule.chain, ...parts.slice(2)]);
+        auditLog(req, `iptables: удалено правило ${rule.chain} ${parts.slice(2).join(' ')}`);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось удалить правило iptables' });
+    }
+});
+
+// ---------------------------------------------------------------------------
 // Сетевые инструменты: статус
 // ---------------------------------------------------------------------------
 app.get('/api/tools/status', checkAuth, (req, res) => {
@@ -3187,6 +3317,7 @@ echo "OK"
                 'не удалось записать /etc/cron.d/ru-drop-refresh';
         }
         // 5 минут: на минимальных образах первый запуск может доустанавливать ipset.
+        const beforeSet = readIpsetEntries('ru_block');
         rootExecFile('/root/awg/ru-drop.sh', [], { timeout: 300000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
             if (err) {
                 let detail = String(stderr || stdout || err.message || '').trim();
@@ -3199,8 +3330,26 @@ echo "OK"
                 auditLog(req, `GeoIP-блокировка: ошибка загрузки списка ${detail}`.slice(0, 900));
                 return res.status(500).json({ error: 'Ошибка загрузки базы GeoIP', detail });
             }
-            auditLog(req, `GeoIP-блокировка включена для: ${ifaces.join(', ')}`);
-            const payload = { success: true };
+            const afterSet = readIpsetEntries('ru_block');
+            let zoneLines = 0;
+            try {
+                zoneLines = fs.readFileSync('/root/awg/ru-drop.zone', 'utf8')
+                    .split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith('#')).length;
+            } catch (e) { /* ignore */ }
+            const added = [...afterSet].filter(x => !beforeSet.has(x)).length;
+            const removed = [...beforeSet].filter(x => !afterSet.has(x)).length;
+            auditLog(req, `GeoIP-блокировка включена для: ${ifaces.join(', ')} (${afterSet.size} правил, +${added}/-${removed})`);
+            const payload = {
+                success: true,
+                count: afterSet.size,
+                before: beforeSet.size,
+                added,
+                removed,
+                zoneLines,
+                ifaces,
+                schedule: scheduleVal,
+                listMode
+            };
             if (cronWarning) {
                 payload.warning = 'Блокировка включена, но автообновление не настроено: ' + cronWarning;
             }
@@ -4071,9 +4220,26 @@ app.get('/api/cascade/diag', checkAuth, requireAdmin, async (req, res) => {
 app.post('/api/cascade/refresh', checkAuth, (req, res) => {
     try {
         if (!fs.existsSync(ROUTING_SCRIPT)) return res.status(400).json({ error: 'Каскад ещё не настроен' });
+        const before = readIpsetEntries('ru');
         const out = sh('sudo', [ROUTING_SCRIPT], { timeout: 120000 });
-        auditLog(req, 'Обновление маршрутов каскада');
-        res.json({ success: true, output: out });
+        const after = readIpsetEntries('ru');
+        let zoneLines = 0;
+        try {
+            zoneLines = fs.readFileSync('/root/awg/ru.zone', 'utf8')
+                .split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith('#')).length;
+        } catch (e) { /* ignore */ }
+        const added = [...after].filter(x => !before.has(x)).length;
+        const removed = [...before].filter(x => !after.has(x)).length;
+        auditLog(req, `Обновление списков каскада: ${after.size} правил (+${added}/-${removed})`);
+        res.json({
+            success: true,
+            output: out,
+            count: after.size,
+            before: before.size,
+            added,
+            removed,
+            zoneLines
+        });
     } catch (e) {
         res.status(500).json({ error: 'Ошибка обновления: ' + (e.stdout || e.message) });
     }
