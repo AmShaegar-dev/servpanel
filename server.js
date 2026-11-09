@@ -1962,7 +1962,11 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
         const clientIface = readIfaceBytes('awg0') || readIfaceBytes('amn0');
         const tunnelRaw = tunnelIface ? tunnelIface.rx + tunnelIface.tx : 0;
         const blockedRaw = readRuBlockBytes();
-        const role = existingCascadeConf() ? cascadeRole() : 'ru';
+        let role = 'ru';
+        try {
+            const cd = cascadeDetails();
+            if (cd && cd.mode === 'exit') role = 'eu';
+        } catch (e) { /* ignore */ }
         if (role === 'eu') {
             const passed = clientIface ? clientIface.total : (tunnelIface ? tunnelIface.total : 0);
             const blocked = blockedRaw;
