@@ -373,8 +373,6 @@ function clientStatus(c) {
   return c.status_code === 'active' || c.status_code === 'recent';
 }
 
-const CLIENT_SHARE_COLORS = ['#5b8cff', '#f2b84b', '#26c281', '#e15b64', '#a06bff', '#4cc9f0', '#ff8a5b', '#8bd450', '#d29922', '#ff6bcb'];
-
 function clientTrafficValue(c) {
   const total = Number(c && c.total_octets);
   if (Number.isFinite(total) && total > 0) return total;
@@ -383,23 +381,34 @@ function clientTrafficValue(c) {
 
 function realClientRows() {
   if (!carbon.clients.length) return `<tr class="empty-row"><td colspan="8">Клиентов пока нет. Создайте первого.</td></tr>`;
-  const values = carbon.clients.map(clientTrafficValue);
-  const total = values.reduce((a, b) => a + b, 0);
-  const max = Math.max(1, ...values);
-  return carbon.clients.map((c, idx) => {
+  const d = carbon.distribution || {};
+  const gCascade = Number(d.tunnel) || 0;
+  const gDirect = Number(d.direct) || 0;
+  const gTotal = gCascade + gDirect;
+  const fallbackCascade = gTotal > 0 ? gCascade / gTotal * 100 : 50;
+  const isEu = (d.role || 'ru') === 'eu';
+  const pctText = v => v >= 10 ? Math.round(v) + '%' : v >= 0.1 ? v.toFixed(1) + '%' : '0%';
+  return carbon.clients.map(c => {
     const online = clientStatus(c);
-    const traffic = values[idx] || 0;
-    const width = traffic > 0 ? Math.max(2, traffic / max * 100) : 0;
-    const sharePct = total ? traffic / total * 100 : 0;
-    const shareText = sharePct >= 10 ? Math.round(sharePct) + '%' : sharePct >= 0.1 ? sharePct.toFixed(1) + '%' : '0%';
-    const color = CLIENT_SHARE_COLORS[idx % CLIENT_SHARE_COLORS.length];
+    const traffic = clientTrafficValue(c);
+    const cascade = Number(c.split_cascade) || 0;
+    const direct = Number(c.split_direct) || 0;
+    const splitTotal = cascade + direct;
+    const cascadePct = splitTotal > 0 ? cascade / splitTotal * 100 : fallbackCascade;
+    const directPct = 100 - cascadePct;
+    const title = splitTotal > 0
+      ? `Каскад: ${fmtBytes(cascade)} · RU: ${fmtBytes(direct)}`
+      : 'Нет данных по клиенту — показано общее соотношение';
+    const splitCell = isEu
+      ? '<span class="muted">—</span>'
+      : `<div class="split-bar" title="${escHtml(title)}"><span style="width:${cascadePct.toFixed(1)}%;background:#5b8cff"></span><span style="width:${directPct.toFixed(1)}%;background:var(--accent)"></span></div><span class="share-pct">${pctText(cascadePct)} / ${pctText(directPct)}</span>`;
     return `<tr data-name="${escHtml(c.name)}" data-ip="${escHtml(c.ip)}">
       <td class="name">${escHtml(c.name)}</td>
       <td class="mono">${escHtml(c.ip || '—')}</td>
       <td>${escHtml(c.status || (online ? 'Активен' : 'Неактивен'))}</td>
       <td class="mono">${fmtBytes(traffic)}</td>
       <td><div class="bar"><span style="width:${online ? 100 : 15}%"></span></div></td>
-      <td><div class="bar"><span style="width:${width}%;background:${color}"></span></div><span class="share-pct">${shareText}</span></td>
+      <td>${splitCell}</td>
       <td><span class="status ${online ? '' : 'idle'}"><span class="dot"></span>${online ? 'online' : 'offline'}</span></td>
       <td><div class="page-actions"><button class="row-action" data-carbon-action="client-key" data-name="${escHtml(c.name)}" title="Ключ и QR">${icon('key')}</button><button class="row-action" data-carbon-action="client-rename" data-name="${escHtml(c.name)}" title="Переименовать">${icon('edit')}</button><button class="row-action" data-copy="${escHtml(c.ip || '')}" title="Скопировать IP">${icon('copy')}</button><button class="row-action" data-carbon-action="client-delete" data-name="${escHtml(c.name)}" title="Удалить">${icon('trash')}</button></div></td>
     </tr>`;
@@ -408,7 +417,7 @@ function realClientRows() {
 
 function realClientsTable() {
   return `<div class="table-tools"><div class="table-search">${icon('search')}<input id="clientSearch" placeholder="Имя или IP" aria-label="Фильтр клиентов"></div><button class="tag" data-toast="Клиентов: ${carbon.clients.length}">Все клиенты ${icon('arrow', 'ico')}</button></div>
-    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr><th>Клиент</th><th>IP</th><th>Статус</th><th>Трафик</th><th>Загрузка</th><th>Фильтрация</th><th>Статус</th><th style="width:80px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
+    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr><th>Клиент</th><th>IP</th><th>Статус</th><th>Трафик</th><th>Загрузка</th><th>Каскад / RU</th><th>Статус</th><th style="width:80px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
 }
 
 function smoothTraffic(values, range) {
@@ -591,7 +600,7 @@ function realClients() {
   const online = carbon.clients.filter(clientStatus).length;
   return `<div class="page-head"><div><div class="page-title">Клиенты</div><div class="page-sub">Реальный список из API. Создание, удаление и статусы.</div></div><div class="page-actions"><button class="btn" data-carbon-action="client-bulk-rename">${icon('edit')}Массовое переименование</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button><button class="btn btn-primary" data-action="open-client-modal">${icon('plus')}Добавить клиента</button></div></div>
     <div class="mini-grid">${mini('Всего клиентов', String(carbon.clients.length), 'в панели')}${mini('Онлайн', String(online), 'активные')}${mini('Трафик RX', fmtBytes(carbon.clients.reduce((a, c) => a + (Number(c.rx) || 0), 0)), 'всего')}${mini('Трафик TX', fmtBytes(carbon.clients.reduce((a, c) => a + (Number(c.tx) || 0), 0)), 'всего')}</div>
-    <section class="card table-card"><div class="card-top"><div><div class="card-title">Все клиенты</div><div class="card-sub">API /api/clients</div></div></div>${realClientsTable()}</section>`;
+    <section class="card table-card"><div class="card-top"><div><div class="card-title">Все клиенты</div><div class="card-sub">API /api/clients</div></div><div class="legend"><span><i style="background:#5b8cff"></i>Каскад</span><span><i style="background:var(--accent)"></i>RU</span></div></div>${realClientsTable()}</section>`;
 }
 
 function realInstall() {

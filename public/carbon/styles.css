@@ -104,6 +104,8 @@ button{background:none;border:0;cursor:pointer}a{color:inherit;text-decoration:n
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:20px;min-width:0}
 #view > .mini-grid{margin-bottom:16px}
 .share-pct{display:block;margin-top:4px;font:500 9px/1 var(--mono);color:var(--text-3)}
+.split-bar{display:flex;width:92px;height:5px;border-radius:99px;overflow:hidden;background:var(--surface-3)}
+.split-bar span{display:block;height:100%}
 .iface-list{display:flex;flex-direction:column;gap:2px;max-height:180px;overflow:auto}
 .iface-row{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--line)}
 .iface-row:last-child{border-bottom:0}

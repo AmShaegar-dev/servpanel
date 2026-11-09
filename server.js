@@ -1930,6 +1930,111 @@ function readMangleSplit() {
     return { direct, tunnel, total: direct + tunnel };
 }
 
+// ---------------------------------------------------------------------------
+// Учёт трафика по клиентам: отдельная цепочка mangle AWG_SPLIT.
+// Она только считает пакеты (RETURN), маршрутизацию не меняет.
+// ---------------------------------------------------------------------------
+let splitAccountingSig = '';
+let splitAccountingAt = 0;
+
+function iptablesHas(args) {
+    try { rootSh('iptables', args); return true; } catch (e) { return false; }
+}
+
+function ensureSplitAccounting(clients) {
+    if (TEST_MODE) return;
+    if (cascadeRole() !== 'ru' || !existingCascadeConf()) return;
+    const ips = [...new Set((clients || []).map(c => String(c.ip || '').trim()).filter(Boolean))].sort();
+    if (!ips.length) return;
+    const ifaces = ['awg0', 'amn0'].filter(i => existingIfaces().includes(i));
+    if (!ifaces.length) return;
+    const sig = ifaces.join(',') + '|' + ips.join(',');
+    const now = Date.now();
+    try {
+        rootShTry('iptables', ['-t', 'mangle', '-N', 'AWG_SPLIT']);
+        for (const iface of ifaces) {
+            try { rootSh('iptables', ['-t', 'mangle', '-D', 'PREROUTING', '-i', iface, '-j', 'AWG_SPLIT']); } catch (e) { /* ignore */ }
+            rootSh('iptables', ['-t', 'mangle', '-I', 'PREROUTING', '1', '-i', iface, '-j', 'AWG_SPLIT']);
+        }
+        if (sig === splitAccountingSig && now - splitAccountingAt < 60000) return;
+        const hasRu = !!rootShTry('ipset', ['list', 'ru']).trim();
+        for (const ip of ips) {
+            if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(ip)) continue;
+            if (hasRu) {
+                const ruRule = ['-s', ip, '-m', 'set', '--match-set', 'ru', 'dst', '-m', 'comment', '--comment', `sp:ru:${ip}`, '-j', 'RETURN'];
+                if (!iptablesHas(['-t', 'mangle', '-C', 'AWG_SPLIT', ...ruRule])) {
+                    rootSh('iptables', ['-t', 'mangle', '-A', 'AWG_SPLIT', ...ruRule]);
+                }
+            }
+            const euRule = ['-s', ip, '-m', 'comment', '--comment', `sp:eu:${ip}`, '-j', 'RETURN'];
+            if (!iptablesHas(['-t', 'mangle', '-C', 'AWG_SPLIT', ...euRule])) {
+                rootSh('iptables', ['-t', 'mangle', '-A', 'AWG_SPLIT', ...euRule]);
+            }
+        }
+        const current = new Set(ips);
+        const chain = rootShTry('iptables', ['-t', 'mangle', '-S', 'AWG_SPLIT']);
+        for (const raw of String(chain || '').split('\n')) {
+            const line = raw.trim();
+            const m = /--comment\s+"sp:(?:ru|eu):([^"]+)"/.exec(line);
+            if (!m || current.has(m[1])) continue;
+            const spec = line.replace(/^-A\s+AWG_SPLIT\s+/, '');
+            const args = iptablesSpecTokens(spec);
+            try { rootSh('iptables', ['-t', 'mangle', '-D', 'AWG_SPLIT', ...args]); } catch (e) { /* ignore */ }
+        }
+        splitAccountingSig = sig;
+        splitAccountingAt = now;
+    } catch (e) { /* ignore */ }
+}
+
+function readSplitCounters() {
+    const ru = {}, eu = {};
+    if (TEST_MODE) return { ru, eu };
+    try {
+        const out = rootShTry('bash', ['-c',
+            "iptables-save -c -t mangle 2>/dev/null || /usr/sbin/iptables-save -c -t mangle 2>/dev/null || true"
+        ], { maxBuffer: 8 * 1024 * 1024 });
+        for (const raw of String(out || '').split('\n')) {
+            const line = raw.trim();
+            const m = /^\[(\d+):(\d+)\]\s+-A\s+AWG_SPLIT\b/.exec(line);
+            if (!m) continue;
+            const bytes = Number(m[2]) || 0;
+            const c = /--comment\s+"sp:(ru|eu):([^"]+)"/.exec(line);
+            if (!c) continue;
+            const map = c[1] === 'ru' ? ru : eu;
+            map[c[2]] = (map[c[2]] || 0) + bytes;
+        }
+    } catch (e) { /* ignore */ }
+    return { ru, eu };
+}
+
+function attachClientSplit(clients) {
+    if (TEST_MODE || cascadeRole() !== 'ru' || !existingCascadeConf()) return clients;
+    try {
+        ensureSplitAccounting(clients);
+        const split = readSplitCounters();
+        return clients.map(c => {
+            const ip = String(c.ip || '');
+            return { ...c, split_cascade: split.eu[ip] || 0, split_direct: split.ru[ip] || 0 };
+        });
+    } catch (e) { return clients; }
+}
+
+function removeSplitAccounting() {
+    try {
+        const out = rootShTry('iptables', ['-t', 'mangle', '-S', 'PREROUTING']);
+        for (const raw of String(out || '').split('\n')) {
+            const line = raw.trim();
+            if (!line.startsWith('-A PREROUTING') || !line.includes('-j AWG_SPLIT')) continue;
+            const spec = line.replace(/^-A PREROUTING\s+/, '');
+            try { rootSh('iptables', ['-t', 'mangle', '-D', 'PREROUTING', ...iptablesSpecTokens(spec)]); } catch (e) { /* ignore */ }
+        }
+        try { rootSh('iptables', ['-t', 'mangle', '-F', 'AWG_SPLIT']); } catch (e) { /* ignore */ }
+        try { rootSh('iptables', ['-t', 'mangle', '-X', 'AWG_SPLIT']); } catch (e) { /* ignore */ }
+    } catch (e) { /* ignore */ }
+    splitAccountingSig = '';
+    splitAccountingAt = 0;
+}
+
 function readIpsetEntries(name) {
     const entries = new Set();
     try {
@@ -4040,6 +4145,7 @@ echo "OK: маршруты каскада применены ($(date '+%Y-%m-%d 
 `;
 }
 function teardownRouting() {
+    try { removeSplitAccounting(); } catch (e) { /* ignore */ }
     try { sh('sudo', ['systemctl', 'stop', 'awg-routing.timer', 'awg-routing.service']); } catch (e) { /* ignore */ }
     try { sh('sudo', ['systemctl', 'disable', 'awg-routing.timer']); } catch (e) { /* ignore */ }
     try {
@@ -5174,6 +5280,7 @@ app.post('/api/cascade/schedule', checkAuth, requireAdmin, (req, res) => {
 app.post('/api/cascade/teardown', checkAuth, requireAdmin, async (req, res) => {
     const body = req.body || {};
     const removed = [];
+    try { removeSplitAccounting(); } catch (e) { /* ignore */ }
     for (const unit of ['awg-routing.timer', 'awg-routing.service', 'awg-quick@awg1']) {
         try { sh('sudo', ['systemctl', 'stop', unit]); } catch (e) { /* не запущена */ }
         try { sh('sudo', ['systemctl', 'disable', unit]); } catch (e) { /* ignore */ }
@@ -6193,7 +6300,7 @@ app.get('/api/clients', checkAuth, (req, res) => {
                 has_vpnuri: fs.existsSync(path.join(AWG_DIR, l.name + '.vpnuri'))
             };
         });
-        res.json(merged);
+        res.json(attachClientSplit(merged));
     } catch (e) { res.status(500).json({ error: 'Ошибка чтения клиентов' }); }
 });
 
@@ -6539,7 +6646,7 @@ app.get('/api/stats', checkAuth, (req, res) => {
                 }
                 return { ...client, status_code: sc };
             });
-            res.json(data);
+            res.json(attachClientSplit(data));
         } catch (e) { res.status(500).json({ error: 'Ошибка парсинга' }); }
     });
 });
