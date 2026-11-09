@@ -388,11 +388,6 @@ function clientTrafficValue(c) {
 function realClientRows() {
   if (!carbon.clients.length) return `<tr class="empty-row"><td colspan="8">Клиентов пока нет. Создайте первого.</td></tr>`;
   const d = carbon.distribution || {};
-  const gCascade = Number(d.tunnel) || 0;
-  const gDirect = Number(d.direct) || 0;
-  const gTotal = gCascade + gDirect;
-  const hasGlobal = gTotal > 0;
-  const fallbackCascade = hasGlobal ? gCascade / gTotal * 100 : 0;
   const isEu = (d.role || 'ru') === 'eu';
   const pctText = v => v >= 10 ? Math.round(v) + '%' : v >= 0.1 ? v.toFixed(1) + '%' : '0%';
   return carbon.clients.map(c => {
@@ -402,15 +397,14 @@ function realClientRows() {
     const direct = Number(c.split_direct) || 0;
     const splitTotal = cascade + direct;
     const hasSplit = splitTotal > 0;
-    const hasData = hasSplit || hasGlobal;
-    const cascadePct = hasSplit ? cascade / splitTotal * 100 : fallbackCascade;
+    const cascadePct = hasSplit ? cascade / splitTotal * 100 : 0;
     const directPct = 100 - cascadePct;
     const title = hasSplit
       ? `Каскад: ${fmtBytes(cascade)} · RU: ${fmtBytes(direct)}`
-      : (hasGlobal ? 'Нет данных по клиенту — показано общее соотношение' : 'Нет данных');
+      : 'Нет данных по клиенту';
     const splitCell = isEu
       ? '<span class="muted">—</span>'
-      : hasData
+      : hasSplit
         ? `<div class="split-bar" title="${escHtml(title)}"><span style="width:${cascadePct.toFixed(1)}%;background:#5b8cff"></span><span style="width:${directPct.toFixed(1)}%;background:var(--accent)"></span></div><span class="share-pct">${pctText(cascadePct)} / ${pctText(directPct)}</span>`
         : `<div class="split-bar" title="Нет данных"><span style="width:100%;background:var(--surface-3)"></span></div><span class="share-pct">нет данных</span>`;
     return `<tr data-name="${escHtml(c.name)}" data-ip="${escHtml(c.ip)}">
