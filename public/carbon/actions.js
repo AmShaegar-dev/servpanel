@@ -750,66 +750,48 @@ function carbonWarpServicesSelect(mode) {
 async function carbonWarpPanel() {
   let st = {};
   try { st = await api('/api/warp/status'); } catch (e) {}
-  const mode = st.mode === 'v1' ? 'v1' : 'v2';
   const modal = document.createElement('div');
   modal.className = 'modal';
   const summary = st.installed
     ? `Режим: ${st.mode || '—'} · Xray: ${st.xrayActive ? 'активен' : 'остановлен'} (${st.listenIp || '—'}:${st.listenPort || '—'}) · WARP: ${st.connected ? 'Connected' : 'не подключён'} · SOCKS: ${st.socksPort || '—'}`
     : 'WARP не установлен.';
+  const rows = (st.services || []).map(s => {
+    const warp = st.mode === 'v1' ? true : !!s.selected;
+    return `<div class="warp-route-row"><b>${escHtml(s.label)}</b><label><input type="radio" name="warp-route-${escHtml(s.id)}" data-warp-route data-service-id="${escHtml(s.id)}" value="warp" ${warp ? 'checked' : ''}></label><label><input type="radio" name="warp-route-${escHtml(s.id)}" data-warp-route data-service-id="${escHtml(s.id)}" value="direct" ${!warp ? 'checked' : ''}></label></div>`;
+  }).join('');
   modal.innerHTML = `<div class="modal-card modal-wide"><div class="modal-head"><div><div class="modal-title">WARP + Xray</div><div class="modal-sub">${escHtml(summary)}</div></div><button class="icon-btn" data-warp-close>✕</button></div>
     <div class="page-actions" style="flex-wrap:wrap"><button class="btn btn-primary" data-warp-action="power-on">Включить</button><button class="btn" data-warp-action="power-off">Остановить</button><button class="btn" data-warp-action="test">Проверить WARP</button></div>
-    <label class="field" style="margin-top:14px"><span>Режим работы</span><select id="warpModeSelect"><option value="v1" ${mode === 'v1' ? 'selected' : ''}>Вариант 1 — весь трафик через WARP</option><option value="v2" ${mode === 'v2' ? 'selected' : ''}>Вариант 2 — AI через WARP, Google/Gemini напрямую</option></select></label>
-    <label class="switch" style="margin:12px 0"><input type="checkbox" id="warpGoogleDirect" ${mode === 'v2' ? 'checked' : ''}> Google/Gemini — напрямую с IP сервера</label>
-    <div class="donut-note">Вариант 1: весь трафик идёт через WARP, список сервисов не используется. Вариант 2: через WARP идут только отмеченные сервисы; Google/Gemini — напрямую, если включён переключатель выше.</div>
-    <div class="card-sub" style="margin:14px 0 8px">Сервисы через WARP (вариант 2)</div>
-    <div class="chips" data-warp-services style="flex-wrap:wrap">${(st.services || []).map(s => `<label class="chip ${s.selected ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-warp-service value="${escHtml(s.id)}" ${s.selected ? 'checked' : ''} onchange="this.closest('label').classList.toggle('on',this.checked)"> ${escHtml(s.label)}</label>`).join('') || '<span class="muted">Сервисы не найдены</span>'}</div>
-    <div class="page-actions" style="margin-top:10px"><button class="btn btn-sm" data-warp-select-ai>Все AI</button><button class="btn btn-sm" data-warp-select-none>Снять все</button><button class="btn" data-warp-save>Сохранить сервисы</button><button class="btn btn-primary" data-warp-apply>Применить режим</button></div>
-    <pre class="code" data-warp-out style="margin-top:14px;padding:12px;white-space:pre-wrap;max-height:40vh;overflow:auto">Готово</pre></div>`;
+    <div class="donut-note" style="margin-top:12px">Слева — трафик идёт через WARP. Справа — напрямую с IP сервера, как Gemini сейчас.</div>
+    <div class="page-actions" style="margin-top:12px"><button class="btn btn-sm" data-warp-preset="all-warp">Все в WARP</button><button class="btn btn-sm" data-warp-preset="v2">Вариант 2: Gemini напрямую</button><button class="btn btn-sm" data-warp-preset="all-direct">Все напрямую</button></div>
+    <div class="warp-route-table" style="margin-top:12px"><div class="warp-route-row head"><span>Сервис</span><span>В WARP</span><span>Напрямую</span></div>${rows || '<div class="empty-row">Сервисы не найдены</div>'}</div>
+    <div class="page-actions" style="margin-top:14px"><button class="btn btn-primary" data-warp-apply>Применить</button></div>
+    <pre class="code" data-warp-out style="margin-top:14px;padding:12px;white-space:pre-wrap;max-height:36vh;overflow:auto">Готово</pre></div>`;
   document.body.appendChild(modal);
   modal.hidden = false;
   modal.querySelector('[data-warp-close]').addEventListener('click', () => modal.remove());
   const out = modal.querySelector('[data-warp-out]');
-  const modeSel = modal.querySelector('#warpModeSelect');
-  const googleDirect = modal.querySelector('#warpGoogleDirect');
-  const boxes = [...modal.querySelectorAll('[data-warp-service]')];
-  const refreshChips = () => {
-    boxes.forEach(x => {
-      const label = x.closest('label');
-      const disable = modeSel.value === 'v1' || (x.value === 'gemini' && googleDirect.checked);
-      x.disabled = disable;
-      if (disable) x.checked = false;
-      label.classList.toggle('on', x.checked);
-      label.style.opacity = disable ? '.5' : '1';
+  const radios = [...modal.querySelectorAll('[data-warp-route]')];
+  modal.querySelectorAll('[data-warp-preset]').forEach(b => b.addEventListener('click', () => {
+    const mode = b.dataset.warpPreset;
+    radios.forEach(x => {
+      const isWarp = x.value === 'warp';
+      if (mode === 'all-warp') x.checked = isWarp;
+      else if (mode === 'all-direct') x.checked = !isWarp;
+      else if (mode === 'v2') x.checked = x.dataset.serviceId === 'gemini' ? !isWarp : isWarp;
     });
-  };
-  modeSel.addEventListener('change', refreshChips);
-  googleDirect.addEventListener('change', refreshChips);
-  modal.querySelector('[data-warp-select-ai]').addEventListener('click', () => {
-    boxes.forEach(x => { if (!x.disabled) { x.checked = true; x.closest('label').classList.add('on'); } });
-  });
-  modal.querySelector('[data-warp-select-none]').addEventListener('click', () => {
-    boxes.forEach(x => { if (!x.disabled) { x.checked = false; x.closest('label').classList.remove('on'); } });
-  });
-  const selectedIds = () => boxes.filter(x => x.checked && !x.disabled).map(x => x.value);
-  modal.querySelector('[data-warp-save]').addEventListener('click', async () => {
-    try {
-      const ids = selectedIds();
-      await api('/api/warp/services', { method: 'POST', body: { services: ids } });
-      out.textContent = 'Сервисы сохранены: ' + (ids.join(', ') || '—');
-    } catch (e) { out.textContent = e.message; }
-  });
+  }));
   modal.querySelector('[data-warp-apply]').addEventListener('click', async () => {
     try {
-      const m = modeSel.value;
-      let ids = selectedIds();
-      if (m === 'v1') ids = [];
-      if (m === 'v2' && !ids.length) throw new Error('Выберите хотя бы один сервис для WARP');
-      const text = m === 'v1'
-        ? 'Вариант 1: весь трафик пойдёт через WARP. Продолжить?'
-        : 'Вариант 2: выбранные сервисы пойдут через WARP, Google/Gemini — напрямую с IP сервера. Продолжить?';
+      const serviceIds = [...new Set(radios.map(x => x.dataset.serviceId))];
+      const warpIds = radios.filter(x => x.value === 'warp' && x.checked).map(x => x.dataset.serviceId);
+      const allWarp = serviceIds.length > 0 && serviceIds.every(id => warpIds.includes(id));
+      const mode = allWarp ? 'v1' : 'v2';
+      const text = mode === 'v1'
+        ? 'Все сервисы пойдут через WARP. Продолжить?'
+        : 'Через WARP пойдут только сервисы из левой колонки, остальные — напрямую с IP сервера. Продолжить?';
       if (!confirm(text)) return;
-      await api('/api/warp/services', { method: 'POST', body: { services: ids } });
-      const d = await api('/api/install/module', { method: 'POST', body: { module: 'warp', warpMode: m, listenIp: '0.0.0.0', listenPort: '443', socksPort: st.socksPort || '40000' } });
+      await api('/api/warp/services', { method: 'POST', body: { services: warpIds } });
+      const d = await api('/api/install/module', { method: 'POST', body: { module: 'warp', warpMode: mode, listenIp: '0.0.0.0', listenPort: '443', socksPort: st.socksPort || '40000' } });
       out.textContent = d.logFile ? 'Установка запущена. Журнал: ' + d.logFile : 'Установка запущена';
     } catch (e) { out.textContent = e.message; }
   });
@@ -825,7 +807,6 @@ async function carbonWarpPanel() {
       }
     } catch (e) { out.textContent = e.message; }
   }));
-  refreshChips();
 }
 
 async function carbonDnsCapture() {
