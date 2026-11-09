@@ -758,7 +758,7 @@ async function carbonWarpPanel() {
   const rows = (st.services || []).map(s => {
     const route = s.route || (s.id === 'gemini' ? 'direct' : (s.selected ? 'warp' : 'direct'));
     const radio = (value, label) => `<label title="${label}"><input type="radio" name="warp-route-${escHtml(s.id)}" data-warp-route data-service-id="${escHtml(s.id)}" value="${value}" ${route === value ? 'checked' : ''}></label>`;
-    return `<div class="warp-route-row"><span class="warp-service-name"><b>${escHtml(s.label)}</b>${s.overridden ? '<span class="tag">изменён</span>' : ''}<button class="row-action" data-warp-custom-edit="${escHtml(s.id)}" title="Редактировать сервис">${icon('edit')}</button>${s.custom ? `<button class="row-action" data-warp-custom-delete="${escHtml(s.id)}" title="Удалить сервис">${icon('trash')}</button>` : ''}</span>${radio('warp', 'В WARP')}${radio('direct', 'Напрямую')}${radio('off', 'Отключено')}</div>`;
+    return `<div class="warp-route-row"><span class="warp-service-name"><b>${escHtml(s.label)}</b>${s.overridden ? '<span class="tag">изменён</span>' : ''}<button class="row-action" data-warp-custom-edit="${escHtml(s.id)}" title="Редактировать сервис">${icon('edit')}</button>${s.overridden ? `<button class="row-action" data-warp-custom-reset="${escHtml(s.id)}" title="Сбросить к стандартным">${icon('refresh')}</button>` : ''}${s.custom ? `<button class="row-action" data-warp-custom-delete="${escHtml(s.id)}" title="Удалить сервис">${icon('trash')}</button>` : ''}</span>${radio('warp', 'В WARP')}${radio('direct', 'Напрямую')}${radio('off', 'Отключено')}</div>`;
   }).join('');
   modal.innerHTML = `<div class="modal-card modal-wide"><div class="modal-head"><div><div class="modal-title">WARP + Xray</div><div class="modal-sub">${escHtml(summary)}</div></div><button class="icon-btn" data-warp-close>✕</button></div>
     <div class="page-actions" style="flex-wrap:wrap"><button class="btn btn-primary" data-warp-action="power-on">Включить</button><button class="btn" data-warp-action="power-off">Остановить</button><button class="btn" data-warp-action="test">Проверить WARP</button><button class="btn" data-warp-custom>Сервисы</button></div>
@@ -817,6 +817,15 @@ async function carbonWarpPanel() {
         await carbonWarpPanel();
       }
     });
+  }));
+  modal.querySelectorAll('[data-warp-custom-reset]').forEach(b => b.addEventListener('click', async () => {
+    const id = b.dataset.warpCustomReset;
+    if (!confirm('Сбросить домены сервиса к стандартным?')) return;
+    try {
+      await api('/api/warp/override/' + encodeURIComponent(id), { method: 'DELETE' });
+      modal.remove();
+      await carbonWarpPanel();
+    } catch (e) { out.textContent = e.message; }
   }));
   modal.querySelectorAll('[data-warp-custom-delete]').forEach(b => b.addEventListener('click', async () => {
     const id = b.dataset.warpCustomDelete;

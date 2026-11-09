@@ -5969,6 +5969,17 @@ app.delete('/api/warp/custom/:id', checkAuth, requireAdmin, (req, res) => {
     res.json({ success: true });
 });
 
+app.delete('/api/warp/override/:id', checkAuth, requireAdmin, (req, res) => {
+    const id = String(req.params.id || '');
+    if (!WARP_SERVICE_CATALOG.some(s => s.id === id)) return res.status(404).json({ error: 'Сервис не найден' });
+    const overrides = warpOverrides();
+    delete overrides[id];
+    const routes = warpRoutes();
+    writeJson(WARP_ROUTES_FILE, { routes, custom: warpCustomCatalog().map(c => ({ id: c.id, label: c.label, domains: c.domains })), overrides, updatedAt: new Date().toISOString() }, 0o600);
+    auditLog(req, `WARP: сброшен сервис ${id}`);
+    res.json({ success: true });
+});
+
 app.get('/api/warp/instructions', checkAuth, (req, res) => {
     const cfg = warpConfig();
     const selected = warpServiceIds();
