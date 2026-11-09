@@ -249,48 +249,75 @@ async function loadCarbonData() {
     api(p).catch(() => null),
     new Promise(resolve => setTimeout(() => resolve(null), ms))
   ]);
-  const [stats, clients, modules, services, security, interfaces, update, server, sys, ufw, cascade, cascadeProxy, obf, profiles, ssl, app, rustdesk, users, audit, backup, notify, awgConfig, history, distribution, cascadeInterfaces, cascadeSchedule] = await Promise.all([
-    safe('/api/stats'), safe('/api/clients'), safe('/api/modules'), safe('/api/services'),
+  // 1. Минимум для первого экрана: KPI, сервер, обновления, службы.
+  // Остальные разделы догружаются в фоне и не задерживают отрисовку.
+  const [stats, modules, services, security, interfaces, update, server, sys] = await Promise.all([
+    safe('/api/stats'), safe('/api/modules'), safe('/api/services'),
     safe('/api/security/status'), safe('/api/interfaces'), safe('/api/update/info'),
-    safe('/api/server-info'), safe('/api/sysinfo'), safe('/api/ufw'), safe('/api/cascade/status'),
-    safe('/api/cascade/proxy'), safe('/api/obf/current'), safe('/api/obf/profiles'),
-    safe('/api/ssl/status'),
-    safe('/api/app/status'), safe('/api/rustdesk/status'), safe('/api/users'),
-    safe('/api/audit?limit=50'), safe('/api/backup/auto'), safe('/api/notify/status'),
-    safe('/api/awg/config'), safe('/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global'),
-    safe('/api/traffic/distribution'), safe('/api/cascade/interfaces'), safe('/api/cascade/schedule')
+    safe('/api/server-info'), safe('/api/sysinfo')
   ]);
   carbon.stats = Array.isArray(stats) ? stats : [];
-  carbon.clients = Array.isArray(clients) ? clients : carbon.stats;
-  carbon.modules = (modules && modules.modules) || [];
-  carbon.services = Array.isArray(services) ? services : [];
-  carbon.security = security;
-  carbon.interfaces = Array.isArray(interfaces) ? interfaces : [];
-  carbon.update = update;
-  carbon.server = server;
-  carbon.sys = sys;
-  carbon.ufw = ufw;
-  carbon.cascade = cascade;
-  carbon.cascadeProxy = cascadeProxy;
-  carbon.obf = obf;
-  carbon.profiles = profiles;
-  carbon.ssl = ssl;
-  carbon.app = app;
-  carbon.rustdesk = rustdesk;
-  carbon.users = users;
-  carbon.audit = audit;
-  carbon.backup = backup;
-  carbon.notify = notify;
-  carbon.awgConfig = awgConfig;
-  carbon.history = history;
-  carbon.distribution = distribution;
-  if (cascadeInterfaces && !cascadeInterfaces.error) carbon.cascadeInterfaces = cascadeInterfaces;
-  if (cascadeSchedule && !cascadeSchedule.error) carbon.cascadeSchedule = cascadeSchedule;
+  if (!carbon.clients.length && carbon.stats.length) carbon.clients = carbon.stats;
+  carbon.modules = (modules && modules.modules) || carbon.modules;
+  carbon.services = Array.isArray(services) ? services : carbon.services;
+  if (security) carbon.security = security;
+  carbon.interfaces = Array.isArray(interfaces) ? interfaces : carbon.interfaces;
+  if (update) carbon.update = update;
+  if (server) carbon.server = server;
+  if (sys) carbon.sys = sys;
   carbon.loaded = true;
   applyShellData();
-  // Прокси-движок опрашивается отдельно: проверка telemt/sudo занимает
-  // несколько секунд и не должна задерживать отрисовку дашборда.
+  // 2. Прокси — первым в очереди, затем остальные разделы.
   loadProxyData();
+  loadSecondaryCarbonData();
+}
+
+let secondaryLoading = null;
+function loadSecondaryCarbonData() {
+  if (secondaryLoading) return secondaryLoading;
+  const safe = (p, ms = 4000) => Promise.race([
+    api(p).catch(() => null),
+    new Promise(resolve => setTimeout(() => resolve(null), ms))
+  ]);
+  secondaryLoading = Promise.all([
+    safe('/api/clients'), safe('/api/ufw'), safe('/api/cascade/status'),
+    safe('/api/cascade/proxy'), safe('/api/obf/current'), safe('/api/obf/profiles'),
+    safe('/api/ssl/status'), safe('/api/app/status'), safe('/api/rustdesk/status'),
+    safe('/api/users'), safe('/api/audit?limit=50'), safe('/api/backup/auto'),
+    safe('/api/notify/status'), safe('/api/awg/config'),
+    safe('/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global'),
+    safe('/api/traffic/distribution'), safe('/api/cascade/interfaces'), safe('/api/cascade/schedule')
+  ]).then(([clients, ufw, cascade, cascadeProxy, obf, profiles, ssl, app, rustdesk, users, audit, backup, notify, awgConfig, history, distribution, cascadeInterfaces, cascadeSchedule]) => {
+    secondaryLoading = null;
+    if (Array.isArray(clients)) carbon.clients = clients;
+    if (ufw) carbon.ufw = ufw;
+    if (cascade) carbon.cascade = cascade;
+    if (cascadeProxy) carbon.cascadeProxy = cascadeProxy;
+    if (obf) carbon.obf = obf;
+    if (profiles) carbon.profiles = profiles;
+    if (ssl) carbon.ssl = ssl;
+    if (app) carbon.app = app;
+    if (rustdesk) carbon.rustdesk = rustdesk;
+    if (users) carbon.users = users;
+    if (audit) carbon.audit = audit;
+    if (backup) carbon.backup = backup;
+    if (notify) carbon.notify = notify;
+    if (awgConfig) carbon.awgConfig = awgConfig;
+    if (history) carbon.history = history;
+    if (distribution) carbon.distribution = distribution;
+    if (cascadeInterfaces && !cascadeInterfaces.error) carbon.cascadeInterfaces = cascadeInterfaces;
+    if (cascadeSchedule && !cascadeSchedule.error) carbon.cascadeSchedule = cascadeSchedule;
+    applyShellData();
+    if (typeof state !== 'undefined' && state.tab === 'dashboard') {
+      const chart = document.getElementById('liveChartCard');
+      if (chart) chart.outerHTML = realTrafficChart();
+      const donut = document.getElementById('liveDistributionCard');
+      if (donut) donut.outerHTML = realTrafficDistribution();
+    } else if (typeof state !== 'undefined') {
+      render();
+    }
+  }).catch(() => { secondaryLoading = null; });
+  return secondaryLoading;
 }
 
 function clientStatus(c) {
@@ -379,6 +406,9 @@ function realTrafficChart() {
 }
 
 function realTrafficDistribution() {
+  if (!carbon.distribution) {
+    return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">загрузка данных…</div></div>${tag('…', 'muted')}</div><div class="empty-row" style="min-height:220px;display:flex;align-items:center;justify-content:center">Загрузка диаграммы…</div></section>`;
+  }
   const d = carbon.distribution || {};
   const role = d.role || 'ru';
   const isEu = role === 'eu';
@@ -829,6 +859,7 @@ document.addEventListener('click', async event => {
 
 let carbonLiveTimer = null;
 let carbonLiveBusy = false;
+let carbonLastStatsAt = 0;
 
 function setLiveText(id, value) {
   const el = document.getElementById(id);
@@ -841,13 +872,16 @@ async function refreshDashboardLive() {
   if (typeof carbon === 'undefined' || !carbon.loaded) return;
   carbonLiveBusy = true;
   try {
+    // /api/stats (manage stats) на медленных VPS занимает 2-3 секунды.
+    // Опрашиваем его реже, а быстрые sysinfo/history/distribution — каждые 5 с.
+    const needStats = Date.now() - carbonLastStatsAt >= 15000;
     const [stats, sys, dist, hist] = await Promise.all([
-      api('/api/stats').catch(() => null),
+      needStats ? api('/api/stats').catch(() => null) : Promise.resolve(null),
       api('/api/sysinfo').catch(() => null),
       api('/api/traffic/distribution').catch(() => null),
       api('/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global').catch(() => null)
     ]);
-    if (Array.isArray(stats)) carbon.clients = stats;
+    if (Array.isArray(stats)) { carbon.clients = stats; carbonLastStatsAt = Date.now(); }
     if (sys && !sys.error) carbon.sys = sys;
     if (dist && !dist.error) carbon.distribution = dist;
     if (hist && !hist.error) carbon.history = hist;
