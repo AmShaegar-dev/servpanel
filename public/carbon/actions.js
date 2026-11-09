@@ -826,6 +826,11 @@ async function carbonAppMetricsToken() {
   await carbonRefresh();
 }
 
+async function carbonRustdeskInstructions() {
+  const text = await api('/api/rustdesk/instructions?format=txt');
+  showCarbonTextModal('Инструкция RustDesk', typeof text === 'string' ? text : JSON.stringify(text, null, 2));
+}
+
 async function carbonRustdeskRefresh() {
   const d = await api('/api/rustdesk/status?refresh=1');
   carbon.rustdesk = d;
@@ -1247,6 +1252,7 @@ document.addEventListener('click', async event => {
     else if (action === 'app-metrics') await carbonAppMetrics();
     else if (action === 'app-metrics-token') await carbonAppMetricsToken();
     else if (action === 'rustdesk-settings') await carbonRustdeskSettings();
+    else if (action === 'rustdesk-instructions') await carbonRustdeskInstructions();
     else if (action === 'rustdesk-refresh') await carbonRustdeskRefresh();
     else if (action === 'rustdesk-ports') { await api('/api/rustdesk/ports', { method: 'POST', body: {} }); await carbonRefresh('Порты RustDesk открыты'); }
     else if (action === 'rustdesk-job') await carbonRustdeskJob(btn.dataset.act || 'update');

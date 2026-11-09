@@ -227,7 +227,10 @@ button{background:none;border:0;cursor:pointer}a{color:inherit;text-decoration:n
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chip{padding:5px 8px;border:1px solid var(--line);border-radius:99px;font:500 9px/1 var(--mono);letter-spacing:.05em;color:var(--text-3);background:var(--surface-2)}
 .chip.on{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 30%,transparent);background:var(--accent-soft)}
-.chips .chip input[type=checkbox]{accent-color:var(--accent);margin-right:5px;vertical-align:-1px}
+.chips .chip input[type=checkbox]{appearance:none;-webkit-appearance:none;width:13px;height:13px;border:1px solid var(--line-3);border-radius:4px;background:var(--surface);margin:0 6px 0 0;position:relative;cursor:pointer;vertical-align:-2px;flex:0 0 auto}
+.chips .chip input[type=checkbox]:checked{background:var(--accent);border-color:var(--accent)}
+.chips .chip input[type=checkbox]:checked::after{content:"";position:absolute;left:3px;top:0;width:5px;height:8px;border:solid var(--accent-ink);border-width:0 2px 2px 0;transform:rotate(45deg)}
+.chips .chip{display:inline-flex;align-items:center;gap:0;padding:7px 10px}
 .file-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;padding:10px 12px;border:1px dashed var(--line-3);border-radius:12px;background:var(--surface-2)}
 .file-row .btn{height:32px}
 .file-row .mono{font-size:10px;color:var(--text-3);min-width:0;overflow:hidden;text-overflow:ellipsis}
