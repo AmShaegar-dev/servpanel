@@ -9879,6 +9879,38 @@ function setTelemtConfigPort(text, port) {
     return lines.join('\n');
 }
 
+function sanitizeTelemtConfig(text) {
+    let section = '';
+    return String(text || '').split(/\r?\n/).map(line => {
+        const t = line.trim();
+        if (/^\[/.test(t)) {
+            section = t.replace(/^\[|\]$/g, '').trim().toLowerCase();
+            return line;
+        }
+        const m = line.match(/^(\s*)([A-Za-z0-9_.-]+)(\s*=\s*)(.*)$/);
+        if (!m) return line;
+        const key = m[2];
+        const secretSection = /^(access\.users|links|server\.links|server\.api)$/.test(section);
+        const secretKey = /(secret|token|password|auth_header|private|key|uuid|pass|hash)/i.test(key);
+        if (secretSection || secretKey) return `${m[1]}${key}${m[3]}"***"`;
+        return line;
+    }).join('\n');
+}
+
+app.get('/api/proxy/config', checkAuth, requireAdmin, (req, res) => {
+    const cfg = proxyUsers.configPath();
+    if (!cfg) return res.status(404).json({ error: 'Конфиг telemt не найден' });
+    const text = readTextSafe(cfg, 256 * 1024);
+    if (!text) return res.status(500).json({ error: 'Не удалось прочитать конфиг' });
+    res.json({
+        file: cfg,
+        port: telemtConfigPort(text),
+        apiPort: telemtConfigPorts(text).api,
+        sni: telemtConfigSni(text),
+        content: sanitizeTelemtConfig(text)
+    });
+});
+
 app.get('/api/proxy/settings', checkAuth, (req, res) => {
     const settings = readProxySettings();
     const cfg = proxyUsers.configPath();
