@@ -5908,13 +5908,25 @@ app.get('/api/warp/test', checkAuth, requireAdmin, (req, res) => {
             if (u.protocol === 'http:' || u.protocol === 'https:') target = u.toString();
         } catch (e) { /* ignore */ }
     }
+    const wantBody = String(req.query.body || '') === '1';
     const socks = 'socks5h://127.0.0.1:' + (warpConfig().socksPort || '40000');
-    const run = args => String(shTry('curl', args, { timeout: 30000 }) || '').trim();
-    const fmt = ['-4', '-sS', '-L', '--max-time', '20', '-o', '/dev/null', '-w', '%{http_code} %{url_effective}'];
-    const direct = run([...fmt, target]);
-    const warp = run(['-x', socks, ...fmt, target]);
+    const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+    const run = args => String(shTry('curl', args, { timeout: 30000 }) || '');
+    const fetchTarget = extra => {
+        const args = ['-4', '-sS', '-L', '--max-time', '20', '-A', ua,
+            '-H', 'Accept-Language: en-US,en;q=0.9', ...extra,
+            '-w', '\n__META__%{http_code} %{url_effective}', target];
+        const raw = run(args);
+        const idx = raw.lastIndexOf('__META__');
+        const body = idx >= 0 ? raw.slice(0, idx) : raw;
+        const meta = idx >= 0 ? raw.slice(idx + 8).trim() : '';
+        return { meta, body };
+    };
+    const blockedRe = /(not available in your country|not available in your region|unavailable in your country|isn't available|is not available|country isn't supported|region isn't supported)/i;
+    const direct = fetchTarget([]);
+    const warp = fetchTarget(['-x', socks]);
     const ipInfo = extra => {
-        const raw = run([...extra, 'https://ipinfo.io/json']);
+        const raw = run(['-4', '-sS', '--max-time', '10', ...extra, 'https://ipinfo.io/json']).trim();
         try {
             const j = JSON.parse(raw);
             return { ip: j.ip || '', country: j.country || '', org: j.org || '' };
@@ -5922,13 +5934,37 @@ app.get('/api/warp/test', checkAuth, requireAdmin, (req, res) => {
             return { raw: raw.slice(0, 200) };
         }
     };
-    res.json({
+    const out = {
         target,
-        direct,
-        warp,
+        direct: direct.meta,
+        warp: warp.meta,
+        directBlocked: blockedRe.test(direct.body),
+        warpBlocked: blockedRe.test(warp.body),
         directIp: ipInfo([]),
         warpIp: ipInfo(['-x', socks])
-    });
+    };
+    if (wantBody) {
+        out.directBody = direct.body.slice(0, 4000);
+        out.warpBody = warp.body.slice(0, 4000);
+    }
+    res.json(out);
+});
+
+app.get('/api/warp/config', checkAuth, requireAdmin, (req, res) => {
+    const file = '/usr/local/etc/xray/config.json';
+    const text = readTextSafe(file);
+    if (!text) return res.status(404).json({ error: 'Конфиг Xray не найден' });
+    let cfg;
+    try { cfg = JSON.parse(text); } catch (e) { return res.status(500).json({ error: 'Конфиг Xray повреждён' }); }
+    const mask = (value, key = '') => {
+        if (Array.isArray(value)) return value.map(v => mask(v, key));
+        if (value && typeof value === 'object') {
+            return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, mask(v, k)]));
+        }
+        if (typeof value === 'string' && /^(uuid|id|password|secret|private|key|token|auth|email|user)$/i.test(key)) return '***';
+        return value;
+    };
+    res.json({ file, config: mask(cfg) });
 });
 
 app.get('/api/warp/domains', checkAuth, (req, res) => {
