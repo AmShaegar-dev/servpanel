@@ -5900,6 +5900,37 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
     });
 });
 
+app.get('/api/warp/test', checkAuth, requireAdmin, (req, res) => {
+    let target = 'https://gemini.google.com/';
+    if (req.query.url) {
+        try {
+            const u = new URL(String(req.query.url));
+            if (u.protocol === 'http:' || u.protocol === 'https:') target = u.toString();
+        } catch (e) { /* ignore */ }
+    }
+    const socks = 'socks5h://127.0.0.1:' + (warpConfig().socksPort || '40000');
+    const run = args => String(shTry('curl', args, { timeout: 30000 }) || '').trim();
+    const fmt = ['-4', '-sS', '-L', '--max-time', '20', '-o', '/dev/null', '-w', '%{http_code} %{url_effective}'];
+    const direct = run([...fmt, target]);
+    const warp = run(['-x', socks, ...fmt, target]);
+    const ipInfo = extra => {
+        const raw = run([...extra, 'https://ipinfo.io/json']);
+        try {
+            const j = JSON.parse(raw);
+            return { ip: j.ip || '', country: j.country || '', org: j.org || '' };
+        } catch (e) {
+            return { raw: raw.slice(0, 200) };
+        }
+    };
+    res.json({
+        target,
+        direct,
+        warp,
+        directIp: ipInfo([]),
+        warpIp: ipInfo(['-x', socks])
+    });
+});
+
 app.get('/api/warp/domains', checkAuth, (req, res) => {
     const domains = warpDomainList();
     res.json({ count: domains.length, domains });
