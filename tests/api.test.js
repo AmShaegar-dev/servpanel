@@ -855,6 +855,13 @@ test('Keenetic: парсинг версии, системы и туннелей'
     assert.equal(t.validTunnelName('AmneziaWG0'), true);
     assert.equal(t.validTunnelName('Wireguard2; reboot'), false);
     assert.equal(t.validTunnelName('GigabitEthernet0'), false);
+
+    assert.equal(t.isIpv4Entry('91.108.4.0/22'), true);
+    assert.equal(t.isIpv4Entry('example.com'), false);
+    assert.equal(t.isIpv6Entry('2a0a:f280::/32'), true);
+    const cleaned = t.cleanDnsEntries([' Example.COM ', 'example.com', '1.2.3.0/24', '']);
+    assert.deepEqual(cleaned, ['example.com', '1.2.3.0/24']);
+    assert.throws(() => t.cleanDnsEntries(['bad domain with spaces']));
 });
 
 test('Git: origin старого аккаунта переключается на новый', () => {

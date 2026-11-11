@@ -125,6 +125,7 @@ function keeneticDetailHtml() {
   const tabs = [
     ['overview', 'Обзор'],
     ['tunnels', `Туннели${tunnels.length ? ' · ' + tunnels.length : ''}`],
+    ['dns', 'Маршруты DNS'],
     ['events', `События${events.length ? ' · ' + events.length : ''}`],
     ['settings', 'Настройки']
   ];
@@ -144,6 +145,40 @@ function keeneticDetailHtml() {
         </div></td>
       </tr>`; }).join('') || '<tr><td colspan="9">Туннели не найдены</td></tr>'}</tbody></table></div>
       <div class="keenetic-table-note">Действия применяются через RCI. Выключение туннеля прервёт связь через него.</div></section>`;
+  } else if (tab === 'dns') {
+    const dns = d.dns && d.dns.routerId === r.id ? d.dns : null;
+    if (!dns || dns.loading) {
+      body = `<section class="card keenetic-dns-loading"><div class="card-top"><div><div class="card-title">Маршруты DNS</div><div class="card-sub">Списки доменных имён и правила маршрутизации</div></div><span class="busy-ring"></span></div><div class="empty-row">Читаю списки с роутера…</div></section>`;
+    } else if (dns.error) {
+      body = `<section class="card"><div class="card-top"><div><div class="card-title">Маршруты DNS</div><div class="card-sub">Списки доменных имён и правила маршрутизации</div></div>${tag('ошибка', 'bad')}</div><div class="empty-row">${escHtml(dns.error)}</div><div class="page-actions" style="margin-top:10px"><button class="btn" data-carbon-action="keenetic-dns-reload">${icon('refresh')}Повторить</button></div></section>`;
+    } else {
+      const groups = dns.groups || [];
+      const routes = dns.routes || [];
+      body = `<section class="card table-card" style="margin-bottom:14px"><div class="card-top"><div><div class="card-title">Списки доменных имён</div><div class="card-sub">Домены, IP и подсети для правил маршрутизации</div></div><div class="page-actions">${tag(String(groups.length), 'muted')}<button class="btn btn-sm" data-carbon-action="keenetic-dns-add-list">${icon('plus')}Добавить список</button></div></div>
+        <div class="table-scroll"><table class="table keenetic-table keenetic-dns-table"><thead><tr><th>Список</th><th>Домены</th><th>IPv4</th><th>IPv6</th><th></th></tr></thead><tbody>${groups.map(g => `<tr>
+          <td class="name">${escHtml(g.description)}<div class="keenetic-sub">${escHtml(g.name)}</div></td>
+          <td class="mono">${g.domains}</td><td class="mono">${g.ip4}</td><td class="mono">${g.ip6}</td>
+          <td><div class="keenetic-row-actions">
+            <button class="row-action" title="Редактировать список" data-carbon-action="keenetic-dns-edit-list" data-name="${escHtml(g.name)}">${icon('edit')}</button>
+            <button class="row-action" title="Удалить список" data-carbon-action="keenetic-dns-delete-list" data-name="${escHtml(g.name)}" data-description="${escHtml(g.description)}">${icon('trash')}</button>
+          </div></td>
+        </tr>`).join('') || '<tr><td colspan="5">Списков пока нет</td></tr>'}</tbody></table></div></section>
+        <section class="card table-card"><div class="card-top"><div><div class="card-title">Правила маршрутизации</div><div class="card-sub">Какой список через какой интерфейс ходит</div></div><div class="page-actions">${tag(String(routes.length), 'muted')}<button class="btn btn-sm" data-carbon-action="keenetic-dns-add-rule">${icon('plus')}Добавить правило</button></div></div>
+        <div class="table-scroll"><table class="table keenetic-table keenetic-dns-table keenetic-dns-rules"><thead><tr><th>Состояние</th><th>Список</th><th>Интерфейс</th><th>Авто</th><th>Эксклюзив</th><th></th></tr></thead><tbody>${routes.map(rt => {
+          const g = groups.find(x => x.name === rt.group);
+          return `<tr>
+            <td><span class="status ${rt.enabled ? '' : 'idle'}"><span class="dot"></span>${rt.enabled ? 'включено' : 'выключено'}</span></td>
+            <td>${escHtml(g ? g.description : rt.group)}</td>
+            <td class="mono">${escHtml(rt.interface || '—')}</td>
+            <td>${rt.auto ? 'да' : 'нет'}</td><td>${rt.reject ? 'да' : 'нет'}</td>
+            <td><div class="keenetic-row-actions">
+              <button class="row-action" title="${rt.enabled ? 'Выключить правило' : 'Включить правило'}" data-carbon-action="keenetic-dns-toggle-rule" data-index="${escHtml(rt.index)}" data-enabled="${rt.enabled ? '1' : '0'}">${icon(rt.enabled ? 'stop' : 'play')}</button>
+              <button class="row-action" title="Удалить правило" data-carbon-action="keenetic-dns-delete-rule" data-index="${escHtml(rt.index)}" data-group="${escHtml(g ? g.description : rt.group)}" data-interface="${escHtml(rt.interface)}">${icon('trash')}</button>
+            </div></td>
+          </tr>`;
+        }).join('') || '<tr><td colspan="6">Правил пока нет</td></tr>'}</tbody></table></div>
+        <div class="keenetic-table-note">Изменения применяются на роутере сразу и сохраняются в конфигурацию.</div></section>`;
+    }
   } else if (tab === 'events') {
     body = keeneticEventsCard(events, r.id);
   } else if (tab === 'settings') {
@@ -264,6 +299,7 @@ function startKeeneticLive() {
 function keeneticOpen(id) {
   keeneticState().selected = String(id || '');
   keeneticState().tab = 'overview';
+  keeneticState().dns = null;
   keeneticState().animate = true;
   render();
   window.scrollTo(0, 0);
@@ -276,9 +312,14 @@ function keeneticBack() {
 }
 
 function keeneticDetailTab(tab) {
-  if (!['overview', 'tunnels', 'events', 'settings'].includes(tab)) return;
-  keeneticState().tab = tab;
-  keeneticState().animate = true;
+  if (!['overview', 'tunnels', 'dns', 'events', 'settings'].includes(tab)) return;
+  const d = keeneticState();
+  d.tab = tab;
+  d.animate = true;
+  if (tab === 'dns' && !(d.dns && d.dns.routerId === d.selected) && !d.dnsBusy) {
+    keeneticDnsLoad(d.selected);
+    return;
+  }
   render();
 }
 
@@ -439,6 +480,137 @@ function keeneticReadFileBase64(file) {
     fr.readAsDataURL(file);
   });
 }
+
+function keeneticDnsLoad(id) {
+  const d = keeneticState();
+  if (!id || d.dnsBusy) return;
+  d.dnsBusy = true;
+  d.dns = { routerId: id, loading: true, groups: [], routes: [], interfaces: [] };
+  render();
+  api('/api/keenetic/routers/' + encodeURIComponent(id) + '/dns')
+    .then(res => { d.dns = { ...res, routerId: id }; })
+    .catch(e => { d.dns = { routerId: id, groups: [], routes: [], interfaces: [], error: e.message || 'Ошибка загрузки' }; })
+    .finally(() => {
+      d.dnsBusy = false;
+      if (d.tab === 'dns' && d.selected === id) render();
+    });
+}
+
+function keeneticDnsApply(res) {
+  const d = keeneticState();
+  d.dns = { ...res, routerId: d.selected };
+  d.animate = true;
+  render();
+}
+
+function keeneticDnsListForm(name) {
+  const d = keeneticState();
+  const dns = d.dns;
+  if (!d.selected || !dns || dns.loading) return;
+  const g = name ? (dns.groups || []).find(x => x.name === name) : null;
+  showCarbonForm({
+    title: g ? 'Список доменных имён' : 'Новый список DNS',
+    sub: g
+      ? 'Одна запись на строку: домен, IP-адрес или подсеть.'
+      : 'Имя списка назначится автоматически (domain-listN). Одна запись на строку.',
+    fields: [
+      { name: 'description', label: 'Название', value: g ? g.description : '' },
+      { name: 'entries', label: 'Домены и адреса', type: 'textarea', rows: 12, value: g ? g.entries.join('\n') : '', placeholder: 'example.com\n1.2.3.0/24' }
+    ],
+    submitText: 'Сохранить',
+    onSubmit: async v => {
+      const res = await api('/api/keenetic/routers/' + encodeURIComponent(d.selected) + '/dns/lists', {
+        method: 'POST',
+        body: {
+          name: g ? g.name : '',
+          description: v.description,
+          entries: String(v.entries || '').split(/\r?\n/)
+        }
+      });
+      keeneticDnsApply(res);
+      showToast('Список сохранён');
+    }
+  });
+}
+
+async function keeneticDnsDeleteList(name, description) {
+  const d = keeneticState();
+  if (!d.selected) return;
+  if (!confirm('Удалить список «' + description + '»? Сначала удалите правила, которые его используют.')) return;
+  try {
+    const res = await api('/api/keenetic/routers/' + encodeURIComponent(d.selected) + '/dns/lists/' + encodeURIComponent(name), { method: 'DELETE' });
+    keeneticDnsApply(res);
+    showToast('Список удалён');
+  } catch (e) {
+    showToast(e.message || 'Не удалось удалить список');
+  }
+}
+
+function keeneticDnsRuleForm(index) {
+  const d = keeneticState();
+  const dns = d.dns;
+  if (!d.selected || !dns || dns.loading) return;
+  if (!(dns.groups || []).length) { showToast('Сначала создайте список доменных имён'); return; }
+  if (!(dns.interfaces || []).length) { showToast('Не удалось получить интерфейсы роутера'); return; }
+  const rt = index ? (dns.routes || []).find(x => x.index === index) : null;
+  const groupOptions = dns.groups.map(g => ({ value: g.name, label: g.description + ' (' + g.name + ')' }));
+  const interfaceOptions = dns.interfaces.map(n => ({ value: n, label: n }));
+  showCarbonForm({
+    title: rt ? 'Правило маршрутизации' : 'Новое правило DNS',
+    sub: 'Выберите список и интерфейс, через который должны ходить эти домены.',
+    fields: [
+      { name: 'group', label: 'Список', type: 'select', value: rt ? rt.group : groupOptions[0].value, options: groupOptions },
+      { name: 'interface', label: 'Интерфейс', type: 'select', value: rt ? rt.interface : interfaceOptions[0].value, options: interfaceOptions },
+      { name: 'auto', label: 'Добавлять автоматически', type: 'checkbox', value: rt ? rt.auto : true },
+      { name: 'reject', label: 'Эксклюзивный маршрут', type: 'checkbox', value: rt ? rt.reject : false },
+      { name: 'enabled', label: 'Правило включено', type: 'checkbox', value: rt ? rt.enabled : true }
+    ],
+    submitText: 'Сохранить',
+    onSubmit: async v => {
+      const res = await api('/api/keenetic/routers/' + encodeURIComponent(d.selected) + '/dns/routes', {
+        method: 'POST',
+        body: {
+          index: rt ? rt.index : '',
+          group: v.group,
+          interface: v.interface,
+          auto: !!v.auto,
+          reject: !!v.reject,
+          enabled: !!v.enabled
+        }
+      });
+      keeneticDnsApply(res);
+      showToast('Правило сохранено');
+    }
+  });
+}
+
+async function keeneticDnsToggleRule(index, enabled) {
+  const d = keeneticState();
+  if (!d.selected) return;
+  try {
+    const res = await api('/api/keenetic/routers/' + encodeURIComponent(d.selected) + '/dns/routes/' + encodeURIComponent(index) + '/toggle', {
+      method: 'POST', body: { enabled }
+    });
+    keeneticDnsApply(res);
+    showToast(enabled ? 'Правило включено' : 'Правило выключено');
+  } catch (e) {
+    showToast(e.message || 'Не удалось изменить правило');
+  }
+}
+
+async function keeneticDnsDeleteRule(index, group, iface) {
+  const d = keeneticState();
+  if (!d.selected) return;
+  if (!confirm('Удалить правило «' + group + ' → ' + iface + '»?')) return;
+  try {
+    const res = await api('/api/keenetic/routers/' + encodeURIComponent(d.selected) + '/dns/routes/' + encodeURIComponent(index), { method: 'DELETE' });
+    keeneticDnsApply(res);
+    showToast('Правило удалено');
+  } catch (e) {
+    showToast(e.message || 'Не удалось удалить правило');
+  }
+}
+
 
 function keeneticImport() {
   const d = keeneticState();

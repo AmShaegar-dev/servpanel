@@ -1716,6 +1716,13 @@ document.addEventListener('click', async event => {
     else if (action === 'keenetic-tunnel-toggle') await keeneticTunnelToggle(btn.dataset.id, btn.dataset.name, btn.dataset.up === '1', btn);
     else if (action === 'keenetic-tunnel-restart') await keeneticTunnelRestart(btn.dataset.id, btn.dataset.name);
     else if (action === 'keenetic-import') keeneticImport();
+    else if (action === 'keenetic-dns-reload') { keeneticState().dns = null; keeneticDnsLoad(keeneticState().selected); }
+    else if (action === 'keenetic-dns-add-list') keeneticDnsListForm('');
+    else if (action === 'keenetic-dns-edit-list') keeneticDnsListForm(btn.dataset.name);
+    else if (action === 'keenetic-dns-delete-list') await keeneticDnsDeleteList(btn.dataset.name, btn.dataset.description);
+    else if (action === 'keenetic-dns-add-rule') keeneticDnsRuleForm('');
+    else if (action === 'keenetic-dns-toggle-rule') await keeneticDnsToggleRule(btn.dataset.index, btn.dataset.enabled !== '1');
+    else if (action === 'keenetic-dns-delete-rule') await keeneticDnsDeleteRule(btn.dataset.index, btn.dataset.group, btn.dataset.interface);
     else if (action === 'keenetic-refresh') await keeneticLoad('Обновлено');
     else if (action === 'obf-generate') await carbonObfGenerate();
     else if (action === 'obf-import') await carbonObfImport();
