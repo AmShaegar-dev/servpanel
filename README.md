@@ -1,4 +1,6 @@
-# 🌐 Servpanel 3.0 — Веб-панель управления AmneziaWG & Server Suite
+# 🌐 Servpanel 3.2.59 — Веб-панель управления AmneziaWG & Server Suite
+
+> ⚠️ **Статус: бета.** Панель активно развивается: Carbon-интерфейс, живой дашборд, каскад, WARP/Xray, MTProto и часть серверных сценариев ещё могут меняться. Перед обновлением рабочего сервера сделайте бэкап и проверьте новую версию на тестовом стенде.
 
 Современная, отказоустойчивая и безопасная веб-панель для управления VPN-сервером **AmneziaWG (версий 3.1 / 2.0 / 1.5)**, каскадом **RU → EU**, правилами фаервола (UFW, GeoIP RU-Drop, DNS-перехват), блокировщиком рекламы **AdGuard Home**, прокси **MTProto (MEKO / MTProxyL)**, доменами и HTTPS-сертификатами **Let's Encrypt**, а также системными службами Linux.
 
@@ -6,27 +8,55 @@
 
 ---
 
-## 🆕 Что нового в 3.0
+## 🆕 Что нового в 3.2
 
-* **Carbon-интерфейс (`/carbon/`) — 3.2.59.** Полностью независимый SPA на реальном API: обновление панели и откат, SSL/домены, пользователи и 2FA, бэкапы и Telegram, ключи/QR/переименование клиентов, пользователи прокси, UFW/AWG, AdGuard/WARP/DNS, метрики приложения, RustDesk, Fail2Ban, диагностика, каскад и MTProxyL. Старая панель больше не нужна для этих действий и остаётся только запасным вариантом.
-* **Каскад RU → EU из панели.** Мастер по SSH ставит AmneziaWG на второй стороне, создаёт `ru_host`, поднимает `awg1`, настраивает `ipset`/`ip rule`/таблицу 100 и маршруты по CASCADE.md. Есть чек-лист шагов, понятные ошибки, автопродолжение после перезагрузки RU/EU и автоисправление модуля.
-* **Статус каскада на EU.** Выходной сервер показывает пир `ru_host`: подключён ли вход RU, endpoint, рукопожатие и трафик — без `awg1.conf`, которого на выходе нет.
-* **Обфускация из Архитектора для 2.0 и 3.1.** Генерация H1–H4, S1–S4, Jc/Jmin/Jmax, CPS и (для 3.x) `HeaderProtectionKey`, `ContentPaddingAddition` и таймеров. Для 2.0 учтены ограничения `amneziawg-tools`: H < 2 147 483 647, без тега `<t>`, чётная hex-длина I2–I5; для 3.x тег `<t>` сохраняется.
-* **Endpoint клиента: IP или домен.** При создании клиента можно выбрать адрес сервера в конфиге. Домен берётся из `/root/awg_domain.txt` или из привязки «Домен и SSL», иначе вводится вручную.
-* **Меню и интерфейс.** Убраны дублирующие карточки, меню перегруппировано: Обзор / Подключение / Инфраструктура / Безопасность / Система.
+* **Живой дашборд Carbon.** KPI, скорость, CPU, RAM, uptime, график трафика, распределение и таблица клиентов обновляются без перезагрузки страницы. В шапке видна отметка «обновлено ЧЧ:ММ:СС».
+* **Часовой пояс панели.** Выбирается в настройках дашборда или кнопкой с названием пояса рядом с графиком. Время на графиках и в отметке обновления считается в выбранном поясе и сохраняется на сервере.
+* **Сортировка клиентов AWG по всем колонкам.** Имя, IP, состояние, трафик, рукопожатие, каскад/RU и связь. Колонка «Каскад / RU» сортирует по доле RU-трафика, а не по абсолютному объёму.
+* **Живой лог обновления.** При запуске обновления открывается окно с прогрессом, текущим шагом, статусом, журналом и ошибкой. Во время перезапуска показывается состояние «перезапуск».
+* **Лимиты клиентов.** Скорость и трафик на клиента, `.client_limits.json`, блокировка через iptables и автосоздание `/root/awg-limit.sh`.
+* **RustDesk.** Полный публичный ключ с копированием, понятные подписи сервер/клиент и пояснение статуса Online.
+* **WARP и Xray.** Диагностика `/api/warp/test` и `/api/warp/config`, живой watchdog и ручной перезапуск `telemt`.
+* **AdGuard Home.** Генератор готового конфига, очистка префиксов `www.`/`www2.`, статистика и журнал запросов.
+* **Каскад RU → EU.** Мастер по SSH, статус пира `ru_host`, автопродолжение после перезагрузки и маршруты через `ipset`/`ip rule`.
+* **Carbon-интерфейс (`/carbon/`).** Полностью независимый SPA на реальном API. Старая панель остаётся запасным вариантом по `/`.
 
 ---
 
 ## 🖼 Скриншоты
 
-> Скриншоты удалены из репозитория, чтобы не публиковать реальные IP, имена и логины. Демо-стенд можно запустить локально.
+> **Бета-интерфейс.** Скриншоты сняты с тестового стенда на демо-данных: имена клиентов, IP и логин заменены. Публичный адрес `203.0.113.10` — документационный, реальные данные не публикуются.
+
+### Дашборд: живой график, KPI и часовой пояс
+
+<img src="docs/screenshots/dashboard.png" alt="Дашборд Servpanel Carbon: живой график, KPI и часовой пояс" width="900">
+
+KPI, CPU/RAM, uptime, график и распределение трафика обновляются автоматически. Кнопка с названием пояса рядом с графиком открывает выбор часового пояса, справа вверху — кнопка **«Настройки»**.
+
+### Клиенты: сортировка по всем колонкам
+
+<img src="docs/screenshots/clients.png" alt="Клиенты Servpanel Carbon: сортировка по доле RU-трафика" width="900">
+
+Клик по заголовку сортирует таблицу, повторный клик меняет направление. Колонка **«Каскад / RU»** сортирует по доле RU-трафика.
+
+### Часовой пояс панели
+
+<img src="docs/screenshots/timezone.png" alt="Настройки дашборда Servpanel Carbon: часовой пояс графиков" width="900">
+
+Часовой пояс сохраняется на сервере и применяется к подписям времени на графиках и к отметке «обновлено».
+
+### Обновление: прогресс, шаг и живой лог
+
+<img src="docs/screenshots/update-progress.png" alt="Обновление Servpanel: прогресс, шаг и живой лог" width="900">
+
+Окно обновления показывает прогресс-бар, текущий шаг, статус, журнал и ошибку. Во время перезапуска панели отображается состояние **«перезапуск»**.
 
 > Новый Carbon-интерфейс доступен по `/carbon/`, старая панель — по `/`. Подробности в [CARBON.md](CARBON.md).
 
 ---
 
 ## 📋 Оглавление
-0. [Что нового в 3.0](#-что-нового-в-30)
+0. [Что нового в 3.2](#-что-нового-в-32)
 * [Скриншоты](#-скриншоты)
 1. [Системные требования](#-системные-требования)
 2. [Быстрый старт (Установка одной командой)](#-быстрый-старт-установка-одной-командой)
@@ -42,6 +72,7 @@
 12. [Обновление и резервное копирование](#-обновление-и-резервное-копирование)
 13. [Ручное обновление из терминала](#ручное-обновление-из-терминала-ssh)
 14. [Полная инструкция по каскаду RU → EU](КАСКАД.md)
+15. [Используемые проекты](#-используемые-проекты)
 
 ---
 
@@ -990,7 +1021,7 @@ npm install
 npm test
 ```
 
-`npm test` проверяет синтаксис `server.js`, `public/app.js`, `lib/updater.js`, `lib/update-worker.js` и запускает 37 интеграционных тестов (встроенный `node:test`, без внешних зависимостей):
+`npm test` проверяет синтаксис `server.js`, `public/app.js`, `public/carbon/app.js`, `public/carbon/carbon-api.js`, `public/carbon/actions.js`, `lib/updater.js`, `lib/update-worker.js` и запускает **108 интеграционных тестов** (встроенный `node:test`, без внешних зависимостей):
 
 * доступ без авторизации, security-заголовки;
 * вход, блокировка после 5 неудач, журнал fail2ban;
@@ -1006,7 +1037,46 @@ npm test
 
 ---
 
-## 📄 Лицензия и Благодарности
-* В основе серверного ядра используется модифицированный стек установщика [bivlked/amneziawg-installer](https://github.com/bivlked/amneziawg-installer) и протокол [AmneziaWG](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module).
-* Лицензия: **MIT**.
+## 🧩 Используемые проекты
+
+Servpanel — это панель-обвязка. Ниже перечислены проекты, которые используются в панели, установщиках и интеграциях. Все права принадлежат их авторам.
+
+| Компонент | Проект | Роль в Servpanel |
+| --- | --- | --- |
+| VPN-ядро | [AmneziaWG](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module) | DKMS-модуль ядра и `amneziawg-tools`, клиенты AWG 1.5 / 2.0 / 3.1 |
+| VPN-основа | [WireGuard](https://www.wireguard.com/) | База протокола и `wg`-утилиты |
+| Установщик AWG | [bivlked/amneziawg-installer](https://github.com/bivlked/amneziawg-installer) | Модифицированный стек установки и `manage_amneziawg.sh` |
+| Панель | [Node.js](https://nodejs.org/) | Серверная среда |
+| Панель | [Express](https://expressjs.com/) и [express-session](https://github.com/expressjs/session) | HTTP API, сессии |
+| Панель | [node-qrcode](https://github.com/soldair/node-qrcode) | QR-коды для `vpn://` и прокси |
+| Процессы | [PM2](https://pm2.keymetrics.io/) | Автозапуск и перезапуск панели |
+| Веб и TLS | [Nginx](https://nginx.org/) | Обратный прокси, сайты, WEB-режим |
+| Веб и TLS | [Certbot](https://certbot.eff.org/) и [Let's Encrypt](https://letsencrypt.org/) | Бесплатные HTTPS-сертификаты и автопродление |
+| Сеть | [UFW](https://launchpad.net/ufw) | Правила файервола |
+| Сеть | [iptables](https://www.netfilter.org/projects/iptables/), [nftables](https://www.netfilter.org/projects/nftables/), [ipset](https://ipset.netfilter.org/) | Маршрутизация, GeoIP, лимиты и каскад |
+| Сеть | [iproute2](https://www.kernel.org/pub/linux/utils/net/iproute2/) | `ip rule`, таблицы маршрутизации |
+| Защита | [Fail2Ban](https://github.com/fail2ban/fail2ban) | Бан IP после неудачных входов |
+| DNS и реклама | [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) | DNS-фильтр, DoH/DoT, блокировка рекламы |
+| WARP | [Cloudflare WARP](https://developers.cloudflare.com/warp-client/) | Выход для AI-сервисов |
+| AI-маршрутизация | [Xray-core](https://github.com/XTLS/Xray-core) и [Xray-install](https://github.com/XTLS/Xray-install) | TLS/SNI-маршрутизация и SOCKS5 |
+| MTProto | [Telemt](https://github.com/telemt/telemt) | Движок MTProto-прокси |
+| MTProto | [MTProxyL](https://github.com/Liafanx/MTProxyL) | Менеджер MTProto-прокси, API и лимиты |
+| MTProto | [MEKO / MTPROTO_FIX_By_MEKO](https://github.com/Mekotofeuka/MTPROTO_FIX_By_MEKO) | Установка Telemt / MTProto.zig, фиксы и оптимизация |
+| MTProto | MTProto.zig | Альтернативный движок, ставится через MEKO |
+| Обход DPI | [Zapret2](https://github.com/bol-van/zapret) | Фикс `v4` и обходы для MTProto |
+| Удалённый доступ | [RustDesk](https://github.com/rustdesk/rustdesk) и [rustdesk-server](https://github.com/rustdesk/rustdesk-server) | Свой ID/relay-сервер и клиенты |
+| GeoIP-списки | [Antifilter / ipdeny](https://www.ipdeny.com/), OpenCCK | Российские сети для RU-DROP и каскада |
+| Обфускация | [AmneziaWG Architect](https://architect.vai-rice.space/amneziawg/) | Пресеты и импорт параметров обфускации |
+| Мобильное приложение | [Servpanel Android](https://github.com/AmShaegar-dev/servpanel-android) | APK и API-клиент |
+| Контейнеры (опция) | [Docker](https://www.docker.com/) | Режим MTProxyL в контейнере |
+
+> Часть компонентов устанавливается только по кнопке и не работает, пока вы её не нажмёте. Панель не изменяет сторонние проекты, а вызывает их штатные установщики, API и службы.
+
+---
+
+## 📄 Лицензия и благодарности
+
+* Код панели: **MIT**.
+* Серверное ядро использует модифицированный стек установщика [bivlked/amneziawg-installer](https://github.com/bivlked/amneziawg-installer) и протокол [AmneziaWG](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module).
+* Спасибо авторам AmneziaWG, WireGuard, AdGuard Home, Xray-core, RustDesk, Telemt, MTProxyL, MEKO, Zapret2 и других проектов из списка выше.
 

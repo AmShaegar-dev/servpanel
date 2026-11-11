@@ -1,5 +1,7 @@
 # Ручное обновление Servpanel из терминала
 
+> ⚠️ **Статус панели: бета.** Ручное обновление — самый безопасный способ проверить новую версию. Перед обновлением сделайте бэкап и держите доступ по SSH.
+
 Этот способ подходит для любой версии панели. Используйте его, если:
 
 - панель ещё на старой версии;
@@ -20,20 +22,20 @@ ssh root@IP_СЕРВЕРА
 
 ```bash
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.7.0/servpanel-2.7.0.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v2.7.0/servpanel-2.7.0.tar.gz.sha256
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.59/servpanel-3.2.59.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.59/servpanel-3.2.59.tar.gz.sha256
 ```
 
 ## 3. Проверьте архив
 
 ```bash
-sha256sum -c servpanel-2.7.0.tar.gz.sha256
+sha256sum -c servpanel-3.2.59.tar.gz.sha256
 ```
 
 В выводе должно быть:
 
 ```text
-servpanel-2.7.0.tar.gz: OK
+servpanel-3.2.59.tar.gz: OK
 ```
 
 Если проверка не прошла, не запускайте установку. Скачайте архив заново.
@@ -41,8 +43,8 @@ servpanel-2.7.0.tar.gz: OK
 ## 4. Распакуйте и запустите обновление
 
 ```bash
-tar -xzf servpanel-2.7.0.tar.gz
-bash /root/servpanel-2.7.0/upgrade.sh
+tar -xzf servpanel-3.2.59.tar.gz
+bash /root/servpanel-3.2.59/upgrade.sh
 ```
 
 Скрипт сам сделает бэкап, проверит новую версию на копии данных, заменит
@@ -58,7 +60,7 @@ node -p "require('/root/servpanel/package.json').version"
 Должно вывести:
 
 ```text
-2.7.0
+3.2.59
 ```
 
 Проверьте, что в git нет локальных изменений кода:
@@ -89,11 +91,11 @@ dnf install -y curl
 Скачайте архив на свой компьютер и загрузите его по SCP:
 
 ```bash
-scp servpanel-2.7.0.tar.gz root@IP_СЕРВЕРА:/root/
+scp servpanel-3.2.59.tar.gz root@IP_СЕРВЕРА:/root/
 ssh root@IP_СЕРВЕРА
 cd /root
-tar -xzf servpanel-2.7.0.tar.gz
-bash /root/servpanel-2.7.0/upgrade.sh
+tar -xzf servpanel-3.2.59.tar.gz
+bash /root/servpanel-3.2.59/upgrade.sh
 ```
 
 ## Важно
