@@ -87,7 +87,7 @@ function keeneticOverviewHtml() {
     <div class="mini-grid">
       ${mini('Роутеры', `${online} / ${routers.length}`, 'в сети')}
       ${mini('Туннели', `${up} / ${tunnels.length}`, down ? `${down} не в сети` : 'все в сети')}
-      ${mini('Проверка', 'авто', 'каждые 30 секунд')}
+      ${mini('Проверка', 'авто', 'каждую минуту')}
       ${mini('События', String((d.events || []).length), 'последние')}
     </div>
     ${routers.length ? `<div class="keenetic-grid">${routers.map(keeneticRouterCard).join('')}</div>` : `<section class="card keenetic-empty">
