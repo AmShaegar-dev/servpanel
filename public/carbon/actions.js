@@ -1553,6 +1553,7 @@ document.addEventListener('click', async event => {
     else if (action === 'notify-save') await carbonNotifySave();
     else if (action === 'notify-test') { await api('/api/notify/test', { method: 'POST' }); showToast('Тестовое сообщение отправлено'); }
     else if (action === 'client-key') await carbonClientKey(name);
+    else if (action === 'client-sort') carbonClientSort(btn.dataset.key || 'name');
     else if (action === 'client-url') await carbonClientUrl(name);
     else if (action === 'client-rename') await carbonClientRename(name);
     else if (action === 'client-bulk-rename') await carbonClientBulkRename();
