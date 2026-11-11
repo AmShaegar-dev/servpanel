@@ -8,7 +8,7 @@
 
 ## 🆕 Что нового в 3.0
 
-* **Carbon-интерфейс (`/carbon/`) — 3.2.52.** Полностью независимый SPA на реальном API: обновление панели и откат, SSL/домены, пользователи и 2FA, бэкапы и Telegram, ключи/QR/переименование клиентов, пользователи прокси, UFW/AWG, AdGuard/WARP/DNS, метрики приложения, RustDesk, Fail2Ban, диагностика, каскад и MTProxyL. Старая панель больше не нужна для этих действий и остаётся только запасным вариантом.
+* **Carbon-интерфейс (`/carbon/`) — 3.2.53.** Полностью независимый SPA на реальном API: обновление панели и откат, SSL/домены, пользователи и 2FA, бэкапы и Telegram, ключи/QR/переименование клиентов, пользователи прокси, UFW/AWG, AdGuard/WARP/DNS, метрики приложения, RustDesk, Fail2Ban, диагностика, каскад и MTProxyL. Старая панель больше не нужна для этих действий и остаётся только запасным вариантом.
 * **Каскад RU → EU из панели.** Мастер по SSH ставит AmneziaWG на второй стороне, создаёт `ru_host`, поднимает `awg1`, настраивает `ipset`/`ip rule`/таблицу 100 и маршруты по CASCADE.md. Есть чек-лист шагов, понятные ошибки, автопродолжение после перезагрузки RU/EU и автоисправление модуля.
 * **Статус каскада на EU.** Выходной сервер показывает пир `ru_host`: подключён ли вход RU, endpoint, рукопожатие и трафик — без `awg1.conf`, которого на выходе нет.
 * **Обфускация из Архитектора для 2.0 и 3.1.** Генерация H1–H4, S1–S4, Jc/Jmin/Jmax, CPS и (для 3.x) `HeaderProtectionKey`, `ContentPaddingAddition` и таймеров. Для 2.0 учтены ограничения `amneziawg-tools`: H < 2 147 483 647, без тега `<t>`, чётная hex-длина I2–I5; для 3.x тег `<t>` сохраняется.
@@ -926,15 +926,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.52/servpanel-3.2.52.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.52/servpanel-3.2.52.tar.gz.sha256
-sha256sum -c servpanel-3.2.52.tar.gz.sha256
-tar -xzf servpanel-3.2.52.tar.gz
-bash /root/servpanel-3.2.52/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.53/servpanel-3.2.53.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.53/servpanel-3.2.53.tar.gz.sha256
+sha256sum -c servpanel-3.2.53.tar.gz.sha256
+tar -xzf servpanel-3.2.53.tar.gz
+bash /root/servpanel-3.2.53/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.2.52`. Если `curl` не установлен:
+Должно вывести `3.2.53`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:

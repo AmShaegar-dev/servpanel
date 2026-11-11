@@ -376,7 +376,7 @@ function ensureTabData(tab) {
 }
 
 function clientStatus(c) {
-  return c.status_code === 'active' || c.status_code === 'recent';
+  return c.status_code === 'active';
 }
 
 const CLIENT_STATE_RU = {

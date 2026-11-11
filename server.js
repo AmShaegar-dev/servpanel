@@ -1211,7 +1211,7 @@ function metricsSnapshot() {
     const clients = DEMO_MODE
         ? demoClients.map(c => ({ status_code: c.status_code, rx: c.rx, tx: c.tx }))
         : lastClientsSnapshot;
-    const online = clients.filter(c => c && (c.status_code === 'active' || c.status_code === 'recent')).length;
+    const online = clients.filter(c => c && c.status_code === 'active').length;
     const g = historyData.global && historyData.global.short && historyData.global.short.length
         ? historyData.global.short[historyData.global.short.length - 1]
         : null;
