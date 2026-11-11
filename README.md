@@ -1056,6 +1056,9 @@ Servpanel — это панель-обвязка. Ниже перечислен�
 | Сеть | [iptables](https://www.netfilter.org/projects/iptables/), [nftables](https://www.netfilter.org/projects/nftables/), [ipset](https://ipset.netfilter.org/) | Маршрутизация, GeoIP, лимиты и каскад |
 | Сеть | [iproute2](https://www.kernel.org/pub/linux/utils/net/iproute2/) | `ip rule`, таблицы маршрутизации |
 | Защита | [Fail2Ban](https://github.com/fail2ban/fail2ban) | Бан IP после неудачных входов |
+| Уведомления | [Telegram Bot API](https://core.telegram.org/bots/api) | Уведомления панели и управление прокси-ботом |
+| Службы | [systemd](https://systemd.io/) | Службы, таймеры и автозапуск |
+| Бэкапы | [OpenSSL](https://www.openssl.org/) | Шифрование архивов AES-256-CBC |
 | DNS и реклама | [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome) | DNS-фильтр, DoH/DoT, блокировка рекламы |
 | WARP | [Cloudflare WARP](https://developers.cloudflare.com/warp-client/) | Выход для AI-сервисов |
 | AI-маршрутизация | [Xray-core](https://github.com/XTLS/Xray-core) и [Xray-install](https://github.com/XTLS/Xray-install) | TLS/SNI-маршрутизация и SOCKS5 |
@@ -1069,6 +1072,7 @@ Servpanel — это панель-обвязка. Ниже перечислен�
 | Обфускация | [AmneziaWG Architect](https://architect.vai-rice.space/amneziawg/) | Пресеты и импорт параметров обфускации |
 | Мобильное приложение | [Servpanel Android](https://github.com/AmShaegar-dev/servpanel-android) | APK и API-клиент |
 | Контейнеры (опция) | [Docker](https://www.docker.com/) | Режим MTProxyL в контейнере |
+| ОС | Debian / Ubuntu | Целевые системы установки |
 
 > Часть компонентов устанавливается только по кнопке и не работает, пока вы её не нажмёте. Панель не изменяет сторонние проекты, а вызывает их штатные установщики, API и службы.
 
