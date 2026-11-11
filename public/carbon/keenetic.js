@@ -40,7 +40,7 @@ function keeneticRouterCard(r) {
   const st = r.status || {};
   const online = !!st.online;
   const tunnels = Array.isArray(st.tunnels) ? st.tunnels : [];
-  const up = tunnels.filter(t => t.up).length;
+  const up = tunnels.filter(t => t.up && t.online !== false).length;
   const cpu = Math.max(0, Math.min(100, Number(st.cpu) || 0));
   const ram = Math.max(0, Math.min(100, Number(st.ram) || 0));
   return `<article class="keenetic-card ${online ? 'is-online' : 'is-offline'}" data-carbon-action="keenetic-open" data-id="${escHtml(r.id)}">
@@ -81,7 +81,7 @@ function keeneticOverviewHtml() {
   const routers = d.routers || [];
   const online = routers.filter(r => r.status && r.status.online).length;
   const tunnels = routers.flatMap(r => (r.status && r.status.tunnels) || []);
-  const up = tunnels.filter(t => t.up).length;
+  const up = tunnels.filter(t => t.up && t.online !== false).length;
   const down = tunnels.filter(t => !t.up).length;
   return `<div class="page-head"><div><div class="page-title">Keenetic</div><div class="page-sub">Парк роутеров, туннели и связь. До ${Math.max(6, routers.length)} роутеров.</div></div><div class="page-actions"><button class="btn" data-carbon-action="keenetic-refresh">${icon('refresh')}Обновить</button><button class="btn btn-primary" data-carbon-action="keenetic-add">${icon('plus')}Добавить роутер</button></div></div>
     <div class="mini-grid">
@@ -106,8 +106,8 @@ function keeneticFlow(r) {
     <div class="keenetic-flow-line"></div>
     <div class="keenetic-flow-node router"><div class="keenetic-flow-ico">${icon('cascade')}</div><b>${escHtml(r.name)}</b><span>${escHtml(r.host)}</span></div>
     <div class="keenetic-flow-line split"></div>
-    <div class="keenetic-flow-tunnels">${tunnels.length ? tunnels.map(t => `<div class="keenetic-flow-tunnel ${t.up ? 'up' : 'down'}">
-      <span class="dot"></span><b>${escHtml(t.name)}</b><span>${escHtml(t.state || (t.up ? 'up' : 'down'))}</span>
+    <div class="keenetic-flow-tunnels">${tunnels.length ? tunnels.map(t => `<div class="keenetic-flow-tunnel ${t.up && t.online !== false ? 'up' : 'down'}">
+      <span class="dot"></span><b>${escHtml(t.name)}</b><span>${escHtml(t.up ? (t.online === false ? 'нет рукопожатия' : 'up') : (t.state || 'down'))}</span>
     </div>`).join('') : '<div class="keenetic-flow-tunnel down"><span class="dot"></span><b>Туннели не найдены</b></div>'}</div>
     <div class="keenetic-flow-line"></div>
     <div class="keenetic-flow-node"><div class="keenetic-flow-ico">${icon('globe')}</div><b>Интернет</b></div>
