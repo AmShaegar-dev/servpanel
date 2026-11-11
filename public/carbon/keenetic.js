@@ -31,16 +31,17 @@ function keeneticStatusTag(r) {
 }
 
 function keeneticTunnelState(t) {
-  if (!t || !t.up || t.link === 'down' || t.empty) return { cls: 'down', label: 'упал', code: 'DOWN' };
-  if (t.online === false) return { cls: 'standby', label: 'неактивен', code: 'STANDBY' };
-  return { cls: 'active', label: 'в сети', code: 'UP' };
+  if (!t || !t.up) return { cls: 'disabled', label: 'отключен', code: 'OFF' };
+  if (t.link === 'down' || t.empty) return { cls: 'down', label: 'упал', code: 'DOWN' };
+  if (t.routed === false) return { cls: 'standby', label: 'резервный', code: 'STANDBY' };
+  return { cls: 'active', label: 'основной', code: 'PRIMARY' };
 }
 
 function keeneticRouterCard(r) {
   const st = r.status || {};
   const online = !!st.online;
   const tunnels = Array.isArray(st.tunnels) ? st.tunnels : [];
-  const up = tunnels.filter(t => t.up && t.online !== false).length;
+  const up = tunnels.filter(t => keeneticTunnelState(t).cls === 'active').length;
   const cpu = Math.max(0, Math.min(100, Number(st.cpu) || 0));
   const ram = Math.max(0, Math.min(100, Number(st.ram) || 0));
   return `<article class="keenetic-card ${online ? 'is-online' : 'is-offline'}" data-carbon-action="keenetic-open" data-id="${escHtml(r.id)}">
@@ -55,7 +56,7 @@ function keeneticRouterCard(r) {
       <div class="keenetic-bar"><span>RAM</span><div><i style="width:${ram}%"></i></div><b>${ram}%</b></div>
     </div>
     <div class="keenetic-card-foot">
-      <span>${tunnels.length ? up + ' / ' + tunnels.length + ' туннелей' : 'туннели не найдены'}</span>
+      <span>${tunnels.length ? up + ' осн. / ' + tunnels.length : 'туннели не найдены'}</span>
       <span>${escHtml(st.uptime || '—')}</span>
     </div>
     <div class="keenetic-card-actions">
@@ -81,12 +82,12 @@ function keeneticOverviewHtml() {
   const routers = d.routers || [];
   const online = routers.filter(r => r.status && r.status.online).length;
   const tunnels = routers.flatMap(r => (r.status && r.status.tunnels) || []);
-  const up = tunnels.filter(t => t.up && t.online !== false).length;
-  const down = tunnels.filter(t => !t.up).length;
+  const up = tunnels.filter(t => keeneticTunnelState(t).cls === 'active').length;
+  const down = tunnels.length - up;
   return `<div class="page-head"><div><div class="page-title">Keenetic</div><div class="page-sub">Парк роутеров, туннели и связь. До ${Math.max(6, routers.length)} роутеров.</div></div><div class="page-actions"><button class="btn" data-carbon-action="keenetic-refresh">${icon('refresh')}Обновить</button><button class="btn btn-primary" data-carbon-action="keenetic-add">${icon('plus')}Добавить роутер</button></div></div>
     <div class="mini-grid">
       ${mini('Роутеры', `${online} / ${routers.length}`, 'в сети')}
-      ${mini('Туннели', `${up} / ${tunnels.length}`, down ? `${down} не в сети` : 'все в сети')}
+      ${mini('Основные', `${up} / ${tunnels.length}`, down ? `${down} резервных / упавших` : 'все основные')}
       ${mini('Проверка', 'авто', 'каждую минуту')}
       ${mini('События', String((d.events || []).length), 'последние')}
     </div>
@@ -108,26 +109,137 @@ function keeneticFlow(r) {
   const branches = tunnels.length ? tunnels.map(t => {
     const ts = keeneticTunnelState(t);
     const label = t.description || t.name;
-    return `<div class="keenetic-flow-branch ${ts.cls}">
-      <div class="keenetic-flow-line"></div>
-      <div class="keenetic-flow-tunnel ${ts.cls}" title="${escHtml(label + ' · ' + t.name + (t.peer ? ' · ' + t.peer : ''))}">
+    return `<div class="keenetic-flow-branch ${ts.cls}" data-flow-branch="${escHtml(t.name)}">
+      <div class="keenetic-flow-tunnel ${ts.cls}" data-flow-chip="${escHtml(t.name)}" title="${escHtml(label + ' · ' + t.name + (t.peer ? ' · ' + t.peer : ''))}">
         <span class="dot"></span>
         <div class="keenetic-flow-tunnel-text"><b>${escHtml(label)}</b><span>${escHtml(t.name + ' · ' + ts.code)}</span></div>
       </div>
-      <div class="keenetic-flow-line"></div>
     </div>`;
-  }).join('') : `<div class="keenetic-flow-branch down">
-      <div class="keenetic-flow-line"></div>
-      <div class="keenetic-flow-tunnel down"><span class="dot"></span><div class="keenetic-flow-tunnel-text"><b>Туннели не найдены</b><span>—</span></div></div>
-      <div class="keenetic-flow-line"></div>
+  }).join('') : `<div class="keenetic-flow-branch down" data-flow-branch="">
+      <div class="keenetic-flow-tunnel down" data-flow-chip=""><span class="dot"></span><div class="keenetic-flow-tunnel-text"><b>Туннели не найдены</b><span>—</span></div></div>
     </div>`;
-  return `<div class="keenetic-flow state-${flowState}">
-    <div class="keenetic-flow-node"><div class="keenetic-flow-ico">${icon('monitor')}</div><b>Локальная сеть</b></div>
-    <div class="keenetic-flow-line main"></div>
-    <div class="keenetic-flow-node router"><div class="keenetic-flow-ico">${icon('cascade')}</div><b>${escHtml(r.name)}</b><span>${escHtml(r.host)}</span></div>
+  return `<div class="keenetic-flow state-${flowState}" data-flow-state="${flowState}">
+    <svg class="keenetic-flow-svg" aria-hidden="true"></svg>
+    <div class="keenetic-flow-node" data-flow-node="local"><div class="keenetic-flow-ico">${icon('monitor')}</div><b>Локальная сеть</b></div>
+    <div class="keenetic-flow-spacer"></div>
+    <div class="keenetic-flow-node router" data-flow-node="router"><div class="keenetic-flow-ico">${icon('cascade')}</div><b>${escHtml(r.name)}</b><span>${escHtml(r.host)}</span></div>
+    <div class="keenetic-flow-spacer"></div>
     <div class="keenetic-flow-branches">${branches}</div>
-    <div class="keenetic-flow-node"><div class="keenetic-flow-ico">${icon('globe')}</div><b>WAN</b></div>
+    <div class="keenetic-flow-spacer"></div>
+    <div class="keenetic-flow-node" data-flow-node="wan"><div class="keenetic-flow-ico">${icon('globe')}</div><b>WAN</b></div>
   </div>`;
+}
+
+function keeneticFlowDraw() {
+  const flow = document.querySelector('.keenetic-flow');
+  if (!flow) return;
+  const svg = flow.querySelector('.keenetic-flow-svg');
+  const local = flow.querySelector('[data-flow-node="local"]');
+  const router = flow.querySelector('[data-flow-node="router"]');
+  const wan = flow.querySelector('[data-flow-node="wan"]');
+  if (!svg || !local || !router || !wan) return;
+  const box = flow.getBoundingClientRect();
+  const W = Math.max(1, Math.round(box.width));
+  const H = Math.max(1, Math.round(box.height));
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  const cs = getComputedStyle(document.documentElement);
+  const accent = cs.getPropertyValue('--accent').trim() || '#ff5a4e';
+  const blue = '#5b8cff';
+  const bad = cs.getPropertyValue('--bad').trim() || '#ff4d4f';
+  const surface = cs.getPropertyValue('--surface-1').trim() || '#15171a';
+  const ns = 'http://www.w3.org/2000/svg';
+  const rel = el => {
+    const r = el.getBoundingClientRect();
+    return {
+      l: r.left - box.left, t: r.top - box.top,
+      r: r.right - box.left, b: r.bottom - box.top,
+      cx: (r.left + r.right) / 2 - box.left,
+      cy: (r.top + r.bottom) / 2 - box.top
+    };
+  };
+  const vertical = getComputedStyle(flow).display === 'flex';
+  let seq = 0;
+
+  const curve = (a, b) => vertical
+    ? `M ${a.cx} ${a.b} C ${a.cx} ${a.b + (b.t - a.b) * .5}, ${b.cx} ${b.t - (b.t - a.b) * .5}, ${b.cx} ${b.t}`
+    : `M ${a.r} ${a.cy} C ${a.r + (b.l - a.r) * .5} ${a.cy}, ${b.l - (b.l - a.r) * .5} ${b.cy}, ${b.l} ${b.cy}`;
+
+  const draw = (a, b, state) => {
+    const d = curve(a, b);
+    const id = 'kflow-' + (++seq);
+    const color = state === 'active' ? accent : state === 'standby' ? blue : '#6b7078';
+    if (state === 'down' || state === 'disabled') {
+      const under = document.createElementNS(ns, 'path');
+      under.setAttribute('d', d);
+      under.setAttribute('fill', 'none');
+      under.setAttribute('stroke', '#000');
+      under.setAttribute('stroke-width', '4');
+      under.setAttribute('stroke-linecap', 'round');
+      svg.appendChild(under);
+    }
+    const p = document.createElementNS(ns, 'path');
+    p.setAttribute('id', id);
+    p.setAttribute('d', d);
+    p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', color);
+    p.setAttribute('stroke-width', state === 'active' || state === 'standby' ? '1.8' : '1.5');
+    p.setAttribute('stroke-linecap', 'round');
+    if (state === 'active' || state === 'standby') {
+      p.setAttribute('style', `filter:drop-shadow(0 0 2.5px ${color})`);
+    }
+    svg.appendChild(p);
+    if (state === 'down' || state === 'disabled') {
+      let pt = { x: 0, y: 0 };
+      try { pt = p.getPointAtLength(p.getTotalLength() / 2); } catch (e) { /* ignore */ }
+      const g = document.createElementNS(ns, 'g');
+      g.setAttribute('transform', `translate(${pt.x} ${pt.y})`);
+      g.innerHTML = `<circle r="5.5" style="fill:${surface};stroke:${bad};stroke-width:1.5"/><path d="M-3.4 -3.4 L3.4 3.4" style="stroke:${bad};stroke-width:1.5" fill="none" stroke-linecap="round"/>`;
+      svg.appendChild(g);
+      return;
+    }
+    const ball = document.createElementNS(ns, 'circle');
+    ball.setAttribute('r', '3.4');
+    ball.setAttribute('fill', color);
+    ball.setAttribute('style', `filter:drop-shadow(0 0 4px ${color})`);
+    const anim = document.createElementNS(ns, 'animateMotion');
+    anim.setAttribute('dur', (state === 'standby' ? 3.4 : 2.7) + 's');
+    anim.setAttribute('repeatCount', 'indefinite');
+    anim.setAttribute('begin', '-' + ((seq % 4) * 0.55).toFixed(2) + 's');
+    const mpath = document.createElementNS(ns, 'mpath');
+    mpath.setAttribute('href', '#' + id);
+    anim.appendChild(mpath);
+    ball.appendChild(anim);
+    svg.appendChild(ball);
+  };
+
+  draw(rel(local), rel(router), flow.dataset.flowState || 'down');
+  for (const br of [...flow.querySelectorAll('.keenetic-flow-branch')]) {
+    const chip = br.querySelector('.keenetic-flow-tunnel');
+    if (!chip) continue;
+    const state = br.classList.contains('active') ? 'active'
+      : br.classList.contains('standby') ? 'standby'
+      : br.classList.contains('disabled') ? 'disabled' : 'down';
+    const chipRect = rel(chip);
+    draw(rel(router), chipRect, state);
+    draw(chipRect, rel(wan), state);
+  }
+}
+
+function scheduleKeeneticFlow() {
+  window.setTimeout(keeneticFlowDraw, 30);
+  window.setTimeout(keeneticFlowDraw, 260);
+  window.setTimeout(keeneticFlowDraw, 620);
+}
+
+if (!window.__keeneticFlowResize) {
+  window.__keeneticFlowResize = true;
+  window.addEventListener('resize', () => {
+    if (document.querySelector('.keenetic-flow')) scheduleKeeneticFlow();
+  });
 }
 
 function keeneticDetailHtml() {
@@ -258,6 +370,7 @@ function renderKeenetic() {
   const animate = !!d.animate;
   d.animate = false;
   const html = d.selected ? keeneticDetailHtml() : keeneticOverviewHtml();
+  if (d.selected) scheduleKeeneticFlow();
   return animate ? `<div class="keenetic-view">${html}</div>` : html;
 }
 
@@ -517,6 +630,11 @@ function keeneticDnsLoad(id) {
 function keeneticDnsApply(res) {
   const d = keeneticState();
   d.dns = { ...res, routerId: d.selected };
+  const used = new Set((res.routes || []).filter(r => r.enabled).map(r => r.interface));
+  const router = (d.routers || []).find(x => x.id === d.selected);
+  if (router && router.status && Array.isArray(router.status.tunnels)) {
+    router.status.tunnels.forEach(t => { t.routed = used.has(t.name); });
+  }
   d.animate = true;
   render();
 }
