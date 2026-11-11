@@ -6696,7 +6696,7 @@ app.get('/api/clients', checkAuth, (req, res) => {
                 isolation_mode: isolation[c.ip] === true ? 'isolated' : isolation[c.ip] === false ? 'shared' : 'default'
             };
         });
-        res.json(attachClientSplit(withLimits));
+        res.json(attachClientSpeeds(attachClientSplit(withLimits)));
     } catch (e) { res.status(500).json({ error: 'Ошибка чтения клиентов' }); }
 });
 
@@ -7150,6 +7150,45 @@ function totalClientBytes(c) {
     return (Number(c && c.rx) || 0) + (Number(c && c.tx) || 0);
 }
 
+// Текущая скорость клиента по дельтам счётчиков между запросами.
+// Один общий кэш для /api/stats и /api/clients, чтобы частые запросы
+// не сбрасывали окно измерения.
+const clientSpeedState = new Map();
+function attachClientSpeeds(clients) {
+    const list = Array.isArray(clients) ? clients : [];
+    const now = Date.now();
+    return list.map(c => {
+        const name = String(c.name || '');
+        const rx = Number(c.rx) || 0;
+        const tx = Number(c.tx) || 0;
+        const prev = clientSpeedState.get(name);
+        let rxSpeed = 0;
+        let txSpeed = 0;
+        if (prev && now - prev.at >= 1000 && rx >= prev.rx && tx >= prev.tx) {
+            const dt = (now - prev.at) / 1000;
+            rxSpeed = (rx - prev.rx) / dt;
+            txSpeed = (tx - prev.tx) / dt;
+            clientSpeedState.set(name, { rx, tx, at: now, rx_speed: rxSpeed, tx_speed: txSpeed });
+        } else if (prev) {
+            rxSpeed = Number(prev.rx_speed) || 0;
+            txSpeed = Number(prev.tx_speed) || 0;
+            if (rx < prev.rx || tx < prev.tx) {
+                clientSpeedState.set(name, { rx, tx, at: now, rx_speed: 0, tx_speed: 0 });
+                rxSpeed = 0;
+                txSpeed = 0;
+            }
+        } else {
+            clientSpeedState.set(name, { rx, tx, at: now, rx_speed: 0, tx_speed: 0 });
+        }
+        return {
+            ...c,
+            rx_speed: Math.round(rxSpeed),
+            tx_speed: Math.round(txSpeed),
+            total_speed: Math.round(rxSpeed + txSpeed)
+        };
+    });
+}
+
 function findClientByName(name) {
     const n = String(name || '');
     const c = (Array.isArray(lastClientsSnapshot) ? lastClientsSnapshot : []).find(x => x && x.name === n);
@@ -7403,7 +7442,7 @@ app.post('/api/limit', checkAuth, (req, res) => {
 app.get('/api/stats', checkAuth, (req, res) => {
     if (DEMO_MODE) {
         const now = Math.floor(Date.now() / 1000);
-        return res.json(demoClients.map(c => ({ ...c, latest_handshake: c.last_handshake || now - 60 })));
+        return res.json(attachClientSpeeds(demoClients.map(c => ({ ...c, latest_handshake: c.last_handshake || now - 60 }))));
     }
     execFile('sudo', ['bash', MANAGE, 'stats', '--json'], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => {
         try {
@@ -7426,7 +7465,7 @@ app.get('/api/stats', checkAuth, (req, res) => {
                 ...c,
                 isolation_mode: isolation[c.ip] === true ? 'isolated' : isolation[c.ip] === false ? 'shared' : 'default'
             }));
-            res.json(withIsolation);
+            res.json(attachClientSpeeds(withIsolation));
         } catch (e) { res.status(500).json({ error: 'Ошибка парсинга' }); }
     });
 });
@@ -13073,6 +13112,7 @@ module.exports._internals = {
     metricsRuntimeInfo, apkInfo, resolveApkFile, APP_SETTINGS_FILE, APP_APK_DIR,
     readPanelSettings, writePanelSettings, historyFormatLabel, isValidTimeZone, PANEL_SETTINGS_FILE,
     readClientIsolation, writeClientIsolation, clientIsolationMode, CLIENT_ISOLATION_FILE,
+    attachClientSpeeds,
     normalizeCascadeConf, firstIpv4, firstTunnelIp, buildRoutingScript, cascadeRole, localTunnelIps, isPublicAddress,
     cascadeEndpointPlan, cascadeRoleFrom, cascadeHealth
 };

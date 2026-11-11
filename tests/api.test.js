@@ -769,6 +769,17 @@ test('Изоляция клиентов AWG: режимы хранятся по 
     }
 });
 
+test('Скорость клиентов: поля скорости добавляются в ответ', () => {
+    const first = internals.attachClientSpeeds([{ name: 'speed-test', rx: 1000, tx: 500 }]);
+    assert.equal(first.length, 1);
+    assert.equal(first[0].rx_speed, 0);
+    assert.equal(first[0].tx_speed, 0);
+    assert.equal(first[0].total_speed, 0);
+    const second = internals.attachClientSpeeds([{ name: 'speed-test', rx: 1000, tx: 500 }]);
+    assert.equal(typeof second[0].rx_speed, 'number');
+    assert.equal(second[0].total_speed, second[0].rx_speed + second[0].tx_speed);
+});
+
 test('Git: origin старого аккаунта переключается на новый', () => {
     const { spawnSync } = require('child_process');
     if (spawnSync('git', ['--version'], { timeout: 5000 }).status !== 0) return;

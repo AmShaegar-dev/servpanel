@@ -56,6 +56,10 @@ function fmtBytes(n) {
   return v + ' B';
 }
 
+function fmtSpeed(n) {
+  return fmtBytes(Math.round(Number(n) || 0)) + '/s';
+}
+
 function panelTimezone() {
   return (carbon.panelSettings && carbon.panelSettings.timezone) || 'UTC';
 }
@@ -469,6 +473,8 @@ function clientSortValue(c, key) {
     }
     case 'traffic':
       return clientTrafficValue(c);
+    case 'speed':
+      return Number(c.total_speed) || 0;
     case 'handshake':
       return Number(c.last_handshake || c.latest_handshake) || 0;
     case 'ru': {
@@ -488,11 +494,10 @@ function clientSortValue(c, key) {
 function carbonClientSort(key) {
   const s = carbon.clientSort || (carbon.clientSort = { key: 'name', desc: false });
   if (s.key === key) s.desc = !s.desc;
-  else { s.key = key; s.desc = key === 'ru' || key === 'isolation'; }
+  else { s.key = key; s.desc = key === 'ru' || key === 'isolation' || key === 'speed'; }
   const tbody = document.querySelector('#clientsTable tbody');
   if (tbody) tbody.innerHTML = realClientRows();
-  const search = document.getElementById('clientSearch');
-  if (search && search.value && typeof filterClientRows === 'function') filterClientRows(search.value);
+  if (typeof filterClientRows === 'function') filterClientRows();
   document.querySelectorAll('#clientsTable [data-carbon-sort]').forEach(th => {
     const active = th.dataset.key === s.key;
     th.classList.toggle('active', active);
@@ -502,7 +507,7 @@ function carbonClientSort(key) {
 }
 
 function realClientRows() {
-  if (!carbon.clients.length) return `<tr class="empty-row"><td colspan="9">Клиентов пока нет. Создайте первого.</td></tr>`;
+  if (!carbon.clients.length) return `<tr class="empty-row"><td colspan="10">Клиентов пока нет. Создайте первого.</td></tr>`;
   const d = carbon.distribution || {};
   const isEu = (d.role || 'ru') === 'eu';
   const pctText = v => v >= 10 ? Math.round(v) + '%' : v >= 0.1 ? v.toFixed(1) + '%' : '0%';
@@ -547,12 +552,19 @@ function realClientRows() {
       : isoMode === 'shared'
         ? '<span class="status shared"><span class="dot"></span>общий</span>'
         : '<span class="status muted"><span class="dot"></span>по умолчанию</span>';
-    return `<tr data-name="${escHtml(c.name)}" data-ip="${escHtml(c.ip)}">
+    const rxSpeed = Number(c.rx_speed) || 0;
+    const txSpeed = Number(c.tx_speed) || 0;
+    const totalSpeed = Number(c.total_speed) || (rxSpeed + txSpeed);
+    const speedCell = totalSpeed > 0
+      ? `<span class="client-speed"><b>↓ ${fmtSpeed(rxSpeed)}</b><span>↑ ${fmtSpeed(txSpeed)}</span></span>`
+      : '<span class="muted">0 B/s</span>';
+    return `<tr data-name="${escHtml(c.name)}" data-ip="${escHtml(c.ip)}" data-speed="${totalSpeed}">
       <td class="name">${escHtml(c.name)}</td>
       <td class="mono">${escHtml(c.ip || '—')}</td>
       <td>${escHtml(clientStateText(c, online))}</td>
       <td>${isoCell}</td>
       <td class="mono">${fmtBytes(traffic)}${limitNote}</td>
+      <td class="mono">${speedCell}</td>
       <td class="mono" title="${escHtml(lastHandshakeTitle(handshake))}">${escHtml(lastHandshakeText(handshake))}</td>
       <td>${splitCell}</td>
       <td><span class="status ${online ? '' : 'idle'}"><span class="dot"></span>${online ? 'в сети' : 'не в сети'}</span></td>
@@ -573,8 +585,8 @@ function clientSortHead(key, label, title = 'Сортировать') {
 }
 
 function realClientsTable() {
-  return `<div class="table-tools"><div class="table-search">${icon('search')}<input id="clientSearch" type="search" name="client-search" placeholder="Имя или IP" aria-label="Фильтр клиентов" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"></div><button class="tag" data-toast="Клиентов: ${carbon.clients.length}">Все клиенты ${icon('arrow', 'ico')}</button></div>
-    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr>${clientSortHead('name', 'Клиент')}${clientSortHead('ip', 'IP')}${clientSortHead('state', 'Состояние')}${clientSortHead('isolation', 'Изоляция')}${clientSortHead('traffic', 'Трафик')}${clientSortHead('handshake', 'Последнее рукопожатие')}${clientSortHead('ru', 'Каскад / RU', 'Сортировать по доле RU')}${clientSortHead('connection', 'Связь')}<th style="width:190px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
+  return `<div class="table-tools"><div class="table-search">${icon('search')}<input id="clientSearch" type="search" name="client-search" placeholder="Имя или IP" aria-label="Фильтр клиентов" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"></div><div class="speed-filter" title="Показывать клиентов со скоростью не ниже">${icon('pulse')}<input id="clientSpeedFilter" type="number" min="0" step="1" placeholder="от, КБ/с" aria-label="Минимальная скорость, КБ/с" autocomplete="off"></div><button class="tag" data-toast="Клиентов: ${carbon.clients.length}">Все клиенты ${icon('arrow', 'ico')}</button></div>
+    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr>${clientSortHead('name', 'Клиент')}${clientSortHead('ip', 'IP')}${clientSortHead('state', 'Состояние')}${clientSortHead('isolation', 'Изоляция')}${clientSortHead('traffic', 'Трафик')}${clientSortHead('speed', 'Скорость')}${clientSortHead('handshake', 'Последнее рукопожатие')}${clientSortHead('ru', 'Каскад / RU', 'Сортировать по доле RU')}${clientSortHead('connection', 'Связь')}<th style="width:190px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
 }
 
 function smoothTraffic(values, range) {
@@ -1214,6 +1226,7 @@ function updateDashboardClients() {
   setLiveText('liveOnline', String(online));
   const tbody = document.querySelector('#view #clientsTable tbody');
   if (tbody) tbody.innerHTML = realClientRows();
+  if (typeof filterClientRows === 'function') filterClientRows();
 }
 
 function updateDashboardSystem() {
@@ -1265,7 +1278,7 @@ async function refreshDashboardFast() {
 
 async function refreshDashboardStats() {
   if (document.hidden || carbonStatsBusy) return;
-  if (!document.getElementById('liveTx')) return;
+  if (!document.getElementById('liveTx') && !document.getElementById('clientsTable')) return;
   if (typeof carbon === 'undefined' || !carbon.loaded) return;
   carbonStatsBusy = true;
   try {
