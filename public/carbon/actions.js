@@ -376,14 +376,36 @@ async function carbonClientUrl(name) {
 }
 
 async function carbonClientRename(name) {
+  let lim = {};
+  try { lim = await api('/api/clients/' + encodeURIComponent(name) + '/limits'); } catch (e) { lim = {}; }
+  const used = Number(lim.used_bytes) || 0;
+  const quota = Number(lim.quota_bytes) || 0;
+  const gbValue = n => n ? String(Math.round((n / (1024 ** 3)) * 100) / 100) : '0';
   showCarbonForm({
-    title: 'Переименовать клиента',
-    fields: [{ name: 'newName', label: 'Новое имя', value: name }],
-    submitText: 'Переименовать',
+    title: 'Редактировать клиента',
+    sub: `Использовано: ${fmtBytes(used)}${quota ? ' из ' + fmtBytes(quota) : ' · лимит не задан'}${lim.blocked ? ' · лимит исчерпан' : ''}`,
+    fields: [
+      { name: 'newName', label: 'Имя клиента', value: name },
+      { name: 'rate', label: 'Скорость, Мбит/с (0 — без лимита)', type: 'number', value: Number(lim.rate) || 0, min: 0, step: 1 },
+      { name: 'quota', label: 'Лимит трафика, ГБ (0 — без лимита)', type: 'number', value: gbValue(quota), min: 0, step: 0.1 },
+      { name: 'reset', label: 'Сбросить использованный трафик', type: 'checkbox', value: false }
+    ],
+    submitText: 'Сохранить',
     onSubmit: async v => {
       if (!/^[A-Za-z0-9_-]{1,63}$/.test(v.newName)) throw new Error('Разрешены буквы, цифры, _ и -, до 63 символов');
-      await api('/api/clients/' + encodeURIComponent(name) + '/rename', { method: 'POST', body: { newName: v.newName } });
-      await carbonRefresh('Клиент переименован');
+      if (v.newName !== name) {
+        await api('/api/clients/' + encodeURIComponent(name) + '/rename', { method: 'POST', body: { newName: v.newName } });
+      }
+      const quotaBytes = v.quota === '' ? 0 : Math.round(Number(v.quota) * (1024 ** 3));
+      const d = await api('/api/clients/' + encodeURIComponent(v.newName) + '/limits', {
+        method: 'POST',
+        body: {
+          rate: Number(v.rate) || 0,
+          quota_bytes: quotaBytes,
+          reset: !!v.reset
+        }
+      });
+      await carbonRefresh(d.warning || 'Клиент обновлён');
     }
   });
 }

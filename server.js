@@ -926,6 +926,7 @@ function isApiRequest(req) {
 // дальше приоритет у файла .app_settings.json (как у .panel_port).
 let lastClientsSnapshot = [];
 const TRAFFIC_SPLIT_FILE = path.join(DATA_DIR, '.traffic_split.json');
+const CLIENT_LIMITS_FILE = path.join(DATA_DIR, '.client_limits.json');
 let lastTrafficSplit = (() => {
     try {
         const j = JSON.parse(fs.readFileSync(TRAFFIC_SPLIT_FILE, 'utf8'));
@@ -6614,7 +6615,19 @@ app.get('/api/clients', checkAuth, (req, res) => {
                 has_vpnuri: fs.existsSync(path.join(AWG_DIR, l.name + '.vpnuri'))
             };
         });
-        res.json(attachClientSplit(merged));
+        const limits = readClientLimits();
+        const withLimits = merged.map(c => {
+            const l = limits[c.ip] || {};
+            const quota = Number(l.quota) || 0;
+            return {
+                ...c,
+                rate_limit_mbps: Number(l.rate) || 0,
+                quota_bytes: quota,
+                quota_used_bytes: quota ? Math.max(0, totalClientBytes(c) - (Number(l.baseline) || 0)) : 0,
+                quota_blocked: !!l.blocked
+            };
+        });
+        res.json(attachClientSplit(withLimits));
     } catch (e) { res.status(500).json({ error: 'Ошибка чтения клиентов' }); }
 });
 
@@ -6908,6 +6921,17 @@ app.post('/api/download-bulk', checkAuth, (req, res) => {
 app.delete('/api/delete/:name', checkAuth, (req, res) => {
     const name = String(req.params.name);
     if (!NAME_RE.test(name)) return res.status(400).send('Invalid name');
+    try {
+        const c = findClientByName(name);
+        if (c && c.ip) {
+            const limits = readClientLimits();
+            if (limits[c.ip]) {
+                setQuotaBlock(c.ip, false);
+                delete limits[c.ip];
+                writeClientLimits(limits);
+            }
+        }
+    } catch (e) { /* ignore */ }
     execFile('sudo', ['bash', MANAGE, 'remove', name, '--yes', '--json'], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => {
         try {
             const response = JSON.parse(String(stdout || ''));
@@ -6922,6 +6946,181 @@ app.delete('/api/delete/:name', checkAuth, (req, res) => {
             res.json({ success: true });
         }
     });
+});
+
+function readClientLimits() {
+    try {
+        const j = JSON.parse(fs.readFileSync(CLIENT_LIMITS_FILE, 'utf8').replace(/^\uFEFF/, ''));
+        return j && typeof j === 'object' && !Array.isArray(j) ? j : {};
+    } catch (e) { return {}; }
+}
+
+function writeClientLimits(limits) {
+    try { writeJson(CLIENT_LIMITS_FILE, limits || {}, 0o600); } catch (e) { /* ignore */ }
+}
+
+function totalClientBytes(c) {
+    return (Number(c && c.rx) || 0) + (Number(c && c.tx) || 0);
+}
+
+function findClientByName(name) {
+    const n = String(name || '');
+    const c = (Array.isArray(lastClientsSnapshot) ? lastClientsSnapshot : []).find(x => x && x.name === n);
+    if (c && c.ip) return c;
+    let item = null;
+    try {
+        const list = JSON.parse(sh('sudo', ['bash', MANAGE, 'list', '--json'], { maxBuffer: 16 * 1024 * 1024 }));
+        item = (Array.isArray(list) ? list : []).find(x => x && x.name === n) || null;
+    } catch (e) { item = null; }
+    if (!item) return null;
+    try {
+        const s = sh('sudo', ['bash', MANAGE, 'stats', '--json'], { maxBuffer: 16 * 1024 * 1024 });
+        const i = s.indexOf('[');
+        if (i !== -1) {
+            const arr = JSON.parse(s.substring(i));
+            const st = (Array.isArray(arr) ? arr : []).find(x => x && x.name === n);
+            if (st) return { ...item, ...st, ip: item.ip || st.ip || '' };
+        }
+    } catch (e) { /* ignore */ }
+    return item;
+}
+
+function applyClientRate(ip, rate) {
+    return new Promise((resolve, reject) => {
+        execFile('sudo', ['bash', '/root/awg-limit.sh', String(ip), String(rate)], {
+            maxBuffer: 8 * 1024 * 1024,
+            timeout: 30000
+        }, (error, stdout, stderr) => {
+            if (error) return reject(new Error(String(stderr || stdout || error.message || 'Ошибка TC').trim().slice(0, 200)));
+            resolve(String(stdout || '').trim());
+        });
+    });
+}
+
+function iptRun(args) {
+    try { sh('iptables', args, { timeout: 10000 }); return true; }
+    catch (e) {
+        try { sh('sudo', ['iptables', ...args], { timeout: 10000 }); return true; }
+        catch (e2) { return false; }
+    }
+}
+
+function setQuotaBlock(ip, block) {
+    const specs = [['-s', ip], ['-d', ip]];
+    let ok = true;
+    for (const spec of specs) {
+        const rule = ['-w', '5', ...spec, '-m', 'comment', '--comment', 'servpanel-quota', '-j', 'DROP'];
+        if (block) {
+            if (!iptRun(['-w', '5', '-C', 'FORWARD', ...rule.slice(2)])) {
+                if (!iptRun(['-w', '5', '-I', 'FORWARD', ...rule.slice(2)])) ok = false;
+            }
+        } else {
+            for (let i = 0; i < 10; i++) {
+                if (!iptRun(['-w', '5', '-D', 'FORWARD', ...rule.slice(2)])) break;
+            }
+        }
+    }
+    return ok;
+}
+
+let limitsRestored = false;
+let quotaEnforcing = false;
+
+async function enforceClientQuotas() {
+    if (DEMO_MODE || TEST_MODE || quotaEnforcing) return;
+    quotaEnforcing = true;
+    try {
+        const limits = readClientLimits();
+        const byIp = {};
+        for (const c of (Array.isArray(lastClientsSnapshot) ? lastClientsSnapshot : [])) {
+            if (c && c.ip) byIp[c.ip] = c;
+        }
+        let changed = false;
+        if (!limitsRestored) {
+            limitsRestored = true;
+            for (const [ip, l] of Object.entries(limits)) {
+                if (l && Number(l.rate) > 0) {
+                    try { await applyClientRate(ip, Number(l.rate)); } catch (e) { /* ignore */ }
+                }
+            }
+        }
+        for (const [ip, l] of Object.entries(limits)) {
+            if (!l || typeof l !== 'object') continue;
+            const quota = Number(l.quota) || 0;
+            const c = byIp[ip];
+            if (!quota) {
+                if (l.blocked && setQuotaBlock(ip, false)) { l.blocked = false; changed = true; }
+                continue;
+            }
+            if (!c) continue;
+            const used = Math.max(0, totalClientBytes(c) - (Number(l.baseline) || 0));
+            const over = used >= quota;
+            if (over !== !!l.blocked && setQuotaBlock(ip, over)) {
+                l.blocked = over;
+                changed = true;
+            }
+        }
+        if (changed) writeClientLimits(limits);
+    } catch (e) { /* ignore */ } finally {
+        quotaEnforcing = false;
+    }
+}
+
+if (!TEST_MODE) {
+    setTimeout(enforceClientQuotas, 15000);
+    setInterval(enforceClientQuotas, 60000);
+}
+
+app.get('/api/clients/:name/limits', checkAuth, (req, res) => {
+    const c = findClientByName(String(req.params.name || ''));
+    if (!c || !c.ip) return res.status(404).json({ error: 'Клиент не найден' });
+    const l = readClientLimits()[c.ip] || {};
+    const total = totalClientBytes(c);
+    const baseline = Number(l.baseline) || 0;
+    res.json({
+        name: c.name,
+        ip: c.ip,
+        rate: Number(l.rate) || 0,
+        quota_bytes: Number(l.quota) || 0,
+        baseline,
+        used_bytes: Math.max(0, total - baseline),
+        total_bytes: total,
+        blocked: !!l.blocked
+    });
+});
+
+app.post('/api/clients/:name/limits', checkAuth, requireAdmin, async (req, res) => {
+    const c = findClientByName(String(req.params.name || ''));
+    if (!c || !c.ip) return res.status(404).json({ error: 'Клиент не найден' });
+    const body = req.body || {};
+    const rate = Math.max(0, Math.min(100000, Math.round(Number(body.rate) || 0)));
+    const quota = Math.max(0, Math.round(Number(body.quota_bytes) || 0));
+    const reset = !!body.reset;
+    const ip = c.ip;
+    const limits = readClientLimits();
+    const prev = limits[ip] || {};
+    const total = totalClientBytes(c);
+    const next = {
+        rate,
+        quota,
+        baseline: Number(prev.baseline) || 0,
+        blocked: !!prev.blocked
+    };
+    if (!quota) next.baseline = 0;
+    else if (reset || !Number(prev.quota)) next.baseline = total;
+    limits[ip] = next;
+    writeClientLimits(limits);
+    let warning = '';
+    try { await applyClientRate(ip, rate); }
+    catch (e) { if (rate > 0) warning = 'Скорость: ' + e.message; }
+    const used = Math.max(0, total - next.baseline);
+    const over = quota > 0 && used >= quota;
+    const blockOk = setQuotaBlock(ip, over);
+    if (over && !blockOk) warning = (warning ? warning + ' ' : '') + 'Не удалось применить блокировку по трафику.';
+    next.blocked = over && blockOk;
+    writeClientLimits(limits);
+    auditLog(req, `Клиент ${c.name}: скорость ${rate} Мбит/с, лимит трафика ${quota ? Math.round(quota / (1024 ** 3)) + ' ГБ' : 'нет'}`);
+    res.json({ success: true, name: c.name, ip, rate, quota_bytes: quota, baseline: next.baseline, used_bytes: used, blocked: next.blocked, warning });
 });
 
 app.post('/api/limit', checkAuth, (req, res) => {

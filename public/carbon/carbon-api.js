@@ -423,6 +423,15 @@ function realClientRows() {
     const online = clientStatus(c);
     const traffic = clientTrafficValue(c);
     const handshake = Number(c.last_handshake || c.latest_handshake) || 0;
+    const rateLimit = Number(c.rate_limit_mbps) || 0;
+    const quota = Number(c.quota_bytes) || 0;
+    const quotaUsed = Number(c.quota_used_bytes) || 0;
+    const limitBits = [];
+    if (rateLimit) limitBits.push(rateLimit + ' Мбит/с');
+    if (quota) limitBits.push(fmtBytes(quotaUsed) + ' / ' + fmtBytes(quota));
+    const limitNote = limitBits.length
+      ? `<div class="donut-note" style="font-size:9px;margin-top:4px">${limitBits.join(' · ')}${c.quota_blocked ? ' · <span class="tag bad">лимит</span>' : ''}</div>`
+      : '';
     const cascade = Number(c.split_cascade) || 0;
     const direct = Number(c.split_direct) || 0;
     const splitTotal = cascade + direct;
@@ -441,7 +450,7 @@ function realClientRows() {
       <td class="name">${escHtml(c.name)}</td>
       <td class="mono">${escHtml(c.ip || '—')}</td>
       <td>${escHtml(clientStateText(c, online))}</td>
-      <td class="mono">${fmtBytes(traffic)}</td>
+      <td class="mono">${fmtBytes(traffic)}${limitNote}</td>
       <td class="mono" title="${escHtml(lastHandshakeTitle(handshake))}">${escHtml(lastHandshakeText(handshake))}</td>
       <td>${splitCell}</td>
       <td><span class="status ${online ? '' : 'idle'}"><span class="dot"></span>${online ? 'в сети' : 'не в сети'}</span></td>
