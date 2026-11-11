@@ -217,7 +217,24 @@ button{background:none;border:0;cursor:pointer}a{color:inherit;text-decoration:n
 .table .name{color:var(--text);font-weight:700}
 .idx-head{width:42px;text-align:left}
 .table .idx-cell{width:42px;color:var(--text-2);font:600 13px/1.2 var(--mono);text-align:left;padding:12px 8px 12px 0;font-variant-numeric:tabular-nums;vertical-align:middle}
-.status.shared{color:var(--warn)}
+#clientsTable{table-layout:fixed;min-width:1140px}
+#clientsTable .col-idx{width:42px}
+#clientsTable .col-name{width:120px}
+#clientsTable .col-ip{width:100px}
+#clientsTable .col-state{width:82px}
+#clientsTable .col-iso{width:108px}
+#clientsTable .col-traffic{width:90px}
+#clientsTable .col-speed{width:112px}
+#clientsTable .col-handshake{width:108px}
+#clientsTable .col-ru{width:112px}
+#clientsTable .col-connection{width:78px}
+#clientsTable .col-actions{width:180px}
+#clientsTable td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#clientsTable th{white-space:normal}
+#clientsTable td:last-child{overflow:visible}
+#clientsTable .client-speed,#clientsTable .split-bar,#clientsTable .share-pct{white-space:nowrap}
+.status.open{color:var(--warn)}
+.status.open-plus{color:var(--accent)}
 .status.muted{color:var(--text-3)}
 .mono{font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums}
 .status{display:inline-flex;align-items:center;gap:6px;font:500 9px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--good)}
@@ -330,6 +347,8 @@ select option{background:var(--surface-2);color:var(--text)}
 .notice{border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:12px;line-height:1.55;background:var(--surface-2);color:var(--text-2);margin-bottom:14px}
 .notice.warn{border-color:color-mix(in srgb,var(--warn) 30%,transparent);background:var(--amber-soft);color:var(--text)}
 .switch-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px}
+.check-field{grid-column:1/-1}
+.check-field .switch-grid{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
 .modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
 .modal-title{font-size:16px;font-weight:800;letter-spacing:-.02em}
 .modal-sub{font-size:11.5px;color:var(--text-2);margin-top:4px}

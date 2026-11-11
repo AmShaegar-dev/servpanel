@@ -755,13 +755,19 @@ test('Изоляция клиентов AWG: режимы хранятся по 
     const had = fs.existsSync(file);
     const prev = had ? fs.readFileSync(file) : null;
     try {
-        internals.writeClientIsolation({ '10.8.0.5': true, '10.8.0.6': false });
+        internals.writeClientIsolation({
+            '10.8.0.5': true,
+            '10.8.0.6': false,
+            '10.8.0.7': { mode: 'open-plus', peers: ['10.8.0.5', '10.8.0.6'] }
+        });
         const map = internals.readClientIsolation();
         assert.equal(map['10.8.0.5'], true);
         assert.equal(map['10.8.0.6'], false);
         assert.equal(internals.clientIsolationMode('10.8.0.5'), 'isolated');
-        assert.equal(internals.clientIsolationMode('10.8.0.6'), 'shared');
-        assert.equal(internals.clientIsolationMode('10.8.0.7'), 'default');
+        assert.equal(internals.clientIsolationMode('10.8.0.6'), 'open');
+        assert.equal(internals.clientIsolationMode('10.8.0.7'), 'open-plus');
+        assert.deepEqual(internals.clientIsolationPeers('10.8.0.7'), ['10.8.0.5', '10.8.0.6']);
+        assert.equal(internals.clientIsolationMode('10.8.0.8'), 'default');
     } finally {
         if (had) fs.writeFileSync(file, prev);
         else fs.rmSync(file, { force: true });

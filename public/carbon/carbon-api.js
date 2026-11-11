@@ -468,7 +468,7 @@ function clientSortValue(c, key) {
       return order[c.status_code] != null ? order[c.status_code] : 0;
     }
     case 'isolation': {
-      const order = { isolated: 2, shared: 1, default: 0 };
+      const order = { isolated: 3, 'open-plus': 2, open: 1, default: 0 };
       return order[c.isolation_mode] != null ? order[c.isolation_mode] : 0;
     }
     case 'traffic':
@@ -547,11 +547,18 @@ function realClientRows() {
         ? `<div class="split-bar" title="${escHtml(title)}"><span style="width:${cascadePct.toFixed(1)}%;background:#5b8cff"></span><span style="width:${directPct.toFixed(1)}%;background:var(--accent)"></span></div><span class="share-pct">${pctText(cascadePct)} / ${pctText(directPct)}</span>`
         : `<div class="split-bar" title="Нет данных"><span style="width:100%;background:var(--surface-3)"></span></div><span class="share-pct">нет данных</span>`;
     const isoMode = c.isolation_mode || 'default';
+    const isoPeers = Array.isArray(c.isolation_peers) ? c.isolation_peers : [];
+    const isoPeerNames = isoPeers.map(ip => {
+      const peer = (carbon.clients || []).find(x => x && x.ip === ip);
+      return peer ? peer.name : ip;
+    });
     const isoCell = isoMode === 'isolated'
       ? '<span class="status"><span class="dot"></span>изолирован</span>'
-      : isoMode === 'shared'
-        ? '<span class="status shared"><span class="dot"></span>общий</span>'
-        : '<span class="status muted"><span class="dot"></span>по умолчанию</span>';
+      : isoMode === 'open-plus'
+        ? `<span class="status open-plus" title="Открыт для: ${escHtml(isoPeerNames.join(', ') || 'выбранных клиентов')}"><span class="dot"></span>Открытый+</span>`
+        : isoMode === 'open'
+          ? '<span class="status open"><span class="dot"></span>Открытый</span>'
+          : '<span class="status muted"><span class="dot"></span>по умолчанию</span>';
     const rxSpeed = Number(c.rx_speed) || 0;
     const txSpeed = Number(c.tx_speed) || 0;
     const totalSpeed = Number(c.total_speed) || (rxSpeed + txSpeed);
@@ -587,7 +594,7 @@ function clientSortHead(key, label, title = 'Сортировать') {
 
 function realClientsTable() {
   return `<div class="table-tools"><div class="table-search">${icon('search')}<input id="clientSearch" type="search" name="client-search" placeholder="Имя или IP" aria-label="Фильтр клиентов" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"></div><div class="speed-filter" title="Показывать клиентов со скоростью не ниже">${icon('pulse')}<input id="clientSpeedFilter" type="number" min="0" step="1" placeholder="от, КБ/с" aria-label="Минимальная скорость, КБ/с" autocomplete="off"></div><button class="tag" data-toast="Клиентов: ${carbon.clients.length}">Все клиенты ${icon('arrow', 'ico')}</button></div>
-    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr><th class="idx-head">#</th>${clientSortHead('name', 'Клиент')}${clientSortHead('ip', 'IP')}${clientSortHead('state', 'Состояние')}${clientSortHead('isolation', 'Изоляция')}${clientSortHead('traffic', 'Трафик')}${clientSortHead('speed', 'Скорость')}${clientSortHead('handshake', 'Последнее рукопожатие')}${clientSortHead('ru', 'Каскад / RU', 'Сортировать по доле RU')}${clientSortHead('connection', 'Связь')}<th style="width:190px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
+    <div class="table-scroll"><table class="table" id="clientsTable"><colgroup><col class="col-idx"><col class="col-name"><col class="col-ip"><col class="col-state"><col class="col-iso"><col class="col-traffic"><col class="col-speed"><col class="col-handshake"><col class="col-ru"><col class="col-connection"><col class="col-actions"></colgroup><thead><tr><th class="idx-head">#</th>${clientSortHead('name', 'Клиент')}${clientSortHead('ip', 'IP')}${clientSortHead('state', 'Состояние')}${clientSortHead('isolation', 'Изоляция')}${clientSortHead('traffic', 'Трафик')}${clientSortHead('speed', 'Скорость')}${clientSortHead('handshake', 'Последнее рукопожатие')}${clientSortHead('ru', 'Каскад / RU', 'Сортировать по доле RU')}${clientSortHead('connection', 'Связь')}<th style="width:190px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
 }
 
 function smoothTraffic(values, range) {

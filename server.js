@@ -6687,13 +6687,17 @@ app.get('/api/clients', checkAuth, (req, res) => {
         const withLimits = merged.map(c => {
             const l = limits[c.ip] || {};
             const quota = Number(l.quota) || 0;
+            const iso = isolation[c.ip];
+            const isoMode = iso === true ? 'isolated' : iso === false ? 'open' : iso && typeof iso === 'object' && iso.mode === 'open-plus' ? 'open-plus' : 'default';
+            const isoPeers = iso && typeof iso === 'object' && Array.isArray(iso.peers) ? iso.peers.filter(p => IPV4_RE.test(String(p))) : [];
             return {
                 ...c,
                 rate_limit_mbps: Number(l.rate) || 0,
                 quota_bytes: quota,
                 quota_used_bytes: quota ? Math.max(0, totalClientBytes(c) - (Number(l.baseline) || 0)) : 0,
                 quota_blocked: !!l.blocked,
-                isolation_mode: isolation[c.ip] === true ? 'isolated' : isolation[c.ip] === false ? 'shared' : 'default'
+                isolation_mode: isoMode,
+                isolation_peers: isoPeers
             };
         });
         res.json(attachClientSpeeds(attachClientSplit(withLimits)));
@@ -7064,9 +7068,17 @@ function clientIsolationIface() {
 
 function clientIsolationMode(ip) {
     const map = readClientIsolation();
-    if (map[ip] === true) return 'isolated';
-    if (map[ip] === false) return 'shared';
+    const value = map[ip];
+    if (value === true) return 'isolated';
+    if (value === false) return 'open';
+    if (value && typeof value === 'object' && value.mode === 'open-plus' && Array.isArray(value.peers)) return 'open-plus';
     return 'default';
+}
+
+function clientIsolationPeers(ip) {
+    const value = readClientIsolation()[ip];
+    if (!value || typeof value !== 'object' || !Array.isArray(value.peers)) return [];
+    return value.peers.filter(p => IPV4_RE.test(String(p)));
 }
 
 // Перестраивает цепочку SERVPANEL_ISOLATION и вставляет её перед глобальным
@@ -7083,11 +7095,16 @@ function syncClientIsolation() {
         }
         const map = readClientIsolation();
         const isolated = [];
-        const shared = [];
+        const open = [];
+        const openPlus = [];
         for (const [ip, value] of Object.entries(map)) {
             if (!IPV4_RE.test(String(ip))) continue;
             if (value === true) isolated.push(ip);
-            else if (value === false) shared.push(ip);
+            else if (value === false) open.push(ip);
+            else if (value && typeof value === 'object' && value.mode === 'open-plus' && Array.isArray(value.peers)) {
+                const peers = value.peers.filter(p => IPV4_RE.test(String(p)) && String(p) !== String(ip));
+                openPlus.push({ ip, peers });
+            }
         }
 
         // Ищем глобальное правило изоляции и общий ACCEPT для интерфейса.
@@ -7124,19 +7141,28 @@ function syncClientIsolation() {
             ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-s', ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'DROP']) && ok;
             ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-d', ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'DROP']) && ok;
         }
-        // ACCEPT-исключения имеют смысл только когда глобальная изоляция
-        // действительно включена. Иначе не трогаем общий поток.
-        if (globalDropLine) {
-            for (const ip of shared) {
-                ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-s', ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'ACCEPT']) && ok;
-                ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-d', ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'ACCEPT']) && ok;
+        // «Открытый+»: сначала закрываем клиента от всех, затем точечно
+        // разрешаем только выбранные пары. Полностью изолированные клиенты
+        // остаются закрытыми — их DROP стоит выше.
+        for (const item of openPlus) {
+            ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-s', item.ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'DROP']) && ok;
+            ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-d', item.ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'DROP']) && ok;
+        }
+        for (const item of openPlus) {
+            for (const peer of item.peers) {
+                ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-s', item.ip, '-d', peer, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'ACCEPT']) && ok;
+                ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-s', peer, '-d', item.ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'ACCEPT']) && ok;
             }
+        }
+        for (const ip of open) {
+            ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-s', ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'ACCEPT']) && ok;
+            ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-d', ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'ACCEPT']) && ok;
         }
 
         // Ставим jump перед глобальной изоляцией (или перед общим ACCEPT awg0).
         // Правила квот и GeoIP остаются выше и не обходятся.
         let line = globalDropLine || generalAcceptLine;
-        if (!line && isolated.length) line = 1;
+        if (!line && (isolated.length || openPlus.length)) line = 1;
         if (line) ok = iptRun(['-w', '-I', 'FORWARD', String(line), '-j', ISOLATION_CHAIN]) && ok;
         isolationLastError = ok ? '' : 'Не удалось применить правила iptables';
     } catch (e) {
@@ -7399,6 +7425,7 @@ app.get('/api/clients/:name/isolation', checkAuth, (req, res) => {
         ip: c.ip,
         interface: clientIsolationIface() || null,
         mode: clientIsolationMode(c.ip),
+        peers: clientIsolationPeers(c.ip),
         isolated: readClientIsolation()[c.ip] === true,
         warning: isolationLastError || ''
     });
@@ -7407,21 +7434,35 @@ app.get('/api/clients/:name/isolation', checkAuth, (req, res) => {
 app.post('/api/clients/:name/isolation', checkAuth, requireAdmin, (req, res) => {
     const c = findClientByName(String(req.params.name || ''));
     if (!c || !c.ip) return res.status(404).json({ error: 'Клиент не найден' });
-    const raw = req.body ? req.body.isolated : undefined;
-    let value = null;
-    if (raw === true || raw === 'true' || raw === 'isolated') value = true;
-    else if (raw === false || raw === 'false' || raw === 'shared') value = false;
-    else if (raw === null || raw === undefined || raw === '' || raw === 'default') value = null;
-    else return res.status(400).json({ error: 'isolated: true, false или null' });
+    const body = req.body || {};
+    let mode = String(body.mode || '').trim();
+    if (!mode) {
+        const raw = body.isolated;
+        if (raw === true || raw === 'true' || raw === 'isolated') mode = 'isolated';
+        else if (raw === false || raw === 'false' || raw === 'open' || raw === 'shared') mode = 'open';
+        else if (raw === null || raw === undefined || raw === '' || raw === 'default') mode = 'default';
+    }
+    if (mode === 'shared') mode = 'open';
+    if (!['default', 'isolated', 'open', 'open-plus'].includes(mode)) {
+        return res.status(400).json({ error: 'mode: default, isolated, open или open-plus' });
+    }
+    let peers = [];
+    if (mode === 'open-plus') {
+        const raw = Array.isArray(body.peers) ? body.peers : [];
+        peers = [...new Set(raw.map(p => String(p || '').trim()).filter(p => IPV4_RE.test(p) && p !== c.ip))].slice(0, 256);
+        if (!peers.length) return res.status(400).json({ error: 'Для «Открытый+» выберите хотя бы одного клиента' });
+    }
 
     const map = readClientIsolation();
-    if (value === null) delete map[c.ip];
-    else map[c.ip] = value;
+    if (mode === 'default') delete map[c.ip];
+    else if (mode === 'isolated') map[c.ip] = true;
+    else if (mode === 'open') map[c.ip] = false;
+    else map[c.ip] = { mode: 'open-plus', peers };
     writeClientIsolation(map);
     syncClientIsolation();
-    const mode = value === true ? 'isolated' : value === false ? 'shared' : 'default';
-    auditLog(req, `Клиент ${c.name}: изоляция ${mode === 'isolated' ? 'включена' : mode === 'shared' ? 'снята' : 'по умолчанию'}`);
-    res.json({ success: true, name: c.name, ip: c.ip, mode, isolated: value, warning: isolationLastError || '' });
+    const label = mode === 'isolated' ? 'включена' : mode === 'open' ? 'открыт для всех' : mode === 'open-plus' ? 'открыт для выбранных' : 'по умолчанию';
+    auditLog(req, `Клиент ${c.name}: изоляция ${label}`);
+    res.json({ success: true, name: c.name, ip: c.ip, mode, peers, isolated: mode === 'isolated', warning: isolationLastError || '' });
 });
 
 app.post('/api/limit', checkAuth, (req, res) => {
@@ -7461,10 +7502,12 @@ app.get('/api/stats', checkAuth, (req, res) => {
                 return { ...client, status_code: sc };
             });
             const isolation = readClientIsolation();
-            const withIsolation = attachClientSplit(data).map(c => ({
-                ...c,
-                isolation_mode: isolation[c.ip] === true ? 'isolated' : isolation[c.ip] === false ? 'shared' : 'default'
-            }));
+            const withIsolation = attachClientSplit(data).map(c => {
+                const iso = isolation[c.ip];
+                const isoMode = iso === true ? 'isolated' : iso === false ? 'open' : iso && typeof iso === 'object' && iso.mode === 'open-plus' ? 'open-plus' : 'default';
+                const isoPeers = iso && typeof iso === 'object' && Array.isArray(iso.peers) ? iso.peers.filter(p => IPV4_RE.test(String(p))) : [];
+                return { ...c, isolation_mode: isoMode, isolation_peers: isoPeers };
+            });
             res.json(attachClientSpeeds(withIsolation));
         } catch (e) { res.status(500).json({ error: 'Ошибка парсинга' }); }
     });
@@ -13111,7 +13154,7 @@ module.exports._internals = {
     writeAppSettings, metricsSnapshot, prometheusMetrics, startMetricsServer, stopMetricsServer,
     metricsRuntimeInfo, apkInfo, resolveApkFile, APP_SETTINGS_FILE, APP_APK_DIR,
     readPanelSettings, writePanelSettings, historyFormatLabel, isValidTimeZone, PANEL_SETTINGS_FILE,
-    readClientIsolation, writeClientIsolation, clientIsolationMode, CLIENT_ISOLATION_FILE,
+    readClientIsolation, writeClientIsolation, clientIsolationMode, clientIsolationPeers, CLIENT_ISOLATION_FILE,
     attachClientSpeeds,
     normalizeCascadeConf, firstIpv4, firstTunnelIp, buildRoutingScript, cascadeRole, localTunnelIps, isPublicAddress,
     cascadeEndpointPlan, cascadeRoleFrom, cascadeHealth

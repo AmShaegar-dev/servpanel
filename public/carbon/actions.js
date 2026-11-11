@@ -28,6 +28,16 @@ function showCarbonForm(opts) {
       }).join('');
       return `<label class="field"><span>${escHtml(f.label)}</span><select data-field="${name}">${options}</select></label>`;
     }
+    if (f.type === 'checkboxes') {
+      const selected = new Set((Array.isArray(f.value) ? f.value : []).map(String));
+      const opts = (f.options || []).map(o => {
+        const val = typeof o === 'string' ? o : o.value;
+        const label = typeof o === 'string' ? o : o.label;
+        return `<label class="switch"><input type="checkbox" data-field="${name}" value="${escHtml(val)}" ${selected.has(String(val)) ? 'checked' : ''}> ${escHtml(label)}</label>`;
+      }).join('');
+      const show = f.showWhen ? ` data-show-when-field="${escHtml(f.showWhen.field)}" data-show-when-value="${escHtml(f.showWhen.value)}"` : '';
+      return `<div class="field check-field"${show}><span>${escHtml(f.label)}</span><div class="switch-grid">${opts || '<span class="muted">Нет других клиентов</span>'}</div></div>`;
+    }
     if (f.type === 'textarea') {
       return `<label class="field"><span>${escHtml(f.label)}</span><textarea name="carbon-${name}" data-field="${name}" rows="${f.rows || 8}" spellcheck="false" autocomplete="off" placeholder="${escHtml(f.placeholder || '')}">${escHtml(value)}</textarea></label>`;
     }
@@ -44,6 +54,13 @@ function showCarbonForm(opts) {
   </div>`;
   document.body.appendChild(modal);
   modal.hidden = false;
+  modal.querySelectorAll('[data-show-when-field]').forEach(el => {
+    const ctrl = modal.querySelector(`[data-field="${el.dataset.showWhenField}"]`);
+    if (!ctrl) return;
+    const apply = () => { el.style.display = ctrl.value === el.dataset.showWhenValue ? '' : 'none'; };
+    ctrl.addEventListener('change', apply);
+    apply();
+  });
   const close = () => modal.remove();
   modal.querySelectorAll('[data-form-close]').forEach(b => b.addEventListener('click', close));
   const err = modal.querySelector('[data-form-error]');
@@ -58,6 +75,7 @@ function showCarbonForm(opts) {
         const el = modal.querySelector(`[data-field="${f.name}"]`);
         if (!el) continue;
         if (f.type === 'checkbox') values[f.name] = el.checked;
+        else if (f.type === 'checkboxes') values[f.name] = [...modal.querySelectorAll(`[data-field="${f.name}"]`)].filter(x => x.checked).map(x => x.value);
         else if (f.type === 'file') values[f.name] = el.files && el.files[0] ? el.files[0] : null;
         else values[f.name] = el.value;
       }
@@ -435,8 +453,13 @@ async function carbonClientRename(name) {
   try { iso = await api('/api/clients/' + encodeURIComponent(name) + '/isolation'); } catch (e) { iso = {}; }
   const used = Number(lim.used_bytes) || 0;
   const quota = Number(lim.quota_bytes) || 0;
-  const isoText = iso.mode === 'isolated' ? ' · изолирован' : iso.mode === 'shared' ? ' · общий доступ' : '';
+  const isoText = iso.mode === 'isolated' ? ' · изолирован' : iso.mode === 'open-plus' ? ' · Открытый+' : iso.mode === 'open' ? ' · Открытый' : '';
   const gbValue = n => n ? String(Math.round((n / (1024 ** 3)) * 100) / 100) : '0';
+  const peerOptions = (carbon.clients || [])
+    .filter(c => c && c.name !== name && c.ip)
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+    .map(c => ({ value: c.ip, label: c.name + ' — ' + c.ip }));
+  const selectedPeers = Array.isArray(iso.peers) ? iso.peers : [];
   showCarbonForm({
     title: 'Редактировать клиента',
     sub: `Использовано: ${fmtBytes(used)}${quota ? ' из ' + fmtBytes(quota) : ' · лимит не задан'}${lim.blocked ? ' · лимит исчерпан' : ''}${isoText}`,
@@ -447,15 +470,19 @@ async function carbonClientRename(name) {
       { name: 'isolation', label: 'Изоляция от других клиентов', type: 'select', value: iso.mode || 'default', options: [
         { value: 'default', label: 'Как на сервере (по умолчанию)' },
         { value: 'isolated', label: 'Изолировать от других клиентов' },
-        { value: 'shared', label: 'Разрешить общение с другими клиентами' }
+        { value: 'open', label: 'Открытый — разрешить всем' },
+        { value: 'open-plus', label: 'Открытый+ — только выбранным' }
       ] },
+      { name: 'peers', label: 'Кому разрешить (для «Открытый+»)', type: 'checkboxes', value: selectedPeers, options: peerOptions, showWhen: { field: 'isolation', value: 'open-plus' } },
       { name: 'reset', label: 'Сбросить использованный трафик', type: 'checkbox', value: false }
     ],
     submitText: 'Сохранить',
     onSubmit: async v => {
       if (!/^[A-Za-z0-9_-]{1,63}$/.test(v.newName)) throw new Error('Разрешены буквы, цифры, _ и -, до 63 символов');
-      const isolated = v.isolation === 'isolated' ? true : v.isolation === 'shared' ? false : null;
-      const isoRes = await api('/api/clients/' + encodeURIComponent(name) + '/isolation', { method: 'POST', body: { isolated } });
+      const mode = ['isolated', 'open', 'open-plus'].includes(v.isolation) ? v.isolation : 'default';
+      const peers = mode === 'open-plus' && Array.isArray(v.peers) ? v.peers : [];
+      if (mode === 'open-plus' && !peers.length) throw new Error('Для «Открытый+» выберите хотя бы одного клиента');
+      const isoRes = await api('/api/clients/' + encodeURIComponent(name) + '/isolation', { method: 'POST', body: { mode, peers } });
       if (v.newName !== name) {
         await api('/api/clients/' + encodeURIComponent(name) + '/rename', { method: 'POST', body: { newName: v.newName } });
       }
