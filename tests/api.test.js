@@ -720,6 +720,36 @@ test('Настройки: старые ссылки на APK переписыв�
     }
 });
 
+test('Панель: часовой пояс сохраняется и применяется к истории', async () => {
+    const before = await request('/api/panel/settings');
+    assert.equal(before.status, 200);
+    assert.equal(typeof before.json.timezone, 'string');
+    const prev = before.json.timezone;
+    try {
+        const bad = await request('/api/panel/settings', jsonBody({ timezone: 'Mars/Olympus' }));
+        assert.equal(bad.status, 400);
+        const save = await request('/api/panel/settings', jsonBody({ timezone: 'Asia/Yekaterinburg' }));
+        assert.equal(save.status, 200);
+        assert.equal(save.json.timezone, 'Asia/Yekaterinburg');
+        const get = await request('/api/panel/settings');
+        assert.equal(get.json.timezone, 'Asia/Yekaterinburg');
+        const hist = await request('/api/history?range=1h&view=global');
+        assert.equal(hist.status, 200);
+        assert.equal(hist.json.timezone, 'Asia/Yekaterinburg');
+    } finally {
+        await request('/api/panel/settings', jsonBody({ timezone: prev }));
+    }
+});
+
+test('Панель: подписи истории форматируются в выбранном часовом поясе', () => {
+    const t = Date.UTC(2026, 0, 1, 23, 30, 0);
+    assert.equal(internals.historyFormatLabel(t, 3600, 'Europe/Moscow'), '02:30');
+    assert.equal(internals.historyFormatLabel(t, 3600, 'Asia/Yekaterinburg'), '04:30');
+    assert.equal(internals.historyFormatLabel(t, 86400, 'UTC'), '23:30');
+    assert.equal(internals.isValidTimeZone('Europe/Moscow'), true);
+    assert.equal(internals.isValidTimeZone('Nope/Nowhere'), false);
+});
+
 test('Git: origin старого аккаунта переключается на новый', () => {
     const { spawnSync } = require('child_process');
     if (spawnSync('git', ['--version'], { timeout: 5000 }).status !== 0) return;

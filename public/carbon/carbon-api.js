@@ -56,6 +56,37 @@ function fmtBytes(n) {
   return v + ' B';
 }
 
+function panelTimezone() {
+  return (carbon.panelSettings && carbon.panelSettings.timezone) || 'UTC';
+}
+
+function panelTimezoneLabel() {
+  return panelTimezone().split('/').pop().replace(/_/g, ' ');
+}
+
+function panelTimezones() {
+  let supported = [];
+  try {
+    if (typeof Intl.supportedValuesOf === 'function') supported = Intl.supportedValuesOf('timeZone');
+  } catch (e) { /* старый браузер */ }
+  const curated = [
+    'UTC', 'Europe/Moscow', 'Europe/Kaliningrad', 'Europe/Samara', 'Asia/Yekaterinburg',
+    'Asia/Omsk', 'Asia/Novosibirsk', 'Asia/Krasnoyarsk', 'Asia/Irkutsk', 'Asia/Yakutsk',
+    'Asia/Vladivostok', 'Asia/Magadan', 'Asia/Kamchatka', 'Europe/Kyiv', 'Europe/Minsk',
+    'Asia/Almaty', 'Asia/Tbilisi', 'Asia/Yerevan', 'Europe/Berlin', 'Europe/Paris',
+    'Europe/London', 'Asia/Dubai', 'Asia/Tokyo', 'America/New_York'
+  ];
+  const current = panelTimezone();
+  return [...new Set([...curated, ...supported, current])].sort((a, b) => a.localeCompare(b));
+}
+
+function panelTimeText(date = new Date(), withSeconds = true) {
+  const opts = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: panelTimezone() };
+  if (withSeconds) opts.second = '2-digit';
+  try { return new Intl.DateTimeFormat('ru-RU', opts).format(date); }
+  catch (e) { return date.toLocaleTimeString('ru-RU'); }
+}
+
 function escHtml(v) {
   return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 }
@@ -261,10 +292,10 @@ async function loadCarbonData() {
   ]);
   // 1. Минимум для первого экрана: KPI, сервер, обновления, службы.
   // Остальные разделы догружаются в фоне и не задерживают отрисовку.
-  const [stats, modules, services, security, interfaces, update, server, sys] = await Promise.all([
+  const [stats, modules, services, security, interfaces, update, server, sys, panelSettings] = await Promise.all([
     safe('/api/stats'), safe('/api/modules'), safe('/api/services'),
     safe('/api/security/status'), safe('/api/interfaces'), safe('/api/update/info'),
-    safe('/api/server-info'), safe('/api/sysinfo')
+    safe('/api/server-info'), safe('/api/sysinfo'), safe('/api/panel/settings')
   ]);
   carbon.stats = Array.isArray(stats) ? stats : [];
   if (!carbon.clients.length && carbon.stats.length) carbon.clients = carbon.stats;
@@ -275,6 +306,7 @@ async function loadCarbonData() {
   if (update) carbon.update = update;
   if (server) carbon.server = server;
   if (sys) carbon.sys = sys;
+  if (panelSettings && !panelSettings.error) carbon.panelSettings = panelSettings;
   carbon.loaded = true;
   applyShellData();
   // 2. Диаграмма, история и прокси — в фоне, без очереди из всех разделов.
@@ -313,6 +345,7 @@ function assignCarbonPath(path, data) {
   else if (p === '/api/notify/status') carbon.notify = data;
   else if (p === '/api/awg/config') carbon.awgConfig = data;
   else if (p === '/api/history') carbon.history = data;
+  else if (p === '/api/panel/settings') carbon.panelSettings = data;
   else if (p === '/api/traffic/distribution') carbon.distribution = data;
   else if (p === '/api/cascade/interfaces') { if (!data.error) carbon.cascadeInterfaces = data; else return false; }
   else if (p === '/api/cascade/schedule') { if (!data.error) carbon.cascadeSchedule = data; else return false; }
@@ -573,7 +606,7 @@ function realTrafficChart() {
   const txPath = chartPath(tx, max, width, height);
   const area = rxPath ? `${rxPath} L${width},${height} L0,${height} Z` : '';
   const names = { '5m': 'последние 5 минут', '1h': 'последний час', '3h': 'последние 3 часа', '24h': 'последние 24 часа', '7d': 'последние 7 суток' };
-  const subline = labels.length ? labels[0] + ' — ' + labels[labels.length - 1] : names[range];
+  const subline = labels.length ? labels[0] + ' — ' + labels[labels.length - 1] + ' · ' + panelTimezoneLabel() : names[range] + ' · ' + panelTimezoneLabel();
   const chip = (value, label) => `<button class="chip ${range === value ? 'on' : ''}" data-carbon-action="chart-range" data-range="${value}">${label}</button>`;
   return `<section class="card" id="liveChartCard" style="grid-column:span 7;position:relative"><div class="card-top"><div><div class="card-title">Трафик</div><div class="card-sub">${escHtml(subline || '')}</div></div><div class="legend"><span><i style="background:#5b8cff"></i>Rx</span><span><i style="background:var(--accent)"></i>Tx</span><div class="chips" style="margin-left:8px">${chip('5m', '5м')}${chip('1h', '1ч')}${chip('3h', '3ч')}${chip('24h', '24ч')}${chip('7d', '7д')}</div></div></div>${labels.length ? `<svg class="chart" viewBox="0 0 760 235" preserveAspectRatio="none" aria-label="График трафика" onmousemove="carbonChartHover(event)" onmouseleave="carbonChartLeave()"><rect x="0" y="0" width="760" height="235" fill="transparent" pointer-events="all"/><g stroke="var(--line)" stroke-width="1"><line x1="0" y1="${height / 4}" x2="${width}" y2="${height / 4}"/><line x1="0" y1="${height / 2}" x2="${width}" y2="${height / 2}"/><line x1="0" y1="${height * 0.75}" x2="${width}" y2="${height * 0.75}"/></g><path d="${area}" fill="rgba(91,140,255,.10)" stroke="none"/><path d="${txPath}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" vector-effect="non-scaling-stroke"/><path d="${rxPath}" fill="none" stroke="#5b8cff" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/><g id="chartCross" style="display:none;pointer-events:none"><line id="chartCrossLine" x1="0" y1="0" x2="0" y2="${height}" stroke="var(--text-3)" stroke-width="1" stroke-dasharray="4 4"/><circle id="chartDotRx" r="3.5" fill="#5b8cff" stroke="var(--surface-1)" stroke-width="2"/><circle id="chartDotTx" r="3.5" fill="var(--accent)" stroke="var(--surface-1)" stroke-width="2"/></g></svg><div class="mini-grid" style="grid-template-columns:repeat(4,1fr);margin-top:10px">${mini('Пик Rx', fmtBytes(Math.round(max)) + '/s', 'сглажено')}${mini('Точек', String(labels.length), 'в окне')}${mini('Rx', fmtBytes(Math.round(rx.reduce((a, b) => a + b, 0) / Math.max(1, rx.length))) + '/s', 'среднее')}${mini('Tx', fmtBytes(Math.round(tx.reduce((a, b) => a + b, 0) / Math.max(1, tx.length))) + '/s', 'среднее')}</div>` : '<div class="empty-row">Нет данных истории за этот период</div>'}<div id="chartTip" style="position:absolute;display:none;z-index:6;pointer-events:none;background:var(--surface-1);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.55;box-shadow:0 8px 24px rgba(0,0,0,.35);white-space:nowrap"></div></section>`;
 }
@@ -694,7 +727,7 @@ function realDashboard() {
   return `
     <div class="overview">
       <div class="server-id"><span class="dot"></span><div><div class="server-name">Servpanel · ${escHtml(s.country || 'сервер')}</div><div class="server-meta">${escHtml(s.ip || 'IP —')} · build ${escHtml(carbon.update ? carbon.update.version : '—')}</div></div></div>
-      <div class="overview-actions"><div class="live"><span class="dot"></span>API подключён</div><button class="btn" data-carbon-action="diag-check">${icon('pulse')}Проверить всё</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button><button class="btn btn-primary" data-action="open-client-modal">${icon('plus')}Добавить клиента</button></div>
+      <div class="overview-actions"><div class="live"><span class="dot"></span><span id="liveUpdated">API подключён</span></div><button class="btn" data-carbon-action="diag-check">${icon('pulse')}Проверить всё</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button><button class="btn btn-primary" data-action="open-client-modal">${icon('plus')}Добавить клиента</button></div>
     </div>
     <div class="grid">
       ${kpi('Исходящий', `<span id="liveTx">${fmtBytes(tx)}</span>`, 'TX всего', 'upload', '')}
@@ -1177,6 +1210,7 @@ function updateDashboardSystem() {
   setLiveText('liveUptime', system.uptime || '—');
   setLiveText('liveCpu', (system.cpu || '—') + '%');
   setLiveText('liveRam', (system.ram || '—') + '%');
+  setLiveText('liveUpdated', 'обновлено ' + panelTimeText());
   const hRx = (carbon.history && carbon.history.rx) || [];
   const hTx = (carbon.history && carbon.history.tx) || [];
   const lastRx = hRx.length ? hRx[hRx.length - 1] : 0;
@@ -1193,7 +1227,7 @@ function updateDashboardDonut() {
 
 async function refreshDashboardFast() {
   if (document.hidden || carbonFastBusy) return;
-  if (typeof state !== 'undefined' && state.tab !== 'dashboard') return;
+  if (!document.getElementById('liveTx')) return;
   if (typeof carbon === 'undefined' || !carbon.loaded) return;
   carbonFastBusy = true;
   try {
@@ -1220,7 +1254,7 @@ async function refreshDashboardFast() {
 
 async function refreshDashboardStats() {
   if (document.hidden || carbonStatsBusy) return;
-  if (typeof state !== 'undefined' && state.tab !== 'dashboard') return;
+  if (!document.getElementById('liveTx')) return;
   if (typeof carbon === 'undefined' || !carbon.loaded) return;
   carbonStatsBusy = true;
   try {
@@ -1240,9 +1274,25 @@ async function refreshDashboardStats() {
 }
 
 function startDashboardLive() {
-  if (carbonFastTimer) return;
-  carbonFastTimer = setInterval(refreshDashboardFast, 2500);
-  carbonStatsTimer = setInterval(refreshDashboardStats, 15000);
+  if (!carbonFastTimer) {
+    carbonFastTimer = setInterval(refreshDashboardFast, 2500);
+    carbonStatsTimer = setInterval(refreshDashboardStats, 8000);
+  }
+  // Первый тик сразу, чтобы после входа/переключения вкладки виджет не ждал.
+  bindDashboardLiveVisibility();
+  refreshDashboardFast();
+  refreshDashboardStats();
+}
+
+let dashboardLiveVisibilityBound = false;
+function bindDashboardLiveVisibility() {
+  if (dashboardLiveVisibilityBound) return;
+  dashboardLiveVisibilityBound = true;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || !document.getElementById('liveTx')) return;
+    refreshDashboardFast();
+    refreshDashboardStats();
+  });
 }
 
 function renderCarbonLoading() {

@@ -92,6 +92,36 @@ const INSTALL_STATE = path.join(DATA_DIR, '.install_state.json');
 const APP_SETTINGS_FILE = path.join(DATA_DIR, '.app_settings.json');
 const APP_APK_DIR = path.join(DATA_DIR, '.app');
 
+// Настройки самой панели (часовой пояс графиков). Лежат рядом с данными,
+// поэтому переживают обновление и не попадают в релизный архив.
+const PANEL_SETTINGS_FILE = path.join(DATA_DIR, '.panel_settings.json');
+const DEFAULT_PANEL_TIMEZONE = (() => {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
+    catch (e) { return 'UTC'; }
+})();
+function isValidTimeZone(value) {
+    if (typeof value !== 'string' || !value.trim() || value.length > 64) return false;
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone: value }).format(new Date());
+        return true;
+    } catch (e) { return false; }
+}
+let panelSettingsCache = null;
+function readPanelSettings() {
+    if (panelSettingsCache) return panelSettingsCache;
+    const raw = readJson(PANEL_SETTINGS_FILE, null) || {};
+    const timezone = isValidTimeZone(raw.timezone) ? raw.timezone : DEFAULT_PANEL_TIMEZONE;
+    panelSettingsCache = { timezone };
+    return panelSettingsCache;
+}
+function writePanelSettings(settings) {
+    const timezone = isValidTimeZone(settings && settings.timezone) ? settings.timezone : DEFAULT_PANEL_TIMEZONE;
+    panelSettingsCache = { timezone };
+    try { ensureDir(DATA_DIR); writeJson(PANEL_SETTINGS_FILE, panelSettingsCache, 0o600); }
+    catch (e) { /* ignore */ }
+    return panelSettingsCache;
+}
+
 // RustDesk: настройки модуля, кэш клиентских сборок и данные сервера.
 // Кэш лежит вне каталога панели, чтобы обновление панели его не трогало.
 const RUSTDESK_SETTINGS_FILE = path.join(DATA_DIR, '.rustdesk.json');
@@ -1977,12 +2007,25 @@ if (!TEST_MODE) {
     setInterval(collectHistory, HISTORY_STEP_MS);
 }
 
-function historyFormatLabel(ms, rangeSec) {
-    const d = new Date(ms);
-    const p = n => String(n).padStart(2, '0');
-    if (rangeSec <= 300) return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-    if (rangeSec <= 86400) return `${p(d.getHours())}:${p(d.getMinutes())}`;
-    return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+function historyFormatLabel(ms, rangeSec, timeZone) {
+    const tz = timeZone || readPanelSettings().timezone;
+    const opts = rangeSec <= 300
+        ? { hour: '2-digit', minute: '2-digit', second: '2-digit' }
+        : rangeSec <= 86400
+            ? { hour: '2-digit', minute: '2-digit' }
+            : { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' };
+    try {
+        return new Intl.DateTimeFormat('ru-RU', { ...opts, hourCycle: 'h23', timeZone: tz })
+            .format(new Date(ms))
+            .replace(',', '')
+            .trim();
+    } catch (e) {
+        const d = new Date(ms);
+        const p = n => String(n).padStart(2, '0');
+        if (rangeSec <= 300) return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+        if (rangeSec <= 86400) return `${p(d.getHours())}:${p(d.getMinutes())}`;
+        return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
 }
 
 // Дополняет короткий ряд до maxPoints линейной интерполяцией: форма линии
@@ -2350,15 +2393,38 @@ app.get('/api/history', checkAuth, (req, res) => {
         const toMs = Math.floor(Date.now() / HISTORY_STEP_MS) * HISTORY_STEP_MS;
         const fromMs = toMs - rangeSec * 1000;
         const points = historyDownsample(h.long.concat(h.short), fromMs, toMs, HISTORY_RENDER_POINTS);
+        const timezone = readPanelSettings().timezone;
         res.json({
             range: rangeKey,
             view,
-            labels: points.map(p => historyFormatLabel(p.t, rangeSec)),
+            timezone,
+            labels: points.map(p => historyFormatLabel(p.t, rangeSec, timezone)),
             rx: points.map(p => Math.round(p.rx)),
             tx: points.map(p => Math.round(p.tx)),
             views: ['global', ...Object.keys(historyData).filter(k => k !== 'global')]
         });
     } catch (e) { res.status(500).json({ error: 'Ошибка истории трафика' }); }
+});
+
+// Часовой пояс панели: применяется к подписям времени на графиках.
+app.get('/api/panel/settings', checkAuth, (req, res) => {
+    try {
+        res.json({ ...readPanelSettings(), serverTimezone: DEFAULT_PANEL_TIMEZONE, serverTime: Date.now() });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось прочитать настройки панели' });
+    }
+});
+
+app.post('/api/panel/settings', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const requested = String((req.body && req.body.timezone) || '').trim();
+        if (!requested) return res.status(400).json({ error: 'Укажите часовой пояс' });
+        if (!isValidTimeZone(requested)) return res.status(400).json({ error: 'Неизвестный часовой пояс: ' + requested.slice(0, 64) });
+        const saved = writePanelSettings({ timezone: requested });
+        res.json({ success: true, ...saved, serverTimezone: DEFAULT_PANEL_TIMEZONE, serverTime: Date.now() });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось сохранить часовой пояс' });
+    }
 });
 
 // ---------------------------------------------------------------------------
@@ -12843,6 +12909,7 @@ module.exports._internals = {
     installEnv, proxyUserPatch, proxyUsername,
     writeAppSettings, metricsSnapshot, prometheusMetrics, startMetricsServer, stopMetricsServer,
     metricsRuntimeInfo, apkInfo, resolveApkFile, APP_SETTINGS_FILE, APP_APK_DIR,
+    readPanelSettings, writePanelSettings, historyFormatLabel, isValidTimeZone, PANEL_SETTINGS_FILE,
     normalizeCascadeConf, firstIpv4, firstTunnelIp, buildRoutingScript, cascadeRole, localTunnelIps, isPublicAddress,
     cascadeEndpointPlan, cascadeRoleFrom, cascadeHealth
 };
