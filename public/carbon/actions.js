@@ -1664,6 +1664,7 @@ document.addEventListener('click', async event => {
     else if (action === 'diag-tc') await carbonDiagTc();
     else if (action === 'diag-wan') await carbonDiagWan();
     else if (action === 'chart-range') await carbonChartRange(btn.dataset.range || '1h');
+    else if (action === 'timezone') openDashboardTimezone();
     else if (action === 'obf-generate') await carbonObfGenerate();
     else if (action === 'obf-import') await carbonObfImport();
     else if (action === 'obf-sync') await carbonObfSync();
