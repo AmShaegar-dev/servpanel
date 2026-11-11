@@ -39,7 +39,7 @@ KPI, CPU/RAM, uptime, график и распределение трафика 
 
 <img src="docs/screenshots/clients.png" alt="Клиенты Servpanel Carbon: сортировка по доле RU-трафика" width="900">
 
-Клик по заголовку сортирует таблицу, повторный клик меняет направление. Колонка **«Каскад / RU»** сортирует по доле RU-трафика.
+Клик по заголовку сортирует таблицу, повторный клик меняет направление. Колонка **«Каскад / RU»** сортирует по доле RU-трафика. В колонке **«Скорость»** — текущие ↓ Rx / ↑ Tx, рядом фильтр **«от, КБ/с»**.
 
 ### Клиент: лимиты и точечная изоляция
 
@@ -1029,7 +1029,7 @@ npm install
 npm test
 ```
 
-`npm test` проверяет синтаксис `server.js`, `public/app.js`, `public/carbon/app.js`, `public/carbon/carbon-api.js`, `public/carbon/actions.js`, `lib/updater.js`, `lib/update-worker.js` и запускает **109 интеграционных тестов** (встроенный `node:test`, без внешних зависимостей):
+`npm test` проверяет синтаксис `server.js`, `public/app.js`, `public/carbon/app.js`, `public/carbon/carbon-api.js`, `public/carbon/actions.js`, `lib/updater.js`, `lib/update-worker.js` и запускает **110 интеграционных тестов** (встроенный `node:test`, без внешних зависимостей):
 
 * доступ без авторизации, security-заголовки;
 * вход, блокировка после 5 неудач, журнал fail2ban;
