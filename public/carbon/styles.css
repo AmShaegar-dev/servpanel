@@ -211,6 +211,11 @@ button{background:none;border:0;cursor:pointer}a{color:inherit;text-decoration:n
 .row-action{width:28px;height:28px;border:1px solid var(--line);border-radius:8px;display:grid;place-items:center;color:var(--text-3);transition:.15s}
 .row-action:hover{border-color:var(--line-3);color:var(--accent);background:var(--accent-soft)}
 .row-action .ico{width:14px;height:14px}
+.client-actions{display:flex;flex-direction:column;gap:4px;min-width:168px}
+.client-action{display:inline-flex;align-items:center;gap:7px;height:27px;padding:0 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--text-2);font:500 9px/1 var(--mono);letter-spacing:.03em;text-transform:none;text-decoration:none;white-space:nowrap;transition:.15s;cursor:pointer}
+.client-action .ico{width:13px;height:13px;flex:0 0 auto}
+.client-action:hover{border-color:var(--line-3);color:var(--accent);background:var(--accent-soft)}
+.client-action.danger:hover{border-color:color-mix(in srgb,var(--bad) 40%,transparent);color:var(--bad);background:color-mix(in srgb,var(--bad) 8%,transparent)}
 .empty-row td{text-align:center!important;padding:24px 0!important;color:var(--text-3)!important}
 .service-list{display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden}
 .service{display:flex;align-items:center;gap:11px;background:var(--surface);padding:13px}

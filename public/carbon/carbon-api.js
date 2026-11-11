@@ -445,14 +445,19 @@ function realClientRows() {
       <td class="mono" title="${escHtml(lastHandshakeTitle(handshake))}">${escHtml(lastHandshakeText(handshake))}</td>
       <td>${splitCell}</td>
       <td><span class="status ${online ? '' : 'idle'}"><span class="dot"></span>${online ? 'в сети' : 'не в сети'}</span></td>
-      <td><div class="page-actions"><button class="row-action" data-carbon-action="client-key" data-name="${escHtml(c.name)}" title="Ключ и QR">${icon('key')}</button><button class="row-action" data-carbon-action="client-rename" data-name="${escHtml(c.name)}" title="Переименовать">${icon('edit')}</button><button class="row-action" data-copy="${escHtml(c.ip || '')}" title="Скопировать IP">${icon('copy')}</button><button class="row-action" data-carbon-action="client-delete" data-name="${escHtml(c.name)}" title="Удалить">${icon('trash')}</button></div></td>
+      <td><div class="client-actions">
+        <a class="client-action" href="/api/download/${encodeURIComponent(c.name)}" title="Скачать конфиг">${icon('download')}<span>Скачать конфиг</span></a>
+        <button class="client-action" data-carbon-action="client-url" data-name="${escHtml(c.name)}" title="URL для подключения">${icon('link')}<span>URL для подключения</span></button>
+        <button class="client-action" data-carbon-action="client-rename" data-name="${escHtml(c.name)}" title="Редактировать">${icon('edit')}<span>Редактировать</span></button>
+        <button class="client-action danger" data-carbon-action="client-delete" data-name="${escHtml(c.name)}" title="Удалить">${icon('trash')}<span>Удалить</span></button>
+      </div></td>
     </tr>`;
   }).join('');
 }
 
 function realClientsTable() {
   return `<div class="table-tools"><div class="table-search">${icon('search')}<input id="clientSearch" placeholder="Имя или IP" aria-label="Фильтр клиентов"></div><button class="tag" data-toast="Клиентов: ${carbon.clients.length}">Все клиенты ${icon('arrow', 'ico')}</button></div>
-    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr><th>Клиент</th><th>IP</th><th>Состояние</th><th>Трафик</th><th>Последнее рукопожатие</th><th>Каскад / RU</th><th>Связь</th><th style="width:80px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
+    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr><th>Клиент</th><th>IP</th><th>Состояние</th><th>Трафик</th><th>Последнее рукопожатие</th><th>Каскад / RU</th><th>Связь</th><th style="width:190px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
 }
 
 function smoothTraffic(values, range) {

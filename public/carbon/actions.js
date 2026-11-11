@@ -347,6 +347,34 @@ async function carbonClientKey(name) {
   });
 }
 
+async function carbonClientUrl(name) {
+  let d;
+  try {
+    d = await api('/api/clients/' + encodeURIComponent(name) + '/key');
+  } catch (e) {
+    showToast(e.message || 'URL недоступен');
+    return;
+  }
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = `<div class="modal-card"><div class="modal-head"><div><div class="modal-title">URL для подключения</div><div class="modal-sub">${escHtml(name)} · AmneziaVPN</div></div><button class="icon-btn" data-url-close>✕</button></div>
+    ${d.qr ? `<img src="${escHtml(d.qr)}" alt="QR" style="width:220px;height:220px;background:#fff;padding:8px;border-radius:10px;display:block;margin:0 auto 12px">` : ''}
+    <label class="field"><span>Ссылка vpn://</span><textarea readonly rows="5" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:11px">${escHtml(d.uri || '')}</textarea></label>
+    <div class="modal-actions"><button class="btn btn-primary" data-url-copy>${icon('copy')}Скопировать URL</button></div></div>`;
+  document.body.appendChild(modal);
+  modal.hidden = false;
+  const close = () => modal.remove();
+  modal.querySelector('[data-url-close]').addEventListener('click', close);
+  modal.querySelector('[data-url-copy]').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(d.uri || '');
+      showToast('Скопировано');
+    } catch (e) {
+      showToast('Не удалось скопировать');
+    }
+  });
+}
+
 async function carbonClientRename(name) {
   showCarbonForm({
     title: 'Переименовать клиента',
@@ -1503,6 +1531,7 @@ document.addEventListener('click', async event => {
     else if (action === 'notify-save') await carbonNotifySave();
     else if (action === 'notify-test') { await api('/api/notify/test', { method: 'POST' }); showToast('Тестовое сообщение отправлено'); }
     else if (action === 'client-key') await carbonClientKey(name);
+    else if (action === 'client-url') await carbonClientUrl(name);
     else if (action === 'client-rename') await carbonClientRename(name);
     else if (action === 'client-bulk-rename') await carbonClientBulkRename();
     else if (action === 'client-delete') { if (confirm('Удалить клиента ' + name + '?')) { await api('/api/delete/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Клиент удалён'); } }
