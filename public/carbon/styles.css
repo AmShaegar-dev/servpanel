@@ -440,6 +440,7 @@ select.tz-focus { outline: 2px solid var(--accent); outline-offset: 2px; border-
 .keenetic-empty-icon .ico{width:26px;height:26px}
 .keenetic-events-card{margin-top:0}
 .keenetic-event{align-items:flex-start;gap:12px}
+.keenetic-error{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45;text-align:right}
 .keenetic-event b{display:flex;align-items:flex-start;gap:8px;line-height:1.35;min-width:0}
 .event-dot.bad{background:var(--bad)}
 .event-dot.warn{background:var(--warn)}

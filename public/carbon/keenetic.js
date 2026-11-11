@@ -140,9 +140,9 @@ function keeneticDetailHtml() {
           <div class="list-row"><b>Пользователь</b><span class="mono">${escHtml(r.user)}</span></div>
           <div class="list-row"><b>Транспорт</b><span class="mono">${escHtml(r.transport)}</span></div>
           <div class="list-row"><b>Профиль</b><span class="mono">${escHtml(st.profile || r.profile || 'auto')}</span></div>
-          <div class="list-row"><b>RCI</b><span class="mono">${escHtml(r.rciScheme || 'http')} : ${escHtml(r.rciPort || 80)}</span></div>
+          <div class="list-row"><b>RCI</b><span class="mono">${escHtml(st.rciScheme || r.rciScheme || 'auto')} : ${escHtml(st.rciPort || r.rciPort || 'авто')}</span></div>
           <div class="list-row"><b>Последняя проверка</b><span class="mono">${st.checkedAt ? keeneticAgo(st.checkedAt) : '—'}</span></div>
-          ${st.error ? `<div class="list-row"><b>Ошибка</b><span class="mono" style="color:var(--bad)">${escHtml(st.error)}</span></div>` : ''}
+          ${st.error ? `<div class="list-row"><b>Ошибка</b><span class="mono keenetic-error" style="color:var(--bad)">${escHtml(st.error)}</span></div>` : ''}
         </div>
         <div class="page-actions" style="margin-top:14px">
           <button class="btn" data-carbon-action="keenetic-test" data-id="${escHtml(r.id)}">${icon('pulse')}Проверить</button>
@@ -289,15 +289,15 @@ function keeneticAdd() {
       { name: 'password', label: 'Пароль', type: 'password', placeholder: 'Пароль администратора' },
       { name: 'transport', label: 'Транспорт', type: 'select', value: 'auto', options: keeneticTransportOptions() },
       { name: 'profile', label: 'Профиль KeeneticOS', type: 'select', value: 'auto', options: keeneticProfileOptions() },
-      { name: 'rciScheme', label: 'RCI-схема', type: 'select', value: 'http', options: [{ value: 'http', label: 'HTTP' }, { value: 'https', label: 'HTTPS' }] },
-      { name: 'rciPort', label: 'RCI-порт', type: 'number', value: 80, min: 1, max: 65535 }
+      { name: 'rciScheme', label: 'RCI-схема', type: 'select', value: 'auto', options: [{ value: 'auto', label: 'Авто' }, { value: 'http', label: 'HTTP' }, { value: 'https', label: 'HTTPS' }] },
+      { name: 'rciPort', label: 'RCI-порт (0 — авто)', type: 'number', value: 0, min: 0, max: 65535 }
     ],
     submitText: 'Добавить и проверить',
     onSubmit: async v => {
       const body = {
         name: v.name, host: v.host, port: Number(v.port) || 22, user: v.user || 'admin',
         password: v.password, transport: v.transport, profile: v.profile,
-        rciScheme: v.rciScheme, rciPort: Number(v.rciPort) || 80
+        rciScheme: v.rciScheme, rciPort: Number(v.rciPort) || 0
       };
       const d = await api('/api/keenetic/routers', { method: 'POST', body });
       const id = d.router && d.router.id;
@@ -323,14 +323,14 @@ function keeneticEdit(id) {
       { name: 'password', label: 'Новый пароль', type: 'password', placeholder: 'Не менять' },
       { name: 'transport', label: 'Транспорт', type: 'select', value: r.transport || 'auto', options: keeneticTransportOptions() },
       { name: 'profile', label: 'Профиль KeeneticOS', type: 'select', value: r.profile || 'auto', options: keeneticProfileOptions() },
-      { name: 'rciScheme', label: 'RCI-схема', type: 'select', value: r.rciScheme || 'http', options: [{ value: 'http', label: 'HTTP' }, { value: 'https', label: 'HTTPS' }] },
-      { name: 'rciPort', label: 'RCI-порт', type: 'number', value: r.rciPort || 80, min: 1, max: 65535 }
+      { name: 'rciScheme', label: 'RCI-схема', type: 'select', value: r.rciScheme || 'auto', options: [{ value: 'auto', label: 'Авто' }, { value: 'http', label: 'HTTP' }, { value: 'https', label: 'HTTPS' }] },
+      { name: 'rciPort', label: 'RCI-порт (0 — авто)', type: 'number', value: r.rciPort || 0, min: 0, max: 65535 }
     ],
     submitText: 'Сохранить',
     onSubmit: async v => {
       const body = {
         name: v.name, host: v.host, port: Number(v.port) || 22, user: v.user || 'admin',
-        transport: v.transport, profile: v.profile, rciScheme: v.rciScheme, rciPort: Number(v.rciPort) || 80
+        transport: v.transport, profile: v.profile, rciScheme: v.rciScheme, rciPort: Number(v.rciPort) || 0
       };
       if (v.password) body.password = v.password;
       await api('/api/keenetic/routers/' + encodeURIComponent(id), { method: 'PUT', body });
