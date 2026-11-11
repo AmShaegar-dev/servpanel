@@ -280,10 +280,10 @@ function keeneticProfileOptions() {
 function keeneticAdd() {
   showCarbonForm({
     title: 'Добавить роутер Keenetic',
-    sub: 'Панель проверит связь и определит модель/прошивку. Пароль хранится в зашифрованном виде.',
+    sub: 'Для роутера за NAT используйте KeenDNS-домен и HTTPS:443. Панель проверит связь и определит модель/прошивку.',
     fields: [
       { name: 'name', label: 'Имя', placeholder: 'Name' },
-      { name: 'host', label: 'Адрес / IP', placeholder: '192.168.1.1' },
+      { name: 'host', label: 'Адрес / IP / домен', placeholder: '192.168.1.1 или name.crazedns.ru' },
       { name: 'port', label: 'SSH-порт', type: 'number', value: 22, min: 1, max: 65535 },
       { name: 'user', label: 'Пользователь', value: 'admin' },
       { name: 'password', label: 'Пароль', type: 'password', placeholder: 'Пароль администратора' },
@@ -317,7 +317,7 @@ function keeneticEdit(id) {
     sub: 'Пароль оставьте пустым, чтобы не менять.',
     fields: [
       { name: 'name', label: 'Имя', value: r.name },
-      { name: 'host', label: 'Адрес / IP', value: r.host },
+      { name: 'host', label: 'Адрес / IP / домен', value: r.host },
       { name: 'port', label: 'SSH-порт', type: 'number', value: r.port, min: 1, max: 65535 },
       { name: 'user', label: 'Пользователь', value: r.user },
       { name: 'password', label: 'Новый пароль', type: 'password', placeholder: 'Не менять' },
