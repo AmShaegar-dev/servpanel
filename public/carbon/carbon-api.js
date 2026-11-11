@@ -463,6 +463,10 @@ function clientSortValue(c, key) {
       const order = { active: 3, recent: 2, inactive: 1, no_handshake: 0 };
       return order[c.status_code] != null ? order[c.status_code] : 0;
     }
+    case 'isolation': {
+      const order = { isolated: 2, shared: 1, default: 0 };
+      return order[c.isolation_mode] != null ? order[c.isolation_mode] : 0;
+    }
     case 'traffic':
       return clientTrafficValue(c);
     case 'handshake':
@@ -484,7 +488,7 @@ function clientSortValue(c, key) {
 function carbonClientSort(key) {
   const s = carbon.clientSort || (carbon.clientSort = { key: 'name', desc: false });
   if (s.key === key) s.desc = !s.desc;
-  else { s.key = key; s.desc = key === 'ru'; }
+  else { s.key = key; s.desc = key === 'ru' || key === 'isolation'; }
   const tbody = document.querySelector('#clientsTable tbody');
   if (tbody) tbody.innerHTML = realClientRows();
   const search = document.getElementById('clientSearch');
@@ -498,7 +502,7 @@ function carbonClientSort(key) {
 }
 
 function realClientRows() {
-  if (!carbon.clients.length) return `<tr class="empty-row"><td colspan="8">Клиентов пока нет. Создайте первого.</td></tr>`;
+  if (!carbon.clients.length) return `<tr class="empty-row"><td colspan="9">Клиентов пока нет. Создайте первого.</td></tr>`;
   const d = carbon.distribution || {};
   const isEu = (d.role || 'ru') === 'eu';
   const pctText = v => v >= 10 ? Math.round(v) + '%' : v >= 0.1 ? v.toFixed(1) + '%' : '0%';
@@ -538,15 +542,16 @@ function realClientRows() {
         ? `<div class="split-bar" title="${escHtml(title)}"><span style="width:${cascadePct.toFixed(1)}%;background:#5b8cff"></span><span style="width:${directPct.toFixed(1)}%;background:var(--accent)"></span></div><span class="share-pct">${pctText(cascadePct)} / ${pctText(directPct)}</span>`
         : `<div class="split-bar" title="Нет данных"><span style="width:100%;background:var(--surface-3)"></span></div><span class="share-pct">нет данных</span>`;
     const isoMode = c.isolation_mode || 'default';
-    const isoBadge = isoMode === 'isolated'
-      ? `<span class="iso-badge on" title="Изоляция от других клиентов включена">${icon('shield')}</span>`
+    const isoCell = isoMode === 'isolated'
+      ? '<span class="status"><span class="dot"></span>изолирован</span>'
       : isoMode === 'shared'
-        ? `<span class="iso-badge off" title="Изоляция от других клиентов снята">${icon('users')}</span>`
-        : '';
+        ? '<span class="status shared"><span class="dot"></span>общий</span>'
+        : '<span class="status muted"><span class="dot"></span>по умолчанию</span>';
     return `<tr data-name="${escHtml(c.name)}" data-ip="${escHtml(c.ip)}">
-      <td class="name">${escHtml(c.name)}${isoBadge}</td>
+      <td class="name">${escHtml(c.name)}</td>
       <td class="mono">${escHtml(c.ip || '—')}</td>
       <td>${escHtml(clientStateText(c, online))}</td>
+      <td>${isoCell}</td>
       <td class="mono">${fmtBytes(traffic)}${limitNote}</td>
       <td class="mono" title="${escHtml(lastHandshakeTitle(handshake))}">${escHtml(lastHandshakeText(handshake))}</td>
       <td>${splitCell}</td>
@@ -569,7 +574,7 @@ function clientSortHead(key, label, title = 'Сортировать') {
 
 function realClientsTable() {
   return `<div class="table-tools"><div class="table-search">${icon('search')}<input id="clientSearch" type="search" name="client-search" placeholder="Имя или IP" aria-label="Фильтр клиентов" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"></div><button class="tag" data-toast="Клиентов: ${carbon.clients.length}">Все клиенты ${icon('arrow', 'ico')}</button></div>
-    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr>${clientSortHead('name', 'Клиент')}${clientSortHead('ip', 'IP')}${clientSortHead('state', 'Состояние')}${clientSortHead('traffic', 'Трафик')}${clientSortHead('handshake', 'Последнее рукопожатие')}${clientSortHead('ru', 'Каскад / RU', 'Сортировать по доле RU')}${clientSortHead('connection', 'Связь')}<th style="width:190px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
+    <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr>${clientSortHead('name', 'Клиент')}${clientSortHead('ip', 'IP')}${clientSortHead('state', 'Состояние')}${clientSortHead('isolation', 'Изоляция')}${clientSortHead('traffic', 'Трафик')}${clientSortHead('handshake', 'Последнее рукопожатие')}${clientSortHead('ru', 'Каскад / RU', 'Сортировать по доле RU')}${clientSortHead('connection', 'Связь')}<th style="width:190px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
 }
 
 function smoothTraffic(values, range) {
