@@ -31,9 +31,9 @@ function keeneticStatusTag(r) {
 }
 
 function keeneticTunnelState(t) {
-  if (!t || !t.up) return { cls: 'idle', label: 'не в сети' };
-  if (t.online === false) return { cls: 'idle', label: 'нет рукопожатия' };
-  return { cls: '', label: 'в сети' };
+  if (!t || !t.up || t.link === 'down' || t.empty) return { cls: 'down', label: 'упал', code: 'DOWN' };
+  if (t.online === false) return { cls: 'standby', label: 'неактивен', code: 'STANDBY' };
+  return { cls: 'active', label: 'в сети', code: 'UP' };
 }
 
 function keeneticRouterCard(r) {
@@ -101,16 +101,32 @@ function keeneticOverviewHtml() {
 function keeneticFlow(r) {
   const st = r.status || {};
   const tunnels = Array.isArray(st.tunnels) ? st.tunnels : [];
-  return `<div class="keenetic-flow">
+  const states = tunnels.map(keeneticTunnelState);
+  let flowState = 'down';
+  if (states.some(x => x.cls === 'active')) flowState = 'active';
+  else if (states.some(x => x.cls === 'standby')) flowState = 'standby';
+  const branches = tunnels.length ? tunnels.map(t => {
+    const ts = keeneticTunnelState(t);
+    const label = t.description || t.name;
+    return `<div class="keenetic-flow-branch ${ts.cls}">
+      <div class="keenetic-flow-line"></div>
+      <div class="keenetic-flow-tunnel ${ts.cls}" title="${escHtml(label + ' · ' + t.name + (t.peer ? ' · ' + t.peer : ''))}">
+        <span class="dot"></span>
+        <div class="keenetic-flow-tunnel-text"><b>${escHtml(label)}</b><span>${escHtml(t.name + ' · ' + ts.code)}</span></div>
+      </div>
+      <div class="keenetic-flow-line"></div>
+    </div>`;
+  }).join('') : `<div class="keenetic-flow-branch down">
+      <div class="keenetic-flow-line"></div>
+      <div class="keenetic-flow-tunnel down"><span class="dot"></span><div class="keenetic-flow-tunnel-text"><b>Туннели не найдены</b><span>—</span></div></div>
+      <div class="keenetic-flow-line"></div>
+    </div>`;
+  return `<div class="keenetic-flow state-${flowState}">
     <div class="keenetic-flow-node"><div class="keenetic-flow-ico">${icon('monitor')}</div><b>Локальная сеть</b></div>
-    <div class="keenetic-flow-line"></div>
+    <div class="keenetic-flow-line main"></div>
     <div class="keenetic-flow-node router"><div class="keenetic-flow-ico">${icon('cascade')}</div><b>${escHtml(r.name)}</b><span>${escHtml(r.host)}</span></div>
-    <div class="keenetic-flow-line split"></div>
-    <div class="keenetic-flow-tunnels">${tunnels.length ? tunnels.map(t => `<div class="keenetic-flow-tunnel ${t.up && t.online !== false ? 'up' : 'down'}">
-      <span class="dot"></span><b>${escHtml(t.name)}</b><span>${escHtml(t.up ? (t.online === false ? 'нет рукопожатия' : 'up') : (t.state || 'down'))}</span>
-    </div>`).join('') : '<div class="keenetic-flow-tunnel down"><span class="dot"></span><b>Туннели не найдены</b></div>'}</div>
-    <div class="keenetic-flow-line"></div>
-    <div class="keenetic-flow-node"><div class="keenetic-flow-ico">${icon('globe')}</div><b>Интернет</b></div>
+    <div class="keenetic-flow-branches">${branches}</div>
+    <div class="keenetic-flow-node"><div class="keenetic-flow-ico">${icon('globe')}</div><b>WAN</b></div>
   </div>`;
 }
 
@@ -140,8 +156,8 @@ function keeneticDetailHtml() {
         <td class="mono">${t.rx || t.tx ? '↓ ' + fmtBytes(t.rx) + ' · ↑ ' + fmtBytes(t.tx) : '—'}</td>
         <td>${escHtml(t.description || '—')}</td>
         <td><div class="keenetic-row-actions">
-          <button class="row-action" title="${t.up ? 'Выключить туннель' : 'Включить туннель'}" data-carbon-action="keenetic-tunnel-toggle" data-id="${escHtml(r.id)}" data-name="${escHtml(t.name)}" data-up="${t.up ? '1' : '0'}">${icon(t.up ? 'stop' : 'play')}</button>
-          <button class="row-action" title="Перезапустить туннель" data-carbon-action="keenetic-tunnel-restart" data-id="${escHtml(r.id)}" data-name="${escHtml(t.name)}">${icon('refresh')}</button>
+          ${t.empty ? `<button class="row-action" disabled title="Пустой интерфейс — управление недоступно">${icon('stop')}</button>` : `<button class="row-action" title="${t.up ? 'Выключить туннель' : 'Включить туннель'}" data-carbon-action="keenetic-tunnel-toggle" data-id="${escHtml(r.id)}" data-name="${escHtml(t.name)}" data-up="${t.up ? '1' : '0'}">${icon(t.up ? 'stop' : 'play')}</button>
+          <button class="row-action" title="Перезапустить туннель" data-carbon-action="keenetic-tunnel-restart" data-id="${escHtml(r.id)}" data-name="${escHtml(t.name)}">${icon('refresh')}</button>`}
         </div></td>
       </tr>`; }).join('') || '<tr><td colspan="9">Туннели не найдены</td></tr>'}</tbody></table></div>
       <div class="keenetic-table-note">Действия применяются через RCI. Выключение туннеля прервёт связь через него.</div></section>`;

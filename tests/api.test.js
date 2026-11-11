@@ -849,7 +849,10 @@ test('Keenetic: парсинг версии, системы и туннелей'
     assert.equal(real[0].online, true);
 
     const empty = t.parseInterfacesJson({ Wireguard99: { state: 'up', link: 'down', type: 'Wireguard', wireguard: { 'listen-port': 45372, status: 'up' } } });
-    assert.equal(empty.length, 0);
+    assert.equal(empty.length, 1);
+    assert.equal(empty[0].empty, true);
+    assert.equal(empty[0].online, false);
+    assert.equal(empty[0].link, 'down');
 
     assert.equal(t.validTunnelName('Wireguard2'), true);
     assert.equal(t.validTunnelName('AmneziaWG0'), true);
