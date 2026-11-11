@@ -270,6 +270,8 @@ button{background:none;border:0;cursor:pointer}a{color:inherit;text-decoration:n
 .code-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border-bottom:1px solid #222}
 .code-head span{font:500 9px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#8b8b93}
 .code pre{margin:0;padding:12px;overflow:auto;font:400 11px/1.6 var(--mono);color:#e8e4ef;white-space:pre-wrap}
+pre.code{color:#fff}
+pre.code::selection,.code pre::selection{background:rgba(91,140,255,.35);color:#fff}
 .code .copy{font:500 9px/1 var(--mono);color:#c8c4d2;border:1px solid #2e2e36;border-radius:7px;padding:5px 7px}
 .code .copy:hover{border-color:#4a4a55;color:#fff}
 .mini-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
