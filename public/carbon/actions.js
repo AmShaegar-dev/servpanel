@@ -5,6 +5,10 @@
 function carbonSleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function carbonRefresh(message) {
+  try {
+    const clients = await api('/api/clients');
+    if (Array.isArray(clients)) carbon.clients = mergeClientData(carbon.clients, clients);
+  } catch (e) { /* обновим из /api/stats ниже */ }
   await loadCarbonData();
   render();
   if (message) showToast(message);

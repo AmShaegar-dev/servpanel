@@ -302,7 +302,7 @@ async function loadCarbonData() {
     safe('/api/server-info'), safe('/api/sysinfo'), safe('/api/panel/settings')
   ]);
   carbon.stats = Array.isArray(stats) ? stats : [];
-  if (!carbon.clients.length && carbon.stats.length) carbon.clients = carbon.stats;
+  if (carbon.stats.length) carbon.clients = mergeClientData(carbon.clients, carbon.stats);
   carbon.modules = (modules && modules.modules) || carbon.modules;
   carbon.services = Array.isArray(services) ? services : carbon.services;
   if (security) carbon.security = security;
@@ -323,14 +323,14 @@ let dashboardExtrasLoading = null;
 function assignCarbonPath(path, data) {
   if (!data) return false;
   const p = String(path).split('?')[0];
-  if (p === '/api/stats') { if (Array.isArray(data)) { carbon.stats = data; carbon.clients = data; } else return false; }
+  if (p === '/api/stats') { if (Array.isArray(data)) { carbon.stats = data; carbon.clients = mergeClientData(carbon.clients, data); } else return false; }
   else if (p === '/api/sysinfo') carbon.sys = data;
   else if (p === '/api/modules') { carbon.modules = data.modules || carbon.modules; }
   else if (p === '/api/services') { if (Array.isArray(data)) carbon.services = data; else return false; }
   else if (p === '/api/security/status') carbon.security = data;
   else if (p === '/api/interfaces') { if (Array.isArray(data)) carbon.interfaces = data; else return false; }
   else if (p === '/api/update/info') carbon.update = data;
-  else if (p === '/api/clients') { if (Array.isArray(data)) carbon.clients = data; else return false; }
+  else if (p === '/api/clients') { if (Array.isArray(data)) carbon.clients = mergeClientData(carbon.clients, data); else return false; }
   else if (p === '/api/ufw') carbon.ufw = data;
   else if (p === '/api/iptables') carbon.iptables = data;
   else if (p === '/api/tools/status') carbon.toolsStatus = data;
@@ -376,7 +376,7 @@ function loadDashboardExtras() {
   if (!carbon.clients.length) {
     api('/api/stats').then(stats => {
       if (!Array.isArray(stats)) return;
-      carbon.clients = stats;
+      carbon.clients = mergeClientData(carbon.clients, stats);
       carbonLastStatsAt = Date.now();
       if (typeof state !== 'undefined' && state.tab === 'dashboard') {
         updateDashboardClients();
@@ -440,6 +440,19 @@ function clientTrafficValue(c) {
   const total = Number(c && c.total_octets);
   if (Number.isFinite(total) && total > 0) return total;
   return (Number(c && c.rx) || 0) + (Number(c && c.tx) || 0);
+}
+
+// Объединяет свежие данные клиента со старыми полями, которых нет в
+// /api/stats (лимиты, квоты). Новые поля всегда перекрывают старые.
+function mergeClientData(prev, next) {
+  const old = new Map();
+  (Array.isArray(prev) ? prev : []).forEach(c => {
+    if (c && (c.ip || c.name)) old.set(c.ip || c.name, c);
+  });
+  return (Array.isArray(next) ? next : []).map(c => {
+    const base = old.get(c.ip || c.name) || {};
+    return { ...base, ...c };
+  });
 }
 
 function lastHandshakeText(ts) {
@@ -1293,7 +1306,7 @@ async function refreshDashboardStats() {
     // manage stats на медленных VPS идёт 2-4 с — отдельный редкий опрос.
     const stats = await api('/api/stats').catch(() => null);
     if (Array.isArray(stats)) {
-      carbon.clients = stats;
+      carbon.clients = mergeClientData(carbon.clients, stats);
       carbonLastStatsAt = Date.now();
       updateDashboardClients();
       applyShellData();
