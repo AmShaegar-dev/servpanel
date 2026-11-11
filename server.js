@@ -6985,9 +6985,48 @@ function findClientByName(name) {
     return item;
 }
 
+const AWG_LIMIT_SCRIPT = '/root/awg-limit.sh';
+const AWG_LIMIT_SCRIPT_TEXT = [
+    '#!/bin/bash',
+    'set -euo pipefail',
+    'IFACE="${AWG_LIMIT_IFACE:-awg0}"',
+    'IP="${1:-}"',
+    'RATE="${2:-}"',
+    'case "$IP" in *[!0-9.]*|"") echo "bad ip" >&2; exit 2 ;; esac',
+    'case "$RATE" in *[!0-9]*|"") echo "bad rate" >&2; exit 2 ;; esac',
+    'LAST="${IP##*.}"',
+    'CLASS="1:${LAST}"',
+    'PRIO="${LAST}"',
+    'if ! tc qdisc show dev "$IFACE" | grep -q "htb 1:"; then',
+    '    tc qdisc replace dev "$IFACE" root handle 1: htb default 999',
+    '    tc class replace dev "$IFACE" parent 1: classid 1:999 htb rate 10000mbit ceil 10000mbit || true',
+    'fi',
+    'if ! tc qdisc show dev "$IFACE" | grep -q "ingress ffff:"; then',
+    '    tc qdisc add dev "$IFACE" handle ffff: ingress || true',
+    'fi',
+    'while tc filter del dev "$IFACE" parent 1: protocol ip prio "$PRIO" 2>/dev/null; do :; done',
+    'tc class del dev "$IFACE" classid "$CLASS" 2>/dev/null || true',
+    'while tc filter del dev "$IFACE" parent ffff: protocol ip prio "$PRIO" 2>/dev/null; do :; done',
+    'if [ "$RATE" -gt 0 ]; then',
+    '    tc class add dev "$IFACE" parent 1: classid "$CLASS" htb rate "${RATE}mbit" ceil "${RATE}mbit"',
+    '    tc filter add dev "$IFACE" parent 1: protocol ip prio "$PRIO" u32 match ip dst "$IP/32" flowid "$CLASS"',
+    '    tc filter add dev "$IFACE" parent ffff: protocol ip prio "$PRIO" u32 match ip src "$IP/32" police rate "${RATE}mbit" burst 1m drop',
+    'fi',
+    'echo "OK: $IP ${RATE} Mbit/s"',
+    ''
+].join('\n');
+
+function ensureAwgLimitScript() {
+    try {
+        if (fs.existsSync(AWG_LIMIT_SCRIPT)) return;
+        writeRootFile(AWG_LIMIT_SCRIPT, AWG_LIMIT_SCRIPT_TEXT, '0755');
+    } catch (e) { /* ignore */ }
+}
+
 function applyClientRate(ip, rate) {
+    ensureAwgLimitScript();
     return new Promise((resolve, reject) => {
-        execFile('sudo', ['bash', '/root/awg-limit.sh', String(ip), String(rate)], {
+        execFile('sudo', ['bash', AWG_LIMIT_SCRIPT, String(ip), String(rate)], {
             maxBuffer: 8 * 1024 * 1024,
             timeout: 30000
         }, (error, stdout, stderr) => {
