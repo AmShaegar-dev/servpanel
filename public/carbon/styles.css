@@ -415,3 +415,64 @@ select.tz-focus { outline: 2px solid var(--accent); outline-offset: 2px; border-
 ::-webkit-scrollbar-corner { background: var(--bg); }
 .nav::-webkit-scrollbar, .table-scroll::-webkit-scrollbar, .modal-card::-webkit-scrollbar, .code pre::-webkit-scrollbar { width: 8px; height: 8px; }
 .nav::-webkit-scrollbar-thumb, .table-scroll::-webkit-scrollbar-thumb, .modal-card::-webkit-scrollbar-thumb, .code pre::-webkit-scrollbar-thumb { background: var(--line-3); border-width: 2px; }
+
+/* Keenetic fleet */
+.keenetic-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:16px}
+.keenetic-card{background:var(--surface-1);border:1px solid var(--line);border-radius:16px;padding:16px;cursor:pointer;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;animation:keeneticIn .32s ease both}
+.keenetic-card:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--accent) 38%,var(--line));box-shadow:0 12px 30px rgba(0,0,0,.16)}
+.keenetic-card.is-offline{opacity:.82}
+.keenetic-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+.keenetic-card-name{display:flex;align-items:center;gap:8px;min-width:0}
+.keenetic-card-name b{font-size:14px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.keenetic-card-model{font:500 10px/1.4 var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.keenetic-card-host{font:500 10px/1.4 var(--mono);color:var(--text-3);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.keenetic-bars{display:flex;flex-direction:column;gap:6px;margin:14px 0 12px}
+.keenetic-bar{display:grid;grid-template-columns:32px 1fr 38px;align-items:center;gap:8px;font:500 9px/1 var(--mono);color:var(--text-3);text-transform:uppercase;letter-spacing:.06em}
+.keenetic-bar>div{height:4px;border-radius:99px;background:var(--surface-3);overflow:hidden}
+.keenetic-bar i{display:block;height:100%;border-radius:99px;background:var(--accent);transition:width .4s ease}
+.keenetic-bar b{text-align:right;color:var(--text-2);font-weight:600}
+.keenetic-card-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:10px;border-top:1px solid var(--line);font:500 9px/1 var(--mono);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em}
+.keenetic-card-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px}
+.keenetic-last{font:500 8px/1 var(--mono);color:var(--text-3);text-align:right}
+.keenetic-card .dot.pulse{animation:keeneticPulse 1.8s ease-in-out infinite}
+.keenetic-empty{display:flex;align-items:center;gap:16px;padding:22px;margin-bottom:16px}
+.keenetic-empty-icon{width:52px;height:52px;border-radius:15px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);flex:0 0 auto}
+.keenetic-empty-icon .ico{width:26px;height:26px}
+.keenetic-events-card{margin-top:0}
+.keenetic-event{align-items:flex-start;gap:12px}
+.keenetic-event b{display:flex;align-items:flex-start;gap:8px;line-height:1.35;min-width:0}
+.event-dot.bad{background:var(--bad)}
+.event-dot.warn{background:var(--warn)}
+.event-dot.good{background:var(--good)}
+.event-dot.info{background:var(--text-3)}
+.keenetic-tabs{display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--line);margin:0 0 16px;overflow-x:auto}
+.keenetic-tab{border:0;background:none;color:var(--text-3);font:500 10px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:10px 12px;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;transition:color .15s,border-color .15s}
+.keenetic-tab:hover{color:var(--text)}
+.keenetic-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.keenetic-detail-head .page-title{margin-bottom:2px}
+.keenetic-detail-head .btn-sm{margin-bottom:0}
+.keenetic-flow{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:230px;padding:18px 8px;flex-wrap:wrap}
+.keenetic-flow-node{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:92px;text-align:center;color:var(--text-2)}
+.keenetic-flow-node b{font-size:11px;font-weight:600}
+.keenetic-flow-node span{font:500 9px/1 var(--mono);color:var(--text-3)}
+.keenetic-flow-ico{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--line-3);background:var(--surface-2);color:var(--text-2)}
+.keenetic-flow-ico .ico{width:23px;height:23px}
+.keenetic-flow-node.router .keenetic-flow-ico{border-color:color-mix(in srgb,var(--accent) 55%,var(--line));color:var(--accent);background:var(--accent-soft)}
+.keenetic-flow-line{height:2px;flex:1 1 30px;min-width:22px;background:linear-gradient(90deg,var(--line-3),var(--accent),var(--line-3));opacity:.6}
+.keenetic-flow-line.split{display:none}
+.keenetic-flow-tunnels{display:flex;flex-direction:column;gap:7px;flex:1 1 190px;min-width:170px}
+.keenetic-flow-tunnel{display:flex;align-items:center;gap:7px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font:500 9px/1 var(--mono);color:var(--text-3);text-transform:uppercase;letter-spacing:.04em}
+.keenetic-flow-tunnel b{color:var(--text-2);font-weight:600;text-transform:none;letter-spacing:0;font-size:10px}
+.keenetic-flow-tunnel .dot{width:6px;height:6px;background:var(--warn)}
+.keenetic-flow-tunnel.up .dot{background:var(--good);box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 14%,transparent)}
+.keenetic-flow-tunnel.down{opacity:.65}
+.keenetic-flow-tunnel.down .dot{background:var(--bad)}
+@keyframes keeneticIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes keeneticPulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--good) 40%,transparent)}50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--good) 0%,transparent)}}
+@media(max-width:900px){
+  .keenetic-flow{flex-direction:column;align-items:stretch}
+  .keenetic-flow-node{flex-direction:row;justify-content:center}
+  .keenetic-flow-line{width:2px;height:24px;min-height:24px;flex:0 0 24px;align-self:center;background:linear-gradient(180deg,var(--line-3),var(--accent),var(--line-3))}
+  .keenetic-flow-tunnels{flex:0 1 auto}
+  .keenetic-empty{align-items:flex-start;flex-direction:column}
+}

@@ -1706,6 +1706,14 @@ document.addEventListener('click', async event => {
     else if (action === 'diag-wan') await carbonDiagWan();
     else if (action === 'chart-range') await carbonChartRange(btn.dataset.range || '1h');
     else if (action === 'timezone') openDashboardTimezone();
+    else if (action === 'keenetic-add') keeneticAdd();
+    else if (action === 'keenetic-open') keeneticOpen(btn.dataset.id);
+    else if (action === 'keenetic-back') keeneticBack();
+    else if (action === 'keenetic-detail-tab') keeneticDetailTab(btn.dataset.tab);
+    else if (action === 'keenetic-test') await keeneticTest(btn.dataset.id);
+    else if (action === 'keenetic-edit') keeneticEdit(btn.dataset.id);
+    else if (action === 'keenetic-delete') await keeneticDelete(btn.dataset.id);
+    else if (action === 'keenetic-refresh') await keeneticLoad('Обновлено');
     else if (action === 'obf-generate') await carbonObfGenerate();
     else if (action === 'obf-import') await carbonObfImport();
     else if (action === 'obf-sync') await carbonObfSync();

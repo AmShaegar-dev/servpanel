@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Servpanel — Carbon</title>
-<link rel="stylesheet" href="styles.css?v=3.2.67">
+<link rel="stylesheet" href="styles.css?v=3.2.68">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -59,6 +59,8 @@
       <div class="nav-label">Обзор</div>
       <button class="nav-item active" data-tab="dashboard"><svg class="ico"><use href="#i-grid"/></svg>Дашборд<span class="nav-dot"></span></button>
       <button class="nav-item" data-tab="clients"><svg class="ico"><use href="#i-users"/></svg>Клиенты<span class="nav-count">0</span></button>
+      <div class="nav-label">РОУТЕРЫ</div>
+      <button class="nav-item" data-tab="keenetic"><svg class="ico"><use href="#i-cascade"/></svg>Keenetic</button>
       <div class="nav-label">Установка</div>
       <button class="nav-item" data-tab="install"><svg class="ico"><use href="#i-download"/></svg>Установка</button>
       <div class="nav-label">Подключение</div>
@@ -91,6 +93,7 @@
       <div class="top-tabs" id="topTabs">
         <button class="top-tab active" data-tab="dashboard">Обзор</button>
         <button class="top-tab" data-tab="clients">Клиенты</button>
+        <button class="top-tab" data-tab="keenetic">Keenetic</button>
         <button class="top-tab" data-tab="cascade">Каскад</button>
         <button class="top-tab" data-tab="services">Службы</button>
       </div>
@@ -182,8 +185,9 @@
   </div>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-<script src="app.js?v=3.2.67"></script>
-<script src="carbon-api.js?v=3.2.67"></script>
-<script src="actions.js?v=3.2.67"></script>
+<script src="app.js?v=3.2.68"></script>
+<script src="carbon-api.js?v=3.2.68"></script>
+<script src="actions.js?v=3.2.68"></script>
+<script src="keenetic.js?v=3.2.68"></script>
 </body>
 </html>

@@ -26,7 +26,8 @@ const carbon = {
   iptables: null,
   toolsStatus: null,
   fail2ban: null,
-  warp: null
+  warp: null,
+  keenetic: { overview: null, routers: [], events: [], selected: null, tab: 'overview' }
 };
 
 async function api(path, options = {}) {
@@ -324,6 +325,9 @@ function assignCarbonPath(path, data) {
   if (!data) return false;
   const p = String(path).split('?')[0];
   if (p === '/api/stats') { if (Array.isArray(data)) { carbon.stats = data; carbon.clients = mergeClientData(carbon.clients, data); } else return false; }
+  else if (p === '/api/keenetic/overview') { carbon.keenetic.overview = data; carbon.keenetic.routers = Array.isArray(data && data.routers) ? data.routers : []; carbon.keenetic.events = Array.isArray(data && data.events) ? data.events : []; }
+  else if (p === '/api/keenetic/routers') { carbon.keenetic.routers = Array.isArray(data) ? data : (Array.isArray(data && data.routers) ? data.routers : carbon.keenetic.routers); }
+  else if (p === '/api/keenetic/events') { carbon.keenetic.events = Array.isArray(data) ? data : (Array.isArray(data && data.events) ? data.events : carbon.keenetic.events); }
   else if (p === '/api/sysinfo') carbon.sys = data;
   else if (p === '/api/modules') { carbon.modules = data.modules || carbon.modules; }
   else if (p === '/api/services') { if (Array.isArray(data)) carbon.services = data; else return false; }
@@ -389,6 +393,7 @@ function loadDashboardExtras() {
 
 const TAB_DATA = {
   dashboard: ['/api/stats', '/api/sysinfo', '/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global', '/api/traffic/distribution'],
+  keenetic: ['/api/keenetic/overview', '/api/keenetic/events'],
   clients: ['/api/clients'],
   install: ['/api/modules'],
   network: ['/api/interfaces', '/api/ufw', '/api/iptables', '/api/awg/config'],

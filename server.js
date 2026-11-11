@@ -33,6 +33,7 @@ const sshBuild = require('./lib/cascade-ssh-build');
 const awgArchitect = require('./lib/awg-architect');
 const sshRunner = require('./lib/cascade-ssh');
 const sshAccess = require('./lib/ssh-access');
+const { createKeenetic } = require('./lib/keenetic');
 const { ensureAwg } = require('./lib/cascade-remote');
 const { createProxyBot } = require('./lib/proxy-bot');
 
@@ -1897,6 +1898,13 @@ app.use('/api', (req, res, next) => {
     if (req.method === 'POST' && (apiPath === '/logout' || apiPath === '/change-password')) return next();
     return res.status(403).json({ error: 'Недостаточно прав: режим только просмотра' });
 });
+
+// Keenetic fleet: отдельный модуль, чтобы не раздувать server.js.
+const keenetic = createKeenetic({
+    DATA_DIR, SECRETS, TEST_MODE, DEMO_MODE, checkAuth, requireAdmin, auditLog
+});
+keenetic.registerRoutes(app);
+keenetic.start();
 
 // ---------------------------------------------------------------------------
 // Сбор истории трафика

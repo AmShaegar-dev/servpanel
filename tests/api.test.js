@@ -786,6 +786,42 @@ test('Скорость клиентов: поля скорости добавл�
     assert.equal(second[0].total_speed, second[0].rx_speed + second[0].tx_speed);
 });
 
+test('Keenetic: парсинг версии, системы и туннелей', () => {
+    const { createKeenetic } = require('../lib/keenetic');
+    const k = createKeenetic({
+        DATA_DIR,
+        SECRETS: { sessionSecret: 'test-secret' },
+        TEST_MODE: true,
+        DEMO_MODE: false,
+        checkAuth: (req, res, next) => next(),
+        requireAdmin: (req, res, next) => next(),
+        auditLog: () => {}
+    });
+    const t = k._test;
+    assert.equal(t.profileFromFirmware('5.1 Alpha 0'), '5.1');
+    assert.equal(t.profileFromFirmware('4.3 LTS'), '4.3');
+    const v = t.parseVersionJson({ release: '5.01.A.0.0-0', title: '5.1 Alpha 0', arch: 'mips', hw_id: 'KN-2111', device: 'Carrier DSL', sandbox: 'nightly' });
+    assert.equal(v.model, 'KN-2111');
+    assert.equal(v.profile, '5.1');
+    assert.equal(v.branch, 'nightly');
+    const s = t.parseSystemJson({ cpuload: 7, memory: '80/128', uptime: '942' });
+    assert.equal(s.cpu, 7);
+    assert.equal(s.ram, 63);
+    assert.equal(s.uptimeSeconds, 942);
+    const cv = t.parseCliVersion('KeeneticOS version: 4.2.1\nModel: KN-1010');
+    assert.equal(cv.profile, '4.2');
+    const cs = t.parseCliSystem('cpuload: 12\nmemory: 64/256\nuptime: 3600');
+    assert.equal(cs.ram, 25);
+    assert.equal(cs.uptime, '1ч 0м');
+    const tunnels = t.parseInterfacesJson({ Wireguard0: { up: true, state: 'up', address: '10.9.0.2', endpoint: '203.0.113.20:3478' } });
+    assert.equal(tunnels.length, 1);
+    assert.equal(tunnels[0].name, 'Wireguard0');
+    assert.equal(tunnels[0].up, true);
+    const cliTunnels = t.parseCliInterfaces('Interface: Wireguard0\n  state: up\n  address: 10.9.0.2');
+    assert.equal(cliTunnels.length, 1);
+    assert.equal(cliTunnels[0].name, 'Wireguard0');
+});
+
 test('Git: origin старого аккаунта переключается на новый', () => {
     const { spawnSync } = require('child_process');
     if (spawnSync('git', ['--version'], { timeout: 5000 }).status !== 0) return;
