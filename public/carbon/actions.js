@@ -102,12 +102,61 @@ function fileToBase64(file) {
   });
 }
 
+function carbonUpdateModal() {
+  let modal = document.getElementById('carbonUpdateProgress');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'carbonUpdateProgress';
+    modal.className = 'modal';
+    modal.innerHTML = `<div class="modal-card modal-wide"><div class="modal-head"><div><div class="modal-title">Обновление панели</div><div class="modal-sub" data-upd-msg>Запуск обновления…</div></div></div>
+      <div class="progress" style="margin:4px 0 12px"><span data-upd-bar style="width:0%"></span></div>
+      <div class="list"><div class="list-row"><b>Шаг</b><span class="mono" data-upd-step>—</span></div><div class="list-row"><b>Статус</b><span class="tag" data-upd-state>ожидание</span></div></div>
+      <pre class="code" data-upd-log style="margin:12px 0 0;max-height:45vh;overflow:auto;padding:10px;white-space:pre-wrap">Журнал пуст</pre>
+      <div data-upd-error style="display:none;margin-top:10px;color:var(--bad);font-size:12px"></div>
+      <div class="modal-actions"><button class="btn" data-upd-close disabled>Закрыть</button></div></div>`;
+    document.body.appendChild(modal);
+    modal.hidden = false;
+    modal.querySelector('[data-upd-close]').addEventListener('click', () => modal.remove());
+  }
+  return modal;
+}
+
+function renderUpdateProgress(d) {
+  const modal = carbonUpdateModal();
+  if (!modal) return;
+  const running = !!d.running;
+  const ok = !!d.ok;
+  const progress = running ? (Number(d.progress) || 0) : (ok ? 100 : (Number(d.progress) || 0));
+  const msg = modal.querySelector('[data-upd-msg]');
+  const bar = modal.querySelector('[data-upd-bar]');
+  const step = modal.querySelector('[data-upd-step]');
+  const state = modal.querySelector('[data-upd-state]');
+  const log = modal.querySelector('[data-upd-log]');
+  const err = modal.querySelector('[data-upd-error]');
+  const close = modal.querySelector('[data-upd-close]');
+  if (msg) msg.textContent = d.message || (running ? 'Обновление выполняется…' : ok ? 'Готово' : 'Ожидание');
+  if (bar) bar.style.width = Math.max(0, Math.min(100, progress)) + '%';
+  if (step) step.textContent = d.step || '—';
+  if (state) {
+    state.textContent = running ? 'выполняется' : ok ? 'готово' : (d.error ? 'ошибка' : 'ожидание');
+    state.className = 'tag ' + (running ? 'warn' : ok ? 'good' : d.error ? 'bad' : 'muted');
+  }
+  if (log) log.textContent = (Array.isArray(d.log) && d.log.length ? d.log.slice(-60).join('\n') : (d.logTail || 'Журнал пуст'));
+  if (err) {
+    err.textContent = d.error || '';
+    err.style.display = d.error ? 'block' : 'none';
+  }
+  if (close) close.disabled = running;
+}
+
 async function pollUpdate() {
-  showToast('Обновление запущено');
-  for (let i = 0; i < 300; i++) {
-    await carbonSleep(1500);
+  renderUpdateProgress({ running: true, progress: 0, message: 'Запуск обновления…', step: 'подготовка', log: [] });
+  let error = '';
+  for (let i = 0; i < 600; i++) {
+    await carbonSleep(1000);
     try {
       const d = await api('/api/update/status');
+      renderUpdateProgress(d);
       if (!d.running) {
         if (d.ok) {
           showToast('Панель обновлена, перезагрузка…');
@@ -115,14 +164,18 @@ async function pollUpdate() {
           location.reload();
           return;
         }
-        showToast(d.error || d.message || 'Обновление завершилось с ошибкой');
-        return;
+        error = d.error || d.message || 'Обновление завершилось с ошибкой';
+        break;
       }
     } catch (e) {
-      /* panel restarting */
+      const modal = carbonUpdateModal();
+      const msg = modal && modal.querySelector('[data-upd-msg]');
+      const state = modal && modal.querySelector('[data-upd-state]');
+      if (msg) msg.textContent = 'Панель перезапускается, ждём ответа…';
+      if (state) { state.textContent = 'перезапуск'; state.className = 'tag warn'; }
     }
   }
-  showToast('Не дождались завершения обновления');
+  showToast(error || 'Не дождались завершения обновления');
 }
 
 async function carbonUpdateCheck() {
