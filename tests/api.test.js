@@ -847,6 +847,14 @@ test('Keenetic: парсинг версии, системы и туннелей'
     assert.ok(Math.abs(real[0].lastHandshake - (Math.floor(Date.now() / 1000) - 66)) <= 5);
     assert.equal(real[0].rx, 7135897464);
     assert.equal(real[0].online, true);
+
+    const empty = t.parseInterfacesJson({ Wireguard99: { state: 'up', link: 'down', type: 'Wireguard', wireguard: { 'listen-port': 45372, status: 'up' } } });
+    assert.equal(empty.length, 0);
+
+    assert.equal(t.validTunnelName('Wireguard2'), true);
+    assert.equal(t.validTunnelName('AmneziaWG0'), true);
+    assert.equal(t.validTunnelName('Wireguard2; reboot'), false);
+    assert.equal(t.validTunnelName('GigabitEthernet0'), false);
 });
 
 test('Git: origin старого аккаунта переключается на новый', () => {

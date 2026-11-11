@@ -1713,6 +1713,8 @@ document.addEventListener('click', async event => {
     else if (action === 'keenetic-test') await keeneticTest(btn.dataset.id);
     else if (action === 'keenetic-edit') keeneticEdit(btn.dataset.id);
     else if (action === 'keenetic-delete') await keeneticDelete(btn.dataset.id);
+    else if (action === 'keenetic-tunnel-toggle') await keeneticTunnelToggle(btn.dataset.id, btn.dataset.name, btn.dataset.up === '1', btn);
+    else if (action === 'keenetic-tunnel-restart') await keeneticTunnelRestart(btn.dataset.id, btn.dataset.name);
     else if (action === 'keenetic-refresh') await keeneticLoad('Обновлено');
     else if (action === 'obf-generate') await carbonObfGenerate();
     else if (action === 'obf-import') await carbonObfImport();

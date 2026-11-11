@@ -131,14 +131,19 @@ function keeneticDetailHtml() {
   let body = '';
   if (tab === 'tunnels') {
     body = `<section class="card table-card"><div class="card-top"><div><div class="card-title">Туннели</div><div class="card-sub">WireGuard / AmneziaWG, найденные на роутере</div></div>${tag(String(tunnels.length), 'muted')}</div>
-      <div class="table-scroll"><table class="table keenetic-table"><thead><tr><th>Интерфейс</th><th>Тип</th><th>Состояние</th><th>Адрес</th><th>Пир / endpoint</th><th>Рукопожатие</th><th>Трафик</th><th>Описание</th></tr></thead><tbody>${tunnels.map(t => { const st = keeneticTunnelState(t); return `<tr>
+      <div class="table-scroll"><table class="table keenetic-table"><thead><tr><th>Интерфейс</th><th>Тип</th><th>Состояние</th><th>Адрес</th><th>Пир / endpoint</th><th>Рукопожатие</th><th>Трафик</th><th>Описание</th><th></th></tr></thead><tbody>${tunnels.map(t => { const st = keeneticTunnelState(t); return `<tr>
         <td class="name">${escHtml(t.name)}</td><td>${escHtml(t.type || '—')}</td>
         <td><span class="status ${st.cls}"><span class="dot"></span>${st.label}</span></td>
         <td class="mono">${escHtml(t.address || '—')}</td><td class="mono">${escHtml(t.peer || '—')}</td>
         <td class="mono">${t.lastHandshake ? escHtml(lastHandshakeText(t.lastHandshake)) : '—'}</td>
         <td class="mono">${t.rx || t.tx ? '↓ ' + fmtBytes(t.rx) + ' · ↑ ' + fmtBytes(t.tx) : '—'}</td>
         <td>${escHtml(t.description || '—')}</td>
-      </tr>`; }).join('') || '<tr><td colspan="8">Туннели не найдены</td></tr>'}</tbody></table></div></section>`;
+        <td><div class="keenetic-row-actions">
+          <button class="row-action" title="${t.up ? 'Выключить туннель' : 'Включить туннель'}" data-carbon-action="keenetic-tunnel-toggle" data-id="${escHtml(r.id)}" data-name="${escHtml(t.name)}" data-up="${t.up ? '1' : '0'}">${icon(t.up ? 'stop' : 'play')}</button>
+          <button class="row-action" title="Перезапустить туннель" data-carbon-action="keenetic-tunnel-restart" data-id="${escHtml(r.id)}" data-name="${escHtml(t.name)}">${icon('refresh')}</button>
+        </div></td>
+      </tr>`; }).join('') || '<tr><td colspan="9">Туннели не найдены</td></tr>'}</tbody></table></div>
+      <div class="keenetic-table-note">Действия применяются через RCI. Выключение туннеля прервёт связь через него.</div></section>`;
   } else if (tab === 'events') {
     body = keeneticEventsCard(events, r.id);
   } else if (tab === 'settings') {
@@ -196,8 +201,15 @@ function keeneticDetailHtml() {
 function renderKeenetic() {
   const d = keeneticState();
   if (state.tab === 'keenetic') startKeeneticLive();
-  if (d.selected) return keeneticDetailHtml();
-  return keeneticOverviewHtml();
+  if (!d.seen) { d.seen = true; d.animate = true; }
+  const animate = !!d.animate;
+  d.animate = false;
+  const html = d.selected ? keeneticDetailHtml() : keeneticOverviewHtml();
+  return animate ? `<div class="keenetic-view">${html}</div>` : html;
+}
+
+function keeneticAnimate() {
+  keeneticState().animate = true;
 }
 
 function keeneticAssign(data) {
@@ -209,6 +221,7 @@ function keeneticAssign(data) {
 
 async function keeneticLoad(showToastMessage) {
   try {
+    if (showToastMessage) keeneticState().animate = true;
     const [ov, ev] = await Promise.all([
       api('/api/keenetic/overview').catch(() => null),
       api('/api/keenetic/events?limit=100').catch(() => null)
@@ -251,18 +264,21 @@ function startKeeneticLive() {
 function keeneticOpen(id) {
   keeneticState().selected = String(id || '');
   keeneticState().tab = 'overview';
+  keeneticState().animate = true;
   render();
   window.scrollTo(0, 0);
 }
 
 function keeneticBack() {
   keeneticState().selected = null;
+  keeneticState().animate = true;
   render();
 }
 
 function keeneticDetailTab(tab) {
   if (!['overview', 'tunnels', 'events', 'settings'].includes(tab)) return;
   keeneticState().tab = tab;
+  keeneticState().animate = true;
   render();
 }
 
@@ -370,4 +386,43 @@ async function keeneticDelete(id) {
   } catch (e) {
     showToast(e.message || 'Ошибка удаления');
   }
+}
+
+function keeneticApplyRouter(router) {
+  if (!router || !router.id) return;
+  const d = keeneticState();
+  const idx = (d.routers || []).findIndex(x => x.id === router.id);
+  if (idx >= 0) d.routers[idx] = router;
+  else d.routers.push(router);
+}
+
+async function keeneticTunnelAction(id, name, action, button) {
+  const d = keeneticState();
+  const r = (d.routers || []).find(x => x.id === id);
+  if (!r) return;
+  if (button) { button.disabled = true; }
+  try {
+    const res = await api('/api/keenetic/routers/' + encodeURIComponent(id) + '/tunnels/' + encodeURIComponent(name) + '/action', {
+      method: 'POST', body: { action }
+    });
+    d.animate = true;
+    keeneticApplyRouter(res.router);
+    render();
+    showToast(action === 'down' ? 'Туннель выключен' : action === 'up' ? 'Туннель включён' : 'Туннель перезапущен');
+  } catch (e) {
+    showToast(e.message || 'Не удалось изменить туннель');
+  } finally {
+    if (button) { button.disabled = false; button.classList.remove('is-busy'); }  }
+}
+
+async function keeneticTunnelToggle(id, name, isUp, button) {
+  const r = keeneticState().routers.find(x => x.id === id);
+  if (isUp && !confirm('Выключить туннель ' + name + ' на «' + (r ? r.name : 'роутере') + '»? Связь через него прервётся.')) return;
+  await keeneticTunnelAction(id, name, isUp ? 'down' : 'up', button);
+}
+
+async function keeneticTunnelRestart(id, name) {
+  const r = keeneticState().routers.find(x => x.id === id);
+  if (!confirm('Перезапустить туннель ' + name + ' на «' + (r ? r.name : 'роутере') + '»? Связь прервётся на несколько секунд.')) return;
+  await keeneticTunnelAction(id, name, 'restart');
 }
