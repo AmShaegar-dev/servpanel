@@ -166,14 +166,16 @@ function keeneticDetailHtml() {
         <section class="card table-card"><div class="card-top"><div><div class="card-title">Правила маршрутизации</div><div class="card-sub">Какой список через какой интерфейс ходит</div></div><div class="page-actions">${tag(String(routes.length), 'muted')}<button class="btn btn-sm" data-carbon-action="keenetic-dns-add-rule">${icon('plus')}Добавить правило</button></div></div>
         <div class="table-scroll"><table class="table keenetic-table keenetic-dns-table keenetic-dns-rules"><thead><tr><th>Состояние</th><th>Список</th><th>Интерфейс</th><th>Авто</th><th>Эксклюзив</th><th></th></tr></thead><tbody>${routes.map(rt => {
           const g = groups.find(x => x.name === rt.group);
+          const iface = (dns.interfaces || []).find(x => x.name === rt.interface);
+          const ifaceLabel = iface && iface.description ? iface.description : (rt.interface || '—');
           return `<tr>
             <td><span class="status ${rt.enabled ? '' : 'idle'}"><span class="dot"></span>${rt.enabled ? 'включено' : 'выключено'}</span></td>
             <td>${escHtml(g ? g.description : rt.group)}</td>
-            <td class="mono">${escHtml(rt.interface || '—')}</td>
+            <td><div class="name">${escHtml(ifaceLabel)}</div>${ifaceLabel !== rt.interface ? `<div class="keenetic-sub">${escHtml(rt.interface)}</div>` : ''}</td>
             <td>${rt.auto ? 'да' : 'нет'}</td><td>${rt.reject ? 'да' : 'нет'}</td>
             <td><div class="keenetic-row-actions">
               <button class="row-action" title="${rt.enabled ? 'Выключить правило' : 'Включить правило'}" data-carbon-action="keenetic-dns-toggle-rule" data-index="${escHtml(rt.index)}" data-enabled="${rt.enabled ? '1' : '0'}">${icon(rt.enabled ? 'stop' : 'play')}</button>
-              <button class="row-action" title="Удалить правило" data-carbon-action="keenetic-dns-delete-rule" data-index="${escHtml(rt.index)}" data-group="${escHtml(g ? g.description : rt.group)}" data-interface="${escHtml(rt.interface)}">${icon('trash')}</button>
+              <button class="row-action" title="Удалить правило" data-carbon-action="keenetic-dns-delete-rule" data-index="${escHtml(rt.index)}" data-group="${escHtml(g ? g.description : rt.group)}" data-interface="${escHtml(ifaceLabel)}">${icon('trash')}</button>
             </div></td>
           </tr>`;
         }).join('') || '<tr><td colspan="6">Правил пока нет</td></tr>'}</tbody></table></div>
@@ -554,7 +556,10 @@ function keeneticDnsRuleForm(index) {
   if (!(dns.interfaces || []).length) { showToast('Не удалось получить интерфейсы роутера'); return; }
   const rt = index ? (dns.routes || []).find(x => x.index === index) : null;
   const groupOptions = dns.groups.map(g => ({ value: g.name, label: g.description + ' (' + g.name + ')' }));
-  const interfaceOptions = dns.interfaces.map(n => ({ value: n, label: n }));
+  const interfaceOptions = dns.interfaces.map(i => ({
+    value: i.name,
+    label: i.description ? i.description + ' — ' + i.name : i.name
+  }));
   showCarbonForm({
     title: rt ? 'Правило маршрутизации' : 'Новое правило DNS',
     sub: 'Выберите список и интерфейс, через который должны ходить эти домены.',
