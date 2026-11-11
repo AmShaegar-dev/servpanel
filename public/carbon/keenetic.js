@@ -130,7 +130,7 @@ function keeneticDetailHtml() {
   ];
   let body = '';
   if (tab === 'tunnels') {
-    body = `<section class="card table-card"><div class="card-top"><div><div class="card-title">Туннели</div><div class="card-sub">WireGuard / AmneziaWG, найденные на роутере</div></div>${tag(String(tunnels.length), 'muted')}</div>
+    body = `<section class="card table-card"><div class="card-top"><div><div class="card-title">Туннели</div><div class="card-sub">WireGuard / AmneziaWG, найденные на роутере</div></div><div class="page-actions">${tag(String(tunnels.length), 'muted')}<button class="btn btn-sm" data-carbon-action="keenetic-import">${icon('upload')}Импорт .conf</button></div></div>
       <div class="table-scroll"><table class="table keenetic-table"><thead><tr><th>Интерфейс</th><th>Тип</th><th>Состояние</th><th>Адрес</th><th>Пир / endpoint</th><th>Рукопожатие</th><th>Трафик</th><th>Описание</th><th></th></tr></thead><tbody>${tunnels.map(t => { const st = keeneticTunnelState(t); return `<tr>
         <td class="name">${escHtml(t.name)}</td><td>${escHtml(t.type || '—')}</td>
         <td><span class="status ${st.cls}"><span class="dot"></span>${st.label}</span></td>
@@ -425,4 +425,45 @@ async function keeneticTunnelRestart(id, name) {
   const r = keeneticState().routers.find(x => x.id === id);
   if (!confirm('Перезапустить туннель ' + name + ' на «' + (r ? r.name : 'роутере') + '»? Связь прервётся на несколько секунд.')) return;
   await keeneticTunnelAction(id, name, 'restart');
+}
+
+function keeneticReadFileBase64(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const s = String(fr.result || '');
+      const i = s.indexOf(',');
+      resolve(i >= 0 ? s.slice(i + 1) : '');
+    };
+    fr.onerror = () => reject(new Error('Не удалось прочитать файл'));
+    fr.readAsDataURL(file);
+  });
+}
+
+function keeneticImport() {
+  const d = keeneticState();
+  const r = (d.routers || []).find(x => x.id === d.selected);
+  if (!r) return;
+  showCarbonForm({
+    title: 'Импорт WireGuard .conf',
+    sub: 'Роутер сам разберёт файл и создаст туннель. Имя интерфейса назначится автоматически.',
+    fields: [
+      { name: 'file', label: 'Файл конфигурации (.conf)', type: 'file', accept: '.conf' },
+      { name: 'defaultRoute', label: 'Использовать для выхода в интернет', type: 'checkbox', value: true }
+    ],
+    submitText: 'Импортировать',
+    onSubmit: async v => {
+      if (!v.file) throw new Error('Выберите файл .conf');
+      const data = await keeneticReadFileBase64(v.file);
+      const res = await api('/api/keenetic/routers/' + encodeURIComponent(r.id) + '/wireguard/import', {
+        method: 'POST',
+        body: { data, filename: v.file.name, defaultRoute: !!v.defaultRoute }
+      });
+      d.animate = true;
+      keeneticApplyRouter(res.router);
+      render();
+      if (res.warning) showToast(res.warning);
+      else showToast(res.created ? 'Туннель ' + res.created + ' добавлен' : 'Туннель добавлен');
+    }
+  });
 }
