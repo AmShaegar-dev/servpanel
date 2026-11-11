@@ -820,6 +820,33 @@ test('Keenetic: парсинг версии, системы и туннелей'
     const cliTunnels = t.parseCliInterfaces('Interface: Wireguard0\n  state: up\n  address: 10.9.0.2');
     assert.equal(cliTunnels.length, 1);
     assert.equal(cliTunnels[0].name, 'Wireguard0');
+
+    const real = t.parseInterfacesJson({
+        Wireguard2: {
+            address: '172.16.17.36',
+            description: 'Serv_v-KVNet',
+            state: 'up',
+            type: 'Wireguard',
+            wireguard: {
+                'listen-port': 43544,
+                peer: [{
+                    'last-handshake': 66,
+                    online: true,
+                    'remote-endpoint-address': '46.29.161.209',
+                    'remote-port': 39744,
+                    'public-key': 'WXNxZf7H0Yc3vAeDYqp1K0+8pqz8nU7Y2twTSyBgAio=',
+                    rxbytes: 7135897464,
+                    txbytes: 1399786386
+                }]
+            }
+        }
+    });
+    assert.equal(real.length, 1);
+    assert.equal(real[0].peer, '46.29.161.209:39744');
+    assert.equal(real[0].handshakeAgo, 66);
+    assert.ok(Math.abs(real[0].lastHandshake - (Math.floor(Date.now() / 1000) - 66)) <= 5);
+    assert.equal(real[0].rx, 7135897464);
+    assert.equal(real[0].online, true);
 });
 
 test('Git: origin старого аккаунта переключается на новый', () => {

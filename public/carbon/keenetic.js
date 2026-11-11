@@ -30,6 +30,12 @@ function keeneticStatusTag(r) {
   return `<span class="tag muted">не проверен</span>`;
 }
 
+function keeneticTunnelState(t) {
+  if (!t || !t.up) return { cls: 'idle', label: 'не в сети' };
+  if (t.online === false) return { cls: 'idle', label: 'нет рукопожатия' };
+  return { cls: '', label: 'в сети' };
+}
+
 function keeneticRouterCard(r) {
   const st = r.status || {};
   const online = !!st.online;
@@ -125,11 +131,14 @@ function keeneticDetailHtml() {
   let body = '';
   if (tab === 'tunnels') {
     body = `<section class="card table-card"><div class="card-top"><div><div class="card-title">Туннели</div><div class="card-sub">WireGuard / AmneziaWG, найденные на роутере</div></div>${tag(String(tunnels.length), 'muted')}</div>
-      <div class="table-scroll"><table class="table"><thead><tr><th>Интерфейс</th><th>Тип</th><th>Состояние</th><th>Адрес</th><th>Пир / endpoint</th><th>Описание</th></tr></thead><tbody>${tunnels.map(t => `<tr>
+      <div class="table-scroll"><table class="table keenetic-table"><thead><tr><th>Интерфейс</th><th>Тип</th><th>Состояние</th><th>Адрес</th><th>Пир / endpoint</th><th>Рукопожатие</th><th>Трафик</th><th>Описание</th></tr></thead><tbody>${tunnels.map(t => { const st = keeneticTunnelState(t); return `<tr>
         <td class="name">${escHtml(t.name)}</td><td>${escHtml(t.type || '—')}</td>
-        <td><span class="status ${t.up ? '' : 'idle'}"><span class="dot"></span>${t.up ? 'в сети' : 'не в сети'}</span></td>
-        <td class="mono">${escHtml(t.address || '—')}</td><td class="mono">${escHtml(t.peer || '—')}</td><td>${escHtml(t.description || '—')}</td>
-      </tr>`).join('') || '<tr><td colspan="6">Туннели не найдены</td></tr>'}</tbody></table></div></section>`;
+        <td><span class="status ${st.cls}"><span class="dot"></span>${st.label}</span></td>
+        <td class="mono">${escHtml(t.address || '—')}</td><td class="mono">${escHtml(t.peer || '—')}</td>
+        <td class="mono">${t.lastHandshake ? escHtml(lastHandshakeText(t.lastHandshake)) : '—'}</td>
+        <td class="mono">${t.rx || t.tx ? '↓ ' + fmtBytes(t.rx) + ' · ↑ ' + fmtBytes(t.tx) : '—'}</td>
+        <td>${escHtml(t.description || '—')}</td>
+      </tr>`; }).join('') || '<tr><td colspan="8">Туннели не найдены</td></tr>'}</tbody></table></div></section>`;
   } else if (tab === 'events') {
     body = keeneticEventsCard(events, r.id);
   } else if (tab === 'settings') {

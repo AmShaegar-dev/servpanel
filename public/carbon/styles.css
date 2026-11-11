@@ -447,6 +447,10 @@ select.tz-focus { outline: 2px solid var(--accent); outline-offset: 2px; border-
 .event-dot.good{background:var(--good)}
 .event-dot.info{background:var(--text-3)}
 .keenetic-tabs{display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--line);margin:0 0 16px;overflow-x:auto}
+.keenetic-table{min-width:1080px}
+.keenetic-table th+th,.keenetic-table td+td{padding-left:18px}
+.keenetic-table td{white-space:nowrap}
+.keenetic-table td:last-child{white-space:normal;min-width:130px}
 .keenetic-tab{border:0;background:none;color:var(--text-3);font:500 10px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:10px 12px;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;transition:color .15s,border-color .15s}
 .keenetic-tab:hover{color:var(--text)}
 .keenetic-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
