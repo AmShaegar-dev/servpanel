@@ -197,9 +197,9 @@ function showCarbonLogin() {
     modal.innerHTML = `<div class="modal-card">
       <div class="modal-head"><div><div class="modal-title">Вход в Servpanel</div><div class="modal-sub">Carbon-интерфейс использует ту же сессию панели.</div></div></div>
       <div class="form-grid" style="grid-template-columns:1fr">
-        <label class="field"><span>Логин</span><input id="carbonUser" value="admin" autocomplete="username"></label>
-        <label class="field"><span>Пароль</span><input id="carbonPass" type="password" autocomplete="current-password"></label>
-        <label class="field"><span>Код 2FA</span><input id="carbonCode" inputmode="numeric" placeholder="Если включена"></label>
+        <label class="field"><span>Логин</span><input id="carbonUser" name="username" value="admin" autocomplete="username"></label>
+        <label class="field"><span>Пароль</span><input id="carbonPass" name="password" type="password" autocomplete="current-password"></label>
+        <label class="field"><span>Код 2FA</span><input id="carbonCode" name="otp" inputmode="numeric" autocomplete="one-time-code" placeholder="Если включена"></label>
       </div>
       <div id="carbonLoginError" style="color:var(--bad);font-size:12px;margin-top:10px;display:none"></div>
       <div class="modal-actions"><button class="btn" onclick="location.href='/'">Старая панель</button><button class="btn btn-primary" id="carbonLoginBtn">Войти</button></div>
@@ -229,7 +229,12 @@ async function carbonLogin() {
     });
     carbon.user = data.user || 'admin';
     carbon.role = data.role || 'admin';
-    document.getElementById('carbonLogin').hidden = true;
+    const loginModal = document.getElementById('carbonLogin');
+    if (loginModal) {
+      const pass = loginModal.querySelector('#carbonPass');
+      if (pass) pass.value = '';
+      loginModal.remove();
+    }
     await loadCarbonData();
     render();
     startDashboardLive();
@@ -465,7 +470,7 @@ function realClientRows() {
 }
 
 function realClientsTable() {
-  return `<div class="table-tools"><div class="table-search">${icon('search')}<input id="clientSearch" placeholder="Имя или IP" aria-label="Фильтр клиентов"></div><button class="tag" data-toast="Клиентов: ${carbon.clients.length}">Все клиенты ${icon('arrow', 'ico')}</button></div>
+  return `<div class="table-tools"><div class="table-search">${icon('search')}<input id="clientSearch" type="search" name="client-search" placeholder="Имя или IP" aria-label="Фильтр клиентов" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"></div><button class="tag" data-toast="Клиентов: ${carbon.clients.length}">Все клиенты ${icon('arrow', 'ico')}</button></div>
     <div class="table-scroll"><table class="table" id="clientsTable"><thead><tr><th>Клиент</th><th>IP</th><th>Состояние</th><th>Трафик</th><th>Последнее рукопожатие</th><th>Каскад / RU</th><th>Связь</th><th style="width:190px"></th></tr></thead><tbody>${realClientRows()}</tbody></table></div>`;
 }
 

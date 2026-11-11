@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#070b12">
-    <meta name="panel-version" content="3.2.53">
+    <meta name="panel-version" content="3.2.54">
     <title>Servpanel</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -369,7 +369,7 @@
                         Ключи и IP при переименовании не меняются — устройствам не нужно переподключаться.
                     </p>
                     <div class="controls-row" style="margin-bottom:0;">
-                        <input type="text" id="renameSearch" placeholder="Найти в имени (paris)" style="width:220px;">
+                        <input type="text" id="renameSearch" placeholder="Найти в имени (paris)" style="width:220px;" autocomplete="off" spellcheck="false">
                         <input type="text" id="renameReplace" placeholder="Заменить на (пусто = удалить)" style="width:220px;">
                         <button class="btn-primary" onclick="bulkRename()">Переименовать</button>
                     </div>

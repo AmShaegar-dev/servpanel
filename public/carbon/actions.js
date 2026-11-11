@@ -29,12 +29,12 @@ function showCarbonForm(opts) {
       return `<label class="field"><span>${escHtml(f.label)}</span><select data-field="${name}">${options}</select></label>`;
     }
     if (f.type === 'textarea') {
-      return `<label class="field"><span>${escHtml(f.label)}</span><textarea data-field="${name}" rows="${f.rows || 8}" spellcheck="false" placeholder="${escHtml(f.placeholder || '')}">${escHtml(value)}</textarea></label>`;
+      return `<label class="field"><span>${escHtml(f.label)}</span><textarea name="carbon-${name}" data-field="${name}" rows="${f.rows || 8}" spellcheck="false" autocomplete="off" placeholder="${escHtml(f.placeholder || '')}">${escHtml(value)}</textarea></label>`;
     }
     if (f.type === 'file') {
       return `<label class="field"><span>${escHtml(f.label)}</span><input type="file" data-field="${name}" accept="${escHtml(f.accept || '')}"></label>`;
     }
-    return `<label class="field"><span>${escHtml(f.label)}</span><input type="${escHtml(f.type || 'text')}" data-field="${name}" value="${escHtml(value)}" placeholder="${escHtml(f.placeholder || '')}" ${f.min != null ? `min="${escHtml(f.min)}"` : ''} ${f.max != null ? `max="${escHtml(f.max)}"` : ''} ${f.step != null ? `step="${escHtml(f.step)}"` : ''}></label>`;
+    return `<label class="field"><span>${escHtml(f.label)}</span><input type="${escHtml(f.type || 'text')}" name="carbon-${name}" data-field="${name}" value="${escHtml(value)}" autocomplete="${f.type === 'password' ? 'new-password' : 'off'}" placeholder="${escHtml(f.placeholder || '')}" ${f.min != null ? `min="${escHtml(f.min)}"` : ''} ${f.max != null ? `max="${escHtml(f.max)}"` : ''} ${f.step != null ? `step="${escHtml(f.step)}"` : ''}></label>`;
   }).join('');
   modal.innerHTML = `<div class="modal-card modal-wide" role="dialog" aria-modal="true">
     <div class="modal-head"><div><div class="modal-title">${escHtml(opts.title || 'Действие')}</div><div class="modal-sub">${escHtml(opts.sub || '')}</div></div><button class="icon-btn" data-form-close aria-label="Закрыть">✕</button></div>
