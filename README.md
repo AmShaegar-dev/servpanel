@@ -40,6 +40,12 @@ KPI, CPU/RAM, uptime, график и распределение трафика 
 
 Клик по заголовку сортирует таблицу, повторный клик меняет направление. Колонка **«Каскад / RU»** сортирует по доле RU-трафика.
 
+### Клиент: лимиты и точечная изоляция
+
+<img src="docs/screenshots/client-isolation.png" alt="Настройки клиента AWG: лимиты и изоляция" width="900">
+
+В карточке клиента можно выбрать изоляцию: **«как на сервере»**, **«изолировать»** или **«разрешить общение с другими клиентами»**. Настройка хранится по IP и не сбрасывается при обновлении панели.
+
 ### Часовой пояс панели
 
 <img src="docs/screenshots/timezone.png" alt="Настройки дашборда Servpanel Carbon: часовой пояс графиков" width="900">
@@ -1022,7 +1028,7 @@ npm install
 npm test
 ```
 
-`npm test` проверяет синтаксис `server.js`, `public/app.js`, `public/carbon/app.js`, `public/carbon/carbon-api.js`, `public/carbon/actions.js`, `lib/updater.js`, `lib/update-worker.js` и запускает **108 интеграционных тестов** (встроенный `node:test`, без внешних зависимостей):
+`npm test` проверяет синтаксис `server.js`, `public/app.js`, `public/carbon/app.js`, `public/carbon/carbon-api.js`, `public/carbon/actions.js`, `lib/updater.js`, `lib/update-worker.js` и запускает **109 интеграционных тестов** (встроенный `node:test`, без внешних зависимостей):
 
 * доступ без авторизации, security-заголовки;
 * вход, блокировка после 5 неудач, журнал fail2ban;
