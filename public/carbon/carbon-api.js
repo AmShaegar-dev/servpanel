@@ -537,8 +537,14 @@ function realClientRows() {
       : hasSplit
         ? `<div class="split-bar" title="${escHtml(title)}"><span style="width:${cascadePct.toFixed(1)}%;background:#5b8cff"></span><span style="width:${directPct.toFixed(1)}%;background:var(--accent)"></span></div><span class="share-pct">${pctText(cascadePct)} / ${pctText(directPct)}</span>`
         : `<div class="split-bar" title="Нет данных"><span style="width:100%;background:var(--surface-3)"></span></div><span class="share-pct">нет данных</span>`;
+    const isoMode = c.isolation_mode || 'default';
+    const isoBadge = isoMode === 'isolated'
+      ? `<span class="iso-badge on" title="Изоляция от других клиентов включена">${icon('shield')}</span>`
+      : isoMode === 'shared'
+        ? `<span class="iso-badge off" title="Изоляция от других клиентов снята">${icon('users')}</span>`
+        : '';
     return `<tr data-name="${escHtml(c.name)}" data-ip="${escHtml(c.ip)}">
-      <td class="name">${escHtml(c.name)}</td>
+      <td class="name">${escHtml(c.name)}${isoBadge}</td>
       <td class="mono">${escHtml(c.ip || '—')}</td>
       <td>${escHtml(clientStateText(c, online))}</td>
       <td class="mono">${fmtBytes(traffic)}${limitNote}</td>

@@ -750,6 +750,25 @@ test('Панель: подписи истории форматируются в 
     assert.equal(internals.isValidTimeZone('Nope/Nowhere'), false);
 });
 
+test('Изоляция клиентов AWG: режимы хранятся по IP', () => {
+    const file = internals.CLIENT_ISOLATION_FILE;
+    const had = fs.existsSync(file);
+    const prev = had ? fs.readFileSync(file) : null;
+    try {
+        internals.writeClientIsolation({ '10.8.0.5': true, '10.8.0.6': false });
+        const map = internals.readClientIsolation();
+        assert.equal(map['10.8.0.5'], true);
+        assert.equal(map['10.8.0.6'], false);
+        assert.equal(internals.clientIsolationMode('10.8.0.5'), 'isolated');
+        assert.equal(internals.clientIsolationMode('10.8.0.6'), 'shared');
+        assert.equal(internals.clientIsolationMode('10.8.0.7'), 'default');
+    } finally {
+        if (had) fs.writeFileSync(file, prev);
+        else fs.rmSync(file, { force: true });
+        internals.writeClientIsolation({});
+    }
+});
+
 test('Git: origin старого аккаунта переключается на новый', () => {
     const { spawnSync } = require('child_process');
     if (spawnSync('git', ['--version'], { timeout: 5000 }).status !== 0) return;

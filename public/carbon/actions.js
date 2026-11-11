@@ -431,21 +431,31 @@ async function carbonClientUrl(name) {
 async function carbonClientRename(name) {
   let lim = {};
   try { lim = await api('/api/clients/' + encodeURIComponent(name) + '/limits'); } catch (e) { lim = {}; }
+  let iso = {};
+  try { iso = await api('/api/clients/' + encodeURIComponent(name) + '/isolation'); } catch (e) { iso = {}; }
   const used = Number(lim.used_bytes) || 0;
   const quota = Number(lim.quota_bytes) || 0;
+  const isoText = iso.mode === 'isolated' ? ' · изолирован' : iso.mode === 'shared' ? ' · общий доступ' : '';
   const gbValue = n => n ? String(Math.round((n / (1024 ** 3)) * 100) / 100) : '0';
   showCarbonForm({
     title: 'Редактировать клиента',
-    sub: `Использовано: ${fmtBytes(used)}${quota ? ' из ' + fmtBytes(quota) : ' · лимит не задан'}${lim.blocked ? ' · лимит исчерпан' : ''}`,
+    sub: `Использовано: ${fmtBytes(used)}${quota ? ' из ' + fmtBytes(quota) : ' · лимит не задан'}${lim.blocked ? ' · лимит исчерпан' : ''}${isoText}`,
     fields: [
       { name: 'newName', label: 'Имя клиента', value: name },
       { name: 'rate', label: 'Скорость, Мбит/с (0 — без лимита)', type: 'number', value: Number(lim.rate) || 0, min: 0, step: 1 },
       { name: 'quota', label: 'Лимит трафика, ГБ (0 — без лимита)', type: 'number', value: gbValue(quota), min: 0, step: 0.1 },
+      { name: 'isolation', label: 'Изоляция от других клиентов', type: 'select', value: iso.mode || 'default', options: [
+        { value: 'default', label: 'Как на сервере (по умолчанию)' },
+        { value: 'isolated', label: 'Изолировать от других клиентов' },
+        { value: 'shared', label: 'Разрешить общение с другими клиентами' }
+      ] },
       { name: 'reset', label: 'Сбросить использованный трафик', type: 'checkbox', value: false }
     ],
     submitText: 'Сохранить',
     onSubmit: async v => {
       if (!/^[A-Za-z0-9_-]{1,63}$/.test(v.newName)) throw new Error('Разрешены буквы, цифры, _ и -, до 63 символов');
+      const isolated = v.isolation === 'isolated' ? true : v.isolation === 'shared' ? false : null;
+      const isoRes = await api('/api/clients/' + encodeURIComponent(name) + '/isolation', { method: 'POST', body: { isolated } });
       if (v.newName !== name) {
         await api('/api/clients/' + encodeURIComponent(name) + '/rename', { method: 'POST', body: { newName: v.newName } });
       }
@@ -458,7 +468,7 @@ async function carbonClientRename(name) {
           reset: !!v.reset
         }
       });
-      await carbonRefresh(d.warning || 'Клиент обновлён');
+      await carbonRefresh(isoRes.warning || d.warning || 'Клиент обновлён');
     }
   });
 }

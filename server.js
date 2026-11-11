@@ -957,6 +957,7 @@ function isApiRequest(req) {
 let lastClientsSnapshot = [];
 const TRAFFIC_SPLIT_FILE = path.join(DATA_DIR, '.traffic_split.json');
 const CLIENT_LIMITS_FILE = path.join(DATA_DIR, '.client_limits.json');
+const CLIENT_ISOLATION_FILE = path.join(DATA_DIR, '.client_isolation.json');
 let lastTrafficSplit = (() => {
     try {
         const j = JSON.parse(fs.readFileSync(TRAFFIC_SPLIT_FILE, 'utf8'));
@@ -6682,6 +6683,7 @@ app.get('/api/clients', checkAuth, (req, res) => {
             };
         });
         const limits = readClientLimits();
+        const isolation = readClientIsolation();
         const withLimits = merged.map(c => {
             const l = limits[c.ip] || {};
             const quota = Number(l.quota) || 0;
@@ -6690,7 +6692,8 @@ app.get('/api/clients', checkAuth, (req, res) => {
                 rate_limit_mbps: Number(l.rate) || 0,
                 quota_bytes: quota,
                 quota_used_bytes: quota ? Math.max(0, totalClientBytes(c) - (Number(l.baseline) || 0)) : 0,
-                quota_blocked: !!l.blocked
+                quota_blocked: !!l.blocked,
+                isolation_mode: isolation[c.ip] === true ? 'isolated' : isolation[c.ip] === false ? 'shared' : 'default'
             };
         });
         res.json(attachClientSplit(withLimits));
@@ -6996,6 +6999,12 @@ app.delete('/api/delete/:name', checkAuth, (req, res) => {
                 delete limits[c.ip];
                 writeClientLimits(limits);
             }
+            const isolation = readClientIsolation();
+            if (Object.prototype.hasOwnProperty.call(isolation, c.ip)) {
+                delete isolation[c.ip];
+                writeClientIsolation(isolation);
+                syncClientIsolation();
+            }
         }
     } catch (e) { /* ignore */ }
     execFile('sudo', ['bash', MANAGE, 'remove', name, '--yes', '--json'], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => {
@@ -7023,6 +7032,118 @@ function readClientLimits() {
 
 function writeClientLimits(limits) {
     try { writeJson(CLIENT_LIMITS_FILE, limits || {}, 0o600); } catch (e) { /* ignore */ }
+}
+
+// Точечная изоляция клиентов AWG. В файле хранится IP -> true/false:
+// true  — клиент изолирован от других клиентов;
+// false — клиенту разрешено общаться с другими клиентами (даже если
+//         глобальная изоляция включена при установке);
+// нет записи — поведение по умолчанию (как настроено на сервере).
+const ISOLATION_CHAIN = 'SERVPANEL_ISOLATION';
+const ISOLATION_COMMENT = 'servpanel-isol';
+let isolationSyncing = false;
+let isolationLastError = '';
+
+function readClientIsolation() {
+    try {
+        const j = JSON.parse(fs.readFileSync(CLIENT_ISOLATION_FILE, 'utf8').replace(/^\uFEFF/, ''));
+        return j && typeof j === 'object' && !Array.isArray(j) ? j : {};
+    } catch (e) { return {}; }
+}
+
+function writeClientIsolation(map) {
+    try { writeJson(CLIENT_ISOLATION_FILE, map || {}, 0o600); } catch (e) { /* ignore */ }
+}
+
+function clientIsolationIface() {
+    try {
+        const ifaces = existingIfaces();
+        return ifaces.find(i => i === 'awg0') || ifaces.find(i => i === 'amn0') || '';
+    } catch (e) { return ''; }
+}
+
+function clientIsolationMode(ip) {
+    const map = readClientIsolation();
+    if (map[ip] === true) return 'isolated';
+    if (map[ip] === false) return 'shared';
+    return 'default';
+}
+
+// Перестраивает цепочку SERVPANEL_ISOLATION и вставляет её перед глобальным
+// правилом изоляции (или перед общим ACCEPT для awg0). Так точечные
+// исключения не обходят квоты и GeoIP: те правила остаются выше.
+function syncClientIsolation() {
+    if (DEMO_MODE || TEST_MODE || isolationSyncing) return;
+    isolationSyncing = true;
+    try {
+        const iface = clientIsolationIface();
+        if (!iface) {
+            isolationLastError = 'Интерфейс AWG не найден';
+            return;
+        }
+        const map = readClientIsolation();
+        const isolated = [];
+        const shared = [];
+        for (const [ip, value] of Object.entries(map)) {
+            if (!IPV4_RE.test(String(ip))) continue;
+            if (value === true) isolated.push(ip);
+            else if (value === false) shared.push(ip);
+        }
+
+        // Ищем глобальное правило изоляции и общий ACCEPT для интерфейса.
+        const rules = String(rootShTry('iptables', ['-w', '-S', 'FORWARD']) || '')
+            .split('\n')
+            .map(s => s.trim())
+            .filter(s => s.startsWith('-A FORWARD '));
+        let globalDropLine = 0;
+        let generalAcceptLine = 0;
+        for (let i = 0; i < rules.length; i++) {
+            const s = rules[i];
+            if (!globalDropLine && s.includes('-i ' + iface) && s.includes('-o ' + iface) && /-j DROP\s*$/.test(s)) {
+                globalDropLine = i + 1;
+            }
+            if (!generalAcceptLine && s.includes('-i ' + iface) && /-j (ACCEPT|RETURN)\s*$/.test(s) && !s.includes('-o ')) {
+                generalAcceptLine = i + 1;
+            }
+        }
+
+        if (!iptRun(['-w', '-n', '-L', ISOLATION_CHAIN])) {
+            iptRun(['-w', '-N', ISOLATION_CHAIN]);
+        }
+        // Убираем старый jump, чтобы переставить его по актуальному месту.
+        for (let i = 0; i < 10; i++) {
+            if (!iptRun(['-w', '-D', 'FORWARD', '-j', ISOLATION_CHAIN])) break;
+        }
+        if (!iptRun(['-w', '-F', ISOLATION_CHAIN])) {
+            isolationLastError = 'Нет доступа к iptables';
+            return;
+        }
+
+        let ok = true;
+        for (const ip of isolated) {
+            ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-s', ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'DROP']) && ok;
+            ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-d', ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'DROP']) && ok;
+        }
+        // ACCEPT-исключения имеют смысл только когда глобальная изоляция
+        // действительно включена. Иначе не трогаем общий поток.
+        if (globalDropLine) {
+            for (const ip of shared) {
+                ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-s', ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'ACCEPT']) && ok;
+                ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-d', ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'ACCEPT']) && ok;
+            }
+        }
+
+        // Ставим jump перед глобальной изоляцией (или перед общим ACCEPT awg0).
+        // Правила квот и GeoIP остаются выше и не обходятся.
+        let line = globalDropLine || generalAcceptLine;
+        if (!line && isolated.length) line = 1;
+        if (line) ok = iptRun(['-w', '-I', 'FORWARD', String(line), '-j', ISOLATION_CHAIN]) && ok;
+        isolationLastError = ok ? '' : 'Не удалось применить правила iptables';
+    } catch (e) {
+        isolationLastError = e.message || 'Ошибка iptables';
+    } finally {
+        isolationSyncing = false;
+    }
 }
 
 function totalClientBytes(c) {
@@ -7174,6 +7295,8 @@ async function enforceClientQuotas() {
 if (!TEST_MODE) {
     setTimeout(enforceClientQuotas, 15000);
     setInterval(enforceClientQuotas, 60000);
+    setTimeout(syncClientIsolation, 20000);
+    setInterval(syncClientIsolation, 60000);
 }
 
 app.get('/api/clients/:name/limits', checkAuth, (req, res) => {
@@ -7228,6 +7351,40 @@ app.post('/api/clients/:name/limits', checkAuth, requireAdmin, async (req, res) 
     res.json({ success: true, name: c.name, ip, rate, quota_bytes: quota, baseline: next.baseline, used_bytes: used, blocked: next.blocked, warning });
 });
 
+// Точечная изоляция клиента от других клиентов AWG.
+app.get('/api/clients/:name/isolation', checkAuth, (req, res) => {
+    const c = findClientByName(String(req.params.name || ''));
+    if (!c || !c.ip) return res.status(404).json({ error: 'Клиент не найден' });
+    res.json({
+        name: c.name,
+        ip: c.ip,
+        interface: clientIsolationIface() || null,
+        mode: clientIsolationMode(c.ip),
+        isolated: readClientIsolation()[c.ip] === true,
+        warning: isolationLastError || ''
+    });
+});
+
+app.post('/api/clients/:name/isolation', checkAuth, requireAdmin, (req, res) => {
+    const c = findClientByName(String(req.params.name || ''));
+    if (!c || !c.ip) return res.status(404).json({ error: 'Клиент не найден' });
+    const raw = req.body ? req.body.isolated : undefined;
+    let value = null;
+    if (raw === true || raw === 'true' || raw === 'isolated') value = true;
+    else if (raw === false || raw === 'false' || raw === 'shared') value = false;
+    else if (raw === null || raw === undefined || raw === '' || raw === 'default') value = null;
+    else return res.status(400).json({ error: 'isolated: true, false или null' });
+
+    const map = readClientIsolation();
+    if (value === null) delete map[c.ip];
+    else map[c.ip] = value;
+    writeClientIsolation(map);
+    syncClientIsolation();
+    const mode = value === true ? 'isolated' : value === false ? 'shared' : 'default';
+    auditLog(req, `Клиент ${c.name}: изоляция ${mode === 'isolated' ? 'включена' : mode === 'shared' ? 'снята' : 'по умолчанию'}`);
+    res.json({ success: true, name: c.name, ip: c.ip, mode, isolated: value, warning: isolationLastError || '' });
+});
+
 app.post('/api/limit', checkAuth, (req, res) => {
     const { ip, rate } = req.body || {};
     const r = parseInt(rate, 10);
@@ -7264,7 +7421,12 @@ app.get('/api/stats', checkAuth, (req, res) => {
                 }
                 return { ...client, status_code: sc };
             });
-            res.json(attachClientSplit(data));
+            const isolation = readClientIsolation();
+            const withIsolation = attachClientSplit(data).map(c => ({
+                ...c,
+                isolation_mode: isolation[c.ip] === true ? 'isolated' : isolation[c.ip] === false ? 'shared' : 'default'
+            }));
+            res.json(withIsolation);
         } catch (e) { res.status(500).json({ error: 'Ошибка парсинга' }); }
     });
 });
@@ -12910,6 +13072,7 @@ module.exports._internals = {
     writeAppSettings, metricsSnapshot, prometheusMetrics, startMetricsServer, stopMetricsServer,
     metricsRuntimeInfo, apkInfo, resolveApkFile, APP_SETTINGS_FILE, APP_APK_DIR,
     readPanelSettings, writePanelSettings, historyFormatLabel, isValidTimeZone, PANEL_SETTINGS_FILE,
+    readClientIsolation, writeClientIsolation, clientIsolationMode, CLIENT_ISOLATION_FILE,
     normalizeCascadeConf, firstIpv4, firstTunnelIp, buildRoutingScript, cascadeRole, localTunnelIps, isPublicAddress,
     cascadeEndpointPlan, cascadeRoleFrom, cascadeHealth
 };

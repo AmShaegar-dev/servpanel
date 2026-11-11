@@ -1,4 +1,4 @@
-# 🌐 Servpanel 3.2.59 — Веб-панель управления AmneziaWG & Server Suite
+# 🌐 Servpanel 3.2.60 — Веб-панель управления AmneziaWG & Server Suite
 
 > ⚠️ **Статус: бета.** Панель активно развивается: Carbon-интерфейс, живой дашборд, каскад, WARP/Xray, MTProto и часть серверных сценариев ещё могут меняться. Перед обновлением рабочего сервера сделайте бэкап и проверьте новую версию на тестовом стенде.
 
@@ -13,6 +13,7 @@
 * **Живой дашборд Carbon.** KPI, скорость, CPU, RAM, uptime, график трафика, распределение и таблица клиентов обновляются без перезагрузки страницы. В шапке видна отметка «обновлено ЧЧ:ММ:СС».
 * **Часовой пояс панели.** Выбирается в настройках дашборда или кнопкой с названием пояса рядом с графиком. Время на графиках и в отметке обновления считается в выбранном поясе и сохраняется на сервере.
 * **Сортировка клиентов AWG по всем колонкам.** Имя, IP, состояние, трафик, рукопожатие, каскад/RU и связь. Колонка «Каскад / RU» сортирует по доле RU-трафика, а не по абсолютному объёму.
+* **Точечная изоляция клиентов AWG.** В настройках клиента можно выбрать «как на сервере», «изолировать» или «разрешить общение с другими клиентами». Настройка хранится по IP и применяется через отдельную цепочку iptables.
 * **Живой лог обновления.** При запуске обновления открывается окно с прогрессом, текущим шагом, статусом, журналом и ошибкой. Во время перезапуска показывается состояние «перезапуск».
 * **Лимиты клиентов.** Скорость и трафик на клиента, `.client_limits.json`, блокировка через iptables и автосоздание `/root/awg-limit.sh`.
 * **RustDesk.** Полный публичный ключ с копированием, понятные подписи сервер/клиент и пояснение статуса Online.
@@ -957,15 +958,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.59/servpanel-3.2.59.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.59/servpanel-3.2.59.tar.gz.sha256
-sha256sum -c servpanel-3.2.59.tar.gz.sha256
-tar -xzf servpanel-3.2.59.tar.gz
-bash /root/servpanel-3.2.59/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.60/servpanel-3.2.60.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.60/servpanel-3.2.60.tar.gz.sha256
+sha256sum -c servpanel-3.2.60.tar.gz.sha256
+tar -xzf servpanel-3.2.60.tar.gz
+bash /root/servpanel-3.2.60/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.2.59`. Если `curl` не установлен:
+Должно вывести `3.2.60`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:
