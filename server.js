@@ -3335,7 +3335,12 @@ async function switchCascadeTarget(target, req) {
     if (cascadeRole() !== 'ru') throw new Error('Резервирование доступно только на RU-входе');
     if (!existingCascadeConf()) throw new Error('Сначала постройте каскад');
     const state = cascadeFailoverStateRead();
-    const id = String(target || '');
+    let id = String(target || '');
+    if (!id || id === 'next') {
+        const order = ['primary', ...cascadeBackupsRead().map(b => b.id)];
+        const idx = Math.max(0, order.indexOf(state.active));
+        id = order[(idx + 1) % order.length];
+    }
     if (id === state.active) {
         return { success: true, unchanged: true, status: cascadeFailoverStatus() };
     }
@@ -3379,6 +3384,22 @@ async function checkCascadeDomains(settings) {
     return { ok: results.some(x => x.ok), results };
 }
 
+async function tryCascadeCandidates(currentId, settings) {
+    const order = ['primary', ...cascadeBackupsRead().map(b => b.id)];
+    const start = Math.max(0, order.indexOf(currentId));
+    const tried = [];
+    for (let step = 1; step < order.length; step++) {
+        const id = order[(start + step) % order.length];
+        tried.push(id);
+        try {
+            await switchCascadeTarget(id, null);
+            const check = await checkCascadeDomains(settings);
+            if (check.ok) return { id, tried, ok: true };
+        } catch (e) { /* пробуем следующий */ }
+    }
+    return { id: null, tried, ok: false };
+}
+
 let cascadeFailoverBusy = false;
 async function cascadeFailoverTick() {
     if (cascadeFailoverBusy || TEST_MODE || DEMO_MODE) return;
@@ -3404,21 +3425,15 @@ async function cascadeFailoverTick() {
         state.failures = (state.failures || 0) + 1;
         state.lastError = 'все проверки недоступны';
         if (state.failures >= settings.failures) {
-            const order = ['primary', ...backups.map(b => b.id)];
-            const idx = Math.max(0, order.indexOf(state.active));
-            const next = order.slice(idx + 1).find(x => x !== 'primary');
-            if (next) {
-                try {
-                    await switchCascadeTarget(next, null);
-                    state.active = next;
-                    state.switchedAt = Date.now();
-                    state.failures = 0;
-                    state.lastError = '';
-                } catch (e) {
-                    state.lastError = 'не удалось переключиться: ' + (e.message || e);
-                }
+            const result = await tryCascadeCandidates(state.active, settings);
+            if (result.ok) {
+                state.active = result.id;
+                state.switchedAt = Date.now();
+                state.failures = 0;
+                state.lastError = '';
             } else {
-                state.lastError = 'нет доступного резерва';
+                state.failures = 0;
+                state.lastError = 'нет доступного сервера после перебора резервов';
             }
         }
         cascadeFailoverStateWrite(state);

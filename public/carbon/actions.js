@@ -1900,7 +1900,11 @@ async function carbonCascadeFailoverSettings() {
 async function carbonCascadeFailoverSwitch(btn) {
   const f = carbon.cascade && carbon.cascade.failover;
   if (!f || !f.applicable) throw new Error((f && f.reason) || 'Сначала постройте каскад');
-  const target = (btn && btn.dataset && btn.dataset.target) || (f.active === 'primary' ? (f.backups[0] && f.backups[0].id) : 'primary');
+  if (!(f.backups || []).length) throw new Error('Сначала добавьте резервный сервер');
+  const order = ['primary', ...(f.backups || []).map(b => b.id)];
+  const idx = Math.max(0, order.indexOf(f.active));
+  const fallback = order[(idx + 1) % order.length] || 'primary';
+  const target = (btn && btn.dataset && btn.dataset.target) || fallback;
   if (!target) throw new Error('Сначала добавьте резервный сервер');
   if (target === f.active) { showToast('Этот сервер уже активен'); return; }
   const label = target === 'primary' ? 'основной сервер' : ((f.backups.find(b => b.id === target) || {}).name || 'резерв');
