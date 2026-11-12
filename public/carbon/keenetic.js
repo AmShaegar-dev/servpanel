@@ -168,7 +168,7 @@ function keeneticFlowDraw() {
     ? `M ${a.cx} ${a.b} C ${a.cx} ${a.b + (b.t - a.b) * .5}, ${b.cx} ${b.t - (b.t - a.b) * .5}, ${b.cx} ${b.t}`
     : `M ${a.r} ${a.cy} C ${a.r + (b.l - a.r) * .5} ${a.cy}, ${b.l - (b.l - a.r) * .5} ${b.cy}, ${b.l} ${b.cy}`;
 
-  const drawPath = (d, state) => {
+  const drawPath = (d, state, withBall = true) => {
     const id = 'kflow-' + (++seq);
     const color = state === 'active' ? accent : state === 'standby' ? blue : '#6b7078';
     if (state === 'down' || state === 'disabled') {
@@ -201,6 +201,7 @@ function keeneticFlowDraw() {
       svg.appendChild(g);
       return;
     }
+    if (!withBall) return;
     const ball = document.createElementNS(ns, 'circle');
     ball.setAttribute('r', '3.4');
     ball.setAttribute('fill', color);
@@ -236,7 +237,8 @@ function keeneticFlowDraw() {
   const wanR = rel(wan);
   if (vertical) {
     drawPath(curve(localR, routerR), mainState);
-    const spineX = 16;
+    const leftX = 16;
+    const rightX = Math.max(leftX + 40, W - 16);
     const branches = [...flow.querySelectorAll('.keenetic-flow-branch')]
       .map(br => {
         const chip = br.querySelector('.keenetic-flow-tunnel');
@@ -244,14 +246,21 @@ function keeneticFlowDraw() {
       })
       .filter(Boolean)
       .sort((a, b) => a.rect.t - b.rect.t);
-    drawPath(`M ${routerR.cx} ${routerR.b} C ${routerR.cx} ${routerR.b + 14}, ${spineX} ${routerR.b + 4}, ${spineX} ${routerR.b + 18}`, mainState);
-    let prevY = routerR.b + 18;
+    if (!branches.length) return;
+    const firstY = branches[0].rect.cy;
+    const lastY = branches[branches.length - 1].rect.cy;
+    // Вход: роутер → левая шина.
+    drawPath(`M ${routerR.cx} ${routerR.b} C ${routerR.cx} ${routerR.b + 14}, ${leftX} ${routerR.b + 4}, ${leftX} ${routerR.b + 18}`, mainState, false);
+    drawPath(`M ${leftX} ${routerR.b + 18} L ${leftX} ${lastY}`, mainState);
+    // Выход: правая шина → WAN.
+    drawPath(`M ${rightX} ${firstY} L ${rightX} ${wanR.t - 18}`, mainState);
+    drawPath(`M ${rightX} ${wanR.t - 18} C ${rightX} ${wanR.t - 4}, ${wanR.cx - 24} ${wanR.t}, ${wanR.cx} ${wanR.t}`, mainState, false);
+    // Вход и выход каждого туннеля — с разных сторон.
     for (const br of branches) {
       const y = br.rect.cy;
-      drawPath(`M ${spineX} ${prevY} L ${spineX} ${y - 8} Q ${spineX} ${y} ${spineX + 8} ${y} L ${br.rect.l} ${y}`, br.state);
-      prevY = y;
+      drawPath(`M ${leftX} ${y} L ${br.rect.l} ${y}`, br.state, false);
+      drawPath(`M ${br.rect.r} ${y} L ${rightX} ${y}`, br.state, false);
     }
-    drawPath(`M ${spineX} ${prevY} L ${spineX} ${wanR.t - 18} C ${spineX} ${wanR.t - 4}, ${wanR.cx - 24} ${wanR.t}, ${wanR.cx} ${wanR.t}`, mainState);
   } else {
     drawPath(curve(localR, routerR), mainState);
     for (const br of [...flow.querySelectorAll('.keenetic-flow-branch')]) {
