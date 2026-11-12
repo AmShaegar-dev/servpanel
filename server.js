@@ -3123,6 +3123,312 @@ function euCascadePeer(confText) {
     return null;
 }
 
+// ---------------------------------------------------------------------------
+// Резервирование каскада: несколько awg1-конфигов, ручное и авто-переключение
+// ---------------------------------------------------------------------------
+const CASCADE_BACKUPS_FILE = path.join(DATA_DIR, '.cascade_backups.json');
+const CASCADE_FAILOVER_FILE = path.join(DATA_DIR, '.cascade_failover.json');
+const CASCADE_FAILOVER_STATE = path.join(DATA_DIR, '.cascade_failover_state.json');
+const CASCADE_PRIMARY_COPY = path.join(DATA_DIR, '.cascade_primary.awg1.conf');
+const CASCADE_FAILOVER_DEFAULTS = {
+    enabled: false,
+    domains: ['ozon.ru', 'wildberries.ru', 'avito.ru'],
+    interval: 60,
+    timeout: 5,
+    failures: 3
+};
+
+function cascadeHostList(value) {
+    const list = Array.isArray(value) ? value : String(value || '').split(/[\s,;]+/);
+    return [...new Set(list.map(x => String(x || '').trim().toLowerCase())
+        .filter(x => x && HOST_RE.test(x)))].slice(0, 20);
+}
+
+function cascadeEndpointFromText(text) {
+    try {
+        const ini = parseIni(String(text || ''));
+        return String(((ini.Peer || {}).Endpoint) || '').trim();
+    } catch (e) { return ''; }
+}
+
+function cascadeBackupsRead() {
+    const j = readJson(CASCADE_BACKUPS_FILE, { backups: [] });
+    const list = Array.isArray(j.backups) ? j.backups : [];
+    return list.filter(b => b && b.id && b.name && b.endpoint && b.config_enc)
+        .map(b => ({
+            id: String(b.id),
+            name: String(b.name).slice(0, 40),
+            endpoint: String(b.endpoint),
+            config_enc: String(b.config_enc),
+            createdAt: b.createdAt || ''
+        }));
+}
+function cascadeBackupsWrite(list) {
+    writeJson(CASCADE_BACKUPS_FILE, { backups: list }, 0o600);
+}
+
+function cascadeFailoverSettingsRead() {
+    const j = readJson(CASCADE_FAILOVER_FILE, null);
+    const s = { ...CASCADE_FAILOVER_DEFAULTS, ...(j && typeof j === 'object' ? j : {}) };
+    const domains = cascadeHostList(s.domains);
+    return {
+        enabled: !!s.enabled,
+        domains: domains.length ? domains : CASCADE_FAILOVER_DEFAULTS.domains.slice(),
+        interval: Math.max(30, Math.min(3600, Number(s.interval) || 60)),
+        timeout: Math.max(3, Math.min(30, Number(s.timeout) || 5)),
+        failures: Math.max(1, Math.min(10, Number(s.failures) || 3))
+    };
+}
+function cascadeFailoverSettingsWrite(settings) {
+    const s = settings || {};
+    const domains = cascadeHostList(s.domains);
+    const out = {
+        enabled: !!s.enabled,
+        domains: domains.length ? domains : CASCADE_FAILOVER_DEFAULTS.domains.slice(),
+        interval: Math.max(30, Math.min(3600, Number(s.interval) || 60)),
+        timeout: Math.max(3, Math.min(30, Number(s.timeout) || 5)),
+        failures: Math.max(1, Math.min(10, Number(s.failures) || 3))
+    };
+    writeJson(CASCADE_FAILOVER_FILE, out, 0o600);
+    return out;
+}
+
+function cascadeFailoverStateRead() {
+    const j = readJson(CASCADE_FAILOVER_STATE, null);
+    return {
+        active: j && typeof j.active === 'string' && j.active ? j.active : 'primary',
+        switchedAt: j && j.switchedAt ? j.switchedAt : 0,
+        lastCheck: j && j.lastCheck ? j.lastCheck : 0,
+        failures: j && Number.isFinite(Number(j.failures)) ? Number(j.failures) : 0,
+        lastError: j && typeof j.lastError === 'string' ? j.lastError : ''
+    };
+}
+function cascadeFailoverStateWrite(state) {
+    writeJson(CASCADE_FAILOVER_STATE, state, 0o600);
+}
+
+function cascadeCipherKey() {
+    return crypto.createHash('sha256')
+        .update(String((SECRETS && SECRETS.sessionSecret) || 'servpanel-cascade'))
+        .digest();
+}
+function cascadeEncrypt(text) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', cascadeCipherKey(), iv);
+    const data = Buffer.concat([cipher.update(String(text), 'utf8'), cipher.final()]);
+    return [iv.toString('base64'), cipher.getAuthTag().toString('base64'), data.toString('base64')].join('.');
+}
+function cascadeDecrypt(payload) {
+    try {
+        const [iv, tag, data] = String(payload || '').split('.');
+        if (!iv || !tag || !data) return '';
+        const decipher = crypto.createDecipheriv('aes-256-gcm', cascadeCipherKey(), Buffer.from(iv, 'base64'));
+        decipher.setAuthTag(Buffer.from(tag, 'base64'));
+        return Buffer.concat([decipher.update(Buffer.from(data, 'base64')), decipher.final()]).toString('utf8');
+    } catch (e) { return ''; }
+}
+
+// Сохраняем текущий основной awg1 перед первым переключением на резерв.
+function ensureCascadePrimaryCopy(force = false) {
+    if (!force && fs.existsSync(CASCADE_PRIMARY_COPY)) return true;
+    const conf = existingCascadeConf();
+    if (!conf) return false;
+    try {
+        writeRootFile(CASCADE_PRIMARY_COPY, readTextSafe(conf), '0600');
+        return true;
+    } catch (e) { return false; }
+}
+
+function cascadeFailoverStatus() {
+    if (cascadeRole() !== 'ru') {
+        return { applicable: false, reason: 'Резервирование настраивается на RU-входе' };
+    }
+    if (!existingCascadeConf()) {
+        return { applicable: false, reason: 'Сначала постройте каскад' };
+    }
+    const settings = cascadeFailoverSettingsRead();
+    const backups = cascadeBackupsRead();
+    const state = cascadeFailoverStateRead();
+    if (state.active !== 'primary' && !backups.some(b => b.id === state.active)) {
+        state.active = 'primary';
+    }
+    const currentText = readTextSafe(existingCascadeConf());
+    const currentEndpoint = cascadeEndpointFromText(currentText);
+    const savedPrimary = fs.existsSync(CASCADE_PRIMARY_COPY) ? readTextSafe(CASCADE_PRIMARY_COPY) : '';
+    const primaryEndpoint = state.active === 'primary'
+        ? (currentEndpoint || cascadeEndpointFromText(savedPrimary))
+        : cascadeEndpointFromText(savedPrimary);
+    return {
+        applicable: true,
+        active: state.active,
+        primary: {
+            id: 'primary',
+            name: 'Основной',
+            endpoint: primaryEndpoint || currentEndpoint || '',
+            state: state.active === 'primary' ? 'active' : 'standby'
+        },
+        backups: backups.map(b => ({
+            id: b.id,
+            name: b.name,
+            endpoint: b.endpoint,
+            state: b.id === state.active ? 'active' : 'standby'
+        })),
+        settings,
+        currentEndpoint,
+        primarySaved: !!savedPrimary,
+        switchedAt: state.switchedAt,
+        lastCheck: state.lastCheck,
+        failures: state.failures,
+        lastError: state.lastError
+    };
+}
+
+// Применяет произвольный awg1-конфиг: туннель, маршруты, MTProto через EU.
+async function applyCascadeTunnelContent(content) {
+    const conf = existingCascadeConf();
+    if (!conf) throw new Error('Сначала постройте каскад');
+    const previous = readTextSafe(conf);
+    try {
+        writeRootFile(conf, content, '0600');
+        await sshRunner.run({ host: '127.0.0.1' }, 'systemctl restart awg-quick@awg1', 60000);
+        await new Promise(r => setTimeout(r, 2500));
+        const st = await sshRunner.run({ host: '127.0.0.1' }, 'systemctl is-active awg-quick@awg1', 20000);
+        if (!/active/.test(String(st.out || ''))) {
+            const why = await sshRunner.run({ host: '127.0.0.1' },
+                'systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 12', 30000);
+            throw new Error('awg1 не запустился: ' + String(why.out || '').trim().slice(0, 700));
+        }
+        if (fs.existsSync(ROUTING_SCRIPT)) {
+            const rr = await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
+            if (rr.code !== 0) {
+                throw new Error('маршруты не применились: ' + String(rr.out || '').trim().slice(-500));
+            }
+        }
+        let proxyReconnected = false;
+        let exitIp = '';
+        let proxyError = '';
+        if (fs.existsSync(PROXY_CASCADE_FLAG_FILE)) {
+            try {
+                exitIp = proxyCascadeExitIp();
+                if (exitIp) {
+                    applyProxyCascadeNatIp(exitIp);
+                    for (const unit of ['telemt', 'kvguardd', 'mtproxyl']) {
+                        try { sh('systemctl', ['restart', unit]); } catch (e) { /* ignore */ }
+                    }
+                    proxyReconnected = true;
+                } else {
+                    proxyError = 'не удалось определить EU-IP через awg1';
+                }
+            } catch (e) { proxyError = e.message || String(e); }
+        }
+        return { success: true, proxyReconnected, exitIp, proxyError };
+    } catch (e) {
+        try {
+            if (previous) writeRootFile(conf, previous, '0600');
+            await sshRunner.run({ host: '127.0.0.1' }, 'systemctl restart awg-quick@awg1', 60000);
+        } catch (e2) { /* ignore */ }
+        throw e;
+    }
+}
+
+async function switchCascadeTarget(target, req) {
+    if (cascadeRole() !== 'ru') throw new Error('Резервирование доступно только на RU-входе');
+    if (!existingCascadeConf()) throw new Error('Сначала постройте каскад');
+    const state = cascadeFailoverStateRead();
+    const id = String(target || '');
+    if (id === state.active) {
+        return { success: true, unchanged: true, status: cascadeFailoverStatus() };
+    }
+    let content = '';
+    let label = '';
+    if (id === 'primary') {
+        if (!fs.existsSync(CASCADE_PRIMARY_COPY)) throw new Error('Основной конфиг не сохранён');
+        content = readTextSafe(CASCADE_PRIMARY_COPY);
+        label = 'Основной';
+    } else {
+        const backup = cascadeBackupsRead().find(b => b.id === id);
+        if (!backup) throw new Error('Резервный сервер не найден');
+        content = cascadeDecrypt(backup.config_enc);
+        if (!content) throw new Error('Не удалось расшифровать конфиг резерва');
+        label = backup.name;
+        if (state.active === 'primary') ensureCascadePrimaryCopy(true);
+    }
+    const applied = await applyCascadeTunnelContent(content);
+    state.active = id;
+    state.switchedAt = Date.now();
+    state.failures = 0;
+    state.lastError = '';
+    cascadeFailoverStateWrite(state);
+    if (req) auditLog(req, 'Каскад: переключение на ' + label);
+    return { ...applied, active: id, name: label, status: cascadeFailoverStatus() };
+}
+
+async function checkCascadeDomains(settings) {
+    const domains = settings.domains || [];
+    const results = [];
+    for (const domain of domains) {
+        let code = '';
+        try {
+            const r = await sshRunner.run({ host: '127.0.0.1' },
+                `curl -4 -sS -o /dev/null -w '%{http_code}' --max-time ${settings.timeout} --interface awg1 https://${domain}`,
+                (settings.timeout + 6) * 1000);
+            code = String(r.out || '').trim().split('\n').pop() || '';
+        } catch (e) { code = ''; }
+        results.push({ domain, code: code || '000', ok: /^[1-5]\d\d$/.test(code) });
+    }
+    return { ok: results.some(x => x.ok), results };
+}
+
+let cascadeFailoverBusy = false;
+async function cascadeFailoverTick() {
+    if (cascadeFailoverBusy || TEST_MODE || DEMO_MODE) return;
+    if (cascadeRole() !== 'ru' || !existingCascadeConf()) return;
+    if (cascadeBuildJob && cascadeBuildJob.running) return;
+    const settings = cascadeFailoverSettingsRead();
+    if (!settings.enabled) return;
+    const backups = cascadeBackupsRead();
+    if (!backups.length) return;
+    const state = cascadeFailoverStateRead();
+    const now = Date.now();
+    if (now - state.lastCheck < settings.interval * 1000) return;
+    cascadeFailoverBusy = true;
+    try {
+        const check = await checkCascadeDomains(settings);
+        state.lastCheck = now;
+        if (check.ok) {
+            state.failures = 0;
+            state.lastError = '';
+            cascadeFailoverStateWrite(state);
+            return;
+        }
+        state.failures = (state.failures || 0) + 1;
+        state.lastError = 'все проверки недоступны';
+        if (state.failures >= settings.failures) {
+            const order = ['primary', ...backups.map(b => b.id)];
+            const idx = Math.max(0, order.indexOf(state.active));
+            const next = order.slice(idx + 1).find(x => x !== 'primary');
+            if (next) {
+                try {
+                    await switchCascadeTarget(next, null);
+                    state.failures = 0;
+                    state.lastError = '';
+                } catch (e) {
+                    state.lastError = 'не удалось переключиться: ' + (e.message || e);
+                }
+            } else {
+                state.lastError = 'нет доступного резерва';
+            }
+        }
+        cascadeFailoverStateWrite(state);
+    } catch (e) {
+        state.lastError = e.message || String(e);
+        cascadeFailoverStateWrite(state);
+    } finally {
+        cascadeFailoverBusy = false;
+    }
+}
+setInterval(cascadeFailoverTick, 15000).unref();
+
 function cascadeDetailsEu() {
     const confPath = path.join(AWG_CONF_DIR, 'awg0.conf');
     const text = readTextSafe(confPath);
@@ -3169,6 +3475,7 @@ function cascadeDetailsEu() {
     out.tunnelActive = out.handshakeAgo !== null && out.handshakeAgo < 180;
     out.endpoint = out.entryEndpoint;
     out.ifaces = ['ru_host'];
+    out.failover = { applicable: false, reason: 'Резервирование настраивается на RU-входе' };
     return out;
 }
 
@@ -3243,6 +3550,8 @@ function cascadeDetails() {
     try {
         if (fs.existsSync(ROUTING_SCRIPT)) out.lastRun = fs.statSync(ROUTING_SCRIPT).mtime.toISOString();
     } catch (e) { /* ignore */ }
+    try { out.failover = cascadeFailoverStatus(); }
+    catch (e) { out.failover = { applicable: false, reason: e.message || String(e) }; }
     return out;
 }
 
@@ -5851,6 +6160,92 @@ app.post('/api/cascade/config', checkAuth, requireAdmin, async (req, res) => {
     } catch (e) {
         restore();
         res.status(500).json({ error: 'Не удалось сохранить awg1.conf: ' + (e.message || String(e)) });
+    }
+});
+
+// --- Резервные серверы и настройки автопереключения ------------------------
+app.post('/api/cascade/backups', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    if (cascadeRole() !== 'ru') return res.status(400).json({ error: 'Резервирование настраивается на RU-входе' });
+    if (!existingCascadeConf()) return res.status(400).json({ error: 'Сначала постройте каскад' });
+    const name = String(body.name || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 40);
+    const config = String(body.config || '');
+    if (!name) return res.status(400).json({ error: 'Укажите название резерва' });
+    if (!config || config.length > 256 * 1024) return res.status(400).json({ error: 'Пустой или слишком большой конфиг' });
+    if (!/^\s*\[Interface\]/im.test(config) || !/^\s*\[Peer\]/im.test(config)) {
+        return res.status(400).json({ error: 'Конфиг должен содержать [Interface] и [Peer]' });
+    }
+    const endpoint = cascadeEndpointFromText(config);
+    if (!/^[A-Za-z0-9.\-\[\]:]+:\d{1,5}$/.test(endpoint)) {
+        return res.status(400).json({ error: 'В конфиге нет корректного Endpoint' });
+    }
+    const list = cascadeBackupsRead();
+    if (list.length >= 8) return res.status(400).json({ error: 'Максимум 8 резервных серверов' });
+    const id = crypto.randomBytes(4).toString('hex');
+    list.push({
+        id,
+        name,
+        endpoint,
+        config_enc: cascadeEncrypt(config),
+        createdAt: new Date().toISOString()
+    });
+    cascadeBackupsWrite(list);
+    if (cascadeFailoverStateRead().active === 'primary') ensureCascadePrimaryCopy(false);
+    auditLog(req, 'Каскад: добавлен резервный сервер ' + name + ' (' + endpoint + ')');
+    res.json({ success: true, id, status: cascadeFailoverStatus() });
+});
+
+app.delete('/api/cascade/backups/:id', checkAuth, requireAdmin, (req, res) => {
+    const id = String(req.params.id || '');
+    const state = cascadeFailoverStateRead();
+    if (state.active === id) return res.status(400).json({ error: 'Сначала вернитесь на основной сервер' });
+    const list = cascadeBackupsRead();
+    const next = list.filter(b => b.id !== id);
+    if (next.length === list.length) return res.status(404).json({ error: 'Резерв не найден' });
+    cascadeBackupsWrite(next);
+    auditLog(req, 'Каскад: удалён резервный сервер ' + id);
+    res.json({ success: true, status: cascadeFailoverStatus() });
+});
+
+app.post('/api/cascade/failover/settings', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    const domains = cascadeHostList(body.domains);
+    if (!domains.length) return res.status(400).json({ error: 'Укажите хотя бы один домен для проверки' });
+    const settings = cascadeFailoverSettingsWrite({
+        enabled: !!body.enabled,
+        domains,
+        interval: body.interval,
+        timeout: body.timeout,
+        failures: body.failures
+    });
+    auditLog(req, 'Каскад: резервирование ' + (settings.enabled ? 'включено' : 'выключено') +
+        ' · ' + domains.join(', ') + ' · каждые ' + settings.interval + ' с');
+    res.json({ success: true, settings, status: cascadeFailoverStatus() });
+});
+
+app.post('/api/cascade/failover/switch', checkAuth, requireAdmin, async (req, res) => {
+    try {
+        const target = String((req.body && req.body.target) || '');
+        if (!target) return res.status(400).json({ error: 'Не указан резерв' });
+        const result = await switchCascadeTarget(target, req);
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось переключить каскад: ' + (e.message || String(e)) });
+    }
+});
+
+app.post('/api/cascade/failover/check', checkAuth, requireAdmin, async (req, res) => {
+    try {
+        const settings = cascadeFailoverSettingsRead();
+        const check = await checkCascadeDomains(settings);
+        const state = cascadeFailoverStateRead();
+        state.lastCheck = Date.now();
+        state.failures = check.ok ? 0 : (state.failures || 0) + 1;
+        state.lastError = check.ok ? '' : 'все проверки недоступны';
+        cascadeFailoverStateWrite(state);
+        res.json({ ...check, settings, state });
+    } catch (e) {
+        res.status(500).json({ error: 'Ошибка проверки: ' + (e.message || String(e)) });
     }
 });
 

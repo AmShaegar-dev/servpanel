@@ -1830,6 +1830,85 @@ async function carbonCascadeConfigEdit() {
   });
 }
 
+async function carbonCascadeBackupAdd() {
+  const f = carbon.cascade && carbon.cascade.failover;
+  if (f && f.applicable === false) throw new Error(f.reason || 'Резервирование недоступно');
+  showCarbonForm({
+    title: 'Резервный сервер',
+    sub: 'Вставьте конфиг AmneziaWG второй стороны. Он сохранится зашифрованным.',
+    fields: [
+      { name: 'name', label: 'Название', placeholder: 'Германия' },
+      { name: 'config', label: 'Конфиг AWG', type: 'textarea', rows: 14, placeholder: '[Interface]\nPrivateKey = ...\nAddress = 10.9.9.5/32\n\n[Peer]\nPublicKey = ...\nEndpoint = 185.x.x.x:3977\nAllowedIPs = 0.0.0.0/0, ::/0' }
+    ],
+    submitText: 'Сохранить резерв',
+    onSubmit: async v => {
+      if (!v.name.trim()) throw new Error('Укажите название резерва');
+      if (!v.config.trim()) throw new Error('Вставьте конфиг AWG');
+      await api('/api/cascade/backups', { method: 'POST', body: { name: v.name.trim(), config: v.config } });
+      await carbonRefresh('Резерв добавлен: ' + v.name.trim());
+    }
+  });
+}
+
+async function carbonCascadeBackupDelete(id) {
+  if (!id) return;
+  if (!confirm('Удалить резервный сервер? Его конфиг будет удалён.')) return;
+  await api('/api/cascade/backups/' + encodeURIComponent(id), { method: 'DELETE' });
+  await carbonRefresh('Резервный сервер удалён');
+}
+
+async function carbonCascadeFailoverSettings() {
+  let f = carbon.cascade && carbon.cascade.failover;
+  if (!f || !f.applicable) {
+    try { const s = await api('/api/cascade/status'); carbon.cascade = s; f = s.failover; } catch (e) {}
+  }
+  if (!f || !f.applicable) throw new Error((f && f.reason) || 'Сначала постройте каскад');
+  const s = f.settings || {};
+  const domains = Array.isArray(s.domains) && s.domains.length ? s.domains.join('\n') : 'ozon.ru\nwildberries.ru\navito.ru';
+  showCarbonForm({
+    title: 'Резервирование каскада',
+    sub: 'Автопереключение, домены проверки и порог срабатывания',
+    fields: [
+      { name: 'enabled', label: 'Автопереключение на резерв', type: 'checkbox', value: !!s.enabled },
+      { name: 'domains', label: 'Домены для проверки (по одному в строке)', type: 'textarea', rows: 5, value: domains },
+      { name: 'interval', label: 'Интервал проверки', type: 'select', value: String(s.interval || 60), options: [
+        { value: '30', label: 'каждые 30 секунд' },
+        { value: '60', label: 'каждые 60 секунд' },
+        { value: '120', label: 'каждые 2 минуты' },
+        { value: '300', label: 'каждые 5 минут' }
+      ] },
+      { name: 'timeout', label: 'Таймаут проверки', type: 'select', value: String(s.timeout || 5), options: [
+        { value: '5', label: '5 секунд' }, { value: '10', label: '10 секунд' }, { value: '15', label: '15 секунд' }
+      ] },
+      { name: 'failures', label: 'Неудач подряд до переключения', type: 'select', value: String(s.failures || 3), options: [
+        { value: '2', label: '2' }, { value: '3', label: '3' }, { value: '5', label: '5' }
+      ] }
+    ],
+    submitText: 'Сохранить настройки',
+    danger: true,
+    onSubmit: async v => {
+      const list = String(v.domains || '').split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
+      if (!list.length) throw new Error('Укажите хотя бы один домен');
+      await api('/api/cascade/failover/settings', { method: 'POST', body: {
+        enabled: !!v.enabled, domains: list, interval: v.interval, timeout: v.timeout, failures: v.failures
+      } });
+      await carbonRefresh(v.enabled ? 'Автопереключение включено' : 'Автопереключение выключено');
+    }
+  });
+}
+
+async function carbonCascadeFailoverSwitch() {
+  const f = carbon.cascade && carbon.cascade.failover;
+  if (!f || !f.applicable) throw new Error((f && f.reason) || 'Сначала постройте каскад');
+  const target = f.active === 'primary' ? (f.backups[0] && f.backups[0].id) : 'primary';
+  if (!target) throw new Error('Сначала добавьте резервный сервер');
+  const label = target === 'primary' ? 'основной сервер' : ((f.backups.find(b => b.id === target) || {}).name || 'резерв');
+  if (!confirm('Переключить каскад на ' + label + '? Туннель перезапустится на 2–3 секунды.')) return;
+  const r = await api('/api/cascade/failover/switch', { method: 'POST', body: { target } });
+  await carbonRefresh('Каскад переключён: ' + label);
+  if (r && r.proxyReconnected) showToast('MTProto через EU переподключён');
+}
+
 async function carbonCascadeRepair() {
   if (!confirm('Пересобрать каскад? Туннель awg1 перезапустится на несколько секунд.')) return;
   const d = await api('/api/cascade/repair', { method: 'POST', body: {} });
@@ -1989,6 +2068,10 @@ document.addEventListener('click', async event => {
     else if (action === 'install-mtproxyl' || action === 'mtproxyl-install') await carbonMtproxylInstall();
     else if (action === 'awg-install') await carbonAwgInstall();
     else if (action === 'cascade-build') await carbonCascadeBuild();
+    else if (action === 'cascade-backup-add') await carbonCascadeBackupAdd();
+    else if (action === 'cascade-backup-delete') await carbonCascadeBackupDelete(btn.dataset.id);
+    else if (action === 'cascade-failover-settings') await carbonCascadeFailoverSettings();
+    else if (action === 'cascade-failover-switch') await carbonCascadeFailoverSwitch();
     else if (action === 'cascade-progress') await carbonCascadeProgress();
     else if (action === 'cascade-manual') await carbonCascadeManual();
     else if (action === 'cascade-config-edit') await carbonCascadeConfigEdit();
