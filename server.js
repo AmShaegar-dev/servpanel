@@ -4931,9 +4931,13 @@ async function runCascadeBuild(job, remote, opts) {
     log('SSH', 'Вторая сторона доступна: ' + euHost);
 
     // 1b. Снимаем cron @reboot прошлой установки: иначе EU перезагружается
-    // по кругу, и SSH пропадает посреди следующих шагов.
+    // по кругу, и SSH пропадает посреди следующих шагов. Но если установщик
+    // реально работает прямо сейчас — не убиваем его, а дожидаемся.
+    let resumeRunning = false;
     for (let i = 0; i < 3; i++) {
-        if (await sshBuild.stopResume(remote, (m) => log('EU', m))) break;
+        const st = await sshBuild.stopResume(remote, (m) => log('EU', m));
+        if (st.running) { resumeRunning = true; break; }
+        if (st.stopped) break;
         const back = await sshRunner.waitOnline(remote, 3 * 60 * 1000);
         if (!back) break;
     }
@@ -4941,7 +4945,7 @@ async function runCascadeBuild(job, remote, opts) {
     // 2. AmneziaWG на второй стороне.
     let info = await sshBuild.awgInfo(remote);
     if (!info.installed) {
-        const waited = await sshBuild.waitForAwg(remote, 5 * 60 * 1000, (m) => log('EU', m));
+        const waited = await sshBuild.waitForAwg(remote, (resumeRunning ? 50 : 5) * 60 * 1000, (m) => log('EU', m));
         if (waited) {
             info = waited;
             log('EU', 'AmneziaWG уже установлен — продолжаю после перезагрузки');
