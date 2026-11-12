@@ -3323,6 +3323,11 @@ async function applyCascadeTunnelContent(content) {
         if (!await waitCascadeHandshake(startedAt, 25)) {
             throw new Error('нет рукопожатия с выбранным сервером — проверьте Endpoint и ключи резерва');
         }
+        const settings = cascadeFailoverSettingsRead();
+        const check = await checkCascadeDomains(settings);
+        if (!check.ok) {
+            throw new Error('сервер поднялся, но проверка сервисов через него не прошла');
+        }
         let proxyReconnected = false;
         let exitIp = '';
         let proxyError = '';
@@ -3416,8 +3421,7 @@ async function tryCascadeCandidates(currentId, settings) {
         tried.push(id);
         try {
             await switchCascadeTarget(id, null);
-            const check = await checkCascadeDomains(settings);
-            if (check.ok) return { id, tried, ok: true };
+            return { id, tried, ok: true };
         } catch (e) { /* пробуем следующий */ }
     }
     return { id: null, tried, ok: false };
