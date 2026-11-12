@@ -476,7 +476,11 @@ select.tz-focus { outline: 2px solid var(--accent); outline-offset: 2px; border-
 .keenetic-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
 .keenetic-detail-head .page-title{margin-bottom:2px}
 .keenetic-detail-head .btn-sm{margin-bottom:0}
-.keenetic-flow-card{overflow:hidden;min-width:0}
+.keenetic-flow-card{grid-column:span 8;overflow:hidden;min-width:0}
+.keenetic-state-card{grid-column:span 4;min-width:0}
+@media(max-width:1500px){
+  .keenetic-flow-card,.keenetic-state-card{grid-column:span 12}
+}
 .keenetic-flow-wrap{container-type:inline-size;min-width:0}
 .keenetic-flow{position:relative;display:grid;grid-template-columns:auto minmax(50px,1fr) auto minmax(60px,1.1fr) minmax(290px,2.2fr) minmax(60px,1.1fr) auto;align-items:center;gap:10px;min-height:230px;padding:18px 8px}
 .keenetic-flow-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0;overflow:visible}
@@ -504,7 +508,7 @@ select.tz-focus { outline: 2px solid var(--accent); outline-offset: 2px; border-
 .keenetic-flow-tunnel.down .keenetic-flow-tunnel-text span,.keenetic-flow-tunnel.disabled .keenetic-flow-tunnel-text span{color:var(--bad)}
 .keenetic-flow-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:0 8px 4px}
 .keenetic-flow-hint{font:500 9px/1.5 var(--mono);letter-spacing:.02em;color:var(--text-3);max-width:340px}
-@container (max-width:760px){
+@container (max-width:840px){
   .keenetic-flow{display:flex;flex-direction:column;align-items:stretch;gap:14px;min-height:0}
   .keenetic-flow-node{flex-direction:row;justify-content:center}
   .keenetic-flow-spacer{display:none}

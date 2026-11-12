@@ -362,8 +362,8 @@ function keeneticDetailHtml() {
     </div>`;
   } else {
     body = `<div class="grid">
-      <section class="card keenetic-flow-card" style="grid-column:span 8"><div class="card-top"><div><div class="card-title">Схема трафика</div><div class="card-sub">Роутер и его туннели</div></div>${tag(st.online ? 'live' : 'offline', st.online ? 'good' : 'bad')}</div><div class="keenetic-flow-wrap">${keeneticFlow(r)}<div class="keenetic-flow-actions"><button class="btn" data-carbon-action="keenetic-failover">${icon('refresh')}Включить резерв</button><span class="keenetic-flow-hint">Переведёт DNS-маршруты через туннели на резервный. Маршруты через Ethernet не меняются.</span></div></div></section>
-      <section class="card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">Состояние</div><div class="card-sub">${escHtml(st.checkedAt ? 'проверено ' + keeneticAgo(st.checkedAt) : 'ещё не проверялся')}</div></div>${keeneticStatusTag(r)}</div>
+      <section class="card keenetic-flow-card"><div class="card-top"><div><div class="card-title">Схема трафика</div><div class="card-sub">Роутер и его туннели</div></div>${tag(st.online ? 'live' : 'offline', st.online ? 'good' : 'bad')}</div><div class="keenetic-flow-wrap">${keeneticFlow(r)}<div class="keenetic-flow-actions"><button class="btn" data-carbon-action="keenetic-failover">${icon('refresh')}Включить резерв</button><span class="keenetic-flow-hint">Переведёт DNS-маршруты через туннели на резервный. Маршруты через Ethernet не меняются.</span></div></div></section>
+      <section class="card keenetic-state-card"><div class="card-top"><div><div class="card-title">Состояние</div><div class="card-sub">${escHtml(st.checkedAt ? 'проверено ' + keeneticAgo(st.checkedAt) : 'ещё не проверялся')}</div></div>${keeneticStatusTag(r)}</div>
         <div class="list">
           <div class="list-row"><b>Модель</b><span class="mono">${escHtml(st.model || '—')}</span></div>
           <div class="list-row"><b>Прошивка</b><span class="mono">${escHtml(st.firmware || '—')}</span></div>
