@@ -510,9 +510,10 @@ select.tz-focus { outline: 2px solid var(--accent); outline-offset: 2px; border-
 .keenetic-flow-hint{font:500 9px/1.5 var(--mono);letter-spacing:.02em;color:var(--text-3);max-width:340px}
 @container (max-width:840px){
   .keenetic-flow{display:flex;flex-direction:column;align-items:stretch;gap:14px;min-height:0}
-  .keenetic-flow-node{flex-direction:row;justify-content:center}
   .keenetic-flow-spacer{display:none}
-  .keenetic-flow-branches,.keenetic-flow-branch{width:100%}
+  .keenetic-flow-branches{width:100%}
+  .keenetic-flow-branch{width:100%;justify-content:stretch;padding-left:34px}
+  .keenetic-flow-branch .keenetic-flow-tunnel{width:100%}
 }
 @keyframes keeneticIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 @keyframes keeneticViewIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
@@ -521,8 +522,9 @@ select.tz-focus { outline: 2px solid var(--accent); outline-offset: 2px; border-
 @keyframes keeneticPulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--good) 40%,transparent)}50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--good) 0%,transparent)}}
 @media(max-width:900px){
   .keenetic-flow{display:flex;flex-direction:column;align-items:stretch;gap:14px}
-  .keenetic-flow-node{flex-direction:row;justify-content:center}
   .keenetic-flow-spacer{display:none}
   .keenetic-flow-branches,.keenetic-flow-branch{width:100%}
+  .keenetic-flow-branch{justify-content:stretch;padding-left:34px}
+  .keenetic-flow-branch .keenetic-flow-tunnel{width:100%}
   .keenetic-empty{align-items:flex-start;flex-direction:column}
 }

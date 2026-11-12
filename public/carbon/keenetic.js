@@ -168,8 +168,7 @@ function keeneticFlowDraw() {
     ? `M ${a.cx} ${a.b} C ${a.cx} ${a.b + (b.t - a.b) * .5}, ${b.cx} ${b.t - (b.t - a.b) * .5}, ${b.cx} ${b.t}`
     : `M ${a.r} ${a.cy} C ${a.r + (b.l - a.r) * .5} ${a.cy}, ${b.l - (b.l - a.r) * .5} ${b.cy}, ${b.l} ${b.cy}`;
 
-  const draw = (a, b, state) => {
-    const d = curve(a, b);
+  const drawPath = (d, state) => {
     const id = 'kflow-' + (++seq);
     const color = state === 'active' ? accent : state === 'standby' ? blue : '#6b7078';
     if (state === 'down' || state === 'disabled') {
@@ -188,6 +187,7 @@ function keeneticFlowDraw() {
     p.setAttribute('stroke', color);
     p.setAttribute('stroke-width', state === 'active' || state === 'standby' ? '1.8' : '1.5');
     p.setAttribute('stroke-linecap', 'round');
+    p.setAttribute('stroke-linejoin', 'round');
     if (state === 'active' || state === 'standby') {
       p.setAttribute('style', `filter:drop-shadow(0 0 2.5px ${color})`);
     }
@@ -227,16 +227,40 @@ function keeneticFlowDraw() {
     svg.appendChild(ball);
   };
 
-  draw(rel(local), rel(router), flow.dataset.flowState || 'down');
-  for (const br of [...flow.querySelectorAll('.keenetic-flow-branch')]) {
-    const chip = br.querySelector('.keenetic-flow-tunnel');
-    if (!chip) continue;
-    const state = br.classList.contains('active') ? 'active'
-      : br.classList.contains('standby') ? 'standby'
-      : br.classList.contains('disabled') ? 'disabled' : 'down';
-    const chipRect = rel(chip);
-    draw(rel(router), chipRect, state);
-    draw(chipRect, rel(wan), state);
+  const branchState = br => br.classList.contains('active') ? 'active'
+    : br.classList.contains('standby') ? 'standby'
+    : br.classList.contains('disabled') ? 'disabled' : 'down';
+  const mainState = flow.dataset.flowState || 'down';
+  const localR = rel(local);
+  const routerR = rel(router);
+  const wanR = rel(wan);
+  if (vertical) {
+    drawPath(curve(localR, routerR), mainState);
+    const spineX = 16;
+    const branches = [...flow.querySelectorAll('.keenetic-flow-branch')]
+      .map(br => {
+        const chip = br.querySelector('.keenetic-flow-tunnel');
+        return chip ? { rect: rel(chip), state: branchState(br) } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.rect.t - b.rect.t);
+    drawPath(`M ${routerR.cx} ${routerR.b} C ${routerR.cx} ${routerR.b + 14}, ${spineX} ${routerR.b + 4}, ${spineX} ${routerR.b + 18}`, mainState);
+    let prevY = routerR.b + 18;
+    for (const br of branches) {
+      const y = br.rect.cy;
+      drawPath(`M ${spineX} ${prevY} L ${spineX} ${y - 8} Q ${spineX} ${y} ${spineX + 8} ${y} L ${br.rect.l} ${y}`, br.state);
+      prevY = y;
+    }
+    drawPath(`M ${spineX} ${prevY} L ${spineX} ${wanR.t - 18} C ${spineX} ${wanR.t - 4}, ${wanR.cx - 24} ${wanR.t}, ${wanR.cx} ${wanR.t}`, mainState);
+  } else {
+    drawPath(curve(localR, routerR), mainState);
+    for (const br of [...flow.querySelectorAll('.keenetic-flow-branch')]) {
+      const chip = br.querySelector('.keenetic-flow-tunnel');
+      if (!chip) continue;
+      const chipRect = rel(chip);
+      drawPath(curve(routerR, chipRect), branchState(br));
+      drawPath(curve(chipRect, wanR), branchState(br));
+    }
   }
 }
 
