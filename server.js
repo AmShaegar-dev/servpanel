@@ -5741,6 +5741,86 @@ app.get('/api/cascade/config', checkAuth, (req, res) => {
     } catch (e) { res.status(500).json({ error: 'Ошибка чтения' }); }
 });
 
+// Сохранение awg1.conf: перезапускаем туннель, пересобираем маршруты и,
+// если MTProto уже пущен через EU, переподключаем прокси к новому туннелю.
+app.post('/api/cascade/config', checkAuth, requireAdmin, async (req, res) => {
+    const content = String((req.body && req.body.content) || '');
+    if (!content.trim()) return res.status(400).json({ error: 'Пустой конфиг' });
+    if (content.length > 256 * 1024) return res.status(400).json({ error: 'Конфиг слишком большой' });
+    if (!/^\s*\[Interface\]/im.test(content)) return res.status(400).json({ error: 'В конфиге нет секции [Interface]' });
+    if (!/^\s*\[Peer\]/im.test(content)) return res.status(400).json({ error: 'В конфиге нет секции [Peer]' });
+
+    const conf = existingCascadeConf();
+    if (!conf) return res.status(400).json({ error: 'Каскад не настроен — сначала постройте каскад' });
+    const backup = readTextSafe(conf);
+    const restore = () => {
+        try {
+            if (backup) writeRootFile(conf, backup, '0600');
+            else if (fs.existsSync(conf)) fs.unlinkSync(conf);
+            sh('sudo', ['systemctl', 'restart', 'awg-quick@awg1']);
+        } catch (e) { /* ignore */ }
+    };
+
+    try {
+        writeRootFile(conf, content, '0600');
+        await sshRunner.run({ host: '127.0.0.1' }, 'systemctl restart awg-quick@awg1', 60000);
+        const st = await sshRunner.run({ host: '127.0.0.1' }, 'sleep 2; systemctl is-active awg-quick@awg1', 30000);
+        if (!/active/.test(String(st.out || ''))) {
+            const why = await sshRunner.run({ host: '127.0.0.1' },
+                'systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 12', 30000);
+            restore();
+            return res.status(500).json({
+                error: 'awg1 не запустился, возвращён прежний конфиг',
+                output: String(why.out || '').trim().slice(0, 1200)
+            });
+        }
+
+        // Маршруты могли ссылаться на старый Endpoint — пересобираем.
+        let routed = false;
+        let routeError = '';
+        if (fs.existsSync(ROUTING_SCRIPT)) {
+            const rr = await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
+            routed = rr.code === 0;
+            if (!routed) routeError = String(rr.out || '').slice(-800);
+        }
+
+        // MTProto через EU: обновляем NAT-IP и перезапускаем прокси,
+        // чтобы он переподключился уже через новый awg1.
+        let proxyReconnected = false;
+        let exitIp = '';
+        let proxyError = '';
+        if (fs.existsSync(PROXY_CASCADE_FLAG_FILE)) {
+            try {
+                exitIp = proxyCascadeExitIp();
+                if (exitIp) {
+                    applyProxyCascadeNatIp(exitIp);
+                    for (const unit of ['telemt', 'kvguardd', 'mtproxyl']) {
+                        try { sh('systemctl', ['restart', unit]); } catch (e) { /* юнита может не быть */ }
+                    }
+                    proxyReconnected = true;
+                } else {
+                    proxyError = 'не удалось определить EU-IP через новый awg1';
+                }
+            } catch (e) {
+                proxyError = e.message || String(e);
+            }
+        }
+
+        auditLog(req, 'Изменён awg1.conf, туннель перезапущен' + (proxyReconnected ? ', MTProto переподключён через EU' : ''));
+        res.json({
+            success: true,
+            routed,
+            routeError,
+            proxyReconnected,
+            exitIp,
+            proxyError
+        });
+    } catch (e) {
+        restore();
+        res.status(500).json({ error: 'Не удалось сохранить awg1.conf: ' + (e.message || String(e)) });
+    }
+});
+
 // Совместимость со старым вызовом из вкладки «Защита и Cron»
 app.post('/api/tools/cascade', checkAuth, async (req, res) => {
     const { ifaces, enable } = req.body || {};
@@ -8620,7 +8700,32 @@ app.post('/api/awg/config', checkAuth, (req, res) => {
         catch (e) {
             try { sh('sudo', ['docker', 'restart', 'amnezia-awg']); } catch (e2) { /* ignore */ }
         }
-        res.json({ success: true });
+        // Если правили awg1, возвращаем маршруты и переподключаем
+        // «MTProto через EU» к новому туннелю.
+        let cascade = null;
+        if (String(file) === CASCADE_CONF || String(file) === CASCADE_CONF_LEGACY) {
+            cascade = { routed: false, proxyReconnected: false, exitIp: '' };
+            try {
+                if (fs.existsSync(ROUTING_SCRIPT)) {
+                    sh('sudo', ['bash', ROUTING_SCRIPT], { timeout: 180000 });
+                    cascade.routed = true;
+                }
+            } catch (e) { cascade.routeError = e.message || String(e); }
+            try {
+                if (fs.existsSync(PROXY_CASCADE_FLAG_FILE)) {
+                    const ip = proxyCascadeExitIp();
+                    if (ip) {
+                        applyProxyCascadeNatIp(ip);
+                        for (const unit of ['telemt', 'kvguardd', 'mtproxyl']) {
+                            try { sh('systemctl', ['restart', unit]); } catch (e) { /* ignore */ }
+                        }
+                        cascade.proxyReconnected = true;
+                        cascade.exitIp = ip;
+                    }
+                }
+            } catch (e) { cascade.proxyError = e.message || String(e); }
+        }
+        res.json({ success: true, cascade });
     } catch (e) { res.status(500).json({ error: 'Ошибка сохранения конфига' }); }
 });
 

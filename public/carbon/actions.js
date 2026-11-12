@@ -1808,6 +1808,28 @@ async function carbonRestorePanel() {
   });
 }
 
+async function carbonCascadeConfigEdit() {
+  let d = null;
+  try { d = await api('/api/cascade/config'); }
+  catch (e) { throw new Error('Конфиг awg1 не найден — сначала постройте каскад'); }
+  showCarbonForm({
+    title: 'Редактирование awg1.conf',
+    sub: 'После сохранения туннель перезапустится. Если MTProto через EU включён, прокси переподключится автоматически.',
+    fields: [{ name: 'content', label: 'awg1.conf', type: 'textarea', rows: 18, value: d.content || '' }],
+    submitText: 'Сохранить и перезапустить',
+    danger: true,
+    onSubmit: async v => {
+      if (!String(v.content || '').trim()) throw new Error('Конфиг пустой');
+      const r = await api('/api/cascade/config', { method: 'POST', body: { content: v.content } });
+      const msg = r.proxyReconnected
+        ? 'awg1 сохранён, MTProto переподключён через EU' + (r.exitIp ? ': ' + r.exitIp : '')
+        : r.warning || r.proxyError || 'awg1 сохранён, туннель перезапущен';
+      await carbonRefresh(msg);
+      if (r.proxyReconnected) showToast('MTProto через EU переподключён' + (r.exitIp ? ': ' + r.exitIp : ''));
+    }
+  });
+}
+
 async function carbonCascadeRepair() {
   if (!confirm('Пересобрать каскад? Туннель awg1 перезапустится на несколько секунд.')) return;
   const d = await api('/api/cascade/repair', { method: 'POST', body: {} });
@@ -1969,6 +1991,7 @@ document.addEventListener('click', async event => {
     else if (action === 'cascade-build') await carbonCascadeBuild();
     else if (action === 'cascade-progress') await carbonCascadeProgress();
     else if (action === 'cascade-manual') await carbonCascadeManual();
+    else if (action === 'cascade-config-edit') await carbonCascadeConfigEdit();
     else if (action === 'cascade-ifaces-save') await carbonCascadeIfacesSave();
     else if (action === 'cascade-list-refresh') await carbonCascadeListRefresh();
     else if (action === 'cascade-schedule-save') await carbonCascadeScheduleSave();
