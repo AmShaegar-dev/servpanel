@@ -4708,6 +4708,7 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
             "ipset destroy ru 2>/dev/null || true",
             "iptables -t mangle -S PREROUTING 2>/dev/null | grep -E 'set-mark 0x1|match-set ru dst' | sed 's/^-A /-D /' | xargs -r -L1 iptables -t mangle 2>/dev/null || true",
             "iptables -t nat -S POSTROUTING 2>/dev/null | grep -- '-o awg1' | grep MASQUERADE | sed 's/^-A /-D /' | xargs -r -L1 iptables -t nat 2>/dev/null || true",
+            `if [ -f /root/awg/manage_amneziawg.sh ]; then bash /root/awg/manage_amneziawg.sh remove ${peerClient} --yes --json >/dev/null 2>&1 || true; fi`,
             'rm -f /etc/amnezia/amneziawg/awg1.conf /root/awg/awg-routing.sh /etc/systemd/system/awg-routing.service /etc/systemd/system/awg-routing.timer',
             `rm -f /root/awg/${peerClient}.conf /root/awg/${peerClient}.png /root/awg/${peerClient}.vpnuri /root/awg/${peerClient}.vpnuri.png`,
             'systemctl daemon-reload',
@@ -4815,11 +4816,14 @@ function cascadeJobSnapshot() {
 // Для выбранной версии AWG оставляем только те ключи, которые она понимает.
 function cascadeObfParams(data, version) {
     let params = null;
+    const sni = String((data && data.obfSni) || '').trim();
+    if (sni && !HOST_RE.test(sni)) throw new Error('некорректный SNI');
     if (data.obfMode === 'architect') {
         const g = awgArchitect.generate({
             version,
             profile: data.obfProfile,
             intensity: data.obfIntensity,
+            sni,
             router: !!data.obfRouter,
             randomTrailers: !!data.obfRandomTrailers,
             disableCookies: !!data.obfDisableCookies
@@ -5153,7 +5157,7 @@ app.get('/api/cascade/interfaces', checkAuth, requireAdmin, (req, res) => {
             reason: 'Маршрутизация настраивается на входе (RU). На этом сервере скрипта маршрутов нет.'
         });
     }
-    const m = script.match(/^CLIENT_IFACES="([^"]*)"/m);
+    const m = script.match(/^CLIENT_IFACES="([^"]*)"/m) || script.match(/^CASC_IFACES=\(([^)]*)\)/m);
     const selected = m ? m[1].split(/\s+/).filter(Boolean) : ['awg0'];
     const out = shTry('bash', ['-c',
         "ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | cut -d@ -f1 | grep -E '^(awg|amn)[0-9]+$' || true"
@@ -5466,8 +5470,19 @@ app.post('/api/cascade/interfaces', checkAuth, requireAdmin, async (req, res) =>
     if (!ifaces.length) return res.status(400).json({ error: 'Выберите хотя бы один интерфейс' });
     const script = readTextSafe(ROUTING_SCRIPT);
     if (!script) return res.status(404).json({ error: 'Сначала постройте каскад' });
-    if (!/^CLIENT_IFACES=/m.test(script)) return res.status(500).json({ error: 'В скрипте нет CLIENT_IFACES' });
-    const next = script.replace(/^CLIENT_IFACES="[^"]*"/m, `CLIENT_IFACES="${ifaces.join(' ')}"`);
+    let next;
+    if (/^CLIENT_IFACES=/m.test(script)) {
+        next = script.replace(/^CLIENT_IFACES="[^"]*"/m, `CLIENT_IFACES="${ifaces.join(' ')}"`);
+    } else if (/^CASC_IFACES=\(/m.test(script)) {
+        next = script.replace(/^CASC_IFACES=\([^)]*\)/m, `CASC_IFACES=(${ifaces.join(' ')})`);
+    } else {
+        // Скрипты старых сборок могли не содержать CLIENT_IFACES.
+        // Добавляем переменную, чтобы выбор интерфейсов не терялся.
+        const line = `CLIENT_IFACES="${ifaces.join(' ')}"`;
+        next = /^AWG1_IF=/m.test(script)
+            ? script.replace(/^(AWG1_IF=.*)$/m, `$1\n${line}`)
+            : line + '\n' + script;
+    }
     try {
         writeRootFile(ROUTING_SCRIPT, next, '0755');
         const r = await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
@@ -5561,6 +5576,12 @@ app.post('/api/cascade/teardown', checkAuth, requireAdmin, async (req, res) => {
     if (body.removeClient !== false) {
         const name = String(body.peerClient || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '');
         if (name) {
+            // Сначала убираем пира из awg0.conf через штатный менеджер,
+            // иначе в конфиге остаётся [Peer] и ключи в текстовом виде.
+            try {
+                rootSh('bash', [MANAGE, 'remove', name, '--yes', '--json'], { timeout: 60000 });
+                removed.push('пир ' + name + ' удалён из awg0.conf');
+            } catch (e) { /* менеджера может не быть */ }
             for (const ext of ['.conf', '.png', '.vpnuri', '.vpnuri.png', '.ovpn']) {
                 try { sh('sudo', ['rm', '-f', path.join(AWG_DIR, name + ext)]); } catch (e) { /* ignore */ }
             }

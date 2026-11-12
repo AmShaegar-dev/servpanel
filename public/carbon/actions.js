@@ -760,15 +760,22 @@ async function carbonInstallMtproxyl() {
 async function carbonCascadeIfacesSave() {
   const ifaces = [...document.querySelectorAll('[data-cascade-iface]:checked')].map(x => x.value);
   if (!ifaces.length) throw new Error('Выберите хотя бы один интерфейс');
-  await api('/api/cascade/interfaces', { method: 'POST', body: { interfaces: ifaces } });
+  // Запоминаем выбор сразу: он нужен форме сборки, даже если маршруты
+  // ещё не созданы или скрипт старого формата.
   carbon.cascadeInterfaces = { ...(carbon.cascadeInterfaces || {}), selected: ifaces };
-  await carbonRefresh('Интерфейсы каскада: ' + ifaces.join(', '));
+  carbon.storeClientIfaces = ifaces;
+  try {
+    await api('/api/cascade/interfaces', { method: 'POST', body: { interfaces: ifaces } });
+    await carbonRefresh('Интерфейсы каскада: ' + ifaces.join(', '));
+  } catch (e) {
+    showToast('Интерфейсы выбраны: ' + ifaces.join(', ') + '. Применятся после установки каскада.');
+  }
 }
 
 async function carbonCascadeBuild() {
   showCarbonForm({
     title: 'Построить каскад RU → EU',
-    sub: 'Панель по SSH настроит вторую сторону. Это может занять 5–15 минут.',
+    sub: 'Панель по SSH настроит вторую сторону. Это может занять 5–15 минут. Профиль мимикрии и SNI используются в режиме «Архитектор».',
     fields: [
       { name: 'role', label: 'Роль этого сервера', type: 'select', options: [{ value: 'ru', label: 'Вход (RU)' }, { value: 'eu', label: 'Выход (EU)' }] },
       { name: 'version', label: 'Версия AWG', type: 'select', options: ['3.1', '2.0', '1.5'] },
@@ -776,8 +783,22 @@ async function carbonCascadeBuild() {
       { name: 'peerPort', label: 'SSH-порт', value: '22' },
       { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
       { name: 'peerPass', label: 'Пароль root', type: 'password' },
-      { name: 'obfMode', label: 'Обфускация', type: 'select', options: [{ value: 'installer', label: 'Как у установщика' }, { value: 'architect', label: 'Архитектор' }, { value: 'custom', label: 'Свои параметры' }] },
-      { name: 'obfProfile', label: 'Профиль Архитектора', value: 'quic' },
+      { name: 'obfMode', label: 'Обфускация', type: 'select', value: 'installer', options: [{ value: 'installer', label: 'Как у установщика' }, { value: 'architect', label: 'Архитектор' }, { value: 'custom', label: 'Свои параметры' }] },
+      { name: 'obfProfile', label: 'Профиль мимикрии', type: 'select', value: 'quic', options: [
+        { value: 'quic', label: 'QUIC' },
+        { value: 'tls', label: 'TLS 1.3' },
+        { value: 'dtls', label: 'DTLS 1.2' },
+        { value: 'dtls13', label: 'DTLS 1.3' },
+        { value: 'sip', label: 'SIP' },
+        { value: 'dns', label: 'DNS' },
+        { value: 'noise', label: 'Noise' }
+      ] },
+      { name: 'obfIntensity', label: 'Интенсивность', type: 'select', value: 'medium', options: [
+        { value: 'low', label: 'Низкая' },
+        { value: 'medium', label: 'Средняя' },
+        { value: 'high', label: 'Высокая' }
+      ] },
+      { name: 'obfSni', label: 'SNI для TLS-мимикрии (необязательно)', placeholder: 'ozon.ru' },
       { name: 'ifaces', label: 'Клиентские интерфейсы', value: (carbon.cascadeInterfaces && carbon.cascadeInterfaces.selected && carbon.cascadeInterfaces.selected.length ? carbon.cascadeInterfaces.selected : ['awg0']).join(', ') },
       { name: 'extraRuNets', label: 'Доп. сети RU', placeholder: '10.0.0.0/8, 192.168.0.0/16' }
     ],
@@ -788,7 +809,8 @@ async function carbonCascadeBuild() {
       const body = {
         role: v.role, version: v.version, peerHost: v.peerHost.trim(), peerPort: v.peerPort || '22',
         peerUser: v.peerUser || 'root', peerPass: v.peerPass,
-        obfMode: v.obfMode, obfProfile: v.obfProfile, obfIntensity: 'medium',
+        obfMode: v.obfMode, obfProfile: v.obfProfile, obfIntensity: v.obfIntensity || 'medium',
+        obfSni: String(v.obfSni || '').trim(),
         obfSource: '', ifaces: String(v.ifaces || '').split(/[\s,]+/).filter(Boolean),
         extraRuNets: String(v.extraRuNets || '').split(/[\s,]+/).filter(Boolean)
       };
