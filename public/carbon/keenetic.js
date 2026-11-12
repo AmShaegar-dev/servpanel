@@ -94,7 +94,7 @@ function keeneticRouterCard(r) {
   const ram = Math.max(0, Math.min(100, Number(st.ram) || 0));
   const tunnelRows = tunnels.slice(0, 4).map(t => {
     const h = keeneticTunnelHealth(t);
-    const hs = t.lastHandshake ? lastHandshakeText(t.lastHandshake) : '';
+    const hs = t.up && t.lastHandshake ? lastHandshakeText(t.lastHandshake) : '';
     return `<div class="keenetic-wg-row ${h.cls}"><span class="keenetic-wg-dot"></span><b>${escHtml(t.name)}</b><span>${escHtml(h.label)}</span>${hs ? `<em>${escHtml(hs)}</em>` : '<em>—</em>'}</div>`;
   }).join('');
   const routedTunnels = tunnels.filter(t => t.routed);
