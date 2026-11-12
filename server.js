@@ -4478,6 +4478,11 @@ function prepareCascadeBackupConf(text) {
     if (idx >= 0) {
         lines.splice(idx + 1, 0, 'Table = off');
     }
+    const peerIdx = lines.findIndex(l => /^\s*\[Peer\]\s*$/i.test(l));
+    if (peerIdx >= 0) {
+        const hasKeepalive = lines.slice(peerIdx).some(l => /^\s*PersistentKeepalive\s*=/i.test(l));
+        if (!hasKeepalive) lines.splice(peerIdx + 1, 0, 'PersistentKeepalive = 33');
+    }
     return stripIpv6Address(lines.join('\n').trim() + '\n');
 }
 
