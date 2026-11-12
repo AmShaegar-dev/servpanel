@@ -3287,6 +3287,7 @@ function cascadeFailoverStatus() {
 async function applyCascadeTunnelContent(content) {
     const conf = existingCascadeConf();
     if (!conf) throw new Error('Сначала постройте каскад');
+    content = prepareCascadeBackupConf(content);
     const previous = readTextSafe(conf);
     try {
         writeRootFile(conf, content, '0600');
@@ -3295,8 +3296,8 @@ async function applyCascadeTunnelContent(content) {
         const st = await sshRunner.run({ host: '127.0.0.1' }, 'systemctl is-active awg-quick@awg1', 20000);
         if (!/active/.test(String(st.out || ''))) {
             const why = await sshRunner.run({ host: '127.0.0.1' },
-                'systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 12', 30000);
-            throw new Error('awg1 не запустился: ' + String(why.out || '').trim().slice(0, 700));
+                'journalctl -u awg-quick@awg1 -n 80 --no-pager 2>&1 | tail -n 40', 30000);
+            throw new Error('awg1 не запустился: ' + String(why.out || '').trim().slice(-1200));
         }
         if (fs.existsSync(ROUTING_SCRIPT)) {
             const rr = await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
@@ -3355,6 +3356,7 @@ async function switchCascadeTarget(target, req) {
         if (!backup) throw new Error('Резервный сервер не найден');
         content = cascadeDecrypt(backup.config_enc);
         if (!content) throw new Error('Не удалось расшифровать конфиг резерва');
+        content = prepareCascadeBackupConf(content);
         label = backup.name;
         if (state.active === 'primary') ensureCascadePrimaryCopy(true);
     }
@@ -4438,6 +4440,20 @@ function stripIpv6Address(text) {
             .filter(a => /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(a));
         return keep.length ? m[1] + keep.join(', ') : '';
     }).filter(Boolean).join('\n');
+}
+
+// Резервный awg1-конфиг из другой панели: убираем DNS, принудительно
+// Table = off (иначе awg-quick лезет в IPv6/маршруты и падает) и
+// вычищаем IPv6-адрес, если IPv6 на этом сервере выключен.
+function prepareCascadeBackupConf(text) {
+    const lines = String(text || '').split(/\r?\n/)
+        .filter(l => !/^\s*DNS\s*=/i.test(l))
+        .filter(l => !/^\s*Table\s*=/i.test(l));
+    const idx = lines.findIndex(l => /^\s*\[Interface\]\s*$/i.test(l));
+    if (idx >= 0) {
+        lines.splice(idx + 1, 0, 'Table = off');
+    }
+    return stripIpv6Address(lines.join('\n').trim() + '\n');
 }
 
 function prepareCascadeConf(text, ownIface) {
@@ -6186,12 +6202,13 @@ app.post('/api/cascade/backups', checkAuth, requireAdmin, (req, res) => {
     if (cascadeRole() !== 'ru') return res.status(400).json({ error: 'Резервирование настраивается на RU-входе' });
     if (!existingCascadeConf()) return res.status(400).json({ error: 'Сначала постройте каскад' });
     const name = String(body.name || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 40);
-    const config = String(body.config || '');
+    const rawConfig = String(body.config || '');
     if (!name) return res.status(400).json({ error: 'Укажите название резерва' });
-    if (!config || config.length > 256 * 1024) return res.status(400).json({ error: 'Пустой или слишком большой конфиг' });
-    if (!/^\s*\[Interface\]/im.test(config) || !/^\s*\[Peer\]/im.test(config)) {
+    if (!rawConfig || rawConfig.length > 256 * 1024) return res.status(400).json({ error: 'Пустой или слишком большой конфиг' });
+    if (!/^\s*\[Interface\]/im.test(rawConfig) || !/^\s*\[Peer\]/im.test(rawConfig)) {
         return res.status(400).json({ error: 'Конфиг должен содержать [Interface] и [Peer]' });
     }
+    const config = prepareCascadeBackupConf(rawConfig);
     const endpoint = cascadeEndpointFromText(config);
     if (!/^[A-Za-z0-9.\-\[\]:]+:\d{1,5}$/.test(endpoint)) {
         return res.status(400).json({ error: 'В конфиге нет корректного Endpoint' });
@@ -6516,8 +6533,12 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
     }
 
     let warpActive = false, xrayActive = false, connected = false, warpStatus = '';
+    let xrayProcesses = 0;
     try { warpActive = isActive('warp-svc') === 'active'; } catch (e) { /* ignore */ }
     try { xrayActive = isActive('xray') === 'active'; } catch (e) { /* ignore */ }
+    try {
+        xrayProcesses = Number(String(shTry('bash', ['-c', "pgrep -c -f '[x]ray run -config' || true"], { timeout: 5000 }) || '').trim()) || 0;
+    } catch (e) { /* ignore */ }
     try {
         warpStatus = String(shTry('bash', ['-c', 'warp-cli --accept-tos status 2>&1'], { timeout: 8000 }) || '').trim();
         connected = /(^|\s)Connected(\s|$)/i.test(warpStatus) && !/Disconnected/i.test(warpStatus);
@@ -6544,6 +6565,7 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
         { id: 'warp', title: 'WARP установлен', ok: !!(cfg.installed || warpActive), detail: cfg.installed ? 'пакет установлен' : warpActive ? 'служба запущена' : 'не установлен' },
         { id: 'connected', title: 'WARP подключён', ok: connected, detail: connected ? 'Connected' : 'нет соединения' },
         { id: 'xray', title: 'Xray активен', ok: xrayActive, detail: xrayActive ? 'active' : 'inactive' },
+        { id: 'xray-procs', title: 'Процессы Xray', ok: xrayProcesses <= 1, detail: xrayProcesses + ' ' + (xrayProcesses === 1 ? 'процесс' : 'процессов') + (xrayProcesses > 1 ? ' — есть дубли' : '') },
         { id: 'routing', title: 'Маршрутизация Xray', ok: routingOk, detail: routingOk ? routingDetail : 'конфиг не совпадает с выбранным вариантом' },
         { id: 'port', title: `Порт ${cfg.listenPort}`, ok: !!portListening, detail: portListening ? `слушает Xray` : 'не слушается' },
         { id: 'socks', title: 'SOCKS5 WARP', ok: socksOk, detail: socksOk ? `127.0.0.1:${cfg.socksPort} отвечает` : 'проверка не прошла' },
@@ -6555,6 +6577,7 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
         installed: cfg.installed || warpActive,
         warpActive,
         xrayActive,
+        xrayProcesses,
         connected,
         warpStatus: warpStatus.slice(0, 2000),
         domains: selectedDomains.length,
@@ -7001,6 +7024,11 @@ app.post('/api/warp/power', checkAuth, requireAdmin, (req, res) => {
     if (TEST_MODE || DEMO_MODE) return res.json({ success: true, enabled: enable, demo: true });
     try {
         if (enable) {
+            // Убираем осиротевшие процессы xray от прошлых запусков:
+            // иначе они копятся и каждый ест память/CPU.
+            try { sh('sudo', ['systemctl', 'stop', 'xray'], { timeout: 20000 }); } catch (e) { /* ignore */ }
+            try { sh('sudo', ['bash', '-c', "pkill -f '[x]ray run -config' || true"], { timeout: 10000 }); } catch (e) { /* ignore */ }
+            try { sh('sleep', ['1']); } catch (e) { /* ignore */ }
             sh('sudo', ['systemctl', 'enable', '--now', 'xray'], { timeout: 30000 });
             sh('sudo', ['warp-cli', '--accept-tos', 'connect'], { timeout: 30000 });
         } else {
