@@ -249,17 +249,15 @@ function keeneticFlowDraw() {
     if (!branches.length) return;
     const firstY = branches[0].rect.cy;
     const lastY = branches[branches.length - 1].rect.cy;
-    // Вход: роутер → левая шина.
-    drawPath(`M ${routerR.cx} ${routerR.b} C ${routerR.cx} ${routerR.b + 14}, ${leftX} ${routerR.b + 4}, ${leftX} ${routerR.b + 18}`, mainState, false);
-    drawPath(`M ${leftX} ${routerR.b + 18} L ${leftX} ${lastY}`, mainState);
-    // Выход: правая шина → WAN.
-    drawPath(`M ${rightX} ${firstY} L ${rightX} ${wanR.t - 18}`, mainState);
-    drawPath(`M ${rightX} ${wanR.t - 18} C ${rightX} ${wanR.t - 4}, ${wanR.cx - 24} ${wanR.t}, ${wanR.cx} ${wanR.t}`, mainState, false);
-    // Вход и выход каждого туннеля — с разных сторон.
+    const midY = (firstY + lastY) / 2;
+    // Одна линия слева: роутер → точка объединения.
+    drawPath(`M ${routerR.cx} ${routerR.b} L ${routerR.cx} ${Math.max(routerR.b + 10, firstY - 18)} C ${routerR.cx} ${firstY - 8}, ${leftX + 10} ${firstY - 14}, ${leftX} ${firstY - 6} L ${leftX} ${midY}`, mainState);
+    // Одна линия справа: точка объединения → WAN.
+    drawPath(`M ${rightX} ${midY} L ${rightX} ${wanR.t - 18} C ${rightX} ${wanR.t - 6}, ${wanR.cx - 24} ${wanR.t}, ${wanR.cx} ${wanR.t}`, mainState);
     for (const br of branches) {
       const y = br.rect.cy;
-      drawPath(`M ${leftX} ${y} L ${br.rect.l} ${y}`, br.state, false);
-      drawPath(`M ${br.rect.r} ${y} L ${rightX} ${y}`, br.state, false);
+      drawPath(`M ${leftX} ${midY} C ${leftX} ${y}, ${br.rect.l - 14} ${y}, ${br.rect.l} ${y}`, br.state, false);
+      drawPath(`M ${br.rect.r} ${y} C ${br.rect.r + 14} ${y}, ${rightX} ${y}, ${rightX} ${midY}`, br.state, false);
     }
   } else {
     drawPath(curve(localR, routerR), mainState);
