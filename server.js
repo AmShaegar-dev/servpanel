@@ -790,8 +790,11 @@ function saveSecrets() {
 // Журнал действий (с ротацией)
 // ---------------------------------------------------------------------------
 function auditLog(req, action) {
-    const ip = String(req.headers['x-forwarded-for'] || req.ip || (req.socket && req.socket.remoteAddress) || '')
-        .split(',')[0].trim();
+    // clientIp() учитывает X-Forwarded-For только от локального прокси,
+    // иначе клиент мог бы подделать IP в журнале.
+    let ip = '';
+    try { ip = clientIp(req); } catch (e) { ip = ''; }
+    if (!ip) ip = String(req.headers['x-forwarded-for'] || req.ip || (req.socket && req.socket.remoteAddress) || '').split(',')[0].trim();
     const date = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const user = (req.session && req.session.user) || '-';
     const line = `[${date}] IP: ${ip} | USER: ${user} | ACTION: ${String(action).replace(/[\r\n]+/g, ' ')}\n`;
@@ -813,6 +816,10 @@ app.use((req, res, next) => {
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+    if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+    // Ответы API содержат ключи, конфиги и данные клиентов — их нельзя
+    // кэшировать в браузере или промежуточных прокси.
+    if (isApiRequest(req)) res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Security-Policy',
         "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
         "style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; " +
@@ -4327,6 +4334,22 @@ if [ -z "$WAN_IF" ] || [ "$WAN_IF" = "$AWG1_IF" ]; then
     exit 1
 fi
 
+# IPv6 в каскад не заворачивается: блокируем форвардинг с клиентских
+# интерфейсов, иначе IPv6 уйдёт напрямую через WAN (утечка).
+if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo 1)" = "0" ]; then
+    if command -v ip6tables >/dev/null 2>&1; then
+        ip6tables -N SERVPANEL_V6 2>/dev/null || true
+        ip6tables -F SERVPANEL_V6 2>/dev/null || true
+        for IFACE in "\${CASC_IFACES[@]}"; do
+            [ -n "$IFACE" ] && ip6tables -A SERVPANEL_V6 -i "$IFACE" -j DROP 2>/dev/null || true
+        done
+        ip6tables -C FORWARD -j SERVPANEL_V6 2>/dev/null || ip6tables -I FORWARD -j SERVPANEL_V6 2>/dev/null || true
+        echo "IPv6: форвардинг с клиентских интерфейсов заблокирован."
+    else
+        echo "WARN: IPv6 включён, ip6tables нет — IPv6 может пойти мимо каскада."
+    fi
+fi
+
 fetch_ru_zone() {
     curl -fsS --retry 2 --connect-timeout 10 --max-time 60 -o "$RU_ZONE.tmp" "$1" || return 1
     local valid
@@ -4354,6 +4377,9 @@ fi
 
 # Таблица 100 — для трафика, помеченного fwmark.
 ip route replace default dev "$AWG1_IF" table "$TABLE_ID"
+# Kill switch: при падении awg1 помеченный трафик уходит в blackhole,
+# а не напрямую через WAN.
+ip route replace blackhole default table "$TABLE_ID" metric 1000
 ip rule del fwmark "$FWMARK" table "$TABLE_ID" 2>/dev/null || true
 ip rule add fwmark "$FWMARK" table "$TABLE_ID" priority "$RULE_PRIO"
 
@@ -4558,6 +4584,9 @@ app.get('/api/cascade/diag', checkAuth, requireAdmin, async (req, res) => {
     if (conf) {
         const host = String(result.endpoint).replace(/:[0-9]+$/, '');
         result.route = run('ip', ['-4', 'route', 'get', host]).out;
+        result.table100 = run('ip', ['-4', 'route', 'show', 'table', '100']).out;
+        result.rules = run('ip', ['-4', 'rule', 'show']).out;
+        result.ipv6Firewall = run('ip6tables', ['-S', 'SERVPANEL_V6']).out;
         result.tunnel = run('systemctl', ['is-active', 'awg-quick@awg1']).out;
         result.routing = fs.existsSync(ROUTING_SCRIPT)
             ? run(ROUTING_SCRIPT)
@@ -5597,6 +5626,10 @@ app.post('/api/cascade/teardown', checkAuth, requireAdmin, async (req, res) => {
     safe(['ip', 'rule', 'del', 'fwmark', '0x1', 'table', '100']);
     safe(['ip', 'rule', 'del', 'fwmark', '0x0', 'table', 'main', 'priority', '90']);
     safe(['ip', 'route', 'flush', 'table', '100']);
+    // IPv6 kill switch: убираем цепочку и jump, если она создавалась.
+    safe(['ip6tables', '-D', 'FORWARD', '-j', 'SERVPANEL_V6']);
+    safe(['ip6tables', '-F', 'SERVPANEL_V6']);
+    safe(['ip6tables', '-X', 'SERVPANEL_V6']);
     safe(['ipset', 'destroy', 'ru']);
     safe(['ipset', 'destroy', 'ru_tmp']);
     const strip = (table, chain, match) => {
