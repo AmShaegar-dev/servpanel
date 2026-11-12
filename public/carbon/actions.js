@@ -1897,11 +1897,12 @@ async function carbonCascadeFailoverSettings() {
   });
 }
 
-async function carbonCascadeFailoverSwitch() {
+async function carbonCascadeFailoverSwitch(btn) {
   const f = carbon.cascade && carbon.cascade.failover;
   if (!f || !f.applicable) throw new Error((f && f.reason) || 'Сначала постройте каскад');
-  const target = f.active === 'primary' ? (f.backups[0] && f.backups[0].id) : 'primary';
+  const target = (btn && btn.dataset && btn.dataset.target) || (f.active === 'primary' ? (f.backups[0] && f.backups[0].id) : 'primary');
   if (!target) throw new Error('Сначала добавьте резервный сервер');
+  if (target === f.active) { showToast('Этот сервер уже активен'); return; }
   const label = target === 'primary' ? 'основной сервер' : ((f.backups.find(b => b.id === target) || {}).name || 'резерв');
   if (!confirm('Переключить каскад на ' + label + '? Туннель перезапустится на 2–3 секунды.')) return;
   const r = await api('/api/cascade/failover/switch', { method: 'POST', body: { target } });
@@ -2071,7 +2072,7 @@ document.addEventListener('click', async event => {
     else if (action === 'cascade-backup-add') await carbonCascadeBackupAdd();
     else if (action === 'cascade-backup-delete') await carbonCascadeBackupDelete(btn.dataset.id);
     else if (action === 'cascade-failover-settings') await carbonCascadeFailoverSettings();
-    else if (action === 'cascade-failover-switch') await carbonCascadeFailoverSwitch();
+    else if (action === 'cascade-failover-switch') await carbonCascadeFailoverSwitch(btn);
     else if (action === 'cascade-progress') await carbonCascadeProgress();
     else if (action === 'cascade-manual') await carbonCascadeManual();
     else if (action === 'cascade-config-edit') await carbonCascadeConfigEdit();

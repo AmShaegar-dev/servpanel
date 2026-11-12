@@ -3410,6 +3410,8 @@ async function cascadeFailoverTick() {
             if (next) {
                 try {
                     await switchCascadeTarget(next, null);
+                    state.active = next;
+                    state.switchedAt = Date.now();
                     state.failures = 0;
                     state.lastError = '';
                 } catch (e) {
