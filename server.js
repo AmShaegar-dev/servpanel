@@ -3629,9 +3629,9 @@ app.get('/api/cascade/status', checkAuth, (req, res) => {
             if (!d.tunnelActive) { text = 'Туннель awg1 поднят, но не активен'; color = '#ffa500'; }
             else if (d.handshakeAgo === null) { text = 'Туннель поднят, ожидание пира EU'; color = '#ffa500'; }
             else if (d.handshakeAgo < 150) { text = `Каскад работает (обмен ${d.handshakeAgo} сек. назад)`; color = '#4caf50'; }
-            else { text = `Связь с EU потеряна (${d.handshakeAgo} сек. назад)`; color = '#ff4c4c'; }
+            else { text = `Туннель awg1 поднят, рукопожатие ${d.handshakeAgo} сек. назад`; color = '#ffa500'; }
         }
-        res.json({ ...d, active: d.configured && d.tunnelActive && d.handshakeAgo !== null && d.handshakeAgo < 150, text, color });
+        res.json({ ...d, active: d.configured && d.tunnelActive, text, color });
     } catch (e) {
         res.json({ active: false, text: 'Ошибка проверки', color: '#ff4c4c' });
     }
