@@ -459,6 +459,7 @@ select.tz-focus { outline: 2px solid var(--accent); outline-offset: 2px; border-
 .keenetic-dns-rules{min-width:860px}
 .keenetic-sub{font:500 9px/1.4 var(--mono);letter-spacing:.04em;color:var(--text-3);margin-top:3px}
 .keenetic-dns-loading .empty-row{min-height:96px;display:flex;align-items:center;justify-content:center}
+.keenetic-dns-toolbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:10px}
 .keenetic-row-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px}
 .keenetic-row-actions .row-action[disabled]{opacity:.4;pointer-events:none}
 .keenetic-table-note{margin-top:10px;font:500 9px/1.5 var(--mono);letter-spacing:.03em;color:var(--text-3)}
@@ -475,6 +476,8 @@ select.tz-focus { outline: 2px solid var(--accent); outline-offset: 2px; border-
 .keenetic-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
 .keenetic-detail-head .page-title{margin-bottom:2px}
 .keenetic-detail-head .btn-sm{margin-bottom:0}
+.keenetic-flow-card{overflow:hidden;min-width:0}
+.keenetic-flow-wrap{container-type:inline-size;min-width:0}
 .keenetic-flow{position:relative;display:grid;grid-template-columns:auto minmax(50px,1fr) auto minmax(60px,1.1fr) minmax(290px,2.2fr) minmax(60px,1.1fr) auto;align-items:center;gap:10px;min-height:230px;padding:18px 8px}
 .keenetic-flow-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0;overflow:visible}
 .keenetic-flow-node,.keenetic-flow-branches,.keenetic-flow-branch,.keenetic-flow-tunnel{position:relative;z-index:1}
@@ -499,6 +502,14 @@ select.tz-focus { outline: 2px solid var(--accent); outline-offset: 2px; border-
 .keenetic-flow-tunnel.down .dot,.keenetic-flow-tunnel.disabled .dot{width:8px;height:8px;background:transparent;border:1.5px solid var(--bad);position:relative;box-shadow:none}
 .keenetic-flow-tunnel.down .dot::after,.keenetic-flow-tunnel.disabled .dot::after{content:"";position:absolute;left:-2px;top:2px;width:8px;height:1.5px;background:var(--bad);transform:rotate(-45deg)}
 .keenetic-flow-tunnel.down .keenetic-flow-tunnel-text span,.keenetic-flow-tunnel.disabled .keenetic-flow-tunnel-text span{color:var(--bad)}
+.keenetic-flow-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:0 8px 4px}
+.keenetic-flow-hint{font:500 9px/1.5 var(--mono);letter-spacing:.02em;color:var(--text-3);max-width:340px}
+@container (max-width:760px){
+  .keenetic-flow{display:flex;flex-direction:column;align-items:stretch;gap:14px;min-height:0}
+  .keenetic-flow-node{flex-direction:row;justify-content:center}
+  .keenetic-flow-spacer{display:none}
+  .keenetic-flow-branches,.keenetic-flow-branch{width:100%}
+}
 @keyframes keeneticIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 @keyframes keeneticViewIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
 @keyframes keeneticCardIn{from{opacity:0;transform:translateY(12px) scale(.985)}to{opacity:1;transform:none}}

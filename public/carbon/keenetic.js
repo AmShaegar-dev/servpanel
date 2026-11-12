@@ -204,15 +204,26 @@ function keeneticFlowDraw() {
     const ball = document.createElementNS(ns, 'circle');
     ball.setAttribute('r', '3.4');
     ball.setAttribute('fill', color);
+    ball.setAttribute('opacity', '0');
     ball.setAttribute('style', `filter:drop-shadow(0 0 4px ${color})`);
+    const dur = (state === 'standby' ? 3.4 : 2.7) + 's';
+    const begin = '-' + ((seq % 4) * 0.55).toFixed(2) + 's';
     const anim = document.createElementNS(ns, 'animateMotion');
-    anim.setAttribute('dur', (state === 'standby' ? 3.4 : 2.7) + 's');
+    anim.setAttribute('dur', dur);
     anim.setAttribute('repeatCount', 'indefinite');
-    anim.setAttribute('begin', '-' + ((seq % 4) * 0.55).toFixed(2) + 's');
+    anim.setAttribute('begin', begin);
     const mpath = document.createElementNS(ns, 'mpath');
     mpath.setAttribute('href', '#' + id);
     anim.appendChild(mpath);
     ball.appendChild(anim);
+    const fade = document.createElementNS(ns, 'animate');
+    fade.setAttribute('attributeName', 'opacity');
+    fade.setAttribute('values', '0;1;1;0');
+    fade.setAttribute('keyTimes', '0;0.08;0.92;1');
+    fade.setAttribute('dur', dur);
+    fade.setAttribute('begin', begin);
+    fade.setAttribute('repeatCount', 'indefinite');
+    ball.appendChild(fade);
     svg.appendChild(ball);
   };
 
@@ -231,8 +242,16 @@ function keeneticFlowDraw() {
 
 function scheduleKeeneticFlow() {
   window.setTimeout(keeneticFlowDraw, 30);
-  window.setTimeout(keeneticFlowDraw, 260);
-  window.setTimeout(keeneticFlowDraw, 620);
+  const flow = document.querySelector('.keenetic-flow');
+  if (!flow || !('ResizeObserver' in window)) return;
+  if (window.__keeneticFlowObserver) window.__keeneticFlowObserver.disconnect();
+  let first = true;
+  window.__keeneticFlowObserver = new ResizeObserver(() => {
+    if (first) { first = false; return; }
+    clearTimeout(window.__keeneticFlowTimer);
+    window.__keeneticFlowTimer = window.setTimeout(keeneticFlowDraw, 120);
+  });
+  window.__keeneticFlowObserver.observe(flow);
 }
 
 if (!window.__keeneticFlowResize) {
@@ -282,7 +301,7 @@ function keeneticDetailHtml() {
     } else {
       const groups = dns.groups || [];
       const routes = dns.routes || [];
-      body = `<section class="card table-card" style="margin-bottom:14px"><div class="card-top"><div><div class="card-title">Списки доменных имён</div><div class="card-sub">Домены, IP и подсети для правил маршрутизации</div></div><div class="page-actions">${tag(String(groups.length), 'muted')}<button class="btn btn-sm" data-carbon-action="keenetic-dns-add-list">${icon('plus')}Добавить список</button></div></div>
+      body = `<div class="keenetic-dns-toolbar"><button class="btn btn-sm" data-carbon-action="keenetic-dns-export">${icon('download')}Экспорт</button><button class="btn btn-sm" data-carbon-action="keenetic-dns-import">${icon('upload')}Импорт</button></div><section class="card table-card" style="margin-bottom:14px"><div class="card-top"><div><div class="card-title">Списки доменных имён</div><div class="card-sub">Домены, IP и подсети для правил маршрутизации</div></div><div class="page-actions">${tag(String(groups.length), 'muted')}<button class="btn btn-sm" data-carbon-action="keenetic-dns-add-list">${icon('plus')}Добавить список</button></div></div>
         <div class="table-scroll"><table class="table keenetic-table keenetic-dns-table"><thead><tr><th>Список</th><th>Домены</th><th>IPv4</th><th>IPv6</th><th></th></tr></thead><tbody>${groups.map(g => `<tr>
           <td class="name">${escHtml(g.description)}<div class="keenetic-sub">${escHtml(g.name)}</div></td>
           <td class="mono">${g.domains}</td><td class="mono">${g.ip4}</td><td class="mono">${g.ip6}</td>
@@ -343,7 +362,7 @@ function keeneticDetailHtml() {
     </div>`;
   } else {
     body = `<div class="grid">
-      <section class="card" style="grid-column:span 8"><div class="card-top"><div><div class="card-title">Схема трафика</div><div class="card-sub">Роутер и его туннели</div></div>${tag(st.online ? 'live' : 'offline', st.online ? 'good' : 'bad')}</div>${keeneticFlow(r)}</section>
+      <section class="card keenetic-flow-card" style="grid-column:span 8"><div class="card-top"><div><div class="card-title">Схема трафика</div><div class="card-sub">Роутер и его туннели</div></div>${tag(st.online ? 'live' : 'offline', st.online ? 'good' : 'bad')}</div><div class="keenetic-flow-wrap">${keeneticFlow(r)}<div class="keenetic-flow-actions"><button class="btn" data-carbon-action="keenetic-failover">${icon('refresh')}Включить резерв</button><span class="keenetic-flow-hint">Переведёт DNS-маршруты через туннели на резервный. Маршруты через Ethernet не меняются.</span></div></div></section>
       <section class="card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">Состояние</div><div class="card-sub">${escHtml(st.checkedAt ? 'проверено ' + keeneticAgo(st.checkedAt) : 'ещё не проверялся')}</div></div>${keeneticStatusTag(r)}</div>
         <div class="list">
           <div class="list-row"><b>Модель</b><span class="mono">${escHtml(st.model || '—')}</span></div>
@@ -385,6 +404,43 @@ function keeneticAssign(data) {
   if (data && data.overview) d.overview = data.overview;
 }
 
+function keeneticSignature(routers, volatile) {
+  return JSON.stringify((routers || []).map(r => {
+    const st = r.status || {};
+    const item = {
+      id: r.id,
+      name: r.name,
+      enabled: r.enabled,
+      online: !!st.online,
+      error: st.error || '',
+      model: st.model || '',
+      firmware: st.firmware || '',
+      transport: st.transport || '',
+      tunnels: (Array.isArray(st.tunnels) ? st.tunnels : []).map(t => ({
+        name: t.name,
+        type: t.type,
+        up: t.up,
+        link: t.link,
+        empty: t.empty,
+        routed: t.routed,
+        description: t.description,
+        address: t.address,
+        peer: t.peer,
+        rx: volatile ? t.rx : 0,
+        tx: volatile ? t.tx : 0,
+        lastHandshake: volatile ? t.lastHandshake : 0
+      }))
+    };
+    if (volatile) {
+      item.cpu = st.cpu;
+      item.ram = st.ram;
+      item.uptime = st.uptime;
+      item.checkedAt = st.checkedAt;
+    }
+    return item;
+  }));
+}
+
 async function keeneticLoad(showToastMessage) {
   try {
     if (showToastMessage) keeneticState().animate = true;
@@ -416,11 +472,13 @@ function startKeeneticLive() {
     try {
       const ov = await api('/api/keenetic/overview').catch(() => null);
       if (!ov || ov.error) return;
-      const before = JSON.stringify(keeneticState().routers);
-      keeneticState().overview = ov;
-      keeneticState().routers = Array.isArray(ov.routers) ? ov.routers : [];
-      keeneticState().events = Array.isArray(ov.events) ? ov.events : keeneticState().events;
-      if (state.tab === 'keenetic' && before !== JSON.stringify(keeneticState().routers)) render();
+      const d = keeneticState();
+      const volatile = !d.selected || d.tab === 'tunnels';
+      const before = keeneticSignature(d.routers, volatile);
+      d.overview = ov;
+      d.routers = Array.isArray(ov.routers) ? ov.routers : [];
+      d.events = Array.isArray(ov.events) ? ov.events : d.events;
+      if (state.tab === 'keenetic' && before !== keeneticSignature(d.routers, volatile)) render();
     } finally {
       keeneticBusy = false;
     }
@@ -750,6 +808,107 @@ async function keeneticDnsDeleteRule(index, group, iface) {
   }
 }
 
+
+function keeneticFailover() {
+  const d = keeneticState();
+  const r = (d.routers || []).find(x => x.id === d.selected);
+  if (!r) return;
+  const backups = ((r.status && r.status.tunnels) || []).filter(t => keeneticTunnelState(t).cls === 'standby');
+  if (!backups.length) {
+    showToast('Нет включённого резервного туннеля. Включите туннель и проверьте, что он не прописан в маршрутах.');
+    return;
+  }
+  const run = async backup => {
+    try {
+      const res = await api('/api/keenetic/routers/' + encodeURIComponent(r.id) + '/failover', {
+        method: 'POST', body: { backup }
+      });
+      d.animate = true;
+      d.dns = null;
+      keeneticApplyRouter(res.router);
+      render();
+      showToast('Маршрутизация переведена на ' + (res.backupLabel || res.backup) + ' — правил: ' + res.updated);
+    } catch (e) {
+      showToast(e.message || 'Не удалось переключить маршрутизацию');
+    }
+  };
+  if (backups.length === 1) {
+    const b = backups[0];
+    const label = b.description || b.name;
+    if (confirm('Перевести все DNS-маршруты через туннели на «' + label + '»? Маршруты через Ethernet не изменятся.')) run(b.name);
+    return;
+  }
+  showCarbonForm({
+    title: 'Включить резерв',
+    sub: 'Все активные DNS-маршруты через туннели будут переведены на выбранный резервный туннель. Маршруты через Ethernet не изменятся.',
+    fields: [{
+      name: 'backup',
+      label: 'Резервный туннель',
+      type: 'select',
+      value: backups[0].name,
+      options: backups.map(b => ({ value: b.name, label: (b.description || b.name) + ' — ' + b.name }))
+    }],
+    submitText: 'Перевести',
+    onSubmit: async v => {
+      if (!v.backup) throw new Error('Выберите резервный туннель');
+      await run(v.backup);
+    }
+  });
+}
+
+async function keeneticDnsExport() {
+  const d = keeneticState();
+  if (!d.selected) return;
+  try {
+    const res = await api('/api/keenetic/routers/' + encodeURIComponent(d.selected) + '/dns/export');
+    const data = res.export || res;
+    const r = (d.routers || []).find(x => x.id === d.selected);
+    const safe = ((r && r.name) || 'router').replace(/[^\w.-]+/g, '-');
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'keenetic-dns-' + safe + '-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    showToast('Экспорт готов');
+  } catch (e) {
+    showToast(e.message || 'Не удалось экспортировать списки');
+  }
+}
+
+function keeneticDnsImport() {
+  const d = keeneticState();
+  if (!d.selected) return;
+  showCarbonForm({
+    title: 'Импорт списков маршрутизации',
+    sub: 'JSON-файл, созданный кнопкой «Экспорт». Списки обновятся, правила можно заменить целиком.',
+    fields: [
+      { name: 'file', label: 'Файл JSON', type: 'file', accept: '.json,application/json' },
+      { name: 'replace', label: 'Заменить текущие правила маршрутизации', type: 'checkbox', value: true }
+    ],
+    submitText: 'Импортировать',
+    onSubmit: async v => {
+      if (!v.file) throw new Error('Выберите файл JSON');
+      const text = await v.file.text();
+      const res = await api('/api/keenetic/routers/' + encodeURIComponent(d.selected) + '/dns/import', {
+        method: 'POST',
+        body: { text, replace: !!v.replace }
+      });
+      d.dns = { ...res, routerId: d.selected };
+      const used = new Set((res.routes || []).filter(x => x.enabled).map(x => x.interface));
+      const router = (d.routers || []).find(x => x.id === d.selected);
+      if (router && router.status && Array.isArray(router.status.tunnels)) {
+        router.status.tunnels.forEach(t => { t.routed = used.has(t.name); });
+      }
+      d.animate = true;
+      render();
+      showToast('Импортировано: списков ' + res.imported.lists + ', правил ' + res.imported.rules);
+    }
+  });
+}
 
 function keeneticImport() {
   const d = keeneticState();
