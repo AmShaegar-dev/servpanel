@@ -2,6 +2,15 @@
 
 /* Keenetic fleet UI: карточки роутеров, статусы, туннели и события. */
 
+const KEENETIC_CHECK_PRESETS = [
+  { value: 'https://www.youtube.com/generate_204', label: 'YouTube' },
+  { value: 'https://discord.com', label: 'Discord' },
+  { value: 'https://www.instagram.com', label: 'Instagram' },
+  { value: 'https://chatgpt.com', label: 'ChatGPT' },
+  { value: 'https://web.telegram.org', label: 'Telegram' },
+  { value: 'custom', label: 'Свой URL' }
+];
+
 function keeneticState() {
   if (!carbon.keenetic) carbon.keenetic = { overview: null, routers: [], events: [], selected: null, tab: 'overview' };
   return carbon.keenetic;
@@ -30,18 +39,57 @@ function keeneticStatusTag(r) {
   return `<span class="tag muted">не проверен</span>`;
 }
 
-function keeneticTunnelState(t) {
-  if (!t || !t.up) return { cls: 'disabled', label: 'отключен', code: 'OFF' };
-  if (t.link === 'down' || t.empty) return { cls: 'down', label: 'упал', code: 'DOWN' };
+function keeneticTunnelHealth(t) {
+  if (!t || !t.up) return { cls: 'disabled', label: 'отключен' };
+  if (t.link === 'down' || t.empty) return { cls: 'down', label: 'упал' };
+  return { cls: 'online', label: 'в сети' };
+}
+
+function keeneticTunnelRole(t, roleIndex) {
+  const h = keeneticTunnelHealth(t);
+  const label = roleIndex === 0 ? 'основной'
+    : roleIndex > 0 ? 'резерв ' + roleIndex
+    : (h.cls === 'online' ? (t.routed === false ? 'резервный' : 'основной') : 'резервный');
+  if (h.cls !== 'online') return { cls: h.cls, label, code: h.cls === 'down' ? 'DOWN' : 'OFF' };
+  if (roleIndex === 0) return { cls: 'active', label, code: 'PRIMARY' };
+  if (roleIndex > 0) return { cls: 'standby', label, code: 'BACKUP ' + roleIndex };
   if (t.routed === false) return { cls: 'standby', label: 'резервный', code: 'STANDBY' };
   return { cls: 'active', label: 'основной', code: 'PRIMARY' };
+}
+
+function keeneticTunnelOrder(r) {
+  return Array.isArray(r && r.tunnelOrder) ? r.tunnelOrder : [];
+}
+
+function keeneticOrderedTunnels(r) {
+  const tunnels = (r && r.status && Array.isArray(r.status.tunnels)) ? r.status.tunnels.slice() : [];
+  const order = keeneticTunnelOrder(r);
+  const rank = { active: 0, standby: 1, down: 2, disabled: 3 };
+  return tunnels.sort((a, b) => {
+    const ia = order.indexOf(a.name);
+    const ib = order.indexOf(b.name);
+    if (ia >= 0 || ib >= 0) {
+      if (ia < 0) return 1;
+      if (ib < 0) return -1;
+      return ia - ib;
+    }
+    const ra = rank[keeneticTunnelRole(a, -1).cls];
+    const rb = rank[keeneticTunnelRole(b, -1).cls];
+    return (ra == null ? 9 : ra) - (rb == null ? 9 : rb);
+  });
+}
+
+function keeneticPrimaryCount(r) {
+  const order = keeneticTunnelOrder(r);
+  return ((r && r.status && Array.isArray(r.status.tunnels)) ? r.status.tunnels : [])
+    .filter(t => keeneticTunnelRole(t, order.indexOf(t.name)).cls === 'active').length;
 }
 
 function keeneticRouterCard(r) {
   const st = r.status || {};
   const online = !!st.online;
   const tunnels = Array.isArray(st.tunnels) ? st.tunnels : [];
-  const up = tunnels.filter(t => keeneticTunnelState(t).cls === 'active').length;
+  const up = keeneticPrimaryCount(r);
   const cpu = Math.max(0, Math.min(100, Number(st.cpu) || 0));
   const ram = Math.max(0, Math.min(100, Number(st.ram) || 0));
   return `<article class="keenetic-card ${online ? 'is-online' : 'is-offline'}" data-carbon-action="keenetic-open" data-id="${escHtml(r.id)}">
@@ -82,7 +130,7 @@ function keeneticOverviewHtml() {
   const routers = d.routers || [];
   const online = routers.filter(r => r.status && r.status.online).length;
   const tunnels = routers.flatMap(r => (r.status && r.status.tunnels) || []);
-  const up = tunnels.filter(t => keeneticTunnelState(t).cls === 'active').length;
+  const up = routers.reduce((n, r) => n + keeneticPrimaryCount(r), 0);
   const down = tunnels.length - up;
   return `<div class="page-head"><div><div class="page-title">Keenetic</div><div class="page-sub">Парк роутеров, туннели и связь. До ${Math.max(6, routers.length)} роутеров.</div></div><div class="page-actions"><button class="btn" data-carbon-action="keenetic-refresh">${icon('refresh')}Обновить</button><button class="btn btn-primary" data-carbon-action="keenetic-add">${icon('plus')}Добавить роутер</button></div></div>
     <div class="mini-grid">
@@ -100,14 +148,14 @@ function keeneticOverviewHtml() {
 }
 
 function keeneticFlow(r) {
-  const st = r.status || {};
-  const tunnels = Array.isArray(st.tunnels) ? st.tunnels : [];
-  const states = tunnels.map(keeneticTunnelState);
+  const order = keeneticTunnelOrder(r);
+  const ordered = keeneticOrderedTunnels(r);
+  const roles = ordered.map(t => keeneticTunnelRole(t, order.indexOf(t.name)));
   let flowState = 'down';
-  if (states.some(x => x.cls === 'active')) flowState = 'active';
-  else if (states.some(x => x.cls === 'standby')) flowState = 'standby';
-  const branches = tunnels.length ? tunnels.map(t => {
-    const ts = keeneticTunnelState(t);
+  if (roles.some(x => x.cls === 'active')) flowState = 'active';
+  else if (roles.some(x => x.cls === 'standby')) flowState = 'standby';
+  const branches = ordered.length ? ordered.map((t, i) => {
+    const ts = roles[i];
     const label = t.description || t.name;
     return `<div class="keenetic-flow-branch ${ts.cls}" data-flow-branch="${escHtml(t.name)}">
       <div class="keenetic-flow-tunnel ${ts.cls}" data-flow-chip="${escHtml(t.name)}" title="${escHtml(label + ' · ' + t.name + (t.peer ? ' · ' + t.peer : ''))}">
@@ -124,7 +172,7 @@ function keeneticFlow(r) {
     <div class="keenetic-flow-spacer"></div>
     <div class="keenetic-flow-node router" data-flow-node="router"><div class="keenetic-flow-ico">${icon('cascade')}</div><b>${escHtml(r.name)}</b><span>${escHtml(r.host)}</span></div>
     <div class="keenetic-flow-spacer"></div>
-    <div class="keenetic-flow-branches">${branches}</div>
+    <div class="keenetic-flow-branches${ordered.length > 3 ? ' many' : ''}">${branches}</div>
     <div class="keenetic-flow-spacer"></div>
     <div class="keenetic-flow-node" data-flow-node="wan"><div class="keenetic-flow-ico">${icon('globe')}</div><b>WAN</b></div>
   </div>`;
@@ -241,34 +289,29 @@ function keeneticFlowDraw() {
   const wanR = rel(wan);
   if (vertical) {
     drawPath(curve(localR, routerR), mainState);
-    const leftX = 16;
-    const rightX = Math.max(leftX + 40, W - 16);
-    const branches = [...flow.querySelectorAll('.keenetic-flow-branch')]
+    const cards = [...flow.querySelectorAll('.keenetic-flow-branch')]
       .map(br => {
         const chip = br.querySelector('.keenetic-flow-tunnel');
         return chip ? { rect: rel(chip), state: branchState(br) } : null;
       })
-      .filter(Boolean)
-      .sort((a, b) => a.rect.t - b.rect.t);
-    if (!branches.length) return;
-    const firstY = branches[0].rect.cy;
-    const lastY = branches[branches.length - 1].rect.cy;
-    const splitY = Math.max(routerR.b + 8, firstY - 28);
-    const mergeY = Math.min(wanR.t - 8, lastY + 28);
-    // Одна общая линия слева: роутер → точка входа.
-    drawPath(`M ${routerR.cx} ${routerR.b} C ${routerR.cx} ${routerR.b + 12}, ${leftX} ${splitY - 8}, ${leftX} ${splitY}`, 'neutral');
-    // Одна общая линия справа: точка выхода → WAN.
-    drawPath(`M ${rightX} ${mergeY} L ${rightX} ${wanR.t - 18} C ${rightX} ${wanR.t - 6}, ${wanR.cx - 24} ${wanR.t}, ${wanR.cx} ${wanR.t}`, 'neutral');
-    for (const br of branches) {
-      const y = br.rect.cy;
-      const dy = y - splitY;
-      drawPath(`M ${leftX} ${splitY} C ${leftX} ${splitY + dy * .55}, ${br.rect.l - 16} ${y}, ${br.rect.l} ${y}`, br.state, false);
-      const dy2 = mergeY - y;
-      drawPath(`M ${br.rect.r} ${y} C ${br.rect.r + 16} ${y}, ${rightX} ${mergeY - dy2 * .55}, ${rightX} ${mergeY}`, br.state, false);
+      .filter(Boolean);
+    if (!cards.length) return;
+    const mx = routerR.cx;
+    const minTop = Math.min(...cards.map(c => c.rect.t));
+    const maxBottom = Math.max(...cards.map(c => c.rect.b));
+    const mergeTopY = Math.max(routerR.b + 12, minTop - 20);
+    const mergeBottomY = Math.min(wanR.t - 12, maxBottom + 20);
+    // Одна линия от роутера до точки объединения.
+    drawPath(`M ${mx} ${routerR.b} L ${mx} ${mergeTopY}`, mainState);
+    for (const c of cards) {
+      drawPath(`M ${mx} ${mergeTopY} Q ${mx} ${c.rect.t} ${c.rect.cx} ${c.rect.t}`, c.state);
+      drawPath(`M ${c.rect.cx} ${c.rect.b} Q ${c.rect.cx} ${mergeBottomY} ${mx} ${mergeBottomY}`, c.state);
     }
-    for (const [jx, jy] of [[leftX, splitY], [rightX, mergeY]]) {
+    // Одна линия от точки объединения до WAN.
+    drawPath(`M ${mx} ${mergeBottomY} L ${wanR.cx} ${wanR.t}`, mainState);
+    for (const jy of [mergeTopY, mergeBottomY]) {
       const dot = document.createElementNS(ns, 'circle');
-      dot.setAttribute('cx', jx);
+      dot.setAttribute('cx', mx);
       dot.setAttribute('cy', jy);
       dot.setAttribute('r', '2.6');
       dot.setAttribute('fill', '#d6dae0');
@@ -325,10 +368,21 @@ function keeneticDetailHtml() {
   ];
   let body = '';
   if (tab === 'tunnels') {
-    body = `<section class="card table-card"><div class="card-top"><div><div class="card-title">Туннели</div><div class="card-sub">WireGuard / AmneziaWG, найденные на роутере</div></div><div class="page-actions">${tag(String(tunnels.length), 'muted')}<button class="btn btn-sm" data-carbon-action="keenetic-import">${icon('upload')}Импорт .conf</button></div></div>
-      <div class="table-scroll"><table class="table keenetic-table"><thead><tr><th>Интерфейс</th><th>Тип</th><th>Состояние</th><th>Адрес</th><th>Пир / endpoint</th><th>Рукопожатие</th><th>Трафик</th><th>Описание</th><th></th></tr></thead><tbody>${tunnels.map(t => { const st = keeneticTunnelState(t); return `<tr>
-        <td class="name">${escHtml(t.name)}</td><td>${escHtml(t.type || '—')}</td>
-        <td><span class="status ${st.cls}"><span class="dot"></span>${st.label}</span></td>
+    const order = keeneticTunnelOrder(r);
+    const ordered = keeneticOrderedTunnels(r);
+    const health = r.health || null;
+    body = `<section class="card table-card"><div class="card-top"><div><div class="card-title">Туннели</div><div class="card-sub">WireGuard / AmneziaWG, найденные на роутере</div></div><div class="page-actions">${tag(String(ordered.length), 'muted')}<button class="btn btn-sm" data-carbon-action="keenetic-import">${icon('upload')}Импорт .conf</button></div></div>
+      <div class="table-scroll"><table class="table keenetic-table"><thead><tr><th>Интерфейс</th><th>Роль</th><th>Тип</th><th>Состояние</th><th>Адрес</th><th>Пир / endpoint</th><th>Рукопожатие</th><th>Трафик</th><th>Описание</th><th></th></tr></thead><tbody>${ordered.map((t, i) => {
+        const role = keeneticTunnelRole(t, order.indexOf(t.name));
+        const h = keeneticTunnelHealth(t);
+        return `<tr>
+        <td class="name">${escHtml(t.name)}</td>
+        <td><div class="keenetic-role-cell"><span>${escHtml(role.label)}</span><span class="keenetic-role-arrows">
+          <button class="row-action" title="Выше" data-carbon-action="keenetic-tunnel-up" data-id="${escHtml(r.id)}" data-name="${escHtml(t.name)}" ${i === 0 ? 'disabled' : ''}>↑</button>
+          <button class="row-action" title="Ниже" data-carbon-action="keenetic-tunnel-down" data-id="${escHtml(r.id)}" data-name="${escHtml(t.name)}" ${i === ordered.length - 1 ? 'disabled' : ''}>↓</button>
+        </span></div></td>
+        <td>${escHtml(t.type || '—')}</td>
+        <td><span class="status ${h.cls === 'online' ? '' : h.cls}"><span class="dot"></span>${h.label}</span></td>
         <td class="mono">${escHtml(t.address || '—')}</td><td class="mono">${escHtml(t.peer || '—')}</td>
         <td class="mono">${t.lastHandshake ? escHtml(lastHandshakeText(t.lastHandshake)) : '—'}</td>
         <td class="mono">${t.rx || t.tx ? '↓ ' + fmtBytes(t.rx) + ' · ↑ ' + fmtBytes(t.tx) : '—'}</td>
@@ -337,8 +391,22 @@ function keeneticDetailHtml() {
           ${t.empty ? `<button class="row-action" disabled title="Пустой интерфейс — управление недоступно">${icon('stop')}</button>` : `<button class="row-action" title="${t.up ? 'Выключить туннель' : 'Включить туннель'}" data-carbon-action="keenetic-tunnel-toggle" data-id="${escHtml(r.id)}" data-name="${escHtml(t.name)}" data-up="${t.up ? '1' : '0'}">${icon(t.up ? 'stop' : 'play')}</button>
           <button class="row-action" title="Перезапустить туннель" data-carbon-action="keenetic-tunnel-restart" data-id="${escHtml(r.id)}" data-name="${escHtml(t.name)}">${icon('refresh')}</button>`}
         </div></td>
-      </tr>`; }).join('') || '<tr><td colspan="9">Туннели не найдены</td></tr>'}</tbody></table></div>
-      <div class="keenetic-table-note">Действия применяются через RCI. Выключение туннеля прервёт связь через него.</div></section>`;
+      </tr>`; }).join('') || '<tr><td colspan="10">Туннели не найдены</td></tr>'}</tbody></table></div>
+      <div class="keenetic-table-note">Стрелки меняют приоритет: верхний туннель — основной, ниже — резерв 1, резерв 2 и т.д. Действия применяются через RCI.</div></section>
+      <section class="card keenetic-health-card"><div class="card-top"><div><div class="card-title">Проверка состояния</div><div class="card-sub">HTTPS-запрос с сервера панели · раз в ${r.checkIntervalMin || 5} мин</div></div>${health ? tag(health.ok ? 'в норме' : 'сбой', health.ok ? 'good' : 'bad') : tag('нет данных', 'muted')}</div>
+        <div class="list">
+          <div class="list-row"><b>Цель</b><span class="mono">${escHtml(r.checkUrl || '—')}</span></div>
+          <div class="list-row"><b>Периодичность</b><span class="mono">каждые ${r.checkIntervalMin || 5} мин</span></div>
+          <div class="list-row"><b>Последняя проверка</b><span class="mono">${health ? keeneticAgo(health.checkedAt) + (health.latencyMs ? ' · ' + health.latencyMs + ' мс' : '') : '—'}</span></div>
+          <div class="list-row"><b>Автопереключение</b><span class="mono">${r.autoFailover ? 'включено' : 'выключено'}</span></div>
+          ${health && health.error ? `<div class="list-row"><b>Ошибка</b><span class="mono keenetic-error" style="color:var(--bad)">${escHtml(health.error)}</span></div>` : ''}
+        </div>
+        <div class="page-actions" style="margin-top:12px">
+          <button class="btn btn-sm" data-carbon-action="keenetic-health-check" data-id="${escHtml(r.id)}">${icon('pulse')}Проверить</button>
+          <button class="btn btn-sm" data-carbon-action="keenetic-health-settings" data-id="${escHtml(r.id)}">${icon('sliders')}Настройки</button>
+        </div>
+        <div class="keenetic-table-note">Проверка идёт с сервера панели. Укажите URL, доступный только через туннель; автопереключение срабатывает после двух неудачных проверок подряд.</div>
+      </section>`;
   } else if (tab === 'dns') {
     const dns = d.dns && d.dns.routerId === r.id ? d.dns : null;
     if (!dns || dns.loading) {
@@ -463,6 +531,10 @@ function keeneticSignature(routers, volatile) {
       model: st.model || '',
       firmware: st.firmware || '',
       transport: st.transport || '',
+      tunnelOrder: r.tunnelOrder || [],
+      autoFailover: !!r.autoFailover,
+      checkUrl: r.checkUrl || '',
+      checkIntervalMin: r.checkIntervalMin || 5,
       tunnels: (Array.isArray(st.tunnels) ? st.tunnels : []).map(t => ({
         name: t.name,
         type: t.type,
@@ -483,6 +555,7 @@ function keeneticSignature(routers, volatile) {
       item.ram = st.ram;
       item.uptime = st.uptime;
       item.checkedAt = st.checkedAt;
+      item.health = r.health || null;
     }
     return item;
   }));
@@ -856,11 +929,86 @@ async function keeneticDnsDeleteRule(index, group, iface) {
 }
 
 
+async function keeneticMoveTunnel(id, name, dir) {
+  const d = keeneticState();
+  const r = (d.routers || []).find(x => x.id === id);
+  if (!r) return;
+  const list = keeneticOrderedTunnels(r).map(t => t.name);
+  const i = list.indexOf(name);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  const tmp = list[i];
+  list[i] = list[j];
+  list[j] = tmp;
+  try {
+    const res = await api('/api/keenetic/routers/' + encodeURIComponent(id) + '/tunnels/order', {
+      method: 'PUT', body: { order: list }
+    });
+    d.animate = true;
+    keeneticApplyRouter(res.router);
+    render();
+    showToast('Приоритет обновлён');
+  } catch (e) {
+    showToast(e.message || 'Не удалось изменить приоритет');
+  }
+}
+
+async function keeneticHealthCheck(id) {
+  const d = keeneticState();
+  try {
+    const res = await api('/api/keenetic/routers/' + encodeURIComponent(id) + '/health/check', {
+      method: 'POST', body: {}
+    });
+    d.animate = true;
+    keeneticApplyRouter(res.router);
+    render();
+    if (res.failover && res.failover.switched) showToast('Проверка не прошла · переключено на ' + (res.failover.backup || 'резерв'));
+    else showToast(res.health && res.health.ok ? 'Проверка успешна' : 'Проверка не прошла');
+  } catch (e) {
+    showToast(e.message || 'Ошибка проверки');
+  }
+}
+
+function keeneticHealthSettings(id) {
+  const d = keeneticState();
+  const r = (d.routers || []).find(x => x.id === id);
+  if (!r) return;
+  const current = r.checkUrl || '';
+  const preset = KEENETIC_CHECK_PRESETS.some(p => p.value === current) ? current : 'custom';
+  showCarbonForm({
+    title: 'Проверка состояния',
+    sub: 'Выберите сервис для проверки или укажите свой URL. Один HTTPS-запрос за указанный интервал с сервера панели.',
+    fields: [
+      { name: 'preset', label: 'Сервис для проверки', type: 'select', value: preset, options: KEENETIC_CHECK_PRESETS },
+      { name: 'checkUrl', label: 'Свой URL (для варианта «Свой URL»)', value: current, placeholder: 'https://example.com' },
+      { name: 'checkIntervalMin', label: 'Периодичность, минут', type: 'number', value: r.checkIntervalMin || 5, min: 1, max: 60 },
+      { name: 'autoFailover', label: 'Автопереключение после двух сбоев подряд', type: 'checkbox', value: !!r.autoFailover }
+    ],
+    submitText: 'Сохранить',
+    onSubmit: async v => {
+      const url = v.preset === 'custom' ? String(v.checkUrl || '').trim() : String(v.preset || '').trim();
+      if (!url) throw new Error('Укажите URL проверки');
+      const res = await api('/api/keenetic/routers/' + encodeURIComponent(id) + '/health', {
+        method: 'PUT',
+        body: {
+          checkUrl: url,
+          checkIntervalMin: Number(v.checkIntervalMin) || 5,
+          autoFailover: !!v.autoFailover
+        }
+      });
+      d.animate = true;
+      keeneticApplyRouter(res.router);
+      render();
+      showToast('Настройки проверки сохранены');
+    }
+  });
+}
+
 function keeneticFailover() {
   const d = keeneticState();
   const r = (d.routers || []).find(x => x.id === d.selected);
   if (!r) return;
-  const backups = ((r.status && r.status.tunnels) || []).filter(t => keeneticTunnelState(t).cls === 'standby');
+  const backups = keeneticOrderedTunnels(r).filter(t => keeneticTunnelRole(t, keeneticTunnelOrder(r).indexOf(t.name)).cls === 'standby');
   if (!backups.length) {
     showToast('Нет включённого резервного туннеля. Включите туннель и проверьте, что он не прописан в маршрутах.');
     return;

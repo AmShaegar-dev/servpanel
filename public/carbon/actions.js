@@ -1715,6 +1715,10 @@ document.addEventListener('click', async event => {
     else if (action === 'keenetic-delete') await keeneticDelete(btn.dataset.id);
     else if (action === 'keenetic-tunnel-toggle') await keeneticTunnelToggle(btn.dataset.id, btn.dataset.name, btn.dataset.up === '1', btn);
     else if (action === 'keenetic-tunnel-restart') await keeneticTunnelRestart(btn.dataset.id, btn.dataset.name);
+    else if (action === 'keenetic-tunnel-up') await keeneticMoveTunnel(btn.dataset.id, btn.dataset.name, -1);
+    else if (action === 'keenetic-tunnel-down') await keeneticMoveTunnel(btn.dataset.id, btn.dataset.name, 1);
+    else if (action === 'keenetic-health-check') await keeneticHealthCheck(btn.dataset.id);
+    else if (action === 'keenetic-health-settings') keeneticHealthSettings(btn.dataset.id);
     else if (action === 'keenetic-import') keeneticImport();
     else if (action === 'keenetic-dns-reload') { keeneticState().dns = null; keeneticDnsLoad(keeneticState().selected); }
     else if (action === 'keenetic-dns-add-list') keeneticDnsListForm('');
