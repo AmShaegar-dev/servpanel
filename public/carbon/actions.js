@@ -46,7 +46,7 @@ function showCarbonForm(opts) {
       return `<label class="field"><span>${escHtml(f.label)}</span><textarea name="carbon-${name}" data-field="${name}" rows="${f.rows || 8}" spellcheck="false" autocomplete="off" placeholder="${escHtml(f.placeholder || '')}">${escHtml(value)}</textarea></label>`;
     }
     if (f.type === 'file') {
-      return `<label class="field"><span>${escHtml(f.label)}</span><input type="file" data-field="${name}" accept="${escHtml(f.accept || '')}"></label>`;
+      return `<label class="field file-field"><span>${escHtml(f.label)}</span><input type="file" data-field="${name}" accept="${escHtml(f.accept || '')}" onchange="carbonFilePicked(this)"><div class="file-picked">Файл не выбран</div></label>`;
     }
     return `<label class="field"><span>${escHtml(f.label)}</span><input type="${escHtml(f.type || 'text')}" name="carbon-${name}" data-field="${name}" value="${escHtml(value)}" autocomplete="${f.type === 'password' ? 'new-password' : 'off'}" placeholder="${escHtml(f.placeholder || '')}" ${f.min != null ? `min="${escHtml(f.min)}"` : ''} ${f.max != null ? `max="${escHtml(f.max)}"` : ''} ${f.step != null ? `step="${escHtml(f.step)}"` : ''}></label>`;
   }).join('');
@@ -74,6 +74,7 @@ function showCarbonForm(opts) {
     submit.disabled = true;
     const finishBusy = carbonBusyStart(submit);
     const values = {};
+    let chosenFile = null;
     try {
       for (const f of fields) {
         const el = modal.querySelector(`[data-field="${f.name}"]`);
@@ -83,9 +84,16 @@ function showCarbonForm(opts) {
         else if (f.type === 'file') values[f.name] = el.files && el.files[0] ? el.files[0] : null;
         else values[f.name] = el.value;
       }
+      chosenFile = fields.filter(f => f.type === 'file').map(f => values[f.name]).find(Boolean) || null;
+      if (chosenFile) {
+        carbonUploadPanel(chosenFile.name);
+        carbonUploadState(5, 'Файл выбран · обработка…');
+      }
       await opts.onSubmit(values, (msg) => { err.textContent = msg; err.style.display = 'block'; });
+      if (chosenFile) carbonUploadDone('Готово');
       close();
     } catch (e) {
+      if (chosenFile) carbonUploadFail(e.message || 'Ошибка загрузки');
       err.textContent = e.message || 'Ошибка';
       err.style.display = 'block';
     } finally {
@@ -112,9 +120,212 @@ function showCarbonTextModal(title, text) {
   modal.hidden = false;
 }
 
+// ---- Чек-лист сборки каскада (как в старой панели) --------------------
+const CARBON_CASCADE_CHECKLIST = [
+  { id: 'ssh', title: 'SSH до второй стороны', phase: 'SSH', match: s => s.title === 'SSH' && /Вторая сторона доступна/.test(s.text) },
+  { id: 'eu-install', title: 'AmneziaWG на EU', phase: 'EU', match: s => s.title === 'EU' && /AmneziaWG готов/.test(s.text) },
+  { id: 'eu-obf', title: 'Обфускация EU', phase: 'EU', optional: true, match: s => s.title === 'EU' && /Обфускация применена/.test(s.text) },
+  { id: 'ru-host', title: 'Клиент ru_host', phase: 'EU', match: s => /Конфиг ru_host получен/.test(s.text) },
+  { id: 'ru-install', title: 'AmneziaWG на RU', phase: 'RU', match: s => s.title === 'RU' && /AmneziaWG готов/.test(s.text) },
+  { id: 'ru-obf', title: 'Обфускация RU', phase: 'RU', optional: true, match: s => s.title === 'RU' && /Обфускация применена/.test(s.text) },
+  { id: 'awg1', title: 'awg1.conf', phase: 'RU', match: s => /awg1\.conf/i.test(s.text) },
+  { id: 'tunnel', title: 'Туннель awg1', phase: 'RU', match: s => /Туннель awg1 поднят/i.test(s.text) },
+  { id: 'routing', title: 'Маршруты и ipset', phase: 'RU', match: s => /Маршруты и фильтрация применены/i.test(s.text) },
+  { id: 'verify', title: 'Рукопожатие', phase: 'Проверка', match: s => s.title === 'Проверка' && /сек\. назад|нет рукопожатия/i.test(s.text) },
+  { id: 'traffic', title: 'Трафик', phase: 'Трафик', match: s => s.title === 'Трафик' }
+];
+
+function carbonCascadePhaseText(steps, item) {
+  const titles = String(item.phase || '').split('|').filter(Boolean);
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const s = steps[i];
+    if (!titles.length || titles.includes(s.title)) return String(s.text || '');
+  }
+  return '';
+}
+
+function carbonCascadeChecklistHtml(job) {
+  const steps = (job && job.steps) || [];
+  const obfOn = !(job && job.obf === false);
+  const found = new Map();
+  for (const item of CARBON_CASCADE_CHECKLIST) {
+    const s = steps.find(x => item.match(x));
+    if (s) found.set(item.id, s);
+  }
+  let current = -1;
+  for (let i = 0; i < CARBON_CASCADE_CHECKLIST.length; i++) {
+    const item = CARBON_CASCADE_CHECKLIST[i];
+    if (found.has(item.id)) continue;
+    if (item.optional && !obfOn) continue;
+    if (item.optional && job && job.done && !job.error) continue;
+    current = i;
+    break;
+  }
+  return CARBON_CASCADE_CHECKLIST.map((item, i) => {
+    const s = found.get(item.id);
+    let cls = 'checklist-muted', ico = '○', desc = '';
+    if (s) {
+      cls = 'checklist-ok'; ico = '✓';
+      desc = '';
+    } else if (item.optional && !obfOn) {
+      cls = 'checklist-muted'; ico = '—'; desc = 'не требуется';
+    } else if (item.optional && job && job.done && !job.error) {
+      cls = 'checklist-muted'; ico = '—'; desc = 'не выполнялась';
+    } else if (i === current) {
+      if (job && job.error && !job.running) { cls = 'checklist-err'; ico = '✗'; desc = job.error; }
+      else if (job && job.running) {
+        cls = 'checklist-run'; ico = '◌';
+        const live = carbonCascadePhaseText(steps, item);
+        desc = (live ? live.slice(-220) + ' · ' : '') + 'выполняется…';
+      }
+    }
+    return `<div class="checklist-item"><span class="checklist-ico ${cls}">${ico}</span><div><b class="${cls}">${escHtml(item.title)}</b>${desc ? `<div class="checklist-desc">${escHtml(desc)}</div>` : ''}</div></div>`;
+  }).join('');
+}
+
+function carbonProgressLogText(job) {
+  const steps = (job && job.steps) || [];
+  return steps.map(s => {
+    let t = '';
+    if (s.at) {
+      try { t = new Date(s.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' '; } catch (e) {}
+    }
+    return t + '[' + s.title + '] ' + (s.text || '');
+  }).join('\n');
+}
+
+function carbonProgressModal(title, sub) {
+  let modal = document.getElementById('carbonProgressModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'carbonProgressModal';
+    modal.className = 'modal';
+    modal.innerHTML = `<div class="modal-card modal-wide progress-modal"><div class="modal-head"><div><div class="modal-title"></div><div class="modal-sub"></div></div><button class="icon-btn" data-progress-close aria-label="Закрыть">✕</button></div><div class="progress-split"><div class="progress-log"><div class="progress-col-title">Журнал выполнения</div><pre class="code"></pre></div><div class="progress-side"><div class="progress-col-title">Чек-лист <span class="badge badge-muted" data-progress-badge>ожидание</span></div><div class="checklist" data-progress-checklist></div></div></div></div>`;
+    document.body.appendChild(modal);
+    modal.querySelector('[data-progress-close]').addEventListener('click', () => { modal.hidden = true; });
+  }
+  modal.hidden = false;
+  modal.querySelector('.modal-title').textContent = title || 'Прогресс';
+  modal.querySelector('.modal-sub').textContent = sub || '';
+  return modal;
+}
+
+function carbonProgressFill(job) {
+  const modal = document.getElementById('carbonProgressModal');
+  if (!modal) return;
+  const pre = modal.querySelector('pre');
+  const text = carbonProgressLogText(job) || (job && job.error ? job.error : 'Ожидание шагов…');
+  const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
+  if (pre.textContent !== text) {
+    pre.textContent = text;
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
+  }
+  modal.querySelector('[data-progress-checklist]').innerHTML = carbonCascadeChecklistHtml(job);
+  const badge = modal.querySelector('[data-progress-badge]');
+  if (badge) {
+    if (job && job.error) { badge.className = 'badge badge-warn'; badge.textContent = 'ошибка'; }
+    else if (job && job.running) { badge.className = 'badge badge-warn'; badge.textContent = 'идёт'; }
+    else if (job && job.done) { badge.className = 'badge badge-good'; badge.textContent = 'готово'; }
+    else { badge.className = 'badge badge-muted'; badge.textContent = 'ожидание'; }
+  }
+}
+
+function carbonProgressStatus(text) {
+  const modal = document.getElementById('carbonProgressModal');
+  if (!modal) return;
+  const pre = modal.querySelector('pre');
+  pre.textContent = text;
+}
+
+let carbonCascadeTimer = null;
+async function carbonWatchCascadeJob(openModal) {
+  if (openModal) carbonProgressModal('Сборка каскада', 'Журнал и чек-лист обновляются автоматически');
+  const tick = async () => {
+    let job = null;
+    try { job = await api('/api/cascade/ssh-progress'); }
+    catch (e) { carbonProgressStatus('Панель перезагружается, ждём…'); return; }
+    carbonProgressFill(job);
+    if (job && job.running === false && job.done) {
+      if (carbonCascadeTimer) { clearInterval(carbonCascadeTimer); carbonCascadeTimer = null; }
+      if (job.error) showToast('Каскад не собрался: ' + job.error);
+      else {
+        showToast('Каскад настроен');
+        try { await carbonRefresh('Каскад настроен'); } catch (e) {}
+      }
+    }
+  };
+  if (!carbonCascadeTimer) carbonCascadeTimer = setInterval(tick, 2500);
+  await tick();
+}
+
+async function carbonCascadeProgress() {
+  let job = null;
+  try { job = await api('/api/cascade/ssh-progress'); } catch (e) {}
+  carbonProgressModal('Сборка каскада', 'Журнал и чек-лист обновляются автоматически');
+  if (job) carbonProgressFill(job);
+  else carbonProgressStatus('Не удалось получить состояние сборки');
+  if (job && job.running) carbonWatchCascadeJob(false);
+}
+
 function fileToBase64(file) {
+  return fileToBase64Tracked(file);
+}
+
+// ---- Индикация загрузки файлов ---------------------------------------
+let carbonUploadHideTimer = null;
+function carbonUploadPanel(name) {
+  let el = document.getElementById('carbonUploadPanel');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'carbonUploadPanel';
+    el.className = 'upload-panel';
+    el.innerHTML = `<div class="upload-head"><span class="upload-name"></span><span class="upload-pct"></span></div><div class="upload-bar"><span></span></div><div class="upload-status"></div>`;
+    document.body.appendChild(el);
+  }
+  clearTimeout(carbonUploadHideTimer);
+  el.hidden = false;
+  el.classList.remove('is-ok', 'is-err');
+  el.querySelector('.upload-name').textContent = name || 'Файл';
+  el.querySelector('.upload-pct').textContent = '';
+  el.querySelector('.upload-bar span').style.width = '0%';
+  el.querySelector('.upload-status').textContent = 'Подготовка…';
+  return el;
+}
+
+function carbonUploadState(pct, text, tone) {
+  const el = document.getElementById('carbonUploadPanel');
+  if (!el) return;
+  const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+  el.hidden = false;
+  el.classList.toggle('is-ok', tone === 'ok');
+  el.classList.toggle('is-err', tone === 'err');
+  el.querySelector('.upload-bar span').style.width = p + '%';
+  el.querySelector('.upload-pct').textContent = p + '%';
+  if (text) el.querySelector('.upload-status').textContent = text;
+}
+
+function carbonUploadDone(text) {
+  carbonUploadState(100, text || 'Готово', 'ok');
+  carbonUploadHideTimer = setTimeout(() => {
+    const el = document.getElementById('carbonUploadPanel');
+    if (el) el.hidden = true;
+  }, 3200);
+}
+
+function carbonUploadFail(text) {
+  carbonUploadState(100, text || 'Ошибка загрузки', 'err');
+  carbonUploadHideTimer = setTimeout(() => {
+    const el = document.getElementById('carbonUploadPanel');
+    if (el) el.hidden = true;
+  }, 6000);
+}
+
+function fileToBase64Tracked(file, onPct) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    reader.onprogress = e => {
+      if (e.lengthComputable && onPct) onPct(Math.round((e.loaded / e.total) * 100));
+    };
     reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
     reader.onload = () => {
       const s = String(reader.result || '');
@@ -122,6 +333,45 @@ function fileToBase64(file) {
     };
     reader.readAsDataURL(file);
   });
+}
+
+// JSON-запрос с реальным прогрессом отправки (fetch не умеет progress).
+function apiUploadTracked(path, body, onPct) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', path, true);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.upload.onprogress = e => {
+      if (e.lengthComputable && onPct) onPct(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onerror = () => reject(new Error('Сетевая ошибка при загрузке файла'));
+    xhr.ontimeout = () => reject(new Error('Истекло время загрузки файла'));
+    xhr.onload = () => {
+      const type = xhr.getResponseHeader('content-type') || '';
+      let data = xhr.responseText || '';
+      if (type.includes('application/json')) {
+        try { data = JSON.parse(data); } catch (e) { data = {}; }
+      }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(data);
+      if (xhr.status === 401 && typeof showCarbonLogin === 'function') showCarbonLogin();
+      const raw = (data && data.error) || (typeof data === 'string' ? data : 'Ошибка загрузки');
+      reject(new Error(String(raw).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240) || 'Ошибка загрузки'));
+    };
+    xhr.send(JSON.stringify(body || {}));
+  });
+}
+
+// Показывает имя и размер выбранного файла сразу после выбора.
+function carbonFilePicked(input) {
+  const f = input && input.files && input.files[0];
+  const byId = input && input.id ? document.getElementById(input.id + 'Name') : null;
+  const label = byId || (input && input.closest('.field') ? input.closest('.field').querySelector('.file-picked') : null);
+  if (label) {
+    label.textContent = f ? f.name + ' · ' + fmtBytes(f.size) : 'Файл не выбран';
+    label.classList.toggle('has-file', !!f);
+  }
+  if (f) showToast('Выбран файл: ' + f.name + ' (' + fmtBytes(f.size) + ')');
 }
 
 function carbonUpdateModal() {
@@ -212,9 +462,18 @@ async function carbonUpdateCheck() {
 async function carbonUpdateUpload(file) {
   if (!file) throw new Error('Выберите .tar.gz');
   if (file.size > 10 * 1024 * 1024) throw new Error('Файл больше 10 МБ');
-  const data = await fileToBase64(file);
-  await api('/api/update/upload', { method: 'POST', body: { name: file.name, data } });
-  pollUpdate();
+  carbonUploadPanel(file.name);
+  try {
+    const data = await fileToBase64Tracked(file, p => carbonUploadState(Math.round(p * 0.45), 'Чтение файла · ' + p + '%'));
+    carbonUploadState(48, 'Отправка архива на сервер…');
+    await apiUploadTracked('/api/update/upload', { name: file.name, data },
+      p => carbonUploadState(48 + Math.round(p * 0.52), 'Отправка архива · ' + p + '%'));
+    carbonUploadDone('Архив загружен, установка запущена');
+    pollUpdate();
+  } catch (e) {
+    carbonUploadFail(e.message || 'Не удалось загрузить архив');
+    throw e;
+  }
 }
 
 async function carbonUpdateFromUrl() {
@@ -779,6 +1038,7 @@ async function carbonCascadeBuild() {
     fields: [
       { name: 'role', label: 'Роль этого сервера', type: 'select', options: [{ value: 'ru', label: 'Вход (RU)' }, { value: 'eu', label: 'Выход (EU)' }] },
       { name: 'version', label: 'Версия AWG', type: 'select', options: ['3.1', '2.0', '1.5'] },
+      { name: 'port', label: 'UDP-порт AWG (обе стороны)', value: '3977', type: 'number', min: 1, max: 65535 },
       { name: 'peerHost', label: 'IP второй стороны', placeholder: '203.0.113.20' },
       { name: 'peerPort', label: 'SSH-порт', value: '22' },
       { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
@@ -799,6 +1059,7 @@ async function carbonCascadeBuild() {
         { value: 'high', label: 'Высокая' }
       ] },
       { name: 'obfSni', label: 'SNI для TLS-мимикрии (необязательно)', placeholder: 'ozon.ru' },
+      { name: 'keepPackages', label: 'Установка без очистки системы (сохранить пакеты)', type: 'checkbox', value: true },
       { name: 'ifaces', label: 'Клиентские интерфейсы', value: (carbon.cascadeInterfaces && carbon.cascadeInterfaces.selected && carbon.cascadeInterfaces.selected.length ? carbon.cascadeInterfaces.selected : ['awg0']).join(', ') },
       { name: 'extraRuNets', label: 'Доп. сети RU', placeholder: '10.0.0.0/8, 192.168.0.0/16' }
     ],
@@ -806,34 +1067,26 @@ async function carbonCascadeBuild() {
     danger: true,
     onSubmit: async v => {
       if (!v.peerHost || !v.peerPass) throw new Error('Укажите IP второй стороны и пароль root');
+      const port = Number(v.port);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('UDP-порт AWG: нужен 1–65535');
+      // Проверяем SSH до запуска: понятная ошибка вместо долгой сборки.
+      const check = await api('/api/cascade/ssh-check', {
+        method: 'POST',
+        body: { peerHost: v.peerHost.trim(), peerPort: v.peerPort || '22', peerUser: v.peerUser || 'root', peerPass: v.peerPass }
+      });
+      if (!check.ok) throw new Error('SSH: ' + (check.reason || 'нет доступа ко второй стороне'));
       const body = {
         role: v.role, version: v.version, peerHost: v.peerHost.trim(), peerPort: v.peerPort || '22',
         peerUser: v.peerUser || 'root', peerPass: v.peerPass,
+        port, keepPackages: v.keepPackages !== false,
         obfMode: v.obfMode, obfProfile: v.obfProfile, obfIntensity: v.obfIntensity || 'medium',
         obfSni: String(v.obfSni || '').trim(),
         obfSource: '', ifaces: String(v.ifaces || '').split(/[\s,]+/).filter(Boolean),
         extraRuNets: String(v.extraRuNets || '').split(/[\s,]+/).filter(Boolean)
       };
       await api('/api/cascade/ssh-install', { method: 'POST', body });
-      showCarbonTextModal('Сборка каскада', 'Задача запущена, ждём шаги…');
-      for (let i = 0; i < 900; i++) {
-        await carbonSleep(2000);
-        let job = null;
-        try { job = await api('/api/cascade/ssh-progress'); } catch (e) {
-          showCarbonTextModal('Сборка каскада', 'Панель перезагружается, ждём…');
-          continue;
-        }
-        const steps = (job && job.steps) || [];
-        const text = steps.map(s => s.title + ': ' + (s.text || '')).join('\n');
-        showCarbonTextModal('Сборка каскада', text || 'Выполняется…');
-        if (job && job.running === false && job.done) {
-          if (job.error) { showToast('Каскад не собрался: ' + job.error); return; }
-          showCarbonTextModal('Каскад настроен', text + '\n\nГотово.');
-          await carbonRefresh('Каскад настроен');
-          return;
-        }
-      }
-      showToast('Сборка идёт дольше 30 минут — проверьте журнал');
+      showToast('Сборка каскада запущена');
+      carbonWatchCascadeJob(true);
     }
   });
 }
@@ -1280,9 +1533,18 @@ async function carbonRuDropUpload() {
   const file = input && input.files && input.files[0];
   if (!file) throw new Error('Выберите файл со списком');
   if (file.size > 10 * 1024 * 1024) throw new Error('Файл больше 10 МБ');
-  const data = await fileToBase64(file);
-  const d = await api('/api/tools/rudrop/upload', { method: 'POST', body: { name: file.name, data } });
-  showToast('Загружено адресов: ' + (d.count || 0));
+  carbonUploadPanel(file.name);
+  try {
+    const data = await fileToBase64Tracked(file, p => carbonUploadState(Math.round(p * 0.45), 'Чтение списка · ' + p + '%'));
+    carbonUploadState(48, 'Отправка списка на сервер…');
+    const d = await apiUploadTracked('/api/tools/rudrop/upload', { name: file.name, data },
+      p => carbonUploadState(48 + Math.round(p * 0.52), 'Отправка списка · ' + p + '%'));
+    carbonUploadDone('Загружено адресов: ' + (d.count || 0));
+    showToast('Загружено адресов: ' + (d.count || 0));
+  } catch (e) {
+    carbonUploadFail(e.message || 'Не удалось загрузить список');
+    throw e;
+  }
 }
 
 async function carbonObfImport() {
@@ -1318,6 +1580,7 @@ async function carbonCascadeProxy() {
     danger: true,
     onSubmit: async v => {
       const r = await api('/api/cascade/proxy', { method: 'POST', body: { enabled: !!v.enabled } });
+      carbon.cascadeProxy = { ...(carbon.cascadeProxy || {}), enabled: !!v.enabled };
       await carbonRefresh(r.output || (v.enabled ? 'Прокси пущен через EU' : 'Прокси возвращён напрямую'));
     }
   });
@@ -1334,7 +1597,8 @@ async function carbonAwgInstall() {
     sub: 'Параметры установщика',
     fields: [
       { name: 'version', label: 'Версия AWG', type: 'select', options: ['3.1', '2.0', '1.5'] },
-      { name: 'port', label: 'Порт', value: '443' },
+      { name: 'port', label: 'UDP-порт AWG', value: '443', type: 'number', min: 1, max: 65535 },
+      { name: 'keepPackages', label: 'Установка без очистки системы (сохранить пакеты)', type: 'checkbox', value: true },
       { name: 'route', label: 'Маршрут', type: 'select', options: [{ value: 'all', label: 'Весь трафик' }, { value: 'custom', label: 'Свои сети' }] },
       { name: 'awgMode', label: 'Режим', type: 'select', options: [{ value: 'single', label: 'Один сервер' }, { value: 'cascade', label: 'Каскад' }] },
       { name: 'cascadeRole', label: 'Роль в каскаде', type: 'select', options: [{ value: 'ru', label: 'RU-вход' }, { value: 'eu', label: 'EU-выход' }] },
@@ -1346,9 +1610,11 @@ async function carbonAwgInstall() {
     submitText: 'Установить AWG',
     danger: true,
     onSubmit: async v => {
+      const port = Number(v.port);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('UDP-порт AWG: нужен 1–65535');
       const body = {
-        module: 'awg', version: v.version, route: v.route, customRoute: '', ipv6: 'disallow', port: v.port,
-        isolation: true, keepPackages: true, noTweaks: false, awgMode: v.awgMode, cascadeRole: v.cascadeRole,
+        module: 'awg', version: v.version, route: v.route, customRoute: '', ipv6: 'disallow', port,
+        isolation: true, keepPackages: v.keepPackages !== false, noTweaks: false, awgMode: v.awgMode, cascadeRole: v.cascadeRole,
         remoteIp: v.remoteIp, remotePort: v.remotePort, remotePass: v.remotePass, domain: v.domain
       };
       const d = await api('/api/install/module', { method: 'POST', body });
@@ -1532,8 +1798,11 @@ async function carbonRestorePanel() {
     danger: true,
     onSubmit: async v => {
       if (!v.file) throw new Error('Выберите файл бэкапа');
-      const data = await fileToBase64(v.file);
-      await api('/api/restore', { method: 'POST', body: { fileData: data } });
+      carbonUploadPanel(v.file.name);
+      const data = await fileToBase64Tracked(v.file, p => carbonUploadState(Math.round(p * 0.5), 'Чтение архива · ' + p + '%'));
+      carbonUploadState(52, 'Отправка архива на сервер…');
+      await apiUploadTracked('/api/restore', { fileData: data },
+        p => carbonUploadState(52 + Math.round(p * 0.46), 'Отправка архива · ' + p + '%'));
       showToast('Восстановление запущено');
     }
   });
@@ -1698,6 +1967,7 @@ document.addEventListener('click', async event => {
     else if (action === 'install-mtproxyl' || action === 'mtproxyl-install') await carbonMtproxylInstall();
     else if (action === 'awg-install') await carbonAwgInstall();
     else if (action === 'cascade-build') await carbonCascadeBuild();
+    else if (action === 'cascade-progress') await carbonCascadeProgress();
     else if (action === 'cascade-manual') await carbonCascadeManual();
     else if (action === 'cascade-ifaces-save') await carbonCascadeIfacesSave();
     else if (action === 'cascade-list-refresh') await carbonCascadeListRefresh();

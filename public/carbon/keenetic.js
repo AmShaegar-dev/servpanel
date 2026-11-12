@@ -777,9 +777,12 @@ async function keeneticTunnelRestart(id, name) {
   await keeneticTunnelAction(id, name, 'restart');
 }
 
-function keeneticReadFileBase64(file) {
+function keeneticReadFileBase64(file, onPct) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
+    fr.onprogress = e => {
+      if (e.lengthComputable && onPct) onPct(Math.round((e.loaded / e.total) * 100));
+    };
     fr.onload = () => {
       const s = String(fr.result || '');
       const i = s.indexOf(',');
@@ -1087,11 +1090,15 @@ function keeneticDnsImport() {
     submitText: 'Импортировать',
     onSubmit: async v => {
       if (!v.file) throw new Error('Выберите файл JSON');
+      carbonUploadPanel(v.file.name);
+      carbonUploadState(20, 'Чтение JSON…');
       const text = await v.file.text();
+      carbonUploadState(55, 'Импорт списков на роутер…');
       const res = await api('/api/keenetic/routers/' + encodeURIComponent(d.selected) + '/dns/import', {
         method: 'POST',
         body: { text, replace: !!v.replace }
       });
+      carbonUploadState(90, 'Применение правил…');
       d.dns = { ...res, routerId: d.selected };
       const used = new Set((res.routes || []).filter(x => x.enabled).map(x => x.interface));
       const router = (d.routers || []).find(x => x.id === d.selected);
@@ -1119,11 +1126,15 @@ function keeneticImport() {
     submitText: 'Импортировать',
     onSubmit: async v => {
       if (!v.file) throw new Error('Выберите файл .conf');
-      const data = await keeneticReadFileBase64(v.file);
+      carbonUploadPanel(v.file.name);
+      carbonUploadState(15, 'Чтение .conf…');
+      const data = await keeneticReadFileBase64(v.file, p => carbonUploadState(15 + Math.round(p * 0.35), 'Чтение .conf · ' + p + '%'));
+      carbonUploadState(55, 'Передача конфигурации на роутер…');
       const res = await api('/api/keenetic/routers/' + encodeURIComponent(r.id) + '/wireguard/import', {
         method: 'POST',
         body: { data, filename: v.file.name, defaultRoute: !!v.defaultRoute }
       });
+      carbonUploadState(90, 'Роутер создаёт туннель…');
       d.animate = true;
       keeneticApplyRouter(res.router);
       render();

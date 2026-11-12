@@ -4794,7 +4794,8 @@ function cascadeJobSnapshot() {
                 peer: saved.peer || '',
                 steps: saved.steps.slice(-300),
                 error: saved.error || '',
-                result: saved.result || null
+                result: saved.result || null,
+                obf: !!(saved.opts && saved.opts.obf && Object.keys(saved.opts.obf).length)
             };
         }
         return { running: false, done: false, steps: [] };
@@ -4808,7 +4809,8 @@ function cascadeJobSnapshot() {
         peer: cascadeBuildJob.peer,
         steps: cascadeBuildJob.steps.slice(-300),
         error: cascadeBuildJob.error || '',
-        result: cascadeBuildJob.result || null
+        result: cascadeBuildJob.result || null,
+        obf: !!(cascadeBuildJob.opts && cascadeBuildJob.opts.obf && Object.keys(cascadeBuildJob.opts.obf).length)
     };
 }
 
@@ -4950,7 +4952,13 @@ async function runCascadeBuild(job, remote, opts) {
             info = waited;
             log('EU', 'AmneziaWG уже установлен — продолжаю после перезагрузки');
         } else {
-            info = await sshBuild.installAwg(remote, { version, subnetNet: euSubnet, onLog: (m) => log('EU', m) });
+            info = await sshBuild.installAwg(remote, {
+                version,
+                subnetNet: euSubnet,
+                port: opts.port || 3977,
+                keepPackages: opts.keepPackages !== false,
+                onLog: (m) => log('EU', m)
+            });
         }
     } else {
         log('EU', 'AmneziaWG уже установлен, UDP-порт ' + (info.listenPort || '—'));
@@ -4979,16 +4987,31 @@ async function runCascadeBuild(job, remote, opts) {
 
     // 4. AmneziaWG на этом сервере (вход).
     let local = await sshBuild.awgInfo({ host: '127.0.0.1' });
+    // Этап установки из журнала — чтобы в логе были не только «идёт», но и
+    // понятные шаги: пакеты, настройка, ключи, завершение.
+    const ruStage = () => {
+        try {
+            const li = installProgress(sshBuild.INSTALL_LOG);
+            const done = (li.steps || []).filter(s => s.done).map(s => s.title);
+            return { step: done[done.length - 1] || '', progress: li.progress || 0, status: li.status || '' };
+        } catch (e) { return { step: '', progress: 0, status: '' }; }
+    };
     if (!local.installed) {
-        const waited = await sshBuild.waitForAwg({ host: '127.0.0.1' }, 5 * 60 * 1000, (m) => log('RU', m));
+        let lastRuStage = '';
+        const waited = await sshBuild.waitForAwg({ host: '127.0.0.1' }, 5 * 60 * 1000, (m) => {
+            const st = ruStage();
+            const extra = st.step ? ' · этап: ' + st.step + ' (' + st.progress + '%)' : '';
+            log('RU', m + extra);
+            if (st.step) lastRuStage = st.step;
+        });
         if (waited) {
             local = waited;
             log('RU', 'AmneziaWG уже установлен — продолжаю после перезагрузки');
         } else {
-            log('RU', 'AmneziaWG на входе не установлен — ставлю');
+            log('RU', 'AmneziaWG на входе не установлен — ставлю (UDP-порт ' + (opts.port || 3977) + ')');
             const started = await localPost('/api/install/module', {
-                module: 'awg', version, route: 'all', ipv6: 'disallow', port: '3977', awgMode: 'single',
-                subnet: '172.16.17.0/24'
+                module: 'awg', version, route: 'all', ipv6: 'disallow', port: String(opts.port || 3977), awgMode: 'single',
+                subnet: '172.16.17.0/24', keepPackages: opts.keepPackages !== false
             });
             if (!started || started.error) {
                 throw new Error('Установка AWG на входе не запустилась: ' + ((started && started.error) || 'ошибка'));
@@ -4997,7 +5020,14 @@ async function runCascadeBuild(job, remote, opts) {
                 await new Promise(r => setTimeout(r, 5000));
                 local = await sshBuild.awgInfo({ host: '127.0.0.1' });
                 if (local.installed) break;
-                if (i > 0 && i % 12 === 0) log('RU', 'Установка AmneziaWG на входе продолжается...');
+                const st = ruStage();
+                if (st.step && st.step !== lastRuStage) {
+                    lastRuStage = st.step;
+                    log('RU', 'Этап: ' + st.step + ' · ' + st.progress + '%');
+                } else if (i > 0 && i % 24 === 0) {
+                    log('RU', 'Установка AmneziaWG на входе продолжается' +
+                        (st.progress ? ' (' + st.progress + '%)' : '') + '...');
+                }
             }
             if (!local.installed) throw new Error('AmneziaWG на входе не установился за 15 минут');
         }
@@ -5100,6 +5130,12 @@ app.post('/api/cascade/ssh-install', checkAuth, requireAdmin, (req, res) => {
     const pass = String(data.peerPass || '');
     const euSubnet = /^(\d{1,3}\.){3}\d{1,3}\/(1[6-9]|2\d|30)$/.test(String(data.euSubnet || ''))
         ? String(data.euSubnet) : '172.16.61.0/24';
+    const awgPortNum = Number(data.port);
+    const awgPortOk = Number.isInteger(awgPortNum) && awgPortNum >= 1 && awgPortNum <= 65535;
+    if (data.port != null && String(data.port).trim() !== '' && !awgPortOk) {
+        return res.status(400).json({ error: 'Некорректный UDP-порт AWG: нужен 1–65535' });
+    }
+    const awgPort = awgPortOk ? awgPortNum : 3977;
     if (!host || !pass) return res.status(400).json({ error: 'Нужны IP второй стороны и пароль root' });
     if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) return res.status(400).json({ error: 'Вторая сторона задаётся по IP' });
 
@@ -5121,7 +5157,11 @@ app.post('/api/cascade/ssh-install', checkAuth, requireAdmin, (req, res) => {
         : [];
 
     const buildParams = { host, port, user, pass };
-    const buildOpts = { version, role, euSubnet, obf, ifaces, extraRuNets };
+    const buildOpts = {
+        version, role, euSubnet, obf, ifaces, extraRuNets,
+        port: awgPort,
+        keepPackages: data.keepPackages !== false
+    };
     cascadeBuildJob = {
         running: true,
         startedAt: new Date().toISOString(),
