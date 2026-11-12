@@ -3283,12 +3283,27 @@ function cascadeFailoverStatus() {
     };
 }
 
+async function waitCascadeHandshake(startedAt, seconds = 25) {
+    const deadline = Date.now() + seconds * 1000;
+    while (Date.now() < deadline) {
+        try {
+            const r = await sshRunner.run({ host: '127.0.0.1' },
+                "awg show awg1 latest-handshakes 2>/dev/null | awk '{print $2}' | sort -nr | head -1", 15000);
+            const ts = parseInt(String(r.out || '').trim(), 10) || 0;
+            if (ts >= startedAt - 5) return true;
+        } catch (e) { /* ignore */ }
+        await new Promise(r => setTimeout(r, 2000));
+    }
+    return false;
+}
+
 // Применяет произвольный awg1-конфиг: туннель, маршруты, MTProto через EU.
 async function applyCascadeTunnelContent(content) {
     const conf = existingCascadeConf();
     if (!conf) throw new Error('Сначала постройте каскад');
     content = prepareCascadeBackupConf(content);
     const previous = readTextSafe(conf);
+    const startedAt = Math.floor(Date.now() / 1000);
     try {
         writeRootFile(conf, content, '0600');
         await sshRunner.run({ host: '127.0.0.1' }, 'systemctl restart awg-quick@awg1', 60000);
@@ -3304,6 +3319,9 @@ async function applyCascadeTunnelContent(content) {
             if (rr.code !== 0) {
                 throw new Error('маршруты не применились: ' + String(rr.out || '').trim().slice(-500));
             }
+        }
+        if (!await waitCascadeHandshake(startedAt, 25)) {
+            throw new Error('нет рукопожатия с выбранным сервером — проверьте Endpoint и ключи резерва');
         }
         let proxyReconnected = false;
         let exitIp = '';
@@ -3327,6 +3345,9 @@ async function applyCascadeTunnelContent(content) {
         try {
             if (previous) writeRootFile(conf, previous, '0600');
             await sshRunner.run({ host: '127.0.0.1' }, 'systemctl restart awg-quick@awg1', 60000);
+            if (fs.existsSync(ROUTING_SCRIPT)) {
+                await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
+            }
         } catch (e2) { /* ignore */ }
         throw e;
     }
