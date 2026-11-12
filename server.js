@@ -10776,6 +10776,13 @@ app.post('/api/install/module', checkAuth, requireAdmin, (req, res) => {
         return res.status(400).json({ error: 'Неизвестный модуль' });
     }
     const mod = MODULES[module];
+    if (module === 'mtproto' && data.publicHost && HOST_RE.test(String(data.publicHost).trim())) {
+        const host = String(data.publicHost).trim();
+        try {
+            const isIp = IPV4_RE.test(host);
+            writeProxySettings({ hostType: isIp ? 'ip' : 'domain', domain: isIp ? '' : host });
+        } catch (e) { /* настройки не критичны для установки */ }
+    }
     if (module === 'awg' && data.awgMode === 'cascade' && (!data.remoteIp || !data.remotePass)) {
         return res.status(400).json({ error: 'Для каскадной установки нужны IP и пароль удалённого сервера' });
     }
@@ -11093,6 +11100,19 @@ function telemtConfigSni(text) {
         if (section === 'censorship') {
             const m = t.match(/^tls_domain\s*=\s*"([^"]+)"/);
             if (m) return m[1];
+        }
+    }
+    return '';
+}
+
+function telemtConfigPublicHost(text) {
+    let section = '';
+    for (const line of String(text || '').split(/\r?\n/)) {
+        const t = line.trim();
+        if (/^\[/.test(t)) { section = t.replace(/^\[|\]$/g, ''); continue; }
+        if (section === 'server.links') {
+            const m = t.match(/^public_host\s*=\s*"([^"]+)"/);
+            if (m) return m[1].trim();
         }
     }
     return '';
@@ -11589,12 +11609,18 @@ app.get('/api/mtproto/links', checkAuth, async (req, res) => {
         const settings = readProxySettings();
         const cfg = proxyUsers.configPath();
         let port = null;
-        try { if (cfg) port = telemtConfigPort(fs.readFileSync(cfg, 'utf8')); } catch (e) { /* ignore */ }
+        let cfgText = '';
+        try { if (cfg) { cfgText = fs.readFileSync(cfg, 'utf8'); port = telemtConfigPort(cfgText); } } catch (e) { /* ignore */ }
+        // public_host из Telemt — запасной вариант, если в настройках
+        // панели ещё не выбран домен. Иначе ссылки остаются с IP.
+        const cfgHost = telemtConfigPublicHost(cfgText);
+        const host = proxyLinkHost(settings) ||
+            (cfgHost && HOST_RE.test(cfgHost) && !IPV4_RE.test(cfgHost) ? cfgHost : '');
         res.json({
-            links: [...new Set(rewriteProxyLinks(links, settings)
+            links: [...new Set(links
                 .filter(proxyLinkUsable)
-                .map(link => rewriteProxyLinkPort(link, port)))],
-            hostType: settings.hostType,
+                .map(link => rewriteProxyLinkPort(rewriteProxyLink(link, host), port)))],
+            hostType: host ? 'domain' : settings.hostType,
             port
         });
     } catch (e) {

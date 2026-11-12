@@ -432,7 +432,7 @@ function keeneticDetailHtml() {
     } else {
       const groups = dns.groups || [];
       const routes = dns.routes || [];
-      body = `<div class="keenetic-dns-toolbar"><button class="btn btn-sm" data-carbon-action="keenetic-dns-export">${icon('download')}Экспорт</button><button class="btn btn-sm" data-carbon-action="keenetic-dns-import">${icon('upload')}Импорт</button></div><section class="card table-card" style="margin-bottom:14px"><div class="card-top"><div><div class="card-title">Списки доменных имён</div><div class="card-sub">Домены, IP и подсети для правил маршрутизации</div></div><div class="page-actions">${tag(String(groups.length), 'muted')}<button class="btn btn-sm" data-carbon-action="keenetic-dns-add-list">${icon('plus')}Добавить список</button></div></div>
+      body = `<div class="keenetic-dns-toolbar"><span class="keenetic-dns-tool-label">Списки</span><button class="btn btn-sm" data-carbon-action="keenetic-dns-export" data-scope="lists">${icon('download')}Экспорт списков</button><button class="btn btn-sm" data-carbon-action="keenetic-dns-import" data-scope="lists">${icon('upload')}Импорт списков</button><span class="keenetic-dns-tool-label">Правила</span><button class="btn btn-sm" data-carbon-action="keenetic-dns-export" data-scope="rules">${icon('download')}Экспорт правил</button><button class="btn btn-sm" data-carbon-action="keenetic-dns-import" data-scope="rules">${icon('upload')}Импорт правил</button></div><section class="card table-card" style="margin-bottom:14px"><div class="card-top"><div><div class="card-title">Списки доменных имён</div><div class="card-sub">Домены, IP и подсети для правил маршрутизации</div></div><div class="page-actions">${tag(String(groups.length), 'muted')}<button class="btn btn-sm" data-carbon-action="keenetic-dns-add-list">${icon('plus')}Добавить список</button></div></div>
         <div class="table-scroll"><table class="table keenetic-table keenetic-dns-table"><thead><tr><th>Список</th><th>Домены</th><th>IPv4</th><th>IPv6</th><th></th></tr></thead><tbody>${groups.map(g => `<tr>
           <td class="name">${escHtml(g.description)}<div class="keenetic-sub">${escHtml(g.name)}</div></td>
           <td class="mono">${g.domains}</td><td class="mono">${g.ip4}</td><td class="mono">${g.ip6}</td>
@@ -452,6 +452,7 @@ function keeneticDetailHtml() {
             <td><div class="name">${escHtml(ifaceLabel)}</div>${ifaceLabel !== rt.interface ? `<div class="keenetic-sub">${escHtml(rt.interface)}</div>` : ''}</td>
             <td>${rt.auto ? 'да' : 'нет'}</td><td>${rt.reject ? 'да' : 'нет'}</td>
             <td><div class="keenetic-row-actions">
+              <button class="row-action" title="Редактировать правило" data-carbon-action="keenetic-dns-edit-rule" data-index="${escHtml(rt.index)}" data-group="${escHtml(rt.group)}" data-interface="${escHtml(rt.interface)}" data-auto="${rt.auto ? '1' : '0'}" data-reject="${rt.reject ? '1' : '0'}" data-enabled="${rt.enabled ? '1' : '0'}">${icon('edit')}</button>
               <button class="row-action" title="${rt.enabled ? 'Выключить правило' : 'Включить правило'}" data-carbon-action="keenetic-dns-toggle-rule" data-index="${escHtml(rt.index)}" data-enabled="${rt.enabled ? '1' : '0'}">${icon(rt.enabled ? 'stop' : 'play')}</button>
               <button class="row-action" title="Удалить правило" data-carbon-action="keenetic-dns-delete-rule" data-index="${escHtml(rt.index)}" data-group="${escHtml(g ? g.description : rt.group)}" data-interface="${escHtml(ifaceLabel)}">${icon('trash')}</button>
             </div></td>
@@ -1071,11 +1072,12 @@ function keeneticFailover() {
   });
 }
 
-async function keeneticDnsExport() {
+async function keeneticDnsExport(btn) {
   const d = keeneticState();
   if (!d.selected) return;
+  const scope = (btn && btn.dataset.scope) || 'all';
   try {
-    const res = await api('/api/keenetic/routers/' + encodeURIComponent(d.selected) + '/dns/export');
+    const res = await api('/api/keenetic/routers/' + encodeURIComponent(d.selected) + '/dns/export?scope=' + encodeURIComponent(scope));
     const data = res.export || res;
     const r = (d.routers || []).find(x => x.id === d.selected);
     const safe = ((r && r.name) || 'router').replace(/[^\w.-]+/g, '-');
@@ -1083,26 +1085,29 @@ async function keeneticDnsExport() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'keenetic-dns-' + safe + '-' + new Date().toISOString().slice(0, 10) + '.json';
+    a.download = 'keenetic-' + (scope === 'lists' ? 'lists' : scope === 'rules' ? 'rules' : 'dns') + '-' + safe + '-' + new Date().toISOString().slice(0, 10) + '.json';
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 3000);
-    showToast('Экспорт готов');
+    showToast(scope === 'lists' ? 'Экспорт списков готов' : scope === 'rules' ? 'Экспорт правил готов' : 'Экспорт готов');
   } catch (e) {
-    showToast(e.message || 'Не удалось экспортировать списки');
+    showToast(e.message || 'Не удалось экспортировать');
   }
 }
 
-function keeneticDnsImport() {
+function keeneticDnsImport(btn) {
   const d = keeneticState();
   if (!d.selected) return;
+  const scope = (btn && btn.dataset.scope) || 'all';
+  const isLists = scope === 'lists';
+  const isRules = scope === 'rules';
   showCarbonForm({
-    title: 'Импорт списков маршрутизации',
-    sub: 'JSON-файл, созданный кнопкой «Экспорт». Списки обновятся, правила можно заменить целиком.',
+    title: isLists ? 'Импорт списков' : isRules ? 'Импорт правил' : 'Импорт списков и правил',
+    sub: isLists ? 'JSON-файл со списками. Существующие правила не изменяются.' : isRules ? 'JSON-файл с правилами. Списки не изменяются.' : 'JSON-файл со списками и правилами.',
     fields: [
       { name: 'file', label: 'Файл JSON', type: 'file', accept: '.json,application/json' },
-      { name: 'replace', label: 'Заменить текущие правила маршрутизации', type: 'checkbox', value: true }
+      ...(isLists ? [] : [{ name: 'replace', label: 'Заменить текущие правила маршрутизации', type: 'checkbox', value: true }])
     ],
     submitText: 'Импортировать',
     onSubmit: async v => {
@@ -1110,12 +1115,12 @@ function keeneticDnsImport() {
       carbonUploadPanel(v.file.name);
       carbonUploadState(20, 'Чтение JSON…');
       const text = await v.file.text();
-      carbonUploadState(55, 'Импорт списков на роутер…');
+      carbonUploadState(55, isLists ? 'Импорт списков на роутер…' : isRules ? 'Импорт правил на роутер…' : 'Импорт на роутер…');
       const res = await api('/api/keenetic/routers/' + encodeURIComponent(d.selected) + '/dns/import', {
         method: 'POST',
-        body: { text, replace: !!v.replace }
+        body: { text, replace: isLists ? false : !!v.replace, scope }
       });
-      carbonUploadState(90, 'Применение правил…');
+      carbonUploadState(90, 'Применение изменений…');
       d.dns = { ...res, routerId: d.selected };
       const used = new Set((res.routes || []).filter(x => x.enabled).map(x => x.interface));
       const router = (d.routers || []).find(x => x.id === d.selected);
@@ -1125,6 +1130,43 @@ function keeneticDnsImport() {
       d.animate = true;
       render();
       showToast('Импортировано: списков ' + res.imported.lists + ', правил ' + res.imported.rules);
+    }
+  });
+}
+
+function keeneticDnsEditRule(btn) {
+  const d = keeneticState();
+  const dns = d.dns && d.dns.routerId === d.selected ? d.dns : null;
+  if (!dns || !btn) return;
+  const index = btn.dataset.index || '';
+  const groups = dns.groups || [];
+  const ifaces = dns.interfaces || [];
+  if (!index) return;
+  showCarbonForm({
+    title: 'Правило маршрутизации',
+    sub: 'Список доменных имён → интерфейс',
+    fields: [
+      { name: 'group', label: 'Список', type: 'select', value: btn.dataset.group || '', options: groups.map(g => ({ value: g.name, label: g.description || g.name })) },
+      { name: 'interface', label: 'Интерфейс', type: 'select', value: btn.dataset.interface || '', options: ifaces.map(i => ({ value: i.name, label: (i.description ? i.description + ' — ' : '') + i.name })) },
+      { name: 'auto', label: 'Авто', type: 'checkbox', value: btn.dataset.auto === '1' },
+      { name: 'reject', label: 'Эксклюзив', type: 'checkbox', value: btn.dataset.reject === '1' },
+      { name: 'enabled', label: 'Правило включено', type: 'checkbox', value: btn.dataset.enabled === '1' }
+    ],
+    submitText: 'Сохранить правило',
+    onSubmit: async v => {
+      const res = await api('/api/keenetic/routers/' + encodeURIComponent(d.selected) + '/dns/routes', {
+        method: 'POST',
+        body: { index, group: v.group, interface: v.interface, auto: !!v.auto, reject: !!v.reject, enabled: !!v.enabled }
+      });
+      d.dns = { ...res, routerId: d.selected };
+      const used = new Set((res.routes || []).filter(x => x.enabled).map(x => x.interface));
+      const router = (d.routers || []).find(x => x.id === d.selected);
+      if (router && router.status && Array.isArray(router.status.tunnels)) {
+        router.status.tunnels.forEach(t => { t.routed = used.has(t.name); });
+      }
+      d.animate = true;
+      render();
+      showToast('Правило сохранено');
     }
   });
 }

@@ -2204,9 +2204,10 @@ document.addEventListener('click', async event => {
     else if (action === 'keenetic-dns-delete-list') await keeneticDnsDeleteList(btn.dataset.name, btn.dataset.description);
     else if (action === 'keenetic-dns-add-rule') keeneticDnsRuleForm('');
     else if (action === 'keenetic-dns-toggle-rule') await keeneticDnsToggleRule(btn.dataset.index, btn.dataset.enabled !== '1');
+    else if (action === 'keenetic-dns-edit-rule') keeneticDnsEditRule(btn);
     else if (action === 'keenetic-dns-delete-rule') await keeneticDnsDeleteRule(btn.dataset.index, btn.dataset.group, btn.dataset.interface);
-    else if (action === 'keenetic-dns-export') await keeneticDnsExport();
-    else if (action === 'keenetic-dns-import') keeneticDnsImport();
+    else if (action === 'keenetic-dns-export') await keeneticDnsExport(btn);
+    else if (action === 'keenetic-dns-import') keeneticDnsImport(btn);
     else if (action === 'keenetic-failover') keeneticFailover();
     else if (action === 'keenetic-refresh') await keeneticLoad('Обновлено');
     else if (action === 'obf-generate') await carbonObfGenerate();

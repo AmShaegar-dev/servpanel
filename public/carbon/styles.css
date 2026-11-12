@@ -486,7 +486,8 @@ select.tz-focus { outline: 2px solid var(--accent); outline-offset: 2px; border-
 .keenetic-sub{font:500 9px/1.4 var(--mono);letter-spacing:.04em;color:var(--text-3);margin-top:3px}
 .keenetic-dns-loading .empty-row{min-height:96px;display:flex;align-items:center;justify-content:center}
 .keenetic-health-card{margin-top:14px}
-.keenetic-dns-toolbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:10px}
+.keenetic-dns-toolbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.keenetic-dns-tool-label{font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--text-3);margin-left:4px}
 .keenetic-row-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px}
 .keenetic-role-cell{display:flex;align-items:center;gap:6px;white-space:nowrap}
 .keenetic-role-arrows{display:inline-flex;gap:2px}
