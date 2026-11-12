@@ -3132,16 +3132,27 @@ const CASCADE_FAILOVER_STATE = path.join(DATA_DIR, '.cascade_failover_state.json
 const CASCADE_PRIMARY_COPY = path.join(DATA_DIR, '.cascade_primary.awg1.conf');
 const CASCADE_FAILOVER_DEFAULTS = {
     enabled: false,
-    domains: ['ozon.ru', 'wildberries.ru', 'avito.ru'],
+    // Проверяем только зарубежные сервисы: запросы к российским сервисам
+    // с EU-выхода светят IP туннеля и могут привести к блокировкам.
+    domains: ['youtube.com', 'telegram.org', 'github.com', 'cloudflare.com'],
     interval: 60,
     timeout: 5,
     failures: 3
 };
+const RU_CHECK_DOMAIN_BLOCK = new Set([
+    'ozon.ru', 'wildberries.ru', 'avito.ru', 'vk.com', 'ok.ru', 'mail.ru',
+    'rutracker.org', 'yandex.ru', 'yandex.com', 'sber.ru', 'tinkoff.ru',
+    'gosuslugi.ru', 'ria.ru', 'lenta.ru', 'kinopoisk.ru'
+]);
+function isRussianCheckDomain(domain) {
+    const d = String(domain || '').toLowerCase();
+    return /\.(ru|рф)$/i.test(d) || RU_CHECK_DOMAIN_BLOCK.has(d);
+}
 
 function cascadeHostList(value) {
     const list = Array.isArray(value) ? value : String(value || '').split(/[\s,;]+/);
     return [...new Set(list.map(x => String(x || '').trim().toLowerCase())
-        .filter(x => x && HOST_RE.test(x)))].slice(0, 20);
+        .filter(x => x && HOST_RE.test(x) && !isRussianCheckDomain(x)))].slice(0, 20);
 }
 
 function cascadeEndpointFromText(text) {
@@ -3347,7 +3358,8 @@ async function applyCascadeTunnelContent(content) {
             success: true,
             trafficOk,
             trafficResults: check.results,
-            warning: trafficOk ? '' : 'сервер поднялся, но проверка сервисов через него не прошла',
+            warning: trafficOk ? '' : 'проверка сервисов через сервер не прошла: ' +
+                check.results.map(r => r.domain + '=' + r.code).join(', '),
             proxyReconnected,
             exitIp,
             proxyError
@@ -6280,7 +6292,7 @@ app.delete('/api/cascade/backups/:id', checkAuth, requireAdmin, (req, res) => {
 app.post('/api/cascade/failover/settings', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     const domains = cascadeHostList(body.domains);
-    if (!domains.length) return res.status(400).json({ error: 'Укажите хотя бы один домен для проверки' });
+    if (!domains.length) return res.status(400).json({ error: 'Укажите хотя бы один зарубежный домен для проверки' });
     const settings = cascadeFailoverSettingsWrite({
         enabled: !!body.enabled,
         domains,

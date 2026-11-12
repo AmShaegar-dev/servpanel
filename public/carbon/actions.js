@@ -1864,13 +1864,13 @@ async function carbonCascadeFailoverSettings() {
   }
   if (!f || !f.applicable) throw new Error((f && f.reason) || 'Сначала постройте каскад');
   const s = f.settings || {};
-  const domains = Array.isArray(s.domains) && s.domains.length ? s.domains.join('\n') : 'ozon.ru\nwildberries.ru\navito.ru';
+  const domains = Array.isArray(s.domains) && s.domains.length ? s.domains.join('\n') : 'youtube.com\ntelegram.org\ngithub.com\ncloudflare.com';
   showCarbonForm({
     title: 'Резервирование каскада',
     sub: 'Автопереключение, домены проверки и порог срабатывания',
     fields: [
       { name: 'enabled', label: 'Автопереключение на резерв', type: 'checkbox', value: !!s.enabled },
-      { name: 'domains', label: 'Домены для проверки (по одному в строке)', type: 'textarea', rows: 5, value: domains },
+      { name: 'domains', label: 'Зарубежные домены для проверки (по одному в строке)', type: 'textarea', rows: 5, value: domains },
       { name: 'interval', label: 'Интервал проверки', type: 'select', value: String(s.interval || 60), options: [
         { value: '30', label: 'каждые 30 секунд' },
         { value: '60', label: 'каждые 60 секунд' },
@@ -1911,7 +1911,7 @@ async function carbonCascadeFailoverSwitch(btn) {
   if (!confirm('Переключить каскад на ' + label + '? Туннель перезапустится на 2–3 секунды.')) return;
   const r = await api('/api/cascade/failover/switch', { method: 'POST', body: { target } });
   await carbonRefresh('Каскад переключён: ' + label);
-  if (r && r.trafficOk === false) showToast('Сервер активен, но проверка сервисов через него не прошла');
+  if (r && r.trafficOk === false) showToast(r.warning || 'Сервер активен, но проверка сервисов через него не прошла');
   else if (r && r.proxyReconnected) showToast('MTProto через EU переподключён');
 }
 
