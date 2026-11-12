@@ -170,7 +170,11 @@ function keeneticFlowDraw() {
 
   const drawPath = (d, state, withBall = true) => {
     const id = 'kflow-' + (++seq);
-    const color = state === 'active' ? accent : state === 'standby' ? blue : '#6b7078';
+    const color = state === 'active' ? accent
+      : state === 'standby' ? blue
+      : state === 'neutral' ? '#9aa0aa'
+      : '#6b7078';
+    const ballColor = state === 'neutral' ? '#d6dae0' : color;
     if (state === 'down' || state === 'disabled') {
       const under = document.createElementNS(ns, 'path');
       under.setAttribute('d', d);
@@ -204,9 +208,9 @@ function keeneticFlowDraw() {
     if (!withBall) return;
     const ball = document.createElementNS(ns, 'circle');
     ball.setAttribute('r', '3.4');
-    ball.setAttribute('fill', color);
+    ball.setAttribute('fill', ballColor);
     ball.setAttribute('opacity', '0');
-    ball.setAttribute('style', `filter:drop-shadow(0 0 4px ${color})`);
+    ball.setAttribute('style', `filter:drop-shadow(0 0 4px ${ballColor})`);
     const dur = (state === 'standby' ? 3.4 : 2.7) + 's';
     const begin = '-' + ((seq % 4) * 0.55).toFixed(2) + 's';
     const anim = document.createElementNS(ns, 'animateMotion');
@@ -249,15 +253,27 @@ function keeneticFlowDraw() {
     if (!branches.length) return;
     const firstY = branches[0].rect.cy;
     const lastY = branches[branches.length - 1].rect.cy;
-    const midY = (firstY + lastY) / 2;
-    // Одна линия слева: роутер → точка объединения.
-    drawPath(`M ${routerR.cx} ${routerR.b} L ${routerR.cx} ${Math.max(routerR.b + 10, firstY - 18)} C ${routerR.cx} ${firstY - 8}, ${leftX + 10} ${firstY - 14}, ${leftX} ${firstY - 6} L ${leftX} ${midY}`, mainState);
-    // Одна линия справа: точка объединения → WAN.
-    drawPath(`M ${rightX} ${midY} L ${rightX} ${wanR.t - 18} C ${rightX} ${wanR.t - 6}, ${wanR.cx - 24} ${wanR.t}, ${wanR.cx} ${wanR.t}`, mainState);
+    const splitY = Math.max(routerR.b + 8, firstY - 28);
+    const mergeY = Math.min(wanR.t - 8, lastY + 28);
+    // Одна общая линия слева: роутер → точка входа.
+    drawPath(`M ${routerR.cx} ${routerR.b} C ${routerR.cx} ${routerR.b + 12}, ${leftX} ${splitY - 8}, ${leftX} ${splitY}`, 'neutral');
+    // Одна общая линия справа: точка выхода → WAN.
+    drawPath(`M ${rightX} ${mergeY} L ${rightX} ${wanR.t - 18} C ${rightX} ${wanR.t - 6}, ${wanR.cx - 24} ${wanR.t}, ${wanR.cx} ${wanR.t}`, 'neutral');
     for (const br of branches) {
       const y = br.rect.cy;
-      drawPath(`M ${leftX} ${midY} C ${leftX} ${y}, ${br.rect.l - 14} ${y}, ${br.rect.l} ${y}`, br.state, false);
-      drawPath(`M ${br.rect.r} ${y} C ${br.rect.r + 14} ${y}, ${rightX} ${y}, ${rightX} ${midY}`, br.state, false);
+      const dy = y - splitY;
+      drawPath(`M ${leftX} ${splitY} C ${leftX} ${splitY + dy * .55}, ${br.rect.l - 16} ${y}, ${br.rect.l} ${y}`, br.state, false);
+      const dy2 = mergeY - y;
+      drawPath(`M ${br.rect.r} ${y} C ${br.rect.r + 16} ${y}, ${rightX} ${mergeY - dy2 * .55}, ${rightX} ${mergeY}`, br.state, false);
+    }
+    for (const [jx, jy] of [[leftX, splitY], [rightX, mergeY]]) {
+      const dot = document.createElementNS(ns, 'circle');
+      dot.setAttribute('cx', jx);
+      dot.setAttribute('cy', jy);
+      dot.setAttribute('r', '2.6');
+      dot.setAttribute('fill', '#d6dae0');
+      dot.setAttribute('style', 'filter:drop-shadow(0 0 4px rgba(214,218,224,.7))');
+      svg.appendChild(dot);
     }
   } else {
     drawPath(curve(localR, routerR), mainState);
