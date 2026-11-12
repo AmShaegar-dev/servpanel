@@ -1911,7 +1911,8 @@ async function carbonCascadeFailoverSwitch(btn) {
   if (!confirm('Переключить каскад на ' + label + '? Туннель перезапустится на 2–3 секунды.')) return;
   const r = await api('/api/cascade/failover/switch', { method: 'POST', body: { target } });
   await carbonRefresh('Каскад переключён: ' + label);
-  if (r && r.proxyReconnected) showToast('MTProto через EU переподключён');
+  if (r && r.trafficOk === false) showToast('Сервер активен, но проверка сервисов через него не прошла');
+  else if (r && r.proxyReconnected) showToast('MTProto через EU переподключён');
 }
 
 async function carbonCascadeRepair() {

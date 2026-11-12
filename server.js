@@ -3325,9 +3325,7 @@ async function applyCascadeTunnelContent(content) {
         }
         const settings = cascadeFailoverSettingsRead();
         const check = await checkCascadeDomains(settings);
-        if (!check.ok) {
-            throw new Error('сервер поднялся, но проверка сервисов через него не прошла');
-        }
+        const trafficOk = check.ok;
         let proxyReconnected = false;
         let exitIp = '';
         let proxyError = '';
@@ -3345,7 +3343,15 @@ async function applyCascadeTunnelContent(content) {
                 }
             } catch (e) { proxyError = e.message || String(e); }
         }
-        return { success: true, proxyReconnected, exitIp, proxyError };
+        return {
+            success: true,
+            trafficOk,
+            trafficResults: check.results,
+            warning: trafficOk ? '' : 'сервер поднялся, но проверка сервисов через него не прошла',
+            proxyReconnected,
+            exitIp,
+            proxyError
+        };
     } catch (e) {
         try {
             if (previous) writeRootFile(conf, previous, '0600');
@@ -3420,8 +3426,8 @@ async function tryCascadeCandidates(currentId, settings) {
         const id = order[(start + step) % order.length];
         tried.push(id);
         try {
-            await switchCascadeTarget(id, null);
-            return { id, tried, ok: true };
+            const switched = await switchCascadeTarget(id, null);
+            if (switched.trafficOk !== false) return { id, tried, ok: true };
         } catch (e) { /* пробуем следующий */ }
     }
     return { id: null, tried, ok: false };
