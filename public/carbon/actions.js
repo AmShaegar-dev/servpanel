@@ -200,7 +200,7 @@ function carbonProgressModal(title, sub) {
     modal = document.createElement('div');
     modal.id = 'carbonProgressModal';
     modal.className = 'modal';
-    modal.innerHTML = `<div class="modal-card modal-wide progress-modal"><div class="modal-head"><div><div class="modal-title"></div><div class="modal-sub"></div></div><button class="icon-btn" data-progress-close aria-label="Закрыть">✕</button></div><div class="progress-split"><div class="progress-log"><div class="progress-col-title">Журнал выполнения</div><pre class="code"></pre></div><div class="progress-side"><div class="progress-col-title">Чек-лист <span class="badge badge-muted" data-progress-badge>ожидание</span></div><div class="checklist" data-progress-checklist></div></div></div></div>`;
+    modal.innerHTML = `<div class="modal-card modal-wide progress-modal"><div class="modal-head"><div><div class="modal-title"></div><div class="modal-sub"></div></div><button class="icon-btn" data-progress-close aria-label="Закрыть">✕</button></div><div class="progress-split"><div class="progress-log"><div class="progress-col-title">Журнал выполнения</div><pre class="code"></pre></div><div class="progress-side"><div class="progress-col-title">Чек-лист <span class="tag" data-progress-badge>ожидание</span></div><div class="checklist" data-progress-checklist></div></div></div></div>`;
     document.body.appendChild(modal);
     modal.querySelector('[data-progress-close]').addEventListener('click', () => { modal.hidden = true; });
   }
@@ -223,10 +223,10 @@ function carbonProgressFill(job) {
   modal.querySelector('[data-progress-checklist]').innerHTML = carbonCascadeChecklistHtml(job);
   const badge = modal.querySelector('[data-progress-badge]');
   if (badge) {
-    if (job && job.error) { badge.className = 'badge badge-warn'; badge.textContent = 'ошибка'; }
-    else if (job && job.running) { badge.className = 'badge badge-warn'; badge.textContent = 'идёт'; }
-    else if (job && job.done) { badge.className = 'badge badge-good'; badge.textContent = 'готово'; }
-    else { badge.className = 'badge badge-muted'; badge.textContent = 'ожидание'; }
+    if (job && job.error) { badge.className = 'tag bad'; badge.textContent = 'ошибка'; }
+    else if (job && job.running) { badge.className = 'tag warn'; badge.textContent = 'идёт'; }
+    else if (job && job.done) { badge.className = 'tag good'; badge.textContent = 'готово'; }
+    else { badge.className = 'tag muted'; badge.textContent = 'ожидание'; }
   }
 }
 
@@ -265,6 +265,79 @@ async function carbonCascadeProgress() {
   if (job) carbonProgressFill(job);
   else carbonProgressStatus('Не удалось получить состояние сборки');
   if (job && job.running) carbonWatchCascadeJob(false);
+}
+
+// ---- Прогресс установки модулей: журнал + чек-лист --------------------
+let carbonInstallProgressTimer = null;
+function carbonInstallModal(title) {
+  let modal = document.getElementById('carbonInstallProgress');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'carbonInstallProgress';
+    modal.className = 'modal';
+    modal.innerHTML = `<div class="modal-card modal-wide progress-modal"><div class="modal-head"><div><div class="modal-title"></div><div class="modal-sub">Журнал и чек-лист обновляются автоматически</div></div><button class="icon-btn" data-install-close aria-label="Закрыть">✕</button></div><div class="progress-split"><div class="progress-log"><div class="progress-col-title">Журнал установки</div><pre class="code"></pre></div><div class="progress-side"><div class="progress-col-title">Чек-лист <span class="tag" data-install-badge>ожидание</span></div><div class="checklist" data-install-checklist></div><div class="install-progress"><div><span data-install-bar></span></div><b data-install-pct>0%</b></div></div></div></div>`;
+    document.body.appendChild(modal);
+    modal.querySelector('[data-install-close]').addEventListener('click', () => { modal.hidden = true; });
+  }
+  modal.hidden = false;
+  modal.querySelector('.modal-title').textContent = title || 'Установка';
+  return modal;
+}
+
+function carbonInstallRender(data) {
+  const modal = document.getElementById('carbonInstallProgress');
+  if (!modal) return;
+  const d = data || {};
+  const pre = modal.querySelector('pre');
+  const text = String(d.text || 'Ожидание старта установки…');
+  const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
+  if (pre.textContent !== text) {
+    pre.textContent = text;
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
+  }
+  const steps = Array.isArray(d.steps) ? d.steps : [];
+  modal.querySelector('[data-install-checklist]').innerHTML = steps.map(s => {
+    const done = !!s.done;
+    return `<div class="checklist-item"><span class="checklist-ico ${done ? 'checklist-ok' : 'checklist-muted'}">${done ? '✓' : '○'}</span><div><b class="${done ? 'checklist-ok' : 'checklist-muted'}">${escHtml(s.title || s.key || '')}</b>${done ? '' : '<div class="checklist-desc">ожидает</div>'}</div></div>`;
+  }).join('') || '<div class="checklist-item checklist-muted"><span class="checklist-ico">○</span><div>Шаги появятся после старта</div></div>';
+  const badge = modal.querySelector('[data-install-badge]');
+  const status = String(d.status || 'running');
+  badge.className = 'tag ' + (status === 'error' ? 'bad' : status === 'done' ? 'good' : 'warn');
+  badge.textContent = status === 'done' ? 'готово' : status === 'error' ? 'ошибка' : status === 'waiting' ? 'ожидание' : 'идёт';
+  const pct = Math.max(0, Math.min(100, Number(d.progress) || 0));
+  modal.querySelector('[data-install-bar]').style.width = pct + '%';
+  modal.querySelector('[data-install-pct]').textContent = pct + '%';
+}
+
+async function carbonWatchInstall(logFile, title) {
+  let file = String(logFile || '');
+  if (!file) {
+    try { const st = await api('/api/install/state'); file = String((st && st.logFile) || ''); } catch (e) { /* ignore */ }
+  }
+  const label = title || 'Установка';
+  if (!file) {
+    showCarbonTextModal(label, 'Установка запущена, но файл журнала ещё не создан. Откройте «Логи» позже.');
+    return;
+  }
+  carbonInstallModal(label);
+  if (carbonInstallProgressTimer) clearInterval(carbonInstallProgressTimer);
+  const tick = async () => {
+    let d = null;
+    try { d = await api('/api/install/progress?file=' + encodeURIComponent(file)); }
+    catch (e) {
+      carbonInstallRender({ text: 'Панель перезагружается, ждём…', steps: [], status: 'running', progress: 0 });
+      return;
+    }
+    carbonInstallRender(d);
+    if (d && (d.status === 'done' || d.status === 'error')) {
+      clearInterval(carbonInstallProgressTimer);
+      carbonInstallProgressTimer = null;
+      showToast(d.status === 'done' ? label + ' завершена' : label + ': ошибка, смотрите журнал');
+      try { await carbonRefresh(); } catch (e) { /* ignore */ }
+    }
+  };
+  carbonInstallProgressTimer = setInterval(tick, 2000);
+  await tick();
 }
 
 function fileToBase64(file) {
@@ -1012,7 +1085,7 @@ async function carbonServerName() {
 async function carbonInstallMtproxyl() {
   if (!confirm('Установить MTProxyL? Это отдельный движок прокси.')) return;
   const d = await api('/api/install/module', { method: 'POST', body: { module: 'mtproxyl' } });
-  showCarbonTextModal('Установка MTProxyL', d.logFile ? 'Запущено. Журнал: ' + d.logFile : 'Установка запущена');
+  await carbonWatchInstall(d && d.logFile, 'Установка MTProxyL');
   await carbonRefresh();
 }
 
@@ -1325,6 +1398,7 @@ async function carbonWarpPanel() {
       if (!confirm('Маршруты будут применены: WARP, напрямую и отключённые. Продолжить?')) return;
       await api('/api/warp/routes', { method: 'POST', body: { routes } });
       const d = await api('/api/install/module', { method: 'POST', body: { module: 'warp', warpMode: 'v2', listenIp: '0.0.0.0', listenPort: '443', socksPort: st.socksPort || '40000' } });
+      await carbonWatchInstall(d && d.logFile, 'Установка WARP/Xray');
       carbon.warp = await api('/api/warp/status').catch(() => null);
       render();
       out.textContent = d.logFile ? 'Маршруты сохранены, установка запущена. Журнал: ' + d.logFile : 'Маршруты сохранены, установка запущена';
@@ -1618,7 +1692,7 @@ async function carbonAwgInstall() {
         remoteIp: v.remoteIp, remotePort: v.remotePort, remotePass: v.remotePass, domain: v.domain
       };
       const d = await api('/api/install/module', { method: 'POST', body });
-      showCarbonTextModal('Установка AWG', d.logFile ? 'Запущено. Журнал: ' + d.logFile : 'Установка запущена');
+      await carbonWatchInstall(d && d.logFile, 'Установка AWG');
       await carbonRefresh();
     }
   });
@@ -1688,7 +1762,7 @@ async function carbonProxyInstallMt(v) {
         nginx: true
       };
       const r = await api('/api/install/module', { method: 'POST', body });
-      showCarbonTextModal('Установка ' + label, r.logFile ? 'Запущено. Журнал: ' + r.logFile : 'Установка запущена');
+      await carbonWatchInstall(r && r.logFile, 'Установка ' + label);
       await carbonRefresh('Установка прокси запущена');
     }
   });
@@ -1755,7 +1829,7 @@ async function carbonProxyInstallMpl(v) {
         mplForce: !!d.mplForce
       };
       const r = await api('/api/install/module', { method: 'POST', body });
-      showCarbonTextModal('Установка MTProxyL', r.logFile ? 'Запущено. Журнал: ' + r.logFile : 'Установка запущена');
+      await carbonWatchInstall(r && r.logFile, 'Установка MTProxyL');
       await carbonRefresh('Установка MTProxyL запущена');
     }
   });
@@ -1783,7 +1857,7 @@ async function carbonMtproxylInstall() {
         mplApiListen: '127.0.0.1:9190', mplWeb: !!v.mplWeb, mplForce: !!v.mplForce
       };
       const d = await api('/api/install/module', { method: 'POST', body });
-      showCarbonTextModal('Установка MTProxyL', d.logFile ? 'Запущено. Журнал: ' + d.logFile : 'Установка запущена');
+      await carbonWatchInstall(d && d.logFile, 'Установка MTProxyL');
       await carbonRefresh();
     }
   });

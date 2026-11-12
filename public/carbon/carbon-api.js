@@ -1187,8 +1187,9 @@ document.addEventListener('click', async event => {
       if (!confirm(`Установить ${module}?`)) return;
       const body = { module };
       if (module === 'mtproto') body.kind = 'telemt';
-      await api('/api/install/module', { method: 'POST', body });
-      showToast('Установка запущена: ' + module);
+      const d = await api('/api/install/module', { method: 'POST', body });
+      if (typeof carbonWatchInstall === 'function') await carbonWatchInstall(d && d.logFile, 'Установка ' + module);
+      else showToast('Установка запущена: ' + module);
     } else if (action === 'uninstall-module') {
       const module = btn.dataset.module;
       const check = prompt(`Удалить ${module}? Введите DELETE`);

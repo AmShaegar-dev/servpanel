@@ -97,6 +97,10 @@ function keeneticRouterCard(r) {
     const hs = t.lastHandshake ? lastHandshakeText(t.lastHandshake) : '';
     return `<div class="keenetic-wg-row ${h.cls}"><span class="keenetic-wg-dot"></span><b>${escHtml(t.name)}</b><span>${escHtml(h.label)}</span>${hs ? `<em>${escHtml(hs)}</em>` : '<em>—</em>'}</div>`;
   }).join('');
+  const routedTunnels = tunnels.filter(t => t.routed);
+  const routeText = routedTunnels.length
+    ? routedTunnels.map(t => t.name + (t.up ? '' : ' (down)')).join(', ')
+    : '—';
   const moreTunnels = tunnels.length > 4 ? `<div class="keenetic-wg-more">+${tunnels.length - 4} ещё</div>` : '';
   return `<article class="keenetic-card keenetic-tile ${online ? 'is-online' : 'is-offline'}" data-carbon-action="keenetic-open" data-id="${escHtml(r.id)}">
     <div class="keenetic-card-head">
@@ -111,6 +115,7 @@ function keeneticRouterCard(r) {
     </div>
     <div class="keenetic-wg">
       <div class="keenetic-wg-head"><span>WireGuard</span><b>${tunnels.length ? up + ' / ' + tunnels.length : 'нет'}</b></div>
+      <div class="keenetic-route-line"><span>Маршруты DNS</span><b>${escHtml(routeText)}</b></div>
       ${tunnelRows || '<div class="keenetic-wg-empty">Туннели не найдены</div>'}
       ${moreTunnels}
     </div>

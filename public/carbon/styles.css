@@ -660,3 +660,13 @@ b.checklist-muted{color:var(--text-2)}
 .cascade-legend{font:500 8.5px/1.4 var(--mono);color:var(--text-3)}
 @media(max-width:900px){.cascade-route-layout{grid-template-columns:1fr}.cascade-flow-link{min-height:30px}.cascade-servers{padding-left:0}}
 
+/* Маршруты DNS в плитке Keenetic */
+.keenetic-route-line{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0 6px;margin-bottom:2px;border-bottom:1px dashed var(--line);font:500 8.5px/1 var(--mono);letter-spacing:.04em;color:var(--text-3)}
+.keenetic-route-line b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent-2);font-weight:700}
+
+/* Прогресс установки модулей */
+.install-progress{display:flex;align-items:center;gap:8px;margin-top:12px}
+.install-progress>div{flex:1;height:5px;border-radius:99px;background:var(--surface-3);overflow:hidden}
+.install-progress span{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+.install-progress b{font:600 9px/1 var(--mono);color:var(--text-2);min-width:32px;text-align:right}
+
