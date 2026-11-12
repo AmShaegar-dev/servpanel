@@ -783,7 +783,7 @@ async function carbonCascadeBuild() {
       { name: 'peerPort', label: 'SSH-порт', value: '22' },
       { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
       { name: 'peerPass', label: 'Пароль root', type: 'password' },
-      { name: 'obfMode', label: 'Обфускация', type: 'select', value: 'installer', options: [{ value: 'installer', label: 'Как у установщика' }, { value: 'architect', label: 'Архитектор' }, { value: 'custom', label: 'Свои параметры' }] },
+      { name: 'obfMode', label: 'Обфускация', type: 'select', value: 'architect', options: [{ value: 'installer', label: 'Как у установщика' }, { value: 'architect', label: 'Архитектор' }, { value: 'custom', label: 'Свои параметры' }] },
       { name: 'obfProfile', label: 'Профиль мимикрии', type: 'select', value: 'quic', options: [
         { value: 'quic', label: 'QUIC' },
         { value: 'tls', label: 'TLS 1.3' },
