@@ -92,24 +92,35 @@ function keeneticRouterCard(r) {
   const up = keeneticPrimaryCount(r);
   const cpu = Math.max(0, Math.min(100, Number(st.cpu) || 0));
   const ram = Math.max(0, Math.min(100, Number(st.ram) || 0));
-  return `<article class="keenetic-card ${online ? 'is-online' : 'is-offline'}" data-carbon-action="keenetic-open" data-id="${escHtml(r.id)}">
+  const tunnelRows = tunnels.slice(0, 4).map(t => {
+    const h = keeneticTunnelHealth(t);
+    const hs = t.lastHandshake ? keeneticAgo(t.lastHandshake) : '';
+    return `<div class="keenetic-wg-row ${h.cls}"><span class="keenetic-wg-dot"></span><b>${escHtml(t.name)}</b><span>${escHtml(h.label)}</span>${hs ? `<em>${escHtml(hs)}</em>` : '<em>—</em>'}</div>`;
+  }).join('');
+  const moreTunnels = tunnels.length > 4 ? `<div class="keenetic-wg-more">+${tunnels.length - 4} ещё</div>` : '';
+  return `<article class="keenetic-card keenetic-tile ${online ? 'is-online' : 'is-offline'}" data-carbon-action="keenetic-open" data-id="${escHtml(r.id)}">
     <div class="keenetic-card-head">
       <div class="keenetic-card-name"><span class="dot ${online ? 'pulse' : ''}"></span><b>${escHtml(r.name)}</b></div>
       ${keeneticStatusTag(r)}
     </div>
     <div class="keenetic-card-model">${escHtml(st.model || st.device || 'Модель не определена')}${st.firmware ? ' · ' + escHtml(st.firmware) : ''}</div>
     <div class="keenetic-card-host">${escHtml(r.host)}:${escHtml(r.port)} · ${escHtml((st.transport || r.transport || 'auto').toUpperCase())}</div>
-    <div class="keenetic-bars">
-      <div class="keenetic-bar"><span>CPU</span><div><i style="width:${cpu}%"></i></div><b>${cpu}%</b></div>
-      <div class="keenetic-bar"><span>RAM</span><div><i style="width:${ram}%"></i></div><b>${ram}%</b></div>
+    <div class="keenetic-metrics">
+      <div class="keenetic-metric"><span>CPU</span><b>${cpu}%</b><i><em style="width:${cpu}%"></em></i></div>
+      <div class="keenetic-metric"><span>RAM</span><b>${ram}%</b><i><em style="width:${ram}%"></em></i></div>
+    </div>
+    <div class="keenetic-wg">
+      <div class="keenetic-wg-head"><span>WireGuard</span><b>${tunnels.length ? up + ' / ' + tunnels.length : 'нет'}</b></div>
+      ${tunnelRows || '<div class="keenetic-wg-empty">Туннели не найдены</div>'}
+      ${moreTunnels}
     </div>
     <div class="keenetic-card-foot">
-      <span>${tunnels.length ? up + ' осн. / ' + tunnels.length : 'туннели не найдены'}</span>
       <span>${escHtml(st.uptime || '—')}</span>
+      <span>${st.checkedAt ? keeneticAgo(st.checkedAt) : 'не проверялся'}</span>
     </div>
     <div class="keenetic-card-actions">
       <button class="btn btn-sm" data-carbon-action="keenetic-test" data-id="${escHtml(r.id)}">${icon('pulse')}Проверить</button>
-      <span class="keenetic-last">${st.checkedAt ? 'проверен ' + keeneticAgo(st.checkedAt) : 'ещё не проверялся'}</span>
+      <span class="keenetic-last">${tunnels.length ? tunnels.length + ' WG' : 'нет WG'}</span>
     </div>
   </article>`;
 }
@@ -132,7 +143,7 @@ function keeneticOverviewHtml() {
   const tunnels = routers.flatMap(r => (r.status && r.status.tunnels) || []);
   const up = routers.reduce((n, r) => n + keeneticPrimaryCount(r), 0);
   const down = tunnels.length - up;
-  return `<div class="page-head"><div><div class="page-title">Keenetic</div><div class="page-sub">Парк роутеров, туннели и связь. До ${Math.max(6, routers.length)} роутеров.</div></div><div class="page-actions"><button class="btn" data-carbon-action="keenetic-refresh">${icon('refresh')}Обновить</button><button class="btn btn-primary" data-carbon-action="keenetic-add">${icon('plus')}Добавить роутер</button></div></div>
+  return `<div class="page-head"><div><div class="page-title">Keenetic</div><div class="page-sub">Парк роутеров, туннели и связь. До 60 роутеров · сейчас ${routers.length}.</div></div><div class="page-actions"><button class="btn" data-carbon-action="keenetic-refresh">${icon('refresh')}Обновить</button><button class="btn btn-primary" data-carbon-action="keenetic-add">${icon('plus')}Добавить роутер</button></div></div>
     <div class="mini-grid">
       ${mini('Роутеры', `${online} / ${routers.length}`, 'в сети')}
       ${mini('Основные', `${up} / ${tunnels.length}`, down ? `${down} резервных / упавших` : 'все основные')}
@@ -653,6 +664,7 @@ function keeneticProfileOptions() {
 }
 
 function keeneticAdd() {
+  if ((keeneticState().routers || []).length >= 60) throw new Error('Максимум 60 роутеров Keenetic');
   showCarbonForm({
     title: 'Добавить роутер Keenetic',
     sub: 'Для роутера за NAT используйте KeenDNS-домен и HTTPS:443. Панель проверит связь и определит модель/прошивку.',
