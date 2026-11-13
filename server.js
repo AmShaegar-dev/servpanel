@@ -1553,7 +1553,17 @@ function appStatusPayload(req, remoteVersion) {
 if (WEB_ENABLED) {
     app.use(express.static(path.join(APP_DIR, 'public'), { index: false }));
     // Carbon — основной интерфейс. Старая панель остаётся на /old/.
-    app.get('/', (req, res) => res.redirect(302, '/carbon/'));
+    // Корень отдаёт Carbon сразу (200), а не редирект: так проверка
+    // панели после обновления видит версию и не откатывает сборку.
+    app.get('/', (req, res) => {
+        try {
+            let html = fs.readFileSync(path.join(APP_DIR, 'public', 'carbon', 'index.html'), 'utf8');
+            if (!/<base\s/i.test(html)) html = html.replace(/<head([^>]*)>/i, '<head$1><base href="/carbon/">');
+            res.type('html').send(html);
+        } catch (e) {
+            res.redirect(302, '/carbon/');
+        }
+    });
     app.get('/index.html', (req, res) => res.redirect(302, '/old/'));
     app.get(['/carbon', '/carbon/'], (req, res) => {
         res.sendFile(path.join(APP_DIR, 'public', 'carbon', 'index.html'));
