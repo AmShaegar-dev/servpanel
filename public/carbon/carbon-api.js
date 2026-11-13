@@ -1022,10 +1022,10 @@ function realAppearance() {
         <div class="appearance-presets">
           <button class="appearance-preset ${presetOn('carbon')}" data-carbon-action="appearance-preset" data-preset="carbon"><b>Carbon</b><span>Текущий тёмный дизайн</span><div class="appearance-preview"><i style="background:#050506"></i><i style="background:#0b0b0d"></i><i style="background:${lockedDark}"></i></div></button>
           <button class="appearance-preset ${presetOn('old')}" data-carbon-action="appearance-preset" data-preset="old"><b>Старая панель</b><span>Синие панели и светлый текст</span><div class="appearance-preview"><i style="background:#070b12"></i><i style="background:#111827"></i><i style="background:#5b8cff"></i></div></button>
-          <button class="appearance-preset ${p.preset === 'custom' ? 'on' : ''}" data-carbon-action="appearance-theme" data-theme="${mode === 'dark' ? 'light' : 'dark'}"><b>Свои цвета</b><span>Настроить под монитор</span><div class="appearance-preview"><i style="background:${value('--bg')}"></i><i style="background:${value('--surface')}"></i><i style="background:${lockedDark}"></i></div></button>
+          <button class="appearance-preset ${p.preset === 'custom' ? 'on' : ''}" data-carbon-action="appearance-custom"><b>Свои цвета</b><span>Настроить под монитор</span><div class="appearance-preview"><i style="background:${value('--bg')}"></i><i style="background:${value('--surface')}"></i><i style="background:${lockedDark}"></i></div></button>
         </div>
       </section>
-      <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Свои цвета · ${mode === 'dark' ? 'тёмная тема' : 'светлая тема'}</div><div class="card-sub">Изменения применяются сразу и хранятся в этом браузере</div></div></div><div class="appearance-colors">${fields}</div><div class="donut-note">Если выбран шаблон «Старая панель», цвета можно донастроить — они сохранятся как своя тема.</div></section>
+      <section class="card" id="appearanceColors" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Свои цвета · ${mode === 'dark' ? 'тёмная тема' : 'светлая тема'}</div><div class="card-sub">Изменения применяются сразу и хранятся в этом браузере</div></div></div><div class="appearance-colors">${fields}</div><div class="donut-note">Если выбран шаблон «Старая панель», цвета можно донастроить — они сохранятся как своя тема.</div></section>
     </div>`;
 }
 

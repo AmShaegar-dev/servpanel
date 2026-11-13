@@ -9,7 +9,7 @@
   --font:'Manrope',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;
   --mono:'JetBrains Mono',ui-monospace,Consolas,monospace;
 }
-[data-theme="light"]{
+:root[data-theme="light"]{
   --bg:#f4f1ec; --surface:#fffdfa; --surface-2:#fff; --surface-3:#f1ede6;
   --line:#e6e0d6; --line-2:#d7d0c4; --line-3:#c4bcae;
   --text:#1d1a16; --text-2:#66615a; --text-3:#938d83;
@@ -272,7 +272,7 @@ button{background:none;border:0;cursor:pointer}a{color:inherit;text-decoration:n
 .switch{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font-size:11.5px;color:var(--text-2)}
 .switch input{accent-color:var(--accent);width:15px;height:15px}
 .code{border:1px solid var(--line);border-radius:12px;background:#070708;overflow:hidden}
-[data-theme="light"] .code{background:#17141a}
+:root[data-theme="light"] .code{background:#17141a}
 .code-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border-bottom:1px solid #222}
 .code-head span{font:500 9px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#8b8b93}
 .code pre{margin:0;padding:12px;overflow:auto;font:400 11px/1.6 var(--mono);color:#e8e4ef;white-space:pre-wrap}

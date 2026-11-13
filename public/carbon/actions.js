@@ -2149,6 +2149,7 @@ document.addEventListener('click', async event => {
     else if (action === 'awg-install') await carbonAwgInstall();
     else if (action === 'cascade-build') await carbonCascadeBuild();
     else if (action === 'appearance-preset') { carbonSetPalettePreset(btn.dataset.preset); render(); showToast('Шаблон применён'); }
+    else if (action === 'appearance-custom') { document.getElementById('appearanceColors')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     else if (action === 'appearance-theme') { setTheme(btn.dataset.theme); render(); }
     else if (action === 'appearance-reset') { carbonResetPalette(); setTheme(state.theme); render(); showToast('Цвета сброшены к Carbon'); }
     else if (action === 'cascade-backup-add') await carbonCascadeBackupAdd();
