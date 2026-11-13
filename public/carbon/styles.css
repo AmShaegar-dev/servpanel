@@ -671,3 +671,25 @@ b.checklist-muted{color:var(--text-2)}
 .install-progress span{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
 .install-progress b{font:600 9px/1 var(--mono);color:var(--text-2);min-width:32px;text-align:right}
 
+/* Визуализация */
+.appearance-presets{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+.appearance-preset{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:13px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);text-align:left;transition:.15s}
+.appearance-preset:hover{border-color:var(--line-3);transform:translateY(-1px)}
+.appearance-preset.on{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent)}
+.appearance-preset b{font-size:12px;font-weight:800}
+.appearance-preset span{font:500 9px/1.4 var(--mono);color:var(--text-3)}
+.appearance-preview{display:flex;gap:4px;margin-top:8px}
+.appearance-preview i{width:18px;height:18px;border-radius:5px;border:1px solid rgba(255,255,255,.08)}
+.appearance-locked{display:flex;gap:12px;flex-wrap:wrap}
+.appearance-lock{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:var(--surface-2);min-width:190px}
+.appearance-lock i{width:34px;height:34px;border-radius:9px;border:1px solid rgba(255,255,255,.12);flex:0 0 auto}
+.appearance-lock span{display:block;font:500 8px/1.3 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)}
+.appearance-lock code{display:block;margin-top:3px;font:600 10px/1.3 var(--mono);color:var(--text-2)}
+.appearance-lock b{margin-left:auto;font-size:12px;opacity:.7}
+.appearance-colors{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+.appearance-color{display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid var(--line);border-radius:11px;background:var(--surface-2)}
+.appearance-color>span{font:500 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-3)}
+.appearance-color-row{display:flex;align-items:center;gap:8px}
+.appearance-color input[type="color"]{width:40px;height:31px;padding:2px;border:1px solid var(--line-2);border-radius:8px;background:var(--surface);cursor:pointer}
+.appearance-color code{font:600 10px/1 var(--mono);color:var(--text-2)}
+

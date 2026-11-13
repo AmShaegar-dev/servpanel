@@ -232,14 +232,14 @@ function showCarbonLogin() {
     modal.id = 'carbonLogin';
     modal.className = 'modal';
     modal.innerHTML = `<div class="modal-card">
-      <div class="modal-head"><div><div class="modal-title">Вход в Servpanel</div><div class="modal-sub">Carbon-интерфейс использует ту же сессию панели.</div></div></div>
+      <div class="modal-head"><div><div class="modal-title">Вход в Servpanel</div><div class="modal-sub">Интерфейс панели использует ту же сессию.</div></div></div>
       <div class="form-grid" style="grid-template-columns:1fr">
         <label class="field"><span>Логин</span><input id="carbonUser" name="username" value="admin" autocomplete="username"></label>
         <label class="field"><span>Пароль</span><input id="carbonPass" name="password" type="password" autocomplete="current-password"></label>
         <label class="field"><span>Код 2FA</span><input id="carbonCode" name="otp" inputmode="numeric" autocomplete="one-time-code" placeholder="Если включена"></label>
       </div>
       <div id="carbonLoginError" style="color:var(--bad);font-size:12px;margin-top:10px;display:none"></div>
-      <div class="modal-actions"><button class="btn" onclick="location.href='/'">Старая панель</button><button class="btn btn-primary" id="carbonLoginBtn">Войти</button></div>
+      <div class="modal-actions"><button class="btn" onclick="location.href='/old/'">Старая панель</button><button class="btn btn-primary" id="carbonLoginBtn">Войти</button></div>
     </div>`;
     document.body.appendChild(modal);
     modal.querySelector('#carbonLoginBtn').addEventListener('click', carbonLogin);
@@ -997,6 +997,38 @@ function realProxy() {
     <section class="card" style="margin-top:16px"><div class="card-top"><div><div class="card-title">Прокси через каскад</div><div class="card-sub">Исходящие соединения MTProto уходят через EU-туннель awg1</div></div>${tag(cp.enabled ? 'включено' : 'выключено', cp.enabled ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>middle_proxy_nat_ip</b><span class="mono">${escHtml(cp.middleProxyNatIp || cp.natIp || '—')}</span></div><div class="list-row"><b>Пользователи</b><span class="mono">${escHtml((cp.users || []).join(', ') || '—')}</span></div><div class="list-row"><b>Доступность</b><span class="mono">${cp.available === false ? 'Telemt/MTProxyL не найден' : 'готова'}</span></div></div><div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="cascade-proxy">${icon('send')}Настроить прокси через EU</button><button class="btn" data-carbon-action="cascade-proxy-test">${icon('pulse')}Проверить выход</button></div><div class="donut-note">Настройка прокси через EU находится здесь, на странице «Прокси». При изменении awg1 прокси переподключается автоматически.</div></section>`;
 }
 
+function realAppearance() {
+  const mode = typeof carbonPaletteMode === 'function' ? carbonPaletteMode() : 'dark';
+  const p = typeof carbonPaletteState === 'function' ? carbonPaletteState() : { preset: 'carbon', dark: {}, light: {} };
+  const presetOn = name => p.preset === name ? 'on' : '';
+  const value = key => typeof carbonPaletteValue === 'function' ? carbonPaletteValue(key, mode) : '#000000';
+  const lockedDark = (typeof CARBON_LOCKED_ACCENTS !== 'undefined' ? CARBON_LOCKED_ACCENTS.dark : '#ff5a4e');
+  const lockedLight = (typeof CARBON_LOCKED_ACCENTS !== 'undefined' ? CARBON_LOCKED_ACCENTS.light : '#d94436');
+  const fields = (typeof CARBON_PALETTE_FIELDS !== 'undefined' ? CARBON_PALETTE_FIELDS : []).map(f => {
+    const v = value(f.key);
+    return `<label class="appearance-color"><span>${escHtml(f.label)}</span><div class="appearance-color-row"><input type="color" data-palette-key="${f.key}" value="${escHtml(v)}"><code data-palette-code="${f.key}">${escHtml(String(v).toUpperCase())}</code></div></label>`;
+  }).join('');
+  return `<div class="page-head"><div><div class="page-title">Визуализация</div><div class="page-sub">Цвета панели и переход в старую версию интерфейса.</div></div><div class="page-actions"><a class="btn" href="/old/">${icon('external')}Старая панель</a><button class="btn" data-carbon-action="appearance-reset">${icon('refresh')}Сбросить к Carbon</button></div></div>
+    <div class="grid">
+      <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Основные цвета темы</div><div class="card-sub">Эти два цвета закреплены — изменить нельзя</div></div>${tag('заблокировано', 'warn')}</div>
+        <div class="appearance-locked">
+          <div class="appearance-lock"><i style="background:${lockedDark}"></i><div><span>Тёмная тема</span><code>${escHtml(lockedDark.toUpperCase())}</code></div><b>🔒</b></div>
+          <div class="appearance-lock"><i style="background:${lockedLight}"></i><div><span>Светлая тема</span><code>${escHtml(lockedLight.toUpperCase())}</code></div><b>🔒</b></div>
+        </div>
+        <div class="page-actions" style="margin-top:12px"><button class="btn ${mode === 'dark' ? 'btn-primary' : ''}" data-carbon-action="appearance-theme" data-theme="dark">${icon('moon')}Тёмная</button><button class="btn ${mode === 'light' ? 'btn-primary' : ''}" data-carbon-action="appearance-theme" data-theme="light">${icon('sun')}Светлая</button></div>
+        <div class="donut-note">Основной акцент темы защищён от изменений. Остальные цвета можно подстроить под свой монитор.</div>
+      </section>
+      <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Шаблоны</div><div class="card-sub">Готовые наборы цветов</div></div>${p.preset === 'custom' ? tag('своя', 'good') : ''}</div>
+        <div class="appearance-presets">
+          <button class="appearance-preset ${presetOn('carbon')}" data-carbon-action="appearance-preset" data-preset="carbon"><b>Carbon</b><span>Текущий тёмный дизайн</span><div class="appearance-preview"><i style="background:#050506"></i><i style="background:#0b0b0d"></i><i style="background:${lockedDark}"></i></div></button>
+          <button class="appearance-preset ${presetOn('old')}" data-carbon-action="appearance-preset" data-preset="old"><b>Старая панель</b><span>Синие панели и светлый текст</span><div class="appearance-preview"><i style="background:#070b12"></i><i style="background:#111827"></i><i style="background:#5b8cff"></i></div></button>
+          <button class="appearance-preset ${p.preset === 'custom' ? 'on' : ''}" data-carbon-action="appearance-theme" data-theme="${mode === 'dark' ? 'light' : 'dark'}"><b>Свои цвета</b><span>Настроить под монитор</span><div class="appearance-preview"><i style="background:${value('--bg')}"></i><i style="background:${value('--surface')}"></i><i style="background:${lockedDark}"></i></div></button>
+        </div>
+      </section>
+      <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Свои цвета · ${mode === 'dark' ? 'тёмная тема' : 'светлая тема'}</div><div class="card-sub">Изменения применяются сразу и хранятся в этом браузере</div></div></div><div class="appearance-colors">${fields}</div><div class="donut-note">Если выбран шаблон «Старая панель», цвета можно донастроить — они сохранятся как своя тема.</div></section>
+    </div>`;
+}
+
 function realDomains() {
   const s = carbon.ssl || {};
   const panel = s.panel || {};
@@ -1089,6 +1121,7 @@ function realAdmin() {
 
 function bindRealData() {
   tabs.dashboard = realDashboard;
+  tabs.appearance = realAppearance;
   tabs.clients = realClients;
   tabs.install = realInstall;
   tabs.services = realServices;

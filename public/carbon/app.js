@@ -478,7 +478,7 @@ function donutCard() {
 function renderDashboard() {
   return `
     <div class="overview">
-      <div class="server-id"><span class="dot"></span><div><div class="server-name">RU → EU · основной узел</div><div class="server-meta">203.0.113.10 · Paris, FR · uptime 6д 5ч · build 3.2.115</div></div></div>
+      <div class="server-id"><span class="dot"></span><div><div class="server-name">RU → EU · основной узел</div><div class="server-meta">203.0.113.10 · Paris, FR · uptime 6д 5ч · build 3.2.116</div></div></div>
       <div class="overview-actions">
         <div class="live"><span class="dot"></span>Всё в норме</div>
         <div class="chips" role="group" aria-label="Период"><button class="chip on" data-range>1ч</button><button class="chip" data-range>24ч</button><button class="chip" data-range>7д</button></div>
@@ -527,7 +527,7 @@ function renderDashboard() {
         ${clientsTable()}
       </section>
     </div>
-    <div class="footnote"><span><b>Servpanel</b> · carbon ux demo</span><span>AMOLED / light · all tabs</span><span>build 3.2.115</span></div>`;
+    <div class="footnote"><span><b>Servpanel</b> · carbon ux demo</span><span>AMOLED / light · all tabs</span><span>build 3.2.116</span></div>`;
 }
 
 function renderClients() {
@@ -684,9 +684,9 @@ function renderDomains() {
 function renderApp() {
   return `
     <div class="page-head"><div><div class="page-title">Приложение</div><div class="page-sub">APK, API и метрики клиентов. Сборки обновляются из GitHub Releases.</div></div><div class="page-actions"><button class="btn" data-toast="Проверка обновлений">${icon('refresh')}Проверить</button><button class="btn btn-primary" data-toast="Скачивание APK">${icon('download')}Скачать APK</button></div></div>
-    <div class="mini-grid" style="margin-bottom:16px">${mini('Версия APK', '3.2.115', '12.1 MB')}${mini('Скачиваний', '1 284', 'за месяц')}${mini('API', 'online', '200 OK')}${mini('Клиентов', '8', '1 активен')}</div>
+    <div class="mini-grid" style="margin-bottom:16px">${mini('Версия APK', '3.2.116', '12.1 MB')}${mini('Скачиваний', '1 284', 'за месяц')}${mini('API', 'online', '200 OK')}${mini('Клиентов', '8', '1 активен')}</div>
     <div class="grid">
-      <section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Последняя сборка</div><div class="card-sub">servpanel.apk</div></div>${dotTag('stable')}</div><div class="list"><div class="list-row"><b>Версия</b><span class="mono">3.2.115</span></div><div class="list-row"><b>Размер</b><span class="mono">12 156 561 B</span></div><div class="list-row"><b>SHA256</b><span class="mono">3a0b7b68…523f</span></div><div class="list-row"><b>Дата</b><span class="mono">08 ноя 2026</span></div></div><div class="code" style="margin-top:12px"><div class="code-head"><span>download</span><button class="copy" data-copy="https://github.com/AmShaegar-dev/servpanel/releases/latest/download/servpanel.apk">Копировать</button></div><pre>https://github.com/AmShaegar-dev/servpanel/releases/latest/download/servpanel.apk</pre></div></section>
+      <section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Последняя сборка</div><div class="card-sub">servpanel.apk</div></div>${dotTag('stable')}</div><div class="list"><div class="list-row"><b>Версия</b><span class="mono">3.2.116</span></div><div class="list-row"><b>Размер</b><span class="mono">12 156 561 B</span></div><div class="list-row"><b>SHA256</b><span class="mono">3a0b7b68…523f</span></div><div class="list-row"><b>Дата</b><span class="mono">08 ноя 2026</span></div></div><div class="code" style="margin-top:12px"><div class="code-head"><span>download</span><button class="copy" data-copy="https://github.com/AmShaegar-dev/servpanel/releases/latest/download/servpanel.apk">Копировать</button></div><pre>https://github.com/AmShaegar-dev/servpanel/releases/latest/download/servpanel.apk</pre></div></section>
       <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">API</div><div class="card-sub">Панель и приложение</div></div>${dotTag('200 OK')}</div><div class="list"><div class="list-row"><b>Endpoint</b><span class="mono">/api/stats</span></div><div class="list-row"><b>Latency</b><span class="mono">24 ms</span></div><div class="list-row"><b>Requests / 24h</b><span class="mono">18 422</span></div><div class="list-row"><b>Errors</b><span class="mono">0.02%</span></div></div><div class="progress" style="margin-top:12px"><span style="width:98%"></span></div></section>
       <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Метрики клиентов</div><div class="card-sub">Установки по платформам</div></div>${tag('за 30 дней')}</div><div class="quick-grid" style="grid-template-columns:repeat(3,1fr)"><div class="quick"><span class="quick-ico">${icon('phone')}</span><span><b>Android</b><small>1 042 установки</small></span></div><div class="quick"><span class="quick-ico">${icon('monitor')}</span><span><b>Windows</b><small>186 установок</small></span></div><div class="quick"><span class="quick-ico">${icon('globe')}</span><span><b>Web</b><small>56 сессий</small></span></div></div></section>
       <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Доступ приложения</div><div class="card-sub">API, токен и адрес панели · настройки в ключе</div></div><div class="page-actions">${tag('demo', 'muted')}<button class="btn btn-sm" data-action="toggle-advanced">${icon('wrench')}Настроить</button></div></div><div class="mini-grid">${mini('API URL', '…:4446/api', 'HTTPS')}${mini('Токен', 'sp_live_…', 'действует')}${mini('Мин. версия', '3.0.90', 'stable')}${mini('Публичная ссылка', 'включена', 'APK')}</div><div class="page-actions" style="margin-top:14px"><button class="btn" data-action="toggle-advanced">${icon('wrench')}Настроить доступ</button><button class="btn" data-toast="Токен приложения перевыпущен">${icon('refresh')}Перевыпустить токен</button><button class="btn" data-toast="API проверен: 200 OK">${icon('pulse')}Проверить API</button></div></section>
@@ -734,11 +734,11 @@ function renderDiagnostics() {
 function renderUpdate() {
   return `
     <div class="page-head"><div><div class="page-title">Обновление</div><div class="page-sub">Версия панели, бэкапы и канал обновлений.</div></div><div class="page-actions"><button class="btn" data-toast="Проверка обновлений">${icon('refresh')}Проверить</button><button class="btn btn-primary" data-toast="Обновление запущено">${icon('download')}Обновить</button></div></div>
-    <div class="mini-grid" style="margin-bottom:16px">${mini('Текущая версия', '3.2.115', 'stable')}${mini('Последняя', '3.2.115', 'обновлений нет')}${mini('Бэкап', '08 ноя', 'AES-256')}${mini('Канал', 'stable', 'GitHub Releases')}</div>
+    <div class="mini-grid" style="margin-bottom:16px">${mini('Текущая версия', '3.2.116', 'stable')}${mini('Последняя', '3.2.116', 'обновлений нет')}${mini('Бэкап', '08 ноя', 'AES-256')}${mini('Канал', 'stable', 'GitHub Releases')}</div>
     <div class="grid">
-      <section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Что нового</div><div class="card-sub">3.2.115 · 08 ноя 2026</div></div>${tag('current', 'good')}</div><div class="list"><div class="list-row"><b>WARP/Xray</b><span>проверка порта 443 и статус без TOS</span></div><div class="list-row"><b>MTProto</b><span>Telemt/MTProxyL через EU, DC 203</span></div><div class="list-row"><b>UI</b><span>Carbon, светлая тема, UX-правки</span></div><div class="list-row"><b>Telegram-бот</b><span>автоопределение админа по /start</span></div></div></section>
+      <section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Что нового</div><div class="card-sub">3.2.116 · 08 ноя 2026</div></div>${tag('current', 'good')}</div><div class="list"><div class="list-row"><b>WARP/Xray</b><span>проверка порта 443 и статус без TOS</span></div><div class="list-row"><b>MTProto</b><span>Telemt/MTProxyL через EU, DC 203</span></div><div class="list-row"><b>UI</b><span>Carbon, светлая тема, UX-правки</span></div><div class="list-row"><b>Telegram-бот</b><span>автоопределение админа по /start</span></div></div></section>
       <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Бэкапы</div><div class="card-sub">Последние архивы</div></div>${tag('3', 'muted')}</div><div class="list"><div class="list-row"><b>08 ноя 09:42</b><span class="mono">3.90 MB</span><div class="page-actions"><button class="row-action" data-toast="Бэкап 08 ноя восстанавливается">${icon('refresh')}</button><button class="row-action" data-action="open-delete" data-delete="backup:08 ноя 09:42" title="Удалить бэкап">${icon('trash')}</button></div></div><div class="list-row"><b>07 ноя 22:10</b><span class="mono">3.88 MB</span><div class="page-actions"><button class="row-action" data-toast="Бэкап 07 ноя восстанавливается">${icon('refresh')}</button><button class="row-action" data-action="open-delete" data-delete="backup:07 ноя 22:10" title="Удалить бэкап">${icon('trash')}</button></div></div><div class="list-row"><b>07 ноя 12:05</b><span class="mono">3.87 MB</span><div class="page-actions"><button class="row-action" data-toast="Бэкап 07 ноя восстанавливается">${icon('refresh')}</button><button class="row-action" data-action="open-delete" data-delete="backup:07 ноя 12:05" title="Удалить бэкап">${icon('trash')}</button></div></div></div><button class="btn" style="margin-top:12px" data-toast="Бэкап создаётся">${icon('box')}Создать бэкап</button></section>
-      <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Установить новую версию</div><div class="card-sub">Архив .tar.gz, URL релиза или GitHub</div></div>${tag('проверка + откат', 'warn')}</div><div class="form-grid"><label class="field"><span>Архив .tar.gz</span><input type="file" accept=".tar.gz,.tgz,application/gzip"></label><label class="field"><span>Ссылка на релиз</span><input placeholder="https://example.com/servpanel-3.2.115.tar.gz"></label><label class="field"><span>Канал</span><select><option>stable</option><option>beta</option></select></label><label class="field"><span>При ошибке</span><select><option>Автоматический откат</option><option>Оставить как есть</option></select></label></div><div class="page-actions" style="margin-top:14px"><button class="btn btn-primary" data-toast="Установка из файла запущена">${icon('upload')}Установить из файла</button><button class="btn" data-toast="Установка по URL запущена">${icon('link')}Установить по URL</button><button class="btn" data-toast="GitHub: обновлений нет">${icon('refresh')}Проверить GitHub</button><button class="btn btn-danger" data-toast="Сброс локальных изменений и обновление">${icon('refresh')}Сбросить и обновить</button></div><div class="donut-note">Перед заменой панель проверит архив, поставит зависимости во временный каталог, создаст бэкап и запустит новую версию на отдельном порту. Клиенты, пароль, 2FA и конфиги AWG не затрагиваются.</div></section>
+      <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Установить новую версию</div><div class="card-sub">Архив .tar.gz, URL релиза или GitHub</div></div>${tag('проверка + откат', 'warn')}</div><div class="form-grid"><label class="field"><span>Архив .tar.gz</span><input type="file" accept=".tar.gz,.tgz,application/gzip"></label><label class="field"><span>Ссылка на релиз</span><input placeholder="https://example.com/servpanel-3.2.116.tar.gz"></label><label class="field"><span>Канал</span><select><option>stable</option><option>beta</option></select></label><label class="field"><span>При ошибке</span><select><option>Автоматический откат</option><option>Оставить как есть</option></select></label></div><div class="page-actions" style="margin-top:14px"><button class="btn btn-primary" data-toast="Установка из файла запущена">${icon('upload')}Установить из файла</button><button class="btn" data-toast="Установка по URL запущена">${icon('link')}Установить по URL</button><button class="btn" data-toast="GitHub: обновлений нет">${icon('refresh')}Проверить GitHub</button><button class="btn btn-danger" data-toast="Сброс локальных изменений и обновление">${icon('refresh')}Сбросить и обновить</button></div><div class="donut-note">Перед заменой панель проверит архив, поставит зависимости во временный каталог, создаст бэкап и запустит новую версию на отдельном порту. Клиенты, пароль, 2FA и конфиги AWG не затрагиваются.</div></section>
     </div>`;
 }
 
@@ -859,7 +859,127 @@ function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
   localStorage.setItem('sp-theme', theme);
   $$('[data-theme-set]').forEach(btn => btn.classList.toggle('on', btn.dataset.themeSet === theme));
+  if (typeof carbonApplyPalette === 'function') carbonApplyPalette();
 }
+
+// ---- Визуализация: цвета панели ---------------------------------------
+const CARBON_LOCKED_ACCENTS = { dark: '#ff5a4e', light: '#d94436' };
+const CARBON_PALETTE_FIELDS = [
+  { key: '--bg', label: 'Фон' },
+  { key: '--surface', label: 'Панели' },
+  { key: '--surface-2', label: 'Поля и карточки' },
+  { key: '--line', label: 'Границы' },
+  { key: '--text', label: 'Основной текст' },
+  { key: '--text-2', label: 'Вторичный текст' }
+];
+const CARBON_PALETTE_DEFAULTS = {
+  dark: {
+    '--bg': '#050506', '--surface': '#0b0b0d', '--surface-2': '#111114',
+    '--line': '#1e1e23', '--text': '#f7f5f2', '--text-2': '#a8a5a0'
+  },
+  light: {
+    '--bg': '#f4f1ec', '--surface': '#fffdfa', '--surface-2': '#ffffff',
+    '--line': '#e6e0d6', '--text': '#1d1a16', '--text-2': '#66615a'
+  }
+};
+const CARBON_OLD_PALETTE = {
+  dark: {
+    '--bg': '#070b12', '--surface': '#111827', '--surface-2': '#162136', '--surface-3': '#1a2740',
+    '--line': '#22304a', '--line-2': '#2b3b58', '--line-3': '#3a4d6e',
+    '--text': '#e8eefc', '--text-2': '#8fa0bd', '--text-3': '#66758f',
+    '--good': '#2dd4a7', '--warn': '#f5b84b', '--bad': '#ff6b6b'
+  },
+  light: {
+    '--bg': '#eef3ff', '--surface': '#ffffff', '--surface-2': '#f6f8ff', '--surface-3': '#e9effa',
+    '--line': '#d6e0f0', '--line-2': '#c3d0e4', '--line-3': '#aebed6',
+    '--text': '#162136', '--text-2': '#5f6f8a', '--text-3': '#8b99b0',
+    '--good': '#1a9a6c', '--warn': '#b07800', '--bad': '#c0392b'
+  }
+};
+
+function carbonPaletteMode() {
+  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+}
+
+function carbonPaletteState() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('sp-carbon-palette-v1') || 'null');
+    if (raw && typeof raw === 'object') {
+      return {
+        preset: ['carbon', 'old', 'custom'].includes(raw.preset) ? raw.preset : 'custom',
+        dark: raw.dark && typeof raw.dark === 'object' ? raw.dark : {},
+        light: raw.light && typeof raw.light === 'object' ? raw.light : {}
+      };
+    }
+  } catch (e) { /* ignore */ }
+  return { preset: 'carbon', dark: {}, light: {} };
+}
+
+function carbonPaletteSave(value) {
+  localStorage.setItem('sp-carbon-palette-v1', JSON.stringify(value));
+}
+
+function carbonPaletteValue(key, mode) {
+  const m = mode || carbonPaletteMode();
+  const stateValue = carbonPaletteState();
+  return (stateValue[m] && stateValue[m][key]) || CARBON_PALETTE_DEFAULTS[m][key] || '#000000';
+}
+
+function carbonApplyPalette() {
+  const value = carbonPaletteState();
+  let css = '';
+  ['dark', 'light'].forEach(mode => {
+    const vars = { ...(value[mode] || {}), '--accent': CARBON_LOCKED_ACCENTS[mode] };
+    const decl = Object.keys(vars)
+      .filter(k => /^--[a-z0-9-]+$/.test(k) && /^#[0-9a-f]{6}$/i.test(String(vars[k])))
+      .map(k => k + ':' + vars[k]);
+    if (decl.length) css += `:root[data-theme="${mode}"]{${decl.join(';')}}`;
+  });
+  let style = document.getElementById('carbonPaletteStyle');
+  if (!style) {
+    style = document.createElement('style');
+    style.id = 'carbonPaletteStyle';
+    document.head.appendChild(style);
+  }
+  style.textContent = css;
+}
+
+function carbonSetPalettePreset(name) {
+  if (name === 'old') {
+    carbonPaletteSave({ preset: 'old', dark: { ...CARBON_OLD_PALETTE.dark }, light: { ...CARBON_OLD_PALETTE.light } });
+    carbonApplyPalette();
+    if (typeof setTheme === 'function') setTheme('dark');
+    return;
+  }
+  if (name === 'carbon') {
+    carbonPaletteSave({ preset: 'carbon', dark: {}, light: {} });
+    carbonApplyPalette();
+    return;
+  }
+}
+
+function carbonSetPaletteColor(key, color) {
+  if (!CARBON_PALETTE_FIELDS.some(f => f.key === key)) return;
+  if (!/^#[0-9a-f]{6}$/i.test(String(color || ''))) return;
+  const value = carbonPaletteState();
+  const mode = carbonPaletteMode();
+  value[mode] = { ...(value[mode] || {}), [key]: color };
+  value.preset = 'custom';
+  carbonPaletteSave(value);
+  carbonApplyPalette();
+  const code = document.querySelector(`[data-palette-code="${key}"]`);
+  if (code) code.textContent = color.toUpperCase();
+}
+
+function carbonResetPalette() {
+  carbonPaletteSave({ preset: 'carbon', dark: {}, light: {} });
+  carbonApplyPalette();
+}
+
+document.addEventListener('input', event => {
+  const el = event.target.closest('[data-palette-key]');
+  if (el) carbonSetPaletteColor(el.dataset.paletteKey, el.value);
+});
 
 let toastTimer;
 function showToast(message) {

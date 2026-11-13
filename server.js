@@ -1551,7 +1551,22 @@ function appStatusPayload(req, remoteVersion) {
 }
 
 if (WEB_ENABLED) {
-    app.use(express.static(path.join(APP_DIR, 'public'), { index: 'index.html' }));
+    app.use(express.static(path.join(APP_DIR, 'public'), { index: false }));
+    // Carbon — основной интерфейс. Старая панель остаётся на /old/.
+    app.get('/', (req, res) => res.redirect(302, '/carbon/'));
+    app.get('/index.html', (req, res) => res.redirect(302, '/old/'));
+    app.get(['/carbon', '/carbon/'], (req, res) => {
+        res.sendFile(path.join(APP_DIR, 'public', 'carbon', 'index.html'));
+    });
+    app.get(['/old', '/old/'], (req, res) => {
+        try {
+            let html = fs.readFileSync(path.join(APP_DIR, 'public', 'index.html'), 'utf8');
+            if (!/<base\s/i.test(html)) html = html.replace(/<head([^>]*)>/i, '<head$1><base href="/">');
+            res.type('html').send(html);
+        } catch (e) {
+            res.status(500).type('text/plain').send('Старая панель недоступна');
+        }
+    });
 } else {
     app.use((req, res, next) => {
         if (isApiRequest(req)) return next();

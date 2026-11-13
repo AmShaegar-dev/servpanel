@@ -2148,6 +2148,9 @@ document.addEventListener('click', async event => {
     else if (action === 'install-mtproxyl' || action === 'mtproxyl-install') await carbonMtproxylInstall();
     else if (action === 'awg-install') await carbonAwgInstall();
     else if (action === 'cascade-build') await carbonCascadeBuild();
+    else if (action === 'appearance-preset') { carbonSetPalettePreset(btn.dataset.preset); render(); showToast('Шаблон применён'); }
+    else if (action === 'appearance-theme') { setTheme(btn.dataset.theme); render(); }
+    else if (action === 'appearance-reset') { carbonResetPalette(); setTheme(state.theme); render(); showToast('Цвета сброшены к Carbon'); }
     else if (action === 'cascade-backup-add') await carbonCascadeBackupAdd();
     else if (action === 'cascade-backup-delete') await carbonCascadeBackupDelete(btn.dataset.id);
     else if (action === 'cascade-failover-settings') await carbonCascadeFailoverSettings();

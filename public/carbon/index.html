@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Servpanel — Carbon</title>
-<link rel="stylesheet" href="styles.css?v=3.2.115">
+<title>Servpanel</title>
+<link rel="stylesheet" href="styles.css?v=3.2.116">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -52,10 +52,10 @@
 <div class="app">
   <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
   <aside class="sidebar">
-    <div class="brand"><div class="brand-mark">SP</div><div><div class="brand-name">Servpanel</div><div class="brand-sub">Carbon console</div></div></div>
+    <div class="brand"><div class="brand-mark">SP</div><div><div class="brand-name">Servpanel</div></div></div>
     <nav class="nav">
       <div class="nav-label">Панель</div>
-      <a class="nav-item" href="/" title="Вернуться в старую панель"><svg class="ico"><use href="#i-external"/></svg>Старая панель</a>
+      <a class="nav-item" href="/old/" title="Вернуться в старую панель"><svg class="ico"><use href="#i-external"/></svg>Старая панель</a>
       <div class="nav-label">Обзор</div>
       <button class="nav-item active" data-tab="dashboard"><svg class="ico"><use href="#i-grid"/></svg>Дашборд<span class="nav-dot"></span></button>
       <button class="nav-item" data-tab="clients"><svg class="ico"><use href="#i-users"/></svg>Клиенты<span class="nav-count">0</span></button>
@@ -74,6 +74,7 @@
       <button class="nav-item" data-tab="app"><svg class="ico"><use href="#i-phone"/></svg>Приложение</button>
       <button class="nav-item" data-tab="rustdesk"><svg class="ico"><use href="#i-monitor"/></svg>RustDesk</button>
       <div class="nav-label">Система</div>
+      <button class="nav-item" data-tab="appearance"><svg class="ico"><use href="#i-sliders"/></svg>Визуализация</button>
       <button class="nav-item" data-tab="security"><svg class="ico"><use href="#i-pulse"/></svg>Защита и GeoIP</button>
       <button class="nav-item" data-tab="diagnostics"><svg class="ico"><use href="#i-terminal"/></svg>Диагностика</button>
       <button class="nav-item" data-tab="update"><svg class="ico"><use href="#i-down"/></svg>Обновление</button>
@@ -98,7 +99,7 @@
         <button class="top-tab" data-tab="services">Службы</button>
       </div>
       <div class="top-actions">
-        <a class="btn btn-sm" href="/" title="Вернуться в старую панель">↩ Старая панель</a>
+        <a class="btn btn-sm" href="/old/" title="Вернуться в старую панель">↩ Старая панель</a>
         <div class="search"><svg class="ico" style="width:15px;height:15px"><use href="#i-search"/></svg><input id="globalSearch" type="search" name="panel-search" placeholder="Поиск и действия" autocomplete="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true"></div>
         <div class="theme-toggle" aria-label="Тема">
           <button data-theme-set="dark" class="on" aria-label="Тёмная"><svg class="ico" style="width:14px;height:14px"><use href="#i-moon"/></svg></button>
@@ -185,9 +186,9 @@
   </div>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-<script src="app.js?v=3.2.115"></script>
-<script src="carbon-api.js?v=3.2.115"></script>
-<script src="actions.js?v=3.2.115"></script>
-<script src="keenetic.js?v=3.2.115"></script>
+<script src="app.js?v=3.2.116"></script>
+<script src="carbon-api.js?v=3.2.116"></script>
+<script src="actions.js?v=3.2.116"></script>
+<script src="keenetic.js?v=3.2.116"></script>
 </body>
 </html>

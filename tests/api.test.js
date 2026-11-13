@@ -525,7 +525,7 @@ test('Обновление: зависший worker определяется к�
 });
 
 test('Обновление: в интерфейсе есть отдельная вкладка и кнопки', async () => {
-    const r = await request('/');
+    const r = await request('/old/');
     assert.equal(r.status, 200);
     assert.match(r.text, /id="tab-update"/);
     assert.match(r.text, /updUploadBtn/);
