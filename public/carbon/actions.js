@@ -744,7 +744,7 @@ async function carbonClientKey(name) {
   modal.innerHTML = `<div class="modal-card"><div class="modal-head"><div><div class="modal-title">Ключ: ${escHtml(name)}</div><div class="modal-sub">Импорт по ссылке или QR</div></div><button class="icon-btn" data-key-close>✕</button></div>
     ${d.qr ? `<img src="${escHtml(d.qr)}" alt="QR" style="width:220px;height:220px;background:#fff;padding:8px;border-radius:10px;display:block;margin:0 auto 12px">` : ''}
     <textarea readonly rows="5" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:11px">${escHtml(d.uri || '')}</textarea>
-    <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap"><div class="page-actions"><button class="btn" data-key-copy>Скопировать vpn://</button></div><div class="page-actions"><a class="btn" href="/api/download/${encodeURIComponent(name)}">Скачать .conf</a><a class="btn" href="/api/clients/${encodeURIComponent(name)}/export">Инструкция</a></div></div></div>`;
+    <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap"><div class="page-actions"><button class="btn" data-key-copy>Скопировать vpn://</button></div><div class="page-actions"><button class="btn" data-carbon-action="download" data-url="/api/download/${encodeURIComponent(name)}" data-name="${escHtml(name)}.conf">Скачать .conf</button><button class="btn" data-carbon-action="download" data-url="/api/clients/${encodeURIComponent(name)}/export" data-name="${escHtml(name)}-instruction.txt">Инструкция</button></div></div></div>`;
   document.body.appendChild(modal);
   modal.hidden = false;
   const close = () => modal.remove();
@@ -2095,7 +2095,8 @@ document.addEventListener('click', async event => {
   const name = btn.dataset.name || '';
   const finishBusy = carbonBusyStart(btn);
   try {
-    if (action === 'update-check') await carbonUpdateCheck();
+    if (action === 'download') await carbonDownload(btn.dataset.url, { filename: btn.dataset.name || '' });
+    else if (action === 'update-check') await carbonUpdateCheck();
     else if (action === 'update-git') { if (confirm('Обновить панель с GitHub? Перед обновлением создаётся бэкап.')) { await api('/api/update/git', { method: 'POST', body: {} }); pollUpdate(); } }
     else if (action === 'update-git-force') { if (confirm('Сбросить локальные изменения кода и обновить с GitHub?')) { await api('/api/update/git-force', { method: 'POST', body: {} }); pollUpdate(); } }
     else if (action === 'update-url') await carbonUpdateFromUrl();
@@ -2221,7 +2222,7 @@ document.addEventListener('click', async event => {
     else if (action === 'rudrop-upload') await carbonRuDropUpload();
     else if (action === 'rudrop-refresh') await carbonRuDropRefresh();
   } catch (e) {
-    showToast(e.message || 'Ошибка');
+    if (!e || !e.silent) showToast(e.message || 'Ошибка');
   } finally {
     finishBusy();
   }

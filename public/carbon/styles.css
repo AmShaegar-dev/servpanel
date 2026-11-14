@@ -609,6 +609,15 @@ b.checklist-muted{color:var(--text-2)}
 .upload-panel.is-ok .upload-bar span{background:var(--good)}
 .upload-panel.is-err .upload-bar span{background:var(--bad)}
 .upload-status{font:500 10.5px/1.4 var(--mono);color:var(--text-2);word-break:break-word}
+.download-panel{width:min(380px,calc(100vw - 36px))}
+.download-panel .upload-head{align-items:center}
+.download-cancel{width:22px;height:22px;flex:0 0 auto;border:1px solid var(--line);border-radius:7px;background:var(--surface-2);color:var(--text-3);font-size:11px;display:grid;place-items:center;cursor:pointer}
+.download-cancel:hover{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,transparent)}
+.download-cancel[hidden]{display:none!important}
+.download-bar.is-indeterminate span{width:38%!important;animation:carbonDownloadSlide 1.1s ease-in-out infinite}
+.download-link{padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.download-link:hover{color:var(--accent)}
+@keyframes carbonDownloadSlide{0%{margin-left:-38%}100%{margin-left:100%}}
 @keyframes carbonPulse{0%,100%{opacity:1}50%{opacity:.45}}
 
 /* Резервирование каскада */

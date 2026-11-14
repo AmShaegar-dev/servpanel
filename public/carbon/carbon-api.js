@@ -123,21 +123,195 @@ function saveBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-async function downloadRequest(path, body) {
-  const res = await fetch(path, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body || {})
-  });
-  if (!res.ok) {
-    if (res.status === 401) showCarbonLogin();
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Ошибка загрузки файла');
+// ---- Скачивание файлов с индикатором прогресса -------------------------
+let carbonDownloadBusy = false;
+let carbonDownloadAbort = null;
+let carbonDownloadHideTimer = null;
+
+function carbonDecodeName(value) {
+  try { return decodeURIComponent(value); } catch (e) { return value; }
+}
+
+function carbonDownloadName(url) {
+  try {
+    const last = new URL(url, location.href).pathname.split('/').filter(Boolean).pop() || 'file';
+    return carbonDecodeName(last) || 'file';
+  } catch (e) {
+    return 'file';
   }
-  const cd = res.headers.get('content-disposition') || '';
-  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
-  return { blob: await res.blob(), filename: m ? decodeURIComponent(m[1]) : '' };
+}
+
+function carbonDownloadPanel(name) {
+  let el = document.getElementById('carbonDownloadPanel');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'carbonDownloadPanel';
+    el.className = 'upload-panel download-panel';
+    el.innerHTML = `<div class="upload-head"><span class="upload-name"></span><span class="upload-pct"></span><button class="download-cancel" type="button" title="Отменить скачивание">✕</button></div><div class="upload-bar download-bar"><span></span></div><div class="upload-status"></div>`;
+    el.querySelector('.download-cancel').addEventListener('click', () => {
+      if (carbonDownloadAbort) carbonDownloadAbort.abort();
+    });
+    document.body.appendChild(el);
+  }
+  clearTimeout(carbonDownloadHideTimer);
+  el.hidden = false;
+  el.classList.remove('is-ok', 'is-err');
+  el.querySelector('.upload-name').textContent = name || 'Файл';
+  el.querySelector('.upload-pct').textContent = '';
+  el.querySelector('.upload-bar').classList.remove('is-indeterminate');
+  el.querySelector('.upload-bar span').style.width = '0%';
+  el.querySelector('.upload-status').textContent = 'Подготовка файла…';
+  el.querySelector('.download-cancel').hidden = false;
+  const uploads = document.getElementById('carbonUploadPanel');
+  el.style.bottom = uploads && !uploads.hidden ? (uploads.offsetHeight + 28) + 'px' : '';
+  return el;
+}
+
+function carbonDownloadState(pct, text, tone, indeterminate) {
+  const el = document.getElementById('carbonDownloadPanel');
+  if (!el) return;
+  const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+  el.hidden = false;
+  el.classList.toggle('is-ok', tone === 'ok');
+  el.classList.toggle('is-err', tone === 'err');
+  const bar = el.querySelector('.upload-bar');
+  if (bar) {
+    bar.classList.toggle('is-indeterminate', !!indeterminate);
+    bar.querySelector('span').style.width = indeterminate ? '' : p + '%';
+  }
+  el.querySelector('.upload-pct').textContent = indeterminate ? '' : p + '%';
+  if (text != null) el.querySelector('.upload-status').textContent = text;
+}
+
+function carbonDownloadDone(text) {
+  carbonDownloadState(100, text || 'Файл сохранён', 'ok');
+  const el = document.getElementById('carbonDownloadPanel');
+  if (el) el.querySelector('.download-cancel').hidden = true;
+  carbonDownloadHideTimer = setTimeout(() => {
+    const panel = document.getElementById('carbonDownloadPanel');
+    if (panel) panel.hidden = true;
+  }, 3200);
+}
+
+function carbonDownloadFail(text) {
+  carbonDownloadState(100, text || 'Ошибка скачивания', 'err');
+  const el = document.getElementById('carbonDownloadPanel');
+  if (el) el.querySelector('.download-cancel').hidden = true;
+  carbonDownloadHideTimer = setTimeout(() => {
+    const panel = document.getElementById('carbonDownloadPanel');
+    if (panel) panel.hidden = true;
+  }, 7000);
+}
+
+function carbonDownloadText(received, total, elapsedMs) {
+  const speed = received / Math.max(0.2, elapsedMs / 1000);
+  if (total > 0) {
+    const pct = Math.min(100, Math.round(received / total * 100));
+    return `${fmtBytes(received)} из ${fmtBytes(total)} · ${pct}% · ${fmtSpeed(speed)}`;
+  }
+  return `${fmtBytes(received)} · ${fmtSpeed(speed)}`;
+}
+
+async function carbonFetchFile(url, options = {}) {
+  if (carbonDownloadBusy) {
+    showToast('Дождитесь завершения текущего скачивания');
+    const busy = new Error('Скачивание уже выполняется');
+    busy.silent = true;
+    throw busy;
+  }
+  carbonDownloadBusy = true;
+  const panel = carbonDownloadPanel(options.filename || carbonDownloadName(url));
+  const controller = new AbortController();
+  carbonDownloadAbort = controller;
+  const started = performance.now();
+  let prepareTimer = setInterval(() => {
+    const sec = Math.max(1, Math.round((performance.now() - started) / 1000));
+    carbonDownloadState(0, `Сервер готовит файл… ${sec} с`, null, true);
+  }, 700);
+  try {
+    const init = {
+      method: options.method || 'GET',
+      credentials: 'same-origin',
+      redirect: 'follow',
+      signal: controller.signal
+    };
+    if (options.body !== undefined) {
+      init.headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+      init.body = JSON.stringify(options.body);
+    } else if (options.headers) {
+      init.headers = options.headers;
+    }
+    const res = await fetch(url, init);
+    clearInterval(prepareTimer);
+    prepareTimer = null;
+    if (res.status === 401) {
+      showCarbonLogin();
+      throw new Error('Требуется вход в панель');
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || ('HTTP ' + res.status));
+    }
+    const cd = res.headers.get('content-disposition') || '';
+    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
+    const filename = match ? carbonDecodeName(match[1]) : (options.filename || carbonDownloadName(url));
+    const nameEl = panel.querySelector('.upload-name');
+    if (nameEl) nameEl.textContent = filename;
+    const total = Number(res.headers.get('content-length')) || 0;
+    const type = res.headers.get('content-type') || 'application/octet-stream';
+    const reader = res.body && res.body.getReader ? res.body.getReader() : null;
+    let blob;
+    if (!reader) {
+      blob = await res.blob();
+      carbonDownloadState(100, `Получено ${fmtBytes(blob.size)}`, null, false);
+    } else {
+      const chunks = [];
+      let received = 0;
+      let lastPaint = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        const now = performance.now();
+        if (now - lastPaint > 120) {
+          lastPaint = now;
+          carbonDownloadState(total ? received / total * 100 : 0, carbonDownloadText(received, total, now - started), null, !total);
+        }
+      }
+      const encoded = (res.headers.get('content-encoding') || '').toLowerCase();
+      if (total && received !== total && (!encoded || encoded === 'identity')) {
+        throw new Error(`Файл получен не полностью: ${received} из ${total} байт`);
+      }
+      blob = new Blob(chunks, { type });
+      carbonDownloadState(100, `Получено ${fmtBytes(blob.size)}`, null, false);
+    }
+    if (options.save !== false) saveBlob(blob, filename);
+    carbonDownloadDone(options.save === false ? 'Файл готов' : 'Файл сохранён');
+    return { blob, filename };
+  } catch (e) {
+    if (prepareTimer) clearInterval(prepareTimer);
+    if (e && e.name === 'AbortError') {
+      carbonDownloadFail('Скачивание отменено');
+      const aborted = new Error('Скачивание отменено');
+      aborted.silent = true;
+      throw aborted;
+    }
+    carbonDownloadFail(e && e.message ? e.message : 'Ошибка скачивания');
+    throw e;
+  } finally {
+    if (prepareTimer) clearInterval(prepareTimer);
+    carbonDownloadAbort = null;
+    carbonDownloadBusy = false;
+  }
+}
+
+async function carbonDownload(url, options = {}) {
+  return carbonFetchFile(url, options);
+}
+
+async function downloadRequest(path, body) {
+  return carbonFetchFile(path, { method: 'POST', body: body || {}, save: false });
 }
 
 function showCarbonLog(title, text) {
@@ -595,7 +769,7 @@ function realClientRows() {
       <td>${splitCell}</td>
       <td><span class="status ${online ? '' : 'idle'}"><span class="dot"></span>${online ? 'в сети' : 'не в сети'}</span></td>
       <td><div class="client-actions">
-        <a class="client-action" href="/api/download/${encodeURIComponent(c.name)}" title="Скачать конфиг">${icon('download')}<span>Скачать конфиг</span></a>
+        <button class="client-action" data-carbon-action="download" data-url="/api/download/${encodeURIComponent(c.name)}" data-name="${escHtml(c.name)}.conf" title="Скачать конфиг">${icon('download')}<span>Скачать конфиг</span></button>
         <button class="client-action" data-carbon-action="client-url" data-name="${escHtml(c.name)}" title="URL для подключения">${icon('link')}<span>URL для подключения</span></button>
         <button class="client-action" data-carbon-action="client-rename" data-name="${escHtml(c.name)}" title="Редактировать">${icon('edit')}<span>Редактировать</span></button>
         <button class="client-action danger" data-carbon-action="client-delete" data-name="${escHtml(c.name)}" title="Удалить">${icon('trash')}<span>Удалить</span></button>
@@ -950,7 +1124,7 @@ function realCascade() {
 function realObfuscation() {
   const o = carbon.obf || {};
   const profiles = (carbon.profiles && (carbon.profiles.builtin || []).concat(carbon.profiles.custom || [])) || [];
-  return `<div class="page-head"><div><div class="page-title">Обфускация</div><div class="page-sub">Текущий конфиг и профили из API.</div></div><div class="page-actions"><button class="btn btn-primary" data-carbon-action="obf-generate">${icon('pulse')}Сгенерировать</button><button class="btn" data-carbon-action="obf-import">${icon('upload')}Импорт из Архитектора</button><button class="btn" data-carbon-action="obf-sync">${icon('key')}Синхронизировать HPK</button><a class="btn" href="/api/obf/export?format=conf">${icon('download')}Экспорт .conf</a><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
+  return `<div class="page-head"><div><div class="page-title">Обфускация</div><div class="page-sub">Текущий конфиг и профили из API.</div></div><div class="page-actions"><button class="btn btn-primary" data-carbon-action="obf-generate">${icon('pulse')}Сгенерировать</button><button class="btn" data-carbon-action="obf-import">${icon('upload')}Импорт из Архитектора</button><button class="btn" data-carbon-action="obf-sync">${icon('key')}Синхронизировать HPK</button><button class="btn" data-carbon-action="download" data-url="/api/obf/export?format=conf" data-name="obfuscation.conf">${icon('download')}Экспорт .conf</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Версия', o.version || '—', 'AWG')}${mini('Оценка', o.audit && o.audit.score != null ? o.audit.score + '/100' : '—', 'DPI')}${mini('H1–H4', o.params && o.params.H1 ? 'заданы' : '—', 'header')}${mini('HPK', o.params && o.params.HeaderProtectionKey ? 'есть' : '—', 'ключ')}</div>
     <div class="grid"><section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Текущий профиль</div><div class="card-sub">/api/obf/current</div></div>${tag(o.error ? 'нет конфига' : 'загружен', o.error ? 'warn' : 'good')}</div><pre class="code" style="margin:0;max-height:260px;overflow:auto;padding:12px;white-space:pre-wrap">${escHtml(o.error || JSON.stringify(o.params || o, null, 2))}</pre></section>
     <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Профили</div><div class="card-sub">встроенные и сохранённые</div></div>${tag(String(profiles.length), 'muted')}</div><div class="list">${profiles.slice(0, 8).map(p => `<div class="list-row"><b>${escHtml(p.title || p.name)}</b><span class="mono">${escHtml(String(p.score || ''))}</span><button class="row-action" data-api-action="obf-apply" data-profile="${escHtml(p.name)}" title="Применить">${icon('check')}</button></div>`).join('') || '<div class="list-row"><b>Нет профилей</b></div>'}</div></section></div>`;
@@ -1054,7 +1228,7 @@ function realApp() {
   const a = carbon.app || {};
   const apk = a.apk || {};
   const m = a.metrics || {};
-  return `<div class="page-head"><div><div class="page-title">Приложение</div><div class="page-sub">APK и порт метрик из API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="app-metrics">${icon('wrench')}Метрики</button><button class="btn" data-carbon-action="app-metrics-token">${icon('key')}Новый токен</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button><a class="btn btn-primary" href="/api/app/apk">${icon('download')}Скачать APK</a></div></div>
+  return `<div class="page-head"><div><div class="page-title">Приложение</div><div class="page-sub">APK и порт метрик из API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="app-metrics">${icon('wrench')}Метрики</button><button class="btn" data-carbon-action="app-metrics-token">${icon('key')}Новый токен</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button><button class="btn btn-primary" data-carbon-action="download" data-url="/api/app/apk" data-name="servpanel.apk">${icon('download')}Скачать APK</button></div></div>
     <div class="mini-grid">${mini('Версия APK', escHtml(apk.version || '—'), apk.source || '')}${mini('Метрики', m.enabled ? 'включены' : 'выключены', 'порт ' + (m.publicPort || '—'))}${mini('Формат', escHtml(m.format || '—'), m.path || '/metrics')}${mini('Токен', m.tokenSet ? 'задан' : 'нет', 'Bearer')}</div>
     <div class="grid"><section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">APK</div><div class="card-sub">/api/app/status</div></div>${tag(apk.available ? 'доступен' : 'нет', apk.available ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>Файл</b><span class="mono">${escHtml(apk.name || '—')}</span></div><div class="list-row"><b>Размер</b><span class="mono">${apk.size ? fmtBytes(apk.size) : (apk.available ? 'не загружен локально' : '—')}</span></div><div class="list-row"><b>SHA256</b><span class="mono">${apk.sha256 ? escHtml(apk.sha256.slice(0, 16)) : (apk.available ? 'по ссылке GitHub' : '—')}</span></div></div></section>
     <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Метрики</div><div class="card-sub">/api/app/metrics</div></div>${tag(m.enabled ? 'on' : 'off', m.enabled ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>Внутренний порт</b><span class="mono">${escHtml(String(m.port || '—'))}</span></div><div class="list-row"><b>Внешний порт</b><span class="mono">${escHtml(String(m.publicPort || '—'))}</span></div><div class="list-row"><b>Адрес</b><span class="mono">${escHtml(m.host || '—')}</span></div></div></section></div>`;
@@ -1067,7 +1241,7 @@ function realRustdesk() {
     const g = c.group || 'Другое';
     (groups[g] = groups[g] || []).push(c);
   });
-  const clientCards = Object.entries(groups).map(([group, list]) => `<section class="card rustdesk-os-card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">${escHtml(group)}</div><div class="card-sub">${escHtml(r.clientVersion || '')} · ${list.length} сборок</div></div>${tag(String(list.length), 'muted')}</div><div class="page-actions" style="flex-direction:column;align-items:stretch">${list.map(c => `<a class="btn btn-sm" href="${escHtml(c.url || ('/api/rustdesk/client/' + encodeURIComponent(c.id)))}" download style="justify-content:flex-start"><span style="flex:1;text-align:left">${escHtml(c.label || c.name || c.id)}</span><span class="mono" style="color:var(--text-3);font-weight:400">${fmtBytes(c.size || 0)}</span></a>`).join('')}</div></section>`).join('');
+  const clientCards = Object.entries(groups).map(([group, list]) => `<section class="card rustdesk-os-card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">${escHtml(group)}</div><div class="card-sub">${escHtml(r.clientVersion || '')} · ${list.length} сборок</div></div>${tag(String(list.length), 'muted')}</div><div class="page-actions" style="flex-direction:column;align-items:stretch">${list.map(c => `<button class="btn btn-sm" data-carbon-action="download" data-url="${escHtml(c.url || ('/api/rustdesk/client/' + encodeURIComponent(c.id)))}" data-name="${escHtml(c.name || c.id)}" style="justify-content:flex-start"><span style="flex:1;text-align:left">${escHtml(c.label || c.name || c.id)}</span><span class="mono" style="color:var(--text-3);font-weight:400">${fmtBytes(c.size || 0)}</span></button>`).join('')}</div></section>`).join('');
   const clientCount = (r.clients || []).length;
   return `<div class="page-head"><div><div class="page-title">RustDesk</div><div class="page-sub">Relay-сервер, сборки клиентов и подключение.</div></div><div class="page-actions"><button class="btn" data-carbon-action="rustdesk-settings">${icon('wrench')}Настройки</button><button class="btn" data-carbon-action="rustdesk-ports">${icon('globe')}Порты</button><button class="btn" data-carbon-action="rustdesk-refresh">${icon('refresh')}Проверить версии</button><button class="btn" data-carbon-action="rustdesk-job" data-act="update">${icon('refresh')}Обновить сервер</button><button class="btn btn-primary" data-carbon-action="rustdesk-job" data-act="install">${icon('download')}Установить сервер</button><button class="btn btn-danger" data-carbon-action="rustdesk-job" data-act="uninstall">${icon('trash')}Удалить</button></div></div>
     <div class="mini-grid">${mini('Сервер', r.installed ? 'установлен' : 'не установлен', r.version || '—')}${mini('Relay', escHtml(r.relay || '—'), 'hbbr')}${mini('Public key', r.publicKey ? 'получен' : '—', 'ключ')}${mini('Сборки клиентов', r.clientVersion || '—', clientCount ? clientCount + ' сборок' : 'GitHub')}</div>
@@ -1115,7 +1289,7 @@ function realAdmin() {
     <div class="grid"><section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Пользователи</div><div class="card-sub">/api/users</div></div>${tag(String(users.length), 'muted')}</div><div class="table-scroll"><table class="table"><thead><tr><th>Логин</th><th>Роль</th><th>2FA</th><th>Создан</th><th></th></tr></thead><tbody>${users.map(u => `<tr><td class="name">${escHtml(u.username)}</td><td>${escHtml(u.role === 'admin' ? 'администратор' : u.role)}</td><td>${u.totpEnabled ? 'вкл' : 'выкл'}</td><td class="mono">${escHtml(u.builtin ? 'встроенный' : (u.createdAt ? fmtDate(u.createdAt) : (u.created || '—')))}</td><td>${u.builtin ? '' : `<button class="row-action" data-carbon-action="user-delete" data-name="${escHtml(u.username)}" title="Удалить">${icon('trash')}</button>`}</td></tr>`).join('') || '<tr><td colspan="5">Пользователей нет</td></tr>'}</tbody></table></div></section>
     <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Аудит</div><div class="card-sub">последние действия</div></div>${tag('live', 'good')}</div><div class="list">${audit.slice(0, 10).map(e => `<div class="list-row"><b>${escHtml(e.user || '—')}</b><span class="mono">${escHtml(e.action || '')}</span></div>`).join('') || '<div class="list-row"><b>Нет записей</b></div>'}</div></section>
     <section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">2FA</div><div class="card-sub">TOTP для текущего пользователя</div></div>${tag(sec.totpEnabled ? 'включена' : 'выключена', sec.totpEnabled ? 'good' : 'warn')}</div><div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="2fa-setup">${icon('shield')}Настроить</button><button class="btn btn-danger" data-carbon-action="2fa-disable">${icon('stop')}Отключить</button></div></section>
-    <section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Автобэкап</div><div class="card-sub">${bc.schedule || 'daily'} · ${bc.time || '—'} · хранить ${bc.keep || 7}</div></div>${tag(bc.enabled ? 'включён' : 'выключен', bc.enabled ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>Шифрование</b><span class="mono">${bc.encrypt !== false ? 'AES-256' : 'нет'}</span></div><div class="list-row"><b>Пароль</b><span class="mono">${b.passwordSet ? 'задан' : 'не задан'}</span></div><div class="list-row"><b>Таймер</b><span class="mono">${b.timerActive ? 'активен' : 'неактивен'}</span></div>${archives.slice(0, 3).map(a => `<div class="list-row"><b><a href="/api/backup/archive/${encodeURIComponent(a.name)}">${escHtml(a.name || '—')}</a></b><span class="mono">${fmtBytes(a.size || 0)}</span></div>`).join('')}</div><div class="page-actions" style="margin-top:12px"><button class="btn" data-carbon-action="backup-run">${icon('box')}Создать сейчас</button><button class="btn" data-carbon-action="backup-password">${icon('key')}Пароль</button></div></section>
+    <section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Автобэкап</div><div class="card-sub">${bc.schedule || 'daily'} · ${bc.time || '—'} · хранить ${bc.keep || 7}</div></div>${tag(bc.enabled ? 'включён' : 'выключен', bc.enabled ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>Шифрование</b><span class="mono">${bc.encrypt !== false ? 'AES-256' : 'нет'}</span></div><div class="list-row"><b>Пароль</b><span class="mono">${b.passwordSet ? 'задан' : 'не задан'}</span></div><div class="list-row"><b>Таймер</b><span class="mono">${b.timerActive ? 'активен' : 'неактивен'}</span></div>${archives.slice(0, 3).map(a => `<div class="list-row"><b><button class="download-link" data-carbon-action="download" data-url="/api/backup/archive/${encodeURIComponent(a.name)}" data-name="${escHtml(a.name || 'backup.tar.gz')}">${escHtml(a.name || '—')}</button></b><span class="mono">${fmtBytes(a.size || 0)}</span></div>`).join('')}</div><div class="page-actions" style="margin-top:12px"><button class="btn" data-carbon-action="backup-run">${icon('box')}Создать сейчас</button><button class="btn" data-carbon-action="backup-password">${icon('key')}Пароль</button></div></section>
     <section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Telegram</div><div class="card-sub">${n.chatId ? 'chat ' + escHtml(n.chatId) : 'не настроен'}</div></div>${tag(n.enabled ? 'включён' : 'выключен', n.enabled ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>Токен</b><span class="mono">${n.hasToken ? 'сохранён' : 'не задан'}</span></div><div class="list-row"><b>Последний алерт</b><span class="mono">${n.lastAlertAt ? fmtDate(n.lastAlertAt) : '—'}</span></div></div><div class="page-actions" style="margin-top:12px"><button class="btn" data-carbon-action="notify-save">${icon('wrench')}Настроить</button><button class="btn" data-carbon-action="notify-test">${icon('bell')}Тест</button></div></section></div>`;
 }
 
