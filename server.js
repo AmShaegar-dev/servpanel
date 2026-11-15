@@ -3542,6 +3542,18 @@ if [ -s "$RU_ZONE" ]; then
     ipset destroy ru_tmp
 fi
 
+# Не чистим рабочие правила, если у клиентского интерфейса ещё нет IPv4
+# (например, awg0 поднимается после старта панели).
+VALID_IFACES=0
+for CIFACE in "\${CASC_IFACES[@]}"; do
+    SUBNET=$(ip -o -f inet addr show "$CIFACE" 2>/dev/null | awk '{print $4}' | head -n 1 || true)
+    [ -n "$SUBNET" ] && VALID_IFACES=$((VALID_IFACES + 1))
+done
+if [ "$VALID_IFACES" -eq 0 ]; then
+    echo "ERROR: у клиентских интерфейсов нет IPv4 — маршруты не изменены."
+    exit 1
+fi
+
 # Чистим только свои цепочки; чужие правила не трогаем.
 iptables -t mangle -D PREROUTING -j AWG_POLICY 2>/dev/null || true
 iptables -t mangle -N AWG_POLICY 2>/dev/null || true
@@ -3964,7 +3976,8 @@ async function cascadeBalanceTick() {
         const exits = cascadeExitSnapshot(true);
         const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments);
         const healthy = exits.filter(e => e.healthy).map(e => e.id).join(',');
-        const sig = healthy + '|' + JSON.stringify(plan.assignments);
+        const policy = String(shTry('iptables', ['-t', 'mangle', '-S', 'AWG_POLICY']) || '');
+        const sig = healthy + '|' + JSON.stringify(plan.assignments) + (policy.includes('-A AWG_POLICY') ? '' : '|no-policy');
         if (sig === cascadeBalanceSig) return;
         cascadeBalanceBusy = true;
         await cascadeBalanceReapply();
@@ -4074,8 +4087,9 @@ function cascadeDetails() {
     } catch (e) { /* ignore */ }
     // Маршрутизация: интерфейсы, ipset, ip rule, таблица
     try {
-        const mangle = rootShTry('iptables', ['-t', 'mangle', '-S', 'PREROUTING']);
-        const matches = [...mangle.matchAll(/-A PREROUTING.*?-i\s+(\S+).*?(?:--set-xmark|--set-mark)\s+0x(?:1|200[0-9a-f])/g)];
+        const mangle = rootShTry('iptables', ['-t', 'mangle', '-S', 'PREROUTING']) +
+            '\n' + rootShTry('iptables', ['-t', 'mangle', '-S', 'AWG_POLICY']);
+        const matches = [...mangle.matchAll(/^\s*(?:-A\s+(?:PREROUTING|AWG_POLICY)).*?-i\s+(\S+).*?(?:--set-xmark|--set-mark)\s+0x(?:1|200[0-9a-f])/gm)];
         out.ifaces = [...new Set(matches.map(m => m[1]))];
     } catch (e) { /* ignore */ }
     try {
@@ -4339,8 +4353,9 @@ app.get('/api/tools/status', checkAuth, (req, res) => {
 
     let cascActive = false, cascIfaces = [];
     try {
-        const mangle = rootShTry('iptables', ['-t', 'mangle', '-S', 'PREROUTING']);
-        const matches = [...mangle.matchAll(/-A PREROUTING.*?-i\s+(\S+).*?(?:--set-xmark|--set-mark)\s+0x(?:1|200[0-9a-f])/g)];
+        const mangle = rootShTry('iptables', ['-t', 'mangle', '-S', 'PREROUTING']) +
+            '\n' + rootShTry('iptables', ['-t', 'mangle', '-S', 'AWG_POLICY']);
+        const matches = [...mangle.matchAll(/^\s*(?:-A\s+(?:PREROUTING|AWG_POLICY)).*?-i\s+(\S+).*?(?:--set-xmark|--set-mark)\s+0x(?:1|200[0-9a-f])/gm)];
         cascIfaces = [...new Set(matches.map(m => m[1]))];
         cascActive = cascIfaces.length > 0;
     } catch (e) { /* ignore */ }
@@ -5398,6 +5413,14 @@ async function cascadeBalanceApply() {
             detail += '\nrollback: ' + (e3.message || String(e3));
         }
         throw new Error(detail.split('\n').slice(-12).join('\n'));
+    }
+    const policyRules = String(shTry('iptables', ['-t', 'mangle', '-S', 'AWG_POLICY']) || '');
+    if (!policyRules.includes('-A AWG_POLICY')) {
+        try {
+            cascadeBalanceCleanup();
+            await installRouting(ifaces, extra);
+        } catch (e3) { /* ignore */ }
+        throw new Error('Скрипт балансировки не добавил правила AWG_POLICY — каскад возвращён в обычный режим');
     }
     cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments });
     cascadeBalanceSig = exits.filter(e => e.healthy).map(e => e.id).join(',') + '|' + JSON.stringify(plan.assignments);
