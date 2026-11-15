@@ -6273,7 +6273,7 @@ app.get('/api/cascade/interfaces', checkAuth, requireAdmin, (req, res) => {
         });
     }
     const m = script.match(/^CLIENT_IFACES="([^"]*)"/m) || script.match(/^CASC_IFACES=\(([^)]*)\)/m);
-    const selected = m ? m[1].split(/\s+/).filter(Boolean) : ['awg0'];
+    const selected = m ? m[1].replace(/[\\"']/g, '').split(/\s+/).filter(Boolean) : ['awg0'];
     const out = shTry('bash', ['-c',
         "ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | cut -d@ -f1 | grep -E '^(awg|amn)[0-9]+$' || true"
     ], { timeout: 10000 });
