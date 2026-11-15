@@ -974,6 +974,10 @@ let lastTrafficSplit = (() => {
     return null;
 })();
 let trafficSplitSavedAt = 0;
+function resetTrafficSplitCache() {
+    lastTrafficSplit = null;
+    try { fs.unlinkSync(TRAFFIC_SPLIT_FILE); } catch (e) { /* кэша нет */ }
+}
 function saveTrafficSplitCache() {
     if (!lastTrafficSplit || !lastTrafficSplit.total) return;
     const now = Date.now();
@@ -5429,6 +5433,7 @@ async function cascadeBalanceApply() {
         throw new Error('Скрипт балансировки не добавил правила AWG_POLICY — каскад возвращён в обычный режим');
     }
     cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments });
+    resetTrafficSplitCache();
     cascadeBalanceSig = exits.filter(e => e.healthy).map(e => e.id).join(',') + '|' + JSON.stringify(plan.assignments);
     sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
     try { sh('sudo', ['systemctl', 'start', 'awg-routing.service']); } catch (e) { /* уже применено */ }
@@ -5442,6 +5447,7 @@ async function cascadeBalanceDisable() {
     cascadeBalanceCleanup();
     await installRouting(ifaces, extra);
     cascadeBalanceWrite({ mode: 'classic', assignments: {} });
+    resetTrafficSplitCache();
     cascadeBalanceSig = '';
     cascadeExitCache = { at: 0, exits: [] };
     return cascadeBalanceStatus(true);
