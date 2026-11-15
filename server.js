@@ -3648,13 +3648,19 @@ for CIFACE in "\${CASC_IFACES[@]}"; do
         IP="\${CLIENT_IPS[$idx]}"
         EXIT_IDX="\${CLIENT_EXITS[$idx]}"
         MARK="\${EXIT_MARKS[$EXIT_IDX]}"
-        iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$IP" -j MARK --set-xmark "$MARK"
+        # Уже установленное соединение сохраняет выход из conntrack;
+        # новый поток получает текущий выход клиента.
+        iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$IP" -m connmark --mark 0x0 -j MARK --set-xmark "$MARK"
         iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$IP" -j CONNMARK --save-mark
+    done
+    iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -j AWG_BALANCE_EXITS
+    for idx in "\${!CLIENT_IPS[@]}"; do
+        IP="\${CLIENT_IPS[$idx]}"
+        iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$IP" -j RETURN
     done
     DMARK="\${EXIT_MARKS[$DEFAULT_EXIT]}"
     iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$SUBNET" -j MARK --set-xmark "$DMARK"
     iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$SUBNET" -j CONNMARK --save-mark
-    iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -j AWG_BALANCE_EXITS
 done
 iptables -w 5 -t mangle -I PREROUTING 1 -j AWG_POLICY
 
