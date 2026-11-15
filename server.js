@@ -5306,9 +5306,8 @@ echo "OK: маршруты каскада применены ($(date '+%Y-%m-%d 
 function cascadeScriptIfaces() {
     const script = readTextSafe(ROUTING_SCRIPT);
     const m = script.match(/^CASC_IFACES=\(([^)]*)\)/m) || script.match(/^CLIENT_IFACES="([^"]*)"/m);
-    return m
-        ? m[1].replace(/["']/g, '').split(/\s+/).filter(Boolean)
-        : ['awg0'];
+    const list = m ? m[1].replace(/[\\"']/g, '').split(/\s+/).filter(Boolean) : [];
+    return list.length ? list : ['awg0'];
 }
 
 function cascadeScriptExtraNets() {
