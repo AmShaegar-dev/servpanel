@@ -1,4 +1,4 @@
-# 🌐 Servpanel 3.2.131 — веб-панель AmneziaWG, Keenetic и серверных служб
+# 🌐 Servpanel 3.2.133 — веб-панель AmneziaWG, Keenetic и серверных служб
 
 > ⚠️ **Статус: активная разработка.** Панель регулярно обновляется: интерфейс, каскад, WARP/Xray, MTProto и часть серверных сценариев продолжают развиваться. Перед обновлением рабочего сервера сделайте бэкап и проверьте новую версию на тестовом стенде.
 
@@ -997,15 +997,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.131/servpanel-3.2.131.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.131/servpanel-3.2.131.tar.gz.sha256
-sha256sum -c servpanel-3.2.131.tar.gz.sha256
-tar -xzf servpanel-3.2.131.tar.gz
-bash /root/servpanel-3.2.131/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.133/servpanel-3.2.133.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.133/servpanel-3.2.133.tar.gz.sha256
+sha256sum -c servpanel-3.2.133.tar.gz.sha256
+tar -xzf servpanel-3.2.133.tar.gz
+bash /root/servpanel-3.2.133/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.2.131`. SHA256 архива: `eb62b837888c486241b61611c8f71286793b74bd7c41249f36f2d684c7ed112c`. Если `curl` не установлен:
+Должно вывести `3.2.133`. SHA256 архива: `c4c3c858d274aecaacb7034ba3a5b5dc3ce4fe7b0c5791ca49c71e94114a20e8`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:
