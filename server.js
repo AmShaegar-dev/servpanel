@@ -3816,31 +3816,41 @@ function iperfClientRun(target, port, seconds, reverse) {
 
 // Замер скорости по HTTPS через уже открытый порт панели.
 // Нужен там, где фаервол провайдера не пропускает ни 5201, ни случайные порты.
-function iperfHttpOne(base, token, seconds, upload) {
-    const url = String(base).replace(/\/+$/, '') + '/api/iperf/agent/blob?mb=32';
+// В несколько потоков: один TLS-поток упирается в буферы nginx/Node,
+// а не в реальную ширину канала.
+function iperfHttpStreams(base, token, seconds, upload) {
+    const url = String(base).replace(/\/+$/, '') + '/api/iperf/agent/blob?mb=24';
     const deadline = Math.max(20, (Number(seconds) || 8) * 4);
-    const timeout = (deadline + 20) * 1000;
+    const timeout = (deadline + 25) * 1000;
+    const streams = 4;
     let out = '';
     if (!upload) {
-        out = String(sh('curl', ['-4', '-fsS', '--max-time', String(deadline),
-            '-H', 'Authorization: Bearer ' + token, '-o', '/dev/null',
-            '-w', '%{speed_download} %{size_download}', url], { timeout }) || '');
+        const cmd = `seq 1 ${streams} | xargs -P ${streams} -I{} curl -4 -fsS --http1.1 --max-time ${deadline} ` +
+            `-H "Authorization: Bearer ${token}" -o /dev/null -w "%{size_download} %{time_total}\\n" "${url}"`;
+        out = String(sh('bash', ['-c', cmd], { timeout }) || '');
     } else {
-        const bytes = 24 * 1024 * 1024;
-        const cmd = `head -c ${bytes} /dev/zero | curl -4 -fsS --max-time ${deadline} -X POST ` +
-            `-H "Authorization: Bearer ${token}" -H "Content-Type: application/octet-stream" ` +
-            `--data-binary @- -o /dev/null -w "%{speed_upload} %{size_upload}" "${url}"`;
+        const bytes = 12 * 1024 * 1024;
+        const cmd = `seq 1 ${streams} | xargs -P ${streams} -I{} bash -c 'head -c ${bytes} /dev/zero | ` +
+            `curl -4 -fsS --http1.1 --max-time ${deadline} -X POST -H "Authorization: Bearer ${token}" ` +
+            `-H "Content-Type: application/octet-stream" --data-binary @- -o /dev/null ` +
+            `-w "%{size_upload} %{time_total}\\n" "${url}"'`;
         out = String(sh('bash', ['-c', cmd], { timeout }) || '');
     }
-    const [speed, size] = out.trim().split(/\s+/).map(Number);
-    return { bps: speed || 0, bytes: size || 0 };
+    let bytesTotal = 0;
+    let slowest = 0;
+    for (const line of out.trim().split(/\r?\n/)) {
+        const [size, time] = line.trim().split(/\s+/).map(Number);
+        bytesTotal += size || 0;
+        if (time > slowest) slowest = time;
+    }
+    return { bps: slowest > 0 ? bytesTotal / slowest : 0, bytes: bytesTotal };
 }
 
 function iperfHttpTest(base, token, seconds) {
     let down = { bps: 0 };
     let up = { bps: 0 };
-    try { down = iperfHttpOne(base, token, seconds, false); } catch (e) { /* ignore */ }
-    try { up = iperfHttpOne(base, token, seconds, true); } catch (e) { /* ignore */ }
+    try { down = iperfHttpStreams(base, token, seconds, false); } catch (e) { /* ignore */ }
+    try { up = iperfHttpStreams(base, token, seconds, true); } catch (e) { /* ignore */ }
     const downMbps = Math.round(down.bps / 1e6 * 10) / 10;
     const upMbps = Math.round(up.bps / 1e6 * 10) / 10;
     const capacity = upMbps && downMbps ? Math.min(upMbps, downMbps) : (upMbps || downMbps);
