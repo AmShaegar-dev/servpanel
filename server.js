@@ -2452,7 +2452,7 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             tunnel = Math.round(lastTrafficSplit.tunnel * k);
             direct = Math.round(lastTrafficSplit.direct * k);
             blocked = Math.round(lastTrafficSplit.blocked * k);
-            if (Array.isArray(lastTrafficSplit.exits)) {
+            if (balanceMode && Array.isArray(lastTrafficSplit.exits)) {
                 exitTotals = lastTrafficSplit.exits.map(e => ({ ...e, bytes: Math.round((Number(e.bytes) || 0) * k) }));
             }
             source = 'cached';
