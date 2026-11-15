@@ -3651,19 +3651,19 @@ function iperfStartServer(port, secs, peerIp, rule, iface, bindIp) {
 // через уже поднятый awg, без открытия новых портов наружу.
 function iperfTunnelAddrs() {
     const out = [];
-    try {
-        const txt = String(sh('ip', ['-4', '-o', 'addr', 'show'], { timeout: 10000 }) || '');
-        for (const line of txt.split(/\r?\n/)) {
-            const m = line.match(/^\d+:\s+(\S+)\s+inet\s+(\d+\.\d+\.\d+\.\d+)\/(\d+)/);
-            if (!m) continue;
-            const iface = m[1];
-            const ip = m[2];
-            if (!/^(awg|wg)\d*$/i.test(iface)) continue;
-            if (/^10\.8\./.test(ip)) continue; // клиентская подсеть входа
+    const role = cascadeRole();
+    const files = role === 'eu'
+        ? [path.join(AWG_CONF_DIR, 'awg0.conf')]
+        : ((() => { try { return cascadeExitList().map(e => path.join(AWG_CONF_DIR, e.iface + '.conf')); } catch (e) { return []; } })());
+    for (const file of files) {
+        try {
+            const ini = parseIni(readTextSafe(file));
+            const raw = String((ini.Interface || {}).Address || '').split(',')[0].trim();
+            const ip = raw.replace(/\/.*$/, '');
             if (!IPV4_RE.test(ip)) continue;
-            out.push({ iface, ip });
-        }
-    } catch (e) { /* ignore */ }
+            out.push({ iface: path.basename(file, '.conf'), ip });
+        } catch (e) { /* ignore */ }
+    }
     return out;
 }
 
@@ -4079,6 +4079,7 @@ app.get('/api/diag/iperf/agent', checkAuth, requireAdmin, (req, res) => {
         allowedPorts: iperfUfwTcpPorts(),
         running: !!run,
         expiresAt: run ? run.expiresAt : 0,
+        tunnels: iperfTunnelAddrs(),
         agents: iperfAgentsRead().map(a => ({ id: a.id, label: a.label, peerIp: a.peerIp, expiresAt: a.expiresAt })),
         ports: items.map(it => ({
             port: it.port,
