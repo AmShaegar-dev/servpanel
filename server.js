@@ -4075,7 +4075,7 @@ function cascadeDetails() {
     // Маршрутизация: интерфейсы, ipset, ip rule, таблица
     try {
         const mangle = rootShTry('iptables', ['-t', 'mangle', '-S', 'PREROUTING']);
-        const matches = [...mangle.matchAll(/-A PREROUTING.*?-i\s+(\S+).*?(?:--set-xmark|--set-mark)\s+0x1/g)];
+        const matches = [...mangle.matchAll(/-A PREROUTING.*?-i\s+(\S+).*?(?:--set-xmark|--set-mark)\s+0x(?:1|200[0-9a-f])/g)];
         out.ifaces = [...new Set(matches.map(m => m[1]))];
     } catch (e) { /* ignore */ }
     try {
@@ -4340,7 +4340,7 @@ app.get('/api/tools/status', checkAuth, (req, res) => {
     let cascActive = false, cascIfaces = [];
     try {
         const mangle = rootShTry('iptables', ['-t', 'mangle', '-S', 'PREROUTING']);
-        const matches = [...mangle.matchAll(/-A PREROUTING.*?-i\s+(\S+).*?(?:--set-xmark|--set-mark)\s+0x1/g)];
+        const matches = [...mangle.matchAll(/-A PREROUTING.*?-i\s+(\S+).*?(?:--set-xmark|--set-mark)\s+0x(?:1|200[0-9a-f])/g)];
         cascIfaces = [...new Set(matches.map(m => m[1]))];
         cascActive = cascIfaces.length > 0;
     } catch (e) { /* ignore */ }
@@ -6973,6 +6973,21 @@ app.post('/api/cascade/failover/check', checkAuth, requireAdmin, async (req, res
 app.get('/api/cascade/balance', checkAuth, (req, res) => {
     try { res.json({ success: true, ...cascadeBalanceStatus(false) }); }
     catch (e) { res.status(500).json({ error: e.message || 'Ошибка чтения балансировки' }); }
+});
+
+app.get('/api/cascade/balance/diag', checkAuth, requireAdmin, (req, res) => {
+    const run = (cmd, args) => {
+        try { return String(sh('sudo', [cmd, ...(args || [])], { timeout: 30000 }) || ''); }
+        catch (e) { return String((e.stdout || '') + (e.stderr || '') || e.message || '').trim(); }
+    };
+    res.json({
+        mangle: run('bash', ['-c', "iptables-save -c -t mangle 2>/dev/null | grep -E 'AWG_POLICY|AWG_BALANCE|PREROUTING' | head -100"]),
+        rules: run('ip', ['rule', 'show']),
+        table1: run('ip', ['route', 'show', 'table', '2001']),
+        table2: run('ip', ['route', 'show', 'table', '2002']),
+        awg1: run('awg', ['show', 'awg1', 'transfer']),
+        awg2: run('awg', ['show', 'awg2', 'transfer'])
+    });
 });
 
 app.get('/api/cascade/script', checkAuth, requireAdmin, (req, res) => {
