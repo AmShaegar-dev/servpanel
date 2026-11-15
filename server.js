@@ -4003,12 +4003,13 @@ async function iperfRunTest(opts) {
             // каскада уже знает, как вести трафик через awg1/awg2.
             const mark = cascadeExitMark(exit ? exit.index : 0);
             for (const t of (prep && Array.isArray(prep.tunnels) ? prep.tunnels : [])) {
-                const add = ['-t', 'mangle', '-A', 'OUTPUT', '-p', 'tcp', '-d', t.ip, '--dport', String(t.port), '-j', 'MARK', '--set-mark', mark];
-                const del = ['-t', 'mangle', '-D', 'OUTPUT', '-p', 'tcp', '-d', t.ip, '--dport', String(t.port), '-j', 'MARK', '--set-mark', mark];
+                const add = ['-w', '-t', 'mangle', '-A', 'OUTPUT', '-p', 'tcp', '-d', t.ip, '--dport', String(t.port), '-j', 'MARK', '--set-mark', mark];
+                const del = ['-w', '-t', 'mangle', '-D', 'OUTPUT', '-p', 'tcp', '-d', t.ip, '--dport', String(t.port), '-j', 'MARK', '--set-mark', mark];
                 let marked = false;
-                try { sh('sudo', ['iptables', ...add]); marked = true; } catch (e) { /* без метки попробуем напрямую */ }
+                let markError = '';
+                try { sh('sudo', ['iptables', ...add]); marked = true; } catch (e) { markError = String(e.stderr || e.message || e).trim().slice(0, 160); }
                 const r = await tcpProbe(t.ip, t.port, 4000);
-                probes.push({ port: t.port, ip: t.ip, result: r, kind: 'tunnel' });
+                probes.push({ port: t.port, ip: t.ip, result: r, kind: 'tunnel', marked, markError });
                 if (r === 'ok') {
                     port = t.port;
                     targetHost = t.ip;
