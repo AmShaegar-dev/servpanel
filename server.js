@@ -3733,17 +3733,38 @@ app.post('/api/iperf/agent/cleanup', requireIperfAgent, (req, res) => {
 
 // Замер по HTTPS через порт самой панели: работает там, где фаервол
 // провайдера закрывает все порты кроме панельного.
+const IPERF_BLOB_PATH = path.join(os.tmpdir(), 'servpanel-iperf-blob.bin');
+const IPERF_BLOB_BYTES = 24 * 1024 * 1024;
+function iperfBlobFile() {
+    try {
+        if (fs.statSync(IPERF_BLOB_PATH).size === IPERF_BLOB_BYTES) return IPERF_BLOB_PATH;
+    } catch (e) { /* файла ещё нет */ }
+    try {
+        sh('sudo', ['bash', '-c', `dd if=/dev/zero of=${IPERF_BLOB_PATH} bs=1M count=24 status=none && chmod 600 ${IPERF_BLOB_PATH}`], { timeout: 60000 });
+        return IPERF_BLOB_PATH;
+    } catch (e) {
+        return '';
+    }
+}
 function iperfBlobSize(req) {
     const mb = Math.max(1, Math.min(256, Number((req.query && req.query.mb) || 32) || 32));
     return Math.round(mb * 1024 * 1024);
 }
 function iperfBlobDownload(req, res) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Accel-Buffering', 'no');
+    // sendFile отдаёт данные из файла через ядро — это заметно быстрее,
+    // чем собирать поток в JS, и не упирается в event loop.
+    const file = iperfBlobFile();
+    if (file) {
+        res.sendFile(file, { headers: { 'Content-Type': 'application/octet-stream', 'X-Accel-Buffering': 'no' }, cacheControl: false }, err => {
+            if (err && !res.headersSent) { try { res.status(500).end(); } catch (e) { /* ignore */ } }
+        });
+        return;
+    }
     const size = iperfBlobSize(req);
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Length', String(size));
-    res.setHeader('Cache-Control', 'no-store');
-    // nginx не должен буферизовать ответ на диск: иначе замер упирается в I/O.
-    res.setHeader('X-Accel-Buffering', 'no');
     const chunk = Buffer.alloc(256 * 1024, 0x5a);
     let sent = 0;
     const pump = () => {
