@@ -3664,6 +3664,24 @@ function iperfTunnelAddrs() {
             out.push({ iface: path.basename(file, '.conf'), ip });
         } catch (e) { /* ignore */ }
     }
+    if (out.length) return out;
+    // Роль/конфиг могли не определиться: берём адреса всех awg-интерфейсов,
+    // кроме клиентской подсети входа. Лишние кандидаты просто не ответят.
+    try {
+        const txt = String(sh('ip', ['-4', '-o', 'addr', 'show'], { timeout: 10000 }) || '');
+        for (const line of txt.split(/\r?\n/)) {
+            const m = line.match(/^\d+:\s+(\S+)\s+inet\s+(\d+\.\d+\.\d+\.\d+)\/(\d+)/);
+            if (!m) continue;
+            const iface = m[1];
+            const ip = m[2];
+            if (!/^(awg|wg)\d*$/i.test(iface)) continue;
+            if (/^10\.8\./.test(ip)) continue;
+            if (!IPV4_RE.test(ip)) continue;
+            if (out.some(x => x.ip === ip)) continue;
+            out.push({ iface, ip });
+            if (out.length >= 2) break;
+        }
+    } catch (e) { /* ignore */ }
     return out;
 }
 
@@ -3978,6 +3996,7 @@ async function iperfRunTest(opts) {
     let port = 0;
     let via = 'iperf3';
     let tunnelRule = null;
+    let tunnelRoute = null;
     const probes = [];
     try {
         let prep = null;
@@ -4002,7 +4021,19 @@ async function iperfRunTest(opts) {
             // Пакет заворачиваем меткой нужного выхода: таблица маршрутов
             // каскада уже знает, как вести трафик через awg1/awg2.
             const mark = cascadeExitMark(exit ? exit.index : 0);
+            const exitIface = exit ? exit.iface : 'awg1';
             for (const t of (prep && Array.isArray(prep.tunnels) ? prep.tunnels : [])) {
+                // Обратный путь должен идти в тот же туннель, иначе rp_filter
+                // выбросит ответ. Добавляем маршрут в основную таблицу.
+                let routeAdded = false;
+                try {
+                    const cur = String(shTry('ip', ['route', 'get', t.ip]) || '');
+                    const specific = String(shTry('ip', ['route', 'show', t.ip + '/32']) || '').trim();
+                    if (!cur.includes('dev ' + exitIface) && !specific) {
+                        sh('sudo', ['ip', 'route', 'add', t.ip + '/32', 'dev', exitIface]);
+                        routeAdded = true;
+                    }
+                } catch (e) { /* без маршрута попробуем метку */ }
                 const add = ['-w', '-t', 'mangle', '-A', 'OUTPUT', '-p', 'tcp', '-d', t.ip, '--dport', String(t.port), '-j', 'MARK', '--set-mark', mark];
                 const del = ['-w', '-t', 'mangle', '-D', 'OUTPUT', '-p', 'tcp', '-d', t.ip, '--dport', String(t.port), '-j', 'MARK', '--set-mark', mark];
                 let marked = false;
@@ -4014,9 +4045,11 @@ async function iperfRunTest(opts) {
                     port = t.port;
                     targetHost = t.ip;
                     if (marked) tunnelRule = del;
+                    if (routeAdded) tunnelRoute = { ip: t.ip, iface: exitIface };
                     break;
                 }
                 if (marked) { try { sh('sudo', ['iptables', ...del]); } catch (e) { /* ignore */ } }
+                if (routeAdded) { try { sh('sudo', ['ip', 'route', 'del', t.ip + '/32', 'dev', exitIface]); } catch (e) { /* ignore */ } }
             }
         }
         const saveCapacity = value => {
@@ -4027,6 +4060,9 @@ async function iperfRunTest(opts) {
             cascadeBalanceWrite(cur);
         };
         if (!port) {
+            if (transport === 'tunnel' && !(prep && Array.isArray(prep.tunnels) && prep.tunnels.length)) {
+                throw new Error('Ответная панель не отдала туннельный адрес: на ней не найден конфиг каскада (awg0/awg1) или интерфейс не поднят.');
+            }
             if (transport === 'iperf3' || transport === 'tunnel') {
                 throw new Error('Порты iperf3 недоступны с этой панели (' +
                     probes.map(p => (p.ip ? p.ip + ':' : '') + p.port + ': ' + p.result).join(', ') + ').');
@@ -4056,6 +4092,7 @@ async function iperfRunTest(opts) {
         return { success: true, target: targetHost, via: viaTunnel ? 'tunnel' : 'iperf3', port, probes, seconds, upMbps, downMbps, capacity, exitId };
     } finally {
         if (tunnelRule) { try { sh('sudo', ['iptables', ...tunnelRule]); } catch (e) { /* ignore */ } }
+        if (tunnelRoute) { try { sh('sudo', ['ip', 'route', 'del', tunnelRoute.ip + '/32', 'dev', tunnelRoute.iface]); } catch (e) { /* ignore */ } }
         if (port || probes.length) {
             try { await iperfAgentCall(base, token, '/api/iperf/agent/cleanup', { port }); } catch (e) { /* ignore */ }
         }
