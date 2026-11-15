@@ -1123,6 +1123,71 @@ async function carbonCascadeMode(mode) {
   await carbonRefresh(balance ? 'Балансировка включена' : 'Обычный каскад включён');
 }
 
+async function carbonBalanceSettings() {
+  const method = document.getElementById('carbonBalanceMethod')?.value === 'bandwidth' ? 'bandwidth' : 'clients';
+  const intervalHours = Number(document.getElementById('carbonBalanceInterval')?.value) || 24;
+  const d = await api('/api/cascade/balance/settings', { method: 'POST', body: { method, intervalHours } });
+  if (carbon.cascade) carbon.cascade.balance = d;
+  await carbonRefresh('Настройки балансировки сохранены');
+}
+
+async function carbonCascadeExitCapacity(id) {
+  const st = await api('/api/cascade/status');
+  const exit = ((st.balance && st.balance.exits) || []).find(e => e.id === id);
+  if (!exit) throw new Error('Выход не найден');
+  showCarbonForm({
+    title: 'Ширина канала · ' + (exit.iface || exit.name),
+    sub: 'Сколько Мбит/с реально даёт этот выход. 0 — не задано.',
+    fields: [{ name: 'mbps', label: 'Мбит/с', type: 'number', min: 0, step: 0.1, value: Number(exit.capacity) || 0 }],
+    submitText: 'Сохранить',
+    onSubmit: async v => {
+      await api('/api/cascade/balance/capacity', { method: 'POST', body: { id, mbps: Number(v.mbps) || 0 } });
+      await carbonRefresh('Ширина канала сохранена');
+    }
+  });
+}
+
+async function carbonCascadeExitIperf(id) {
+  showCarbonForm({
+    title: 'Тест канала iperf3',
+    sub: 'Если ключ уже сохранён, URL и логин можно не заполнять.',
+    fields: [
+      { name: 'panelUrl', label: 'URL панели-ответчика', placeholder: 'https://eu.example.com:4446' },
+      { name: 'panelUser', label: 'Логин панели', placeholder: 'admin' },
+      { name: 'panelPass', label: 'Пароль панели', type: 'password' },
+      { name: 'seconds', label: 'Секунд', type: 'number', min: 5, max: 20, value: 10 }
+    ],
+    submitText: 'Проверить',
+    onSubmit: async v => {
+      showToast('Запускаю iperf3…');
+      const d = await api('/api/diag/iperf', {
+        method: 'POST',
+        body: { exitId: id, panelUrl: v.panelUrl, panelUser: v.panelUser, panelPass: v.panelPass, seconds: Number(v.seconds) || 10 }
+      });
+      await carbonRefresh('Канал ' + (d.capacity || 0) + ' Мбит/с');
+    }
+  });
+}
+
+async function carbonDiagIperf() {
+  const out = document.getElementById('carbonIperfOut');
+  const body = {
+    panelUrl: document.getElementById('carbonIperfUrl')?.value.trim() || '',
+    panelUser: document.getElementById('carbonIperfUser')?.value.trim() || '',
+    panelPass: document.getElementById('carbonIperfPass')?.value || '',
+    seconds: Number(document.getElementById('carbonIperfSeconds')?.value) || 10
+  };
+  if (out) out.textContent = 'Запускаю iperf3… Это может занять до минуты.';
+  try {
+    const d = await api('/api/diag/iperf', { method: 'POST', body });
+    if (out) out.textContent = `Канал: ${d.capacity} Мбит/с\nОтдача: ${d.upMbps} Мбит/с\nЗагрузка: ${d.downMbps} Мбит/с\nСервер: ${d.target}:${d.port}`;
+    showToast('Тест канала завершён');
+  } catch (e) {
+    if (out) out.textContent = e.message || 'Ошибка iperf3';
+    throw e;
+  }
+}
+
 async function carbonCascadeIfacesSave() {
   const ifaces = [...document.querySelectorAll('[data-cascade-iface]:checked')].map(x => x.value);
   if (!ifaces.length) throw new Error('Выберите хотя бы один интерфейс');
@@ -2184,6 +2249,10 @@ document.addEventListener('click', async event => {
     else if (action === 'awg-install') await carbonAwgInstall();
     else if (action === 'cascade-build') await carbonCascadeBuild();
     else if (action === 'cascade-mode') await carbonCascadeMode(btn.dataset.mode || 'classic');
+    else if (action === 'cascade-balance-settings') await carbonBalanceSettings();
+    else if (action === 'cascade-exit-capacity') await carbonCascadeExitCapacity(btn.dataset.id);
+    else if (action === 'cascade-exit-iperf') await carbonCascadeExitIperf(btn.dataset.id);
+    else if (action === 'diag-iperf') await carbonDiagIperf();
     else if (action === 'appearance-preset') { carbonSetPalettePreset(btn.dataset.preset); render(); showToast('Шаблон применён'); }
     else if (action === 'appearance-custom') { document.getElementById('appearanceColors')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     else if (action === 'appearance-theme') { setTheme(btn.dataset.theme); render(); }

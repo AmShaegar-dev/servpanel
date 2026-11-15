@@ -3300,15 +3300,30 @@ function cascadeBalanceRead() {
         mode: j && j.mode === 'balance' ? 'balance' : 'classic',
         assignments: j && j.assignments && typeof j.assignments === 'object' ? j.assignments : {},
         manual: j && j.manual && typeof j.manual === 'object' ? j.manual : {},
+        capacities: j && j.capacities && typeof j.capacities === 'object' ? j.capacities : {},
+        capacityAt: j && j.capacityAt && typeof j.capacityAt === 'object' ? j.capacityAt : {},
+        agents: j && j.agents && typeof j.agents === 'object' ? j.agents : {},
+        method: j && j.method === 'bandwidth' ? 'bandwidth' : 'clients',
+        intervalHours: Math.max(1, Math.min(168, Number(j && j.intervalHours) || 24)),
+        moves: j && j.moves && typeof j.moves === 'object' ? j.moves : {},
+        lastRebalance: j && j.lastRebalance ? String(j.lastRebalance) : '',
         updatedAt: (j && j.updatedAt) || 0
     };
 }
 
 function cascadeBalanceWrite(value) {
+    const prev = cascadeBalanceRead();
     const data = {
         mode: value && value.mode === 'balance' ? 'balance' : 'classic',
         assignments: value && value.assignments && typeof value.assignments === 'object' ? value.assignments : {},
         manual: value && value.manual && typeof value.manual === 'object' ? value.manual : {},
+        capacities: value && value.capacities && typeof value.capacities === 'object' ? value.capacities : (prev.capacities || {}),
+        capacityAt: value && value.capacityAt && typeof value.capacityAt === 'object' ? value.capacityAt : (prev.capacityAt || {}),
+        agents: value && value.agents && typeof value.agents === 'object' ? value.agents : (prev.agents || {}),
+        method: value && value.method === 'bandwidth' ? 'bandwidth' : (value && value.method === 'clients' ? 'clients' : (prev.method || 'clients')),
+        intervalHours: Math.max(1, Math.min(168, Number(value && value.intervalHours !== undefined ? value.intervalHours : prev.intervalHours) || 24)),
+        moves: value && value.moves && typeof value.moves === 'object' ? value.moves : (prev.moves || {}),
+        lastRebalance: value && value.lastRebalance !== undefined ? String(value.lastRebalance || '') : (prev.lastRebalance || ''),
         updatedAt: Date.now()
     };
     writeJson(CASCADE_BALANCE_FILE, data, 0o600);
@@ -3449,13 +3464,258 @@ function cascadeBalanceStatus(force) {
             healthy: !!e.healthy,
             handshakeAgo: e.handshakeAgo,
             traffic: e.traffic || 0,
-            clients: plan.counts[e.id] || 0
+            clients: plan.counts[e.id] || 0,
+            capacity: Number(state.capacities[e.id]) || 0,
+            capacityAt: Number(state.capacityAt[e.id]) || 0
         })),
         assignments: plan.assignments,
         manual: plan.manual,
+        method: state.method || 'clients',
+        intervalHours: state.intervalHours || 24,
         updatedAt: state.updatedAt
     };
 }
+
+// ---------------------------------------------------------------------------
+// iperf3-агент: ограниченный API для замера канала между панелями.
+// ---------------------------------------------------------------------------
+const IPERF_AGENT_FILE = path.join(DATA_DIR, '.iperf_agent.json');
+const IPERF_RUN_FILE = path.join(DATA_DIR, '.iperf_run.json');
+let iperfRun = null;
+let iperfRunTimer = null;
+
+function iperfAgentsRead() {
+    const j = readJson(IPERF_AGENT_FILE, { tokens: [] });
+    return Array.isArray(j.tokens) ? j.tokens.filter(t => t && t.id && t.hash) : [];
+}
+function iperfAgentsWrite(tokens) {
+    writeJson(IPERF_AGENT_FILE, { tokens: Array.isArray(tokens) ? tokens : [] }, 0o600);
+}
+function iperfTokenHash(token) {
+    return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+function iperfAgentCreate(label, peerIp, ttlHours) {
+    const tokens = iperfAgentsRead();
+    const token = crypto.randomBytes(32).toString('hex');
+    const now = Date.now();
+    const item = {
+        id: crypto.randomBytes(6).toString('hex'),
+        label: String(label || 'iperf').slice(0, 60),
+        hash: iperfTokenHash(token),
+        peerIp: IPV4_RE.test(String(peerIp || '')) ? String(peerIp) : '',
+        createdAt: now,
+        expiresAt: now + Math.max(1, Math.min(8760, Number(ttlHours) || 720)) * 3600000
+    };
+    tokens.push(item);
+    iperfAgentsWrite(tokens);
+    return { token, agent: item };
+}
+function iperfAgentAuth(req) {
+    const raw = String(req.headers.authorization || '');
+    const token = raw.replace(/^Bearer\s+/i, '').trim();
+    if (!token) return null;
+    const hash = iperfTokenHash(token);
+    const agent = iperfAgentsRead().find(t => t.hash === hash);
+    if (!agent || agent.expiresAt <= Date.now()) return null;
+    const ip = clientIp(req);
+    if (agent.peerIp && ip && agent.peerIp !== ip) return null;
+    return agent;
+}
+function requireIperfAgent(req, res, next) {
+    const agent = iperfAgentAuth(req);
+    if (!agent) return res.status(401).json({ error: 'Неверный или просроченный ключ iperf' });
+    req.iperfAgent = agent;
+    next();
+}
+function iperfRunRead() {
+    if (iperfRun) return iperfRun;
+    try { iperfRun = JSON.parse(readTextSafe(IPERF_RUN_FILE) || 'null'); } catch (e) { iperfRun = null; }
+    if (iperfRun && iperfRun.expiresAt && iperfRun.expiresAt < Date.now()) {
+        iperfCleanup();
+        return null;
+    }
+    return iperfRun;
+}
+function iperfCleanup() {
+    const run = iperfRun || (() => { try { return JSON.parse(readTextSafe(IPERF_RUN_FILE) || 'null'); } catch (e) { return null; } })();
+    if (run) {
+        try { sh('sudo', ['kill', String(run.pid || '')]); } catch (e) { /* ignore */ }
+        if (run.rule === 'ufw') {
+            try { sh('sudo', ['ufw', 'delete', 'allow', 'from', run.peerIp, 'to', 'any', 'port', String(run.port), 'proto', 'tcp']); } catch (e) { /* ignore */ }
+        } else if (run.rule === 'iptables') {
+            try { sh('sudo', ['iptables', '-D', 'INPUT', '-p', 'tcp', '-s', run.peerIp, '--dport', String(run.port), '-j', 'ACCEPT']); } catch (e) { /* ignore */ }
+        }
+        try { fs.unlinkSync(run.script); } catch (e) { /* ignore */ }
+    }
+    iperfRun = null;
+    clearTimeout(iperfRunTimer);
+    iperfRunTimer = null;
+    try { fs.unlinkSync(IPERF_RUN_FILE); } catch (e) { /* ignore */ }
+}
+async function iperfAgentPrepare(seconds, req) {
+    iperfCleanup();
+    try {
+        sh('sudo', ['bash', '-c', 'command -v iperf3 >/dev/null 2>&1 || (DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y iperf3)'], { timeout: 180000 });
+    } catch (e) {
+        throw new Error('iperf3 не установлен и не удалось установить: ' + (e.stdout || e.message || e));
+    }
+    const agent = iperfAgentAuth(req) || null;
+    const peerIp = agent && agent.peerIp;
+    if (!peerIp) throw new Error('Ключ iperf не привязан к IP');
+    const port = crypto.randomInt(20000, 60000);
+    const secs = Math.max(5, Math.min(20, Number(seconds) || 10));
+    const ufw = String(shTry('sudo', ['ufw', 'status']) || '');
+    const useUfw = /Status:\s*active/i.test(ufw);
+    const rule = useUfw ? 'ufw' : 'iptables';
+    const allow = useUfw
+        ? `ufw allow from ${peerIp} to any port ${port} proto tcp`
+        : `iptables -I INPUT -p tcp -s ${peerIp} --dport ${port} -j ACCEPT`;
+    const deny = useUfw
+        ? `ufw delete allow from ${peerIp} to any port ${port} proto tcp`
+        : `iptables -D INPUT -p tcp -s ${peerIp} --dport ${port} -j ACCEPT`;
+    const scriptFile = path.join(os.tmpdir(), `servpanel-iperf-${port}.sh`);
+    const logFile = `/tmp/servpanel-iperf-${port}.log`;
+    const script = `#!/bin/bash\nset -e\n${allow} >/dev/null 2>&1 || true\ncleanup(){ ${deny} >/dev/null 2>&1 || true; }\ntrap cleanup EXIT\ntimeout ${secs * 2 + 10} iperf3 -s -p ${port} -B 0.0.0.0\n`;
+    writeRootFile(scriptFile, script, '0700');
+    const pidOut = sh('sudo', ['bash', '-c', `nohup ${scriptFile} >${logFile} 2>&1 & echo $!`], { timeout: 15000 });
+    const pid = parseInt(String(pidOut || '').trim(), 10) || 0;
+    iperfRun = { pid, port, peerIp, rule, seconds: secs, script: scriptFile, log: logFile, startedAt: Date.now(), expiresAt: Date.now() + (secs * 2 + 18) * 1000 };
+    writeJson(IPERF_RUN_FILE, iperfRun, 0o600);
+    iperfRunTimer = setTimeout(() => { try { iperfCleanup(); } catch (e) { /* ignore */ } }, (secs * 2 + 18) * 1000);
+    iperfRunTimer.unref && iperfRunTimer.unref();
+    return iperfRun;
+}
+
+app.post('/api/iperf/agent/token', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    const peerIp = clientIp(req);
+    const created = iperfAgentCreate(body.label || 'servpanel-balance', peerIp, body.ttlHours);
+    res.json({ success: true, token: created.token, id: created.agent.id, peerIp: created.agent.peerIp, expiresAt: created.agent.expiresAt });
+});
+
+app.get('/api/iperf/agent/status', requireIperfAgent, (req, res) => {
+    const run = iperfRunRead();
+    res.json({ success: true, running: !!run, port: run ? run.port : 0, seconds: run ? run.seconds : 0, expiresAt: run ? run.expiresAt : 0 });
+});
+
+app.post('/api/iperf/agent/prepare', requireIperfAgent, async (req, res) => {
+    try {
+        const run = await iperfAgentPrepare(req.body && req.body.seconds, req);
+        res.json({ success: true, port: run.port, seconds: run.seconds, expiresAt: run.expiresAt, host: await cascadePublicHost() });
+    } catch (e) {
+        res.status(500).json({ error: e.message || 'Не удалось запустить iperf3' });
+    }
+});
+
+app.post('/api/iperf/agent/cleanup', requireIperfAgent, (req, res) => {
+    iperfCleanup();
+    res.json({ success: true });
+});
+
+function iperfBits(data, key) {
+    try {
+        const b = data && data.end && data.end[key] && data.end[key].bits_per_second;
+        return Number(b) || 0;
+    } catch (e) { return 0; }
+}
+
+async function iperfAgentCall(base, token, pathName, body, timeoutMs) {
+    const r = await fetch(String(base).replace(/\/+$/, '') + pathName, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify(body || {}),
+        signal: AbortSignal.timeout(Math.max(5000, Number(timeoutMs) || 30000))
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    return data;
+}
+
+async function iperfRunTest(opts) {
+    const body = opts || {};
+    const state = cascadeBalanceRead();
+    const exitId = String(body.exitId || '');
+    let base = String(body.panelUrl || '').trim();
+    let token = '';
+    if (!base && exitId && state.agents[exitId]) {
+        base = String(state.agents[exitId].url || '');
+        try { token = cascadeDecrypt(state.agents[exitId].token); } catch (e) { token = ''; }
+    }
+    if (!base) throw new Error('Укажите URL панели-ответчика');
+    if (!/^https?:\/\//i.test(base)) base = 'https://' + base;
+    if (!token) {
+        if (!body.panelUser || !body.panelPass) throw new Error('Нужны логин и пароль панели-ответчика');
+        const remote = new Panel(base, String(body.panelUser), String(body.panelPass));
+        const login = await remote.login();
+        if (!login.ok) throw new Error(login.error || 'Не удалось войти в панель-ответчик');
+        const created = await remote.post('/api/iperf/agent/token', { label: 'servpanel-balance', ttlHours: 720 }, 30000);
+        const data = created && created.json;
+        if (!data || !data.token) throw new Error('Ответная панель не выдала ключ iperf');
+        token = data.token;
+        if (exitId) {
+            state.agents[exitId] = { url: base, token: cascadeEncrypt(token), createdAt: Date.now(), peerIp: data.peerIp || '' };
+            cascadeBalanceWrite({ ...state, agents: state.agents });
+        }
+    }
+    try {
+        sh('sudo', ['bash', '-c', 'command -v iperf3 >/dev/null 2>&1 || (DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y iperf3)'], { timeout: 180000 });
+    } catch (e) {
+        throw new Error('iperf3 не установлен на этой панели: ' + (e.stdout || e.message || e));
+    }
+    const exits = cascadeExitList();
+    const exit = exitId ? exits.find(e => e.id === exitId) : null;
+    const target = exit && exit.endpoint ? String(exit.endpoint).split(':')[0] : new URL(base).hostname;
+    const seconds = Math.max(5, Math.min(20, Number(body.seconds) || 10));
+    let port = 0;
+    try {
+        const prep = await iperfAgentCall(base, token, '/api/iperf/agent/prepare', { seconds }, 180000);
+        port = Number(prep.port) || 0;
+        if (!port) throw new Error('Ответная панель не открыла порт iperf');
+        const upRun = sh('iperf3', ['-c', target, '-p', String(port), '-t', String(seconds), '-J'], { timeout: 60000 });
+        const up = JSON.parse(String(upRun || '{}'));
+        const downRun = sh('iperf3', ['-c', target, '-p', String(port), '-t', String(seconds), '-R', '-J'], { timeout: 60000 });
+        const down = JSON.parse(String(downRun || '{}'));
+        const upMbps = Math.round(iperfBits(up, 'sum_sent') / 1e6 * 10) / 10;
+        const downMbps = Math.round(iperfBits(down, 'sum_received') / 1e6 * 10) / 10;
+        const capacity = Math.round((upMbps && downMbps ? Math.min(upMbps, downMbps) : (upMbps || downMbps)) * 10) / 10;
+        if (exitId && capacity > 0) {
+            const cur = cascadeBalanceRead();
+            cur.capacities[exitId] = capacity;
+            cur.capacityAt[exitId] = Date.now();
+            cascadeBalanceWrite(cur);
+        }
+        return { success: true, target, port, seconds, upMbps, downMbps, capacity, exitId };
+    } finally {
+        if (port) {
+            try { await iperfAgentCall(base, token, '/api/iperf/agent/cleanup', { port }); } catch (e) { /* ignore */ }
+        }
+        try { sh('sudo', ['pkill', '-f', `iperf3 -c ${target}`]); } catch (e) { /* ignore */ }
+    }
+}
+
+app.post('/api/diag/iperf', checkAuth, requireAdmin, async (req, res) => {
+    try {
+        const result = await iperfRunTest(req.body || {});
+        auditLog(req, `iperf3: ${result.target} → ${result.capacity} Мбит/с`);
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message || 'Ошибка iperf3' });
+    }
+});
+
+app.post('/api/cascade/balance/capacity', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    const id = String(body.id || '');
+    const exit = cascadeExitList().find(e => e.id === id);
+    if (!exit) return res.status(404).json({ error: 'Выход не найден' });
+    const mbps = Math.max(0, Math.min(100000, Number(body.mbps) || 0));
+    const state = cascadeBalanceRead();
+    state.capacities[id] = mbps;
+    state.capacityAt[id] = mbps ? Date.now() : 0;
+    cascadeBalanceWrite(state);
+    auditLog(req, `Каскад: ширина ${exit.iface} = ${mbps} Мбит/с`);
+    res.json({ success: true, id, capacity: mbps });
+});
 
 function forceCascadeMtu(text) {
     const lines = String(text || '').split(/\r?\n/).filter(l => !/^\s*MTU\s*=/i.test(l));
@@ -3475,7 +3735,7 @@ async function cascadeBalancePrepareBackupExits() {
     if (exits.length) await new Promise(r => setTimeout(r, 2500));
 }
 
-function cascadeBalanceScript(ifaces, extraRuNets, exits, assignments) {
+function cascadeBalanceScript(ifaces, extraRuNets, exits, assignments, manual) {
     const list = (ifaces || []).filter(Boolean);
     const active = (exits || []).filter(e => e.healthy);
     const use = active.length ? active : (exits || []).slice(0, 1);
@@ -5386,8 +5646,9 @@ async function cascadeBalanceReapply(clientsOnly = false) {
     // Для смены выхода клиента не скачиваем RU-список заново: это делает
     // полный запуск и таймер. Иначе кнопка «Применить» висит минутами.
     const out = sh('sudo', [ROUTING_SCRIPT, clientsOnly ? '--clients-only' : '--no-list'], { timeout: 60000 });
+    const proxy = syncProxyCascadeExit(false);
     cascadeExitCache = { at: 0, exits: [] };
-    return { out, assignments: plan.assignments };
+    return { out, assignments: plan.assignments, proxy };
 }
 
 function cascadeBalanceCleanup() {
@@ -5469,13 +5730,16 @@ async function cascadeBalanceApply() {
         } catch (e3) { /* ignore */ }
         throw new Error('Скрипт балансировки не добавил правила AWG_POLICY — каскад возвращён в обычный режим');
     }
+    const proxy = syncProxyCascadeExit(true);
     cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments, manual: state.manual });
     resetTrafficSplitCache();
     cascadeBalanceSig = exits.filter(e => e.healthy).map(e => e.id).join(',') + '|' + JSON.stringify(plan.assignments);
     sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
     try { sh('sudo', ['systemctl', 'start', 'awg-routing.service']); } catch (e) { /* уже применено */ }
     cascadeExitCache = { at: 0, exits: [] };
-    return cascadeBalanceStatus(true);
+    const status = cascadeBalanceStatus(true);
+    status.proxy = proxy;
+    return status;
 }
 
 async function cascadeBalanceDisable() {
@@ -5483,11 +5747,14 @@ async function cascadeBalanceDisable() {
     const extra = cascadeScriptExtraNets();
     cascadeBalanceCleanup();
     await installRouting(ifaces, extra);
+    const proxy = syncProxyCascadeExit(true);
     cascadeBalanceWrite({ mode: 'classic', assignments: {} });
     resetTrafficSplitCache();
     cascadeBalanceSig = '';
     cascadeExitCache = { at: 0, exits: [] };
-    return cascadeBalanceStatus(true);
+    const status = cascadeBalanceStatus(true);
+    status.proxy = proxy;
+    return status;
 }
 
 function cascadeBalanceSwitchClient(ip, exitId) {
@@ -6424,14 +6691,15 @@ function proxyCascadeUsers() {
     return [...users];
 }
 
-function proxyCascadeExitIp() {
+function proxyCascadeExitIp(iface) {
+    const dev = String(iface || 'awg1');
     let ip = '';
     try {
-        ip = String(sh('bash', ['-c', 'curl -4 -fsS --max-time 8 --interface awg1 https://api.ipify.org'], { timeout: 12000 }) || '').trim();
+        ip = String(sh('bash', ['-c', `curl -4 -fsS --max-time 8 --interface ${dev} https://api.ipify.org`], { timeout: 12000 }) || '').trim();
     } catch (e) { /* ignore */ }
     if (IPV4_RE.test(ip)) return ip;
-    const conf = existingCascadeConf();
-    if (conf) {
+    const conf = dev === 'awg1' ? existingCascadeConf() : path.join(AWG_CONF_DIR, dev + '.conf');
+    if (conf && fs.existsSync(conf)) {
         try {
             const ini = parseIni(readTextSafe(conf));
             const ep = String((ini.Peer || {}).Endpoint || '');
@@ -6439,10 +6707,34 @@ function proxyCascadeExitIp() {
             if (m) {
                 const resolved = resolveHostSync(m[1]);
                 if (IPV4_RE.test(resolved)) return resolved;
+                if (IPV4_RE.test(m[1])) return m[1];
             }
         } catch (e) { /* ignore */ }
     }
     return '';
+}
+
+function cascadeProxyExit() {
+    if (!cascadeBalanceEnabled()) return { id: 'primary', iface: 'awg1', name: 'EU-1' };
+    const exits = cascadeExitSnapshot(false).filter(e => e.healthy);
+    return exits[0] || null;
+}
+
+function syncProxyCascadeExit(force) {
+    if (!fs.existsSync(PROXY_CASCADE_FLAG_FILE)) return { changed: false, skipped: true };
+    const exit = cascadeProxyExit();
+    if (!exit) return { changed: false, error: 'нет живого выхода для MTProto' };
+    const stateFile = '/root/awg/proxy-cascade.exit';
+    const prev = readTextSafe(stateFile).trim();
+    if (!force && prev === exit.iface) return { changed: false, iface: exit.iface };
+    const ip = proxyCascadeExitIp(exit.iface);
+    if (!ip) return { changed: false, iface: exit.iface, error: 'не удалось определить IP через ' + exit.iface };
+    applyProxyCascadeNatIp(ip);
+    for (const unit of ['telemt', 'kvguardd', 'mtproxyl']) {
+        try { sh('systemctl', ['restart', unit]); } catch (e) { /* ignore */ }
+    }
+    try { writeRootFile(stateFile, exit.iface + '\n', '0600'); } catch (e) { /* ignore */ }
+    return { changed: true, iface: exit.iface, exitId: exit.id, ip, reconnected: true };
 }
 
 function setNatIpText(text, ip) {
@@ -7085,6 +7377,16 @@ app.post('/api/cascade/balance/mode', checkAuth, requireAdmin, async (req, res) 
     } catch (e) {
         res.status(500).json({ error: 'Не удалось изменить режим: ' + (e.message || String(e)) });
     }
+});
+
+app.post('/api/cascade/balance/settings', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    const state = cascadeBalanceRead();
+    state.method = body.method === 'bandwidth' ? 'bandwidth' : 'clients';
+    state.intervalHours = Math.max(1, Math.min(168, Number(body.intervalHours) || 24));
+    cascadeBalanceWrite(state);
+    auditLog(req, `Каскад: метод ${state.method}, интервал ${state.intervalHours} ч`);
+    res.json({ success: true, ...cascadeBalanceStatus(false) });
 });
 
 app.post('/api/cascade/balance/client', checkAuth, requireAdmin, async (req, res) => {
