@@ -469,7 +469,7 @@ function isDnsTarget(v) {
     return parts[1] === undefined || isPort(parts[1]);
 }
 // Служебные интерфейсы каскада не годятся как клиентские.
-const CASCADE_IFACE_RE = /^(awg1|amn1|awg-eu)$/;
+const CASCADE_IFACE_RE = /^(awg[1-9][0-9]*|amn[1-9][0-9]*|awg-eu)$/;
 function existingIfaces() {
     return Object.keys(os.networkInterfaces()).filter(name => !CASCADE_IFACE_RE.test(name));
 }
@@ -7094,7 +7094,9 @@ function serviceList() {
         fs.existsSync('/lib/systemd/system/warp-svc.service') || fs.existsSync('/etc/systemd/system/warp-svc.service')) {
         base.push({ name: 'warp-svc', desc: 'Cloudflare WARP' });
     }
-    for (const iface of ['awg0', 'amn0', 'awg1']) {
+    let cascadeIfaces = ['awg1'];
+    try { cascadeIfaces = cascadeExitList().map(e => e.iface); } catch (e) { /* ignore */ }
+    for (const iface of [...new Set(['awg0', 'amn0', ...cascadeIfaces])]) {
         if (fs.existsSync(path.join(AWG_CONF_DIR, iface + '.conf'))) {
             base.push({ name: `awg-quick@${iface}`, desc: `AmneziaWG туннель ${iface}` });
         }
