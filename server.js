@@ -2416,7 +2416,7 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
                 if (!exit) continue;
                 byId[exit.id] = (byId[exit.id] || 0) + Object.values(map).reduce((a, b) => a + b, 0);
             }
-            exitTotals = cascadeExitList().map(e => ({ id: e.id, name: e.name, bytes: byId[e.id] || 0 }));
+            exitTotals = cascadeExitList().map(e => ({ id: e.id, name: e.name, iface: e.iface, bytes: byId[e.id] || 0 }));
             splitCascade = exitTotals.reduce((a, e) => a + e.bytes, 0);
             splitDirect = Object.values(splitTotals.ru).reduce((a, b) => a + b, 0);
             splitTotal = splitCascade + splitDirect;
@@ -3499,9 +3499,18 @@ EXTRA_RU_NETS="${extra}"
 AWG_DIR="/root/awg"
 RU_ZONE="$AWG_DIR/ru.zone"
 ACCOUNTING_MARK="$AWG_DIR/.balance-accounting"
+SKIP_LIST=0
+CLIENTS_ONLY=0
+[ "\${1:-}" = "--no-list" ] && SKIP_LIST=1
+if [ "\${1:-}" = "--clients-only" ]; then CLIENTS_ONLY=1; SKIP_LIST=1; fi
 mkdir -p "$AWG_DIR"
-exec 9>"$AWG_DIR/awg-routing.lock"
-flock -w 300 9 || exit 1
+if [ "$CLIENTS_ONLY" = "1" ]; then
+    exec 8>"$AWG_DIR/awg-balance-clients.lock"
+    flock -w 10 8 || { echo "ERROR: занято, повторите"; exit 2; }
+else
+    exec 9>"$AWG_DIR/awg-routing.lock"
+    flock -w 300 9 || exit 1
+fi
 trap 'rm -f "$RU_ZONE.tmp"' EXIT
 
 if [ "\${#CASC_IFACES[@]}" -eq 0 ]; then
@@ -3525,6 +3534,7 @@ if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo 1)" = "
     fi
 fi
 
+if [ "$SKIP_LIST" = "0" ]; then
 fetch_ru_zone() {
     curl -fsS --retry 2 --connect-timeout 10 --max-time 60 -o "$RU_ZONE.tmp" "$1" || return 1
     local valid
@@ -3546,6 +3556,7 @@ if [ -s "$RU_ZONE" ]; then
     fi
     ipset swap ru_tmp ru
     ipset destroy ru_tmp
+fi
 fi
 
 # Старый учёт обычного каскада не должен перехватывать клиентов до политики.
@@ -3577,6 +3588,7 @@ if [ ! -f "$ACCOUNTING_MARK" ]; then
     touch "$ACCOUNTING_MARK"
 fi
 
+if [ "$CLIENTS_ONLY" = "0" ]; then
 for idx in "\${!EXIT_IFS[@]}"; do
     IFACE="\${EXIT_IFS[$idx]}"
     MARK="\${EXIT_MARKS[$idx]}"
@@ -3613,6 +3625,7 @@ for idx in "\${!EXIT_IFS[@]}"; do
         iptables -w 5 -t mangle -A FORWARD -o "$IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
     done
 done
+fi
 
 # Учёт: RU-направления считаем отдельно, остальное — по метке выхода.
 for idx in "\${!CLIENT_IPS[@]}"; do
@@ -3644,6 +3657,11 @@ for CIFACE in "\${CASC_IFACES[@]}"; do
     iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -j AWG_BALANCE_EXITS
 done
 iptables -w 5 -t mangle -I PREROUTING 1 -j AWG_POLICY
+
+if [ "$CLIENTS_ONLY" = "1" ]; then
+    echo "OK: выходы клиентов обновлены"
+    exit 0
+fi
 
 # Для MTProto-прокси используем первый (основной) выход.
 AWG1_IF="\${EXIT_IFS[0]}"
@@ -5341,7 +5359,7 @@ function cascadeScriptExtraNets() {
     return m ? m[1].split(/\n/).map(s => s.trim()).filter(Boolean) : [];
 }
 
-async function cascadeBalanceReapply() {
+async function cascadeBalanceReapply(clientsOnly = false) {
     const state = cascadeBalanceRead();
     if (state.mode !== 'balance') throw new Error('Балансировка не включена');
     const exits = cascadeExitSnapshot(true);
@@ -5350,7 +5368,9 @@ async function cascadeBalanceReapply() {
     cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments });
     const script = cascadeBalanceScript(cascadeScriptIfaces(), cascadeScriptExtraNets(), exits, plan.assignments);
     writeRootFile(ROUTING_SCRIPT, script, '0755');
-    const out = sh('sudo', [ROUTING_SCRIPT], { timeout: 180000 });
+    // Для смены выхода клиента не скачиваем RU-список заново: это делает
+    // полный запуск и таймер. Иначе кнопка «Применить» висит минутами.
+    const out = sh('sudo', [ROUTING_SCRIPT, clientsOnly ? '--clients-only' : '--no-list'], { timeout: 60000 });
     cascadeExitCache = { at: 0, exits: [] };
     return { out, assignments: plan.assignments };
 }
@@ -5456,6 +5476,7 @@ async function cascadeBalanceDisable() {
 
 function cascadeBalanceSwitchClient(ip, exitId) {
     const state = cascadeBalanceRead();
+    if (state.mode !== 'balance') throw new Error('Балансировка выходов выключена — сначала включите её в «Каскаде»');
     if (!IPV4_RE.test(String(ip || ''))) throw new Error('Некорректный IP клиента');
     const exits = cascadeExitList();
     if (exitId && exitId !== 'balance' && !exits.some(e => e.id === exitId)) {
@@ -5465,7 +5486,7 @@ function cascadeBalanceSwitchClient(ip, exitId) {
     else state.assignments[ip] = exitId;
     cascadeBalanceWrite({ mode: state.mode, assignments: state.assignments });
     cascadeBalanceSig = '';
-    return cascadeBalanceReapply();
+    return cascadeBalanceReapply(true);
 }
 
 function teardownRouting() {

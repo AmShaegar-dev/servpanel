@@ -835,7 +835,11 @@ async function carbonClientRename(name) {
       if (v.newName !== name) {
         await api('/api/clients/' + encodeURIComponent(name) + '/rename', { method: 'POST', body: { newName: v.newName } });
       }
-      if (balanceMode && v.exitId && client.ip) {
+      if (v.exitId && client.ip) {
+        const current = await api('/api/cascade/status');
+        if (!current.balance || current.balance.mode !== 'balance') {
+          throw new Error('Балансировка выходов выключена — выход клиента недоступен');
+        }
         await api('/api/cascade/balance/client', { method: 'POST', body: { ip: client.ip, exitId: v.exitId } });
       }
       const quotaBytes = v.quota === '' ? 0 : Math.round(Number(v.quota) * (1024 ** 3));

@@ -916,7 +916,7 @@ function realTrafficDistribution() {
         { key: 'blocked', label: 'GeoIP blocked', short: 'заблокировано', value: blocked, color: '#d29922' }
       ]
     : exits
-      ? exits.map((e, i) => ({ key: e.id, label: e.name || ('EU-' + (i + 1)), short: e.name || 'EU', value: Number(e.bytes) || 0, color: exitColors[i % exitColors.length] }))
+      ? exits.map((e, i) => ({ key: e.id, label: e.iface || e.name || ('awg' + (i + 1)), short: e.iface || e.name || 'EU', value: Number(e.bytes) || 0, color: exitColors[i % exitColors.length] }))
         .concat([{ key: 'direct', label: 'RU выход', short: 'в RU-выходе', value: direct, color: 'var(--accent)' }])
       : [
         { key: 'tunnel', label: 'В EU-туннель', short: 'в EU-туннеле', value: tunnel, color: '#5b8cff' },
