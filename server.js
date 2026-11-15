@@ -3742,7 +3742,9 @@ function iperfBlobDownload(req, res) {
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Length', String(size));
     res.setHeader('Cache-Control', 'no-store');
-    const chunk = Buffer.alloc(64 * 1024, 0x5a);
+    // nginx не должен буферизовать ответ на диск: иначе замер упирается в I/O.
+    res.setHeader('X-Accel-Buffering', 'no');
+    const chunk = Buffer.alloc(256 * 1024, 0x5a);
     let sent = 0;
     const pump = () => {
         while (sent < size) {
