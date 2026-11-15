@@ -316,7 +316,12 @@ fi
 
 echo "[5/6] Запуск Xray..."
 systemctl enable xray >/dev/null 2>&1 || true
-systemctl restart xray || true
+# Осиротевшие процессы от прошлых запусков копятся и каждый ест
+# память/CPU. Останавливаем службу и добиваем старые xray.
+systemctl stop xray >/dev/null 2>&1 || true
+pkill -f '[x]ray run -config' 2>/dev/null || true
+sleep 1
+systemctl start xray || true
 sleep 3
 if ! systemctl is-active --quiet xray; then
     echo "ERROR: Xray не запустился. Последние строки журнала:"
