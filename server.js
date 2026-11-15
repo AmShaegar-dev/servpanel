@@ -7009,7 +7009,10 @@ app.get('/api/cascade/balance/diag', checkAuth, requireAdmin, (req, res) => {
         table1: run('ip', ['route', 'show', 'table', '2001']),
         table2: run('ip', ['route', 'show', 'table', '2002']),
         awg1: run('awg', ['show', 'awg1', 'transfer']),
-        awg2: run('awg', ['show', 'awg2', 'transfer'])
+        awg2: run('awg', ['show', 'awg2', 'transfer']),
+        policy: run('iptables', ['-t', 'mangle', '-L', 'AWG_POLICY', '-v', '-n', '-x']),
+        addr0: run('ip', ['-o', '-f', 'inet', 'addr', 'show', 'awg0']),
+        addrAmn: run('ip', ['-o', '-f', 'inet', 'addr', 'show', 'amn0'])
     });
 });
 
