@@ -24,6 +24,7 @@ const fs = require('fs');
 const os = require('os');
 const zlib = require('zlib');
 const dns = require('dns');
+const net = require('net');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
 const updater = require('./lib/updater');
@@ -3536,52 +3537,127 @@ function iperfRunRead() {
     }
     return iperfRun;
 }
+// Убираем временный UFW/iptables-разрешатель, если он создавался под этот прогон.
+function iperfRemoveRule(item) {
+    if (!item || !item.peerIp || !item.port) return;
+    if (item.rule === 'ufw') {
+        try { sh('sudo', ['ufw', 'delete', 'allow', 'from', item.peerIp, 'to', 'any', 'port', String(item.port), 'proto', 'tcp']); } catch (e) { /* ignore */ }
+    } else if (item.rule === 'iptables') {
+        try { sh('sudo', ['iptables', '-D', 'INPUT', '-p', 'tcp', '-s', item.peerIp, '--dport', String(item.port), '-j', 'ACCEPT']); } catch (e) { /* ignore */ }
+    }
+}
+function iperfKillPort(port) {
+    if (!port) return;
+    try { sh('sudo', ['bash', '-c', `pkill -f "^iperf3 -s -p ${port} " >/dev/null 2>&1 || true`], { timeout: 10000 }); } catch (e) { /* ignore */ }
+}
 function iperfCleanup() {
     const run = iperfRun || (() => { try { return JSON.parse(readTextSafe(IPERF_RUN_FILE) || 'null'); } catch (e) { return null; } })();
     if (run) {
-        try { sh('sudo', ['kill', String(run.pid || '')]); } catch (e) { /* ignore */ }
-        if (run.rule === 'ufw') {
-            try { sh('sudo', ['ufw', 'delete', 'allow', 'from', run.peerIp, 'to', 'any', 'port', String(run.port), 'proto', 'tcp']); } catch (e) { /* ignore */ }
-        } else if (run.rule === 'iptables') {
-            try { sh('sudo', ['iptables', '-D', 'INPUT', '-p', 'tcp', '-s', run.peerIp, '--dport', String(run.port), '-j', 'ACCEPT']); } catch (e) { /* ignore */ }
+        const items = Array.isArray(run.items) && run.items.length
+            ? run.items
+            : [{ port: run.port, pid: run.pid, rule: run.rule, peerIp: run.peerIp, script: run.script }];
+        for (const it of items) {
+            if (!it) continue;
+            if (it.pid) { try { sh('sudo', ['kill', String(it.pid)]); } catch (e) { /* ignore */ } }
+            iperfKillPort(it.port);
+            iperfRemoveRule(it);
+            if (it.script) { try { fs.unlinkSync(it.script); } catch (e) { /* ignore */ } }
         }
-        try { fs.unlinkSync(run.script); } catch (e) { /* ignore */ }
     }
     iperfRun = null;
     clearTimeout(iperfRunTimer);
     iperfRunTimer = null;
     try { fs.unlinkSync(IPERF_RUN_FILE); } catch (e) { /* ignore */ }
 }
+
+let iperfInstalled = false;
+function iperfEnsureInstalled() {
+    if (iperfInstalled) return;
+    try {
+        sh('sudo', ['bash', '-c', 'command -v iperf3 >/dev/null 2>&1 || (DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y iperf3)'], { timeout: 240000 });
+        iperfInstalled = true;
+    } catch (e) {
+        const tail = String(e.stdout || e.stderr || e.message || e).trim().split(/\r?\n/).slice(-3).join(' ');
+        throw new Error('iperf3 не установлен: ' + (tail || 'apt-get install iperf3 не удался'));
+    }
+}
+function iperfVersion() {
+    try { return String(sh('iperf3', ['--version'], { timeout: 10000 }) || '').trim().split(/\r?\n/)[0]; }
+    catch (e) { return ''; }
+}
+// Порты, которые UFW уже разрешает на входящие: их обычно пропускает и фаервол провайдера.
+function iperfUfwTcpPorts() {
+    const out = String(shTry('sudo', ['ufw', 'status']) || '');
+    const ports = [];
+    for (const line of out.split(/\r?\n/)) {
+        const m = line.match(/^(\d{1,5})(?:\/(tcp))?\s+ALLOW\b/i);
+        if (!m) continue;
+        const port = Number(m[1]);
+        if (port > 0 && port <= 65535 && !ports.includes(port)) ports.push(port);
+    }
+    return ports;
+}
+function iperfPortBusy(port) {
+    const out = String(shTry('sudo', ['ss', '-ltnH', 'sport = :' + port]) || '').trim();
+    return !!out;
+}
+function iperfUfwActive() {
+    return /Status:\s*active/i.test(String(shTry('sudo', ['ufw', 'status']) || ''));
+}
+function iperfStartServer(port, secs, peerIp, rule) {
+    const allow = rule === 'ufw' ? `ufw allow from ${peerIp} to any port ${port} proto tcp`
+        : rule === 'iptables' ? `iptables -I INPUT -p tcp -s ${peerIp} --dport ${port} -j ACCEPT`
+            : 'true';
+    const deny = rule === 'ufw' ? `ufw delete allow from ${peerIp} to any port ${port} proto tcp`
+        : rule === 'iptables' ? `iptables -D INPUT -p tcp -s ${peerIp} --dport ${port} -j ACCEPT`
+            : 'true';
+    const scriptFile = path.join(os.tmpdir(), `servpanel-iperf-${port}.sh`);
+    const logFile = `/tmp/servpanel-iperf-${port}.log`;
+    const life = secs * 3 + 25;
+    const script = `#!/bin/bash\nset -e\n${allow} >/dev/null 2>&1 || true\ncleanup(){ ${deny} >/dev/null 2>&1 || true; }\ntrap cleanup EXIT\ntimeout ${life} iperf3 -s -p ${port} -B 0.0.0.0\n`;
+    writeRootFile(scriptFile, script, '0700');
+    const pidOut = sh('sudo', ['bash', '-c', `nohup ${scriptFile} >${logFile} 2>&1 & echo $!`], { timeout: 15000 });
+    return { port, rule, peerIp, script: scriptFile, log: logFile, pid: parseInt(String(pidOut || '').trim(), 10) || 0 };
+}
+
 async function iperfAgentPrepare(seconds, req) {
     iperfCleanup();
-    try {
-        sh('sudo', ['bash', '-c', 'command -v iperf3 >/dev/null 2>&1 || (DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y iperf3)'], { timeout: 180000 });
-    } catch (e) {
-        throw new Error('iperf3 не установлен и не удалось установить: ' + (e.stdout || e.message || e));
-    }
+    iperfEnsureInstalled();
     const agent = iperfAgentAuth(req) || null;
     const peerIp = agent && agent.peerIp;
     if (!peerIp) throw new Error('Ключ iperf не привязан к IP');
-    const port = crypto.randomInt(20000, 60000);
     const secs = Math.max(5, Math.min(20, Number(seconds) || 10));
-    const ufw = String(shTry('sudo', ['ufw', 'status']) || '');
-    const useUfw = /Status:\s*active/i.test(ufw);
-    const rule = useUfw ? 'ufw' : 'iptables';
-    const allow = useUfw
-        ? `ufw allow from ${peerIp} to any port ${port} proto tcp`
-        : `iptables -I INPUT -p tcp -s ${peerIp} --dport ${port} -j ACCEPT`;
-    const deny = useUfw
-        ? `ufw delete allow from ${peerIp} to any port ${port} proto tcp`
-        : `iptables -D INPUT -p tcp -s ${peerIp} --dport ${port} -j ACCEPT`;
-    const scriptFile = path.join(os.tmpdir(), `servpanel-iperf-${port}.sh`);
-    const logFile = `/tmp/servpanel-iperf-${port}.log`;
-    const script = `#!/bin/bash\nset -e\n${allow} >/dev/null 2>&1 || true\ncleanup(){ ${deny} >/dev/null 2>&1 || true; }\ntrap cleanup EXIT\ntimeout ${secs * 2 + 10} iperf3 -s -p ${port} -B 0.0.0.0\n`;
-    writeRootFile(scriptFile, script, '0700');
-    const pidOut = sh('sudo', ['bash', '-c', `nohup ${scriptFile} >${logFile} 2>&1 & echo $!`], { timeout: 15000 });
-    const pid = parseInt(String(pidOut || '').trim(), 10) || 0;
-    iperfRun = { pid, port, peerIp, rule, seconds: secs, script: scriptFile, log: logFile, startedAt: Date.now(), expiresAt: Date.now() + (secs * 2 + 18) * 1000 };
+    const ufw = iperfUfwActive();
+    // Открытые в UFW и свободные порты — самый надёжный путь: их, как правило,
+    // не режет и внешний фаервол провайдера.
+    const picks = [];
+    for (const port of iperfUfwTcpPorts()) {
+        if (picks.length >= 2) break;
+        if (port === 22 || iperfPortBusy(port)) continue;
+        picks.push({ port, rule: 'existing' });
+    }
+    let guard = 0;
+    while (picks.length < 3 && guard++ < 50) {
+        const port = crypto.randomInt(20000, 60000);
+        if (picks.some(p => p.port === port) || iperfPortBusy(port)) continue;
+        picks.push({ port, rule: ufw ? 'ufw' : 'iptables' });
+    }
+    const items = picks.map(p => iperfStartServer(p.port, secs, peerIp, p.rule));
+    await new Promise(r => setTimeout(r, 500));
+    for (const it of items) it.listening = iperfPortBusy(it.port);
+    if (!items.some(it => it.listening)) {
+        iperfCleanup();
+        throw new Error('iperf3-сервер не запустился ни на одном порту');
+    }
+    iperfRun = {
+        items,
+        seconds: secs,
+        peerIp,
+        startedAt: Date.now(),
+        expiresAt: Date.now() + (secs * 3 + 40) * 1000
+    };
     writeJson(IPERF_RUN_FILE, iperfRun, 0o600);
-    iperfRunTimer = setTimeout(() => { try { iperfCleanup(); } catch (e) { /* ignore */ } }, (secs * 2 + 18) * 1000);
+    iperfRunTimer = setTimeout(() => { try { iperfCleanup(); } catch (e) { /* ignore */ } }, (secs * 3 + 40) * 1000);
     iperfRunTimer.unref && iperfRunTimer.unref();
     return iperfRun;
 }
@@ -3595,13 +3671,30 @@ app.post('/api/iperf/agent/token', checkAuth, requireAdmin, (req, res) => {
 
 app.get('/api/iperf/agent/status', requireIperfAgent, (req, res) => {
     const run = iperfRunRead();
-    res.json({ success: true, running: !!run, port: run ? run.port : 0, seconds: run ? run.seconds : 0, expiresAt: run ? run.expiresAt : 0 });
+    const items = run && Array.isArray(run.items) ? run.items : [];
+    res.json({
+        success: true,
+        running: !!run,
+        port: items.length ? items[0].port : 0,
+        ports: items.map(it => ({ port: it.port, rule: it.rule, listening: !!it.listening })),
+        seconds: run ? run.seconds : 0,
+        expiresAt: run ? run.expiresAt : 0,
+        iperf3: iperfVersion()
+    });
 });
 
 app.post('/api/iperf/agent/prepare', requireIperfAgent, async (req, res) => {
     try {
         const run = await iperfAgentPrepare(req.body && req.body.seconds, req);
-        res.json({ success: true, port: run.port, seconds: run.seconds, expiresAt: run.expiresAt, host: await cascadePublicHost() });
+        const items = run.items || [];
+        res.json({
+            success: true,
+            port: items.length ? items[0].port : 0,
+            ports: items.map(it => ({ port: it.port, rule: it.rule, listening: !!it.listening })),
+            seconds: run.seconds,
+            expiresAt: run.expiresAt,
+            host: await cascadePublicHost()
+        });
     } catch (e) {
         res.status(500).json({ error: e.message || 'Не удалось запустить iperf3' });
     }
@@ -3617,6 +3710,41 @@ function iperfBits(data, key) {
         const b = data && data.end && data.end[key] && data.end[key].bits_per_second;
         return Number(b) || 0;
     } catch (e) { return 0; }
+}
+
+function tcpProbe(host, port, timeoutMs) {
+    return new Promise(resolve => {
+        const socket = net.connect({ host, port });
+        let done = false;
+        const finish = result => {
+            if (done) return;
+            done = true;
+            try { socket.destroy(); } catch (e) { /* ignore */ }
+            resolve(result);
+        };
+        socket.setTimeout(Math.max(1000, Number(timeoutMs) || 5000));
+        socket.once('connect', () => finish('ok'));
+        socket.once('timeout', () => finish('timeout'));
+        socket.once('error', e => finish(e && e.code === 'ECONNREFUSED' ? 'refused' : String((e && e.code) || 'error').toLowerCase()));
+    });
+}
+
+function iperfClientRun(target, port, seconds, reverse) {
+    const args = ['-c', target, '-p', String(port), '-t', String(seconds), '-J'];
+    if (reverse) args.push('-R');
+    let out = '';
+    try {
+        out = String(sh('iperf3', args, { timeout: (seconds + 30) * 1000 }) || '');
+    } catch (e) {
+        out = String(e.stdout || '');
+        let msg = '';
+        try { const j = JSON.parse(out); if (j && j.error) msg = String(j.error); } catch (e2) { /* ignore */ }
+        if (!msg) {
+            msg = String(e.stderr || e.message || e).trim().split(/\r?\n/).filter(Boolean).slice(-2).join(' ') || 'нет ответа';
+        }
+        throw new Error('iperf3 ' + target + ':' + port + ' — ' + msg);
+    }
+    try { return JSON.parse(out || '{}'); } catch (e) { throw new Error('iperf3 вернул не-JSON ответ'); }
 }
 
 async function iperfAgentCall(base, token, pathName, body, timeoutMs) {
@@ -3658,25 +3786,35 @@ async function iperfRunTest(opts) {
         }
     }
     try {
-        sh('sudo', ['bash', '-c', 'command -v iperf3 >/dev/null 2>&1 || (DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y iperf3)'], { timeout: 180000 });
+        iperfEnsureInstalled();
     } catch (e) {
-        throw new Error('iperf3 не установлен на этой панели: ' + (e.stdout || e.message || e));
+        throw new Error('iperf3 не установлен на этой панели: ' + (e.message || e));
     }
     const exits = cascadeExitList();
     const exit = exitId ? exits.find(e => e.id === exitId) : null;
     const target = exit && exit.endpoint ? String(exit.endpoint).split(':')[0] : new URL(base).hostname;
     const seconds = Math.max(5, Math.min(20, Number(body.seconds) || 10));
     let port = 0;
+    const probes = [];
     try {
-        const prep = await iperfAgentCall(base, token, '/api/iperf/agent/prepare', { seconds }, 180000);
-        port = Number(prep.port) || 0;
-        if (!port) throw new Error('Ответная панель не открыла порт iperf');
-        const upRun = sh('iperf3', ['-c', target, '-p', String(port), '-t', String(seconds), '-J'], { timeout: 60000 });
-        const up = JSON.parse(String(upRun || '{}'));
-        const downRun = sh('iperf3', ['-c', target, '-p', String(port), '-t', String(seconds), '-R', '-J'], { timeout: 60000 });
-        const down = JSON.parse(String(downRun || '{}'));
+        const prep = await iperfAgentCall(base, token, '/api/iperf/agent/prepare', { seconds }, 240000);
+        const candidates = Array.isArray(prep.ports) && prep.ports.length
+            ? prep.ports.map(p => Number(p && p.port ? p.port : p)).filter(Boolean)
+            : [Number(prep.port) || 0].filter(Boolean);
+        if (!candidates.length) throw new Error('Ответная панель не открыла порт iperf');
+        for (const candidate of candidates) {
+            const r = await tcpProbe(target, candidate, 5000);
+            probes.push({ port: candidate, result: r });
+            if (r === 'ok') { port = candidate; break; }
+        }
+        if (!port) {
+            throw new Error('Порт iperf недоступен с этой панели (' + probes.map(p => p.port + ': ' + p.result).join(', ') + '). Похоже, внешний фаервол закрывает эти порты.');
+        }
+        const up = iperfClientRun(target, port, seconds, false);
+        const down = iperfClientRun(target, port, seconds, true);
         const upMbps = Math.round(iperfBits(up, 'sum_sent') / 1e6 * 10) / 10;
         const downMbps = Math.round(iperfBits(down, 'sum_received') / 1e6 * 10) / 10;
+        if (!upMbps && !downMbps) throw new Error('iperf3 не передал данные — канал не отвечает');
         const capacity = Math.round((upMbps && downMbps ? Math.min(upMbps, downMbps) : (upMbps || downMbps)) * 10) / 10;
         if (exitId && capacity > 0) {
             const cur = cascadeBalanceRead();
@@ -3684,9 +3822,9 @@ async function iperfRunTest(opts) {
             cur.capacityAt[exitId] = Date.now();
             cascadeBalanceWrite(cur);
         }
-        return { success: true, target, port, seconds, upMbps, downMbps, capacity, exitId };
+        return { success: true, target, port, probes, seconds, upMbps, downMbps, capacity, exitId };
     } finally {
-        if (port) {
+        if (port || probes.length) {
             try { await iperfAgentCall(base, token, '/api/iperf/agent/cleanup', { port }); } catch (e) { /* ignore */ }
         }
         try { sh('sudo', ['pkill', '-f', `iperf3 -c ${target}`]); } catch (e) { /* ignore */ }
@@ -3701,6 +3839,38 @@ app.post('/api/diag/iperf', checkAuth, requireAdmin, async (req, res) => {
     } catch (e) {
         res.status(500).json({ error: e.message || 'Ошибка iperf3' });
     }
+});
+
+// Проверка TCP-доступности порта с этой панели (диагностика фаервола).
+app.post('/api/diag/tcp-probe', checkAuth, requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const host = String(body.host || '').trim();
+    const port = Number(body.port) || 0;
+    if (!host || !isPort(port)) return res.status(400).json({ error: 'Нужны host и port' });
+    const result = await tcpProbe(host, port, Math.max(1000, Math.min(15000, Number(body.timeout) || 5000)));
+    res.json({ success: true, host, port, result });
+});
+
+// Состояние iperf-агента на этой панели (для отладки ответной стороны).
+app.get('/api/diag/iperf/agent', checkAuth, requireAdmin, (req, res) => {
+    const run = iperfRunRead();
+    const items = run && Array.isArray(run.items) ? run.items : [];
+    res.json({
+        success: true,
+        installed: !!iperfVersion(),
+        version: iperfVersion(),
+        ufwActive: iperfUfwActive(),
+        allowedPorts: iperfUfwTcpPorts(),
+        running: !!run,
+        expiresAt: run ? run.expiresAt : 0,
+        agents: iperfAgentsRead().map(a => ({ id: a.id, label: a.label, peerIp: a.peerIp, expiresAt: a.expiresAt })),
+        ports: items.map(it => ({
+            port: it.port,
+            rule: it.rule,
+            listening: iperfPortBusy(it.port),
+            log: String(readTextSafe(it.log) || '').trim().split(/\r?\n/).slice(-6).join('\n')
+        }))
+    });
 });
 
 app.post('/api/cascade/balance/capacity', checkAuth, requireAdmin, (req, res) => {
