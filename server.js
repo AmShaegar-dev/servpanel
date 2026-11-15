@@ -3542,6 +3542,11 @@ if [ -s "$RU_ZONE" ]; then
     ipset destroy ru_tmp
 fi
 
+# Старый учёт обычного каскада не должен перехватывать клиентов до политики.
+iptables -t mangle -D PREROUTING -j AWG_SPLIT 2>/dev/null || true
+iptables -t mangle -F AWG_SPLIT 2>/dev/null || true
+iptables -t mangle -X AWG_SPLIT 2>/dev/null || true
+
 # Не чистим рабочие правила, если у клиентского интерфейса ещё нет IPv4
 # (например, awg0 поднимается после старта панели).
 VALID_IFACES=0
