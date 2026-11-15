@@ -7007,6 +7007,16 @@ app.get('/api/cascade/proxy', checkAuth, (req, res) => {
     });
 });
 
+app.post('/api/cascade/proxy/sync', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const result = syncProxyCascadeExit(true);
+        auditLog(req, `Каскад: синхронизация прокси через ${result.iface || '—'}`);
+        res.json({ success: true, ...result });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось синхронизировать прокси: ' + (e.message || String(e)) });
+    }
+});
+
 app.post('/api/cascade/proxy', checkAuth, requireAdmin, async (req, res) => {
     const enabled = !!(req.body && req.body.enabled);
     if (!fs.existsSync(ROUTING_SCRIPT)) {

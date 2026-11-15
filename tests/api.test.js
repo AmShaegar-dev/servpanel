@@ -1627,6 +1627,19 @@ test('Балансировка: скрипт содержит выходы, ме
     if (!syntax.error) assert.equal(syntax.status, 0, syntax.stderr);
 });
 
+test('Балансировка: MTProto-прокси идёт через первый живой выход', () => {
+    const exits = [
+        { id: 'primary', name: 'EU-1', iface: 'awg1', index: 0, healthy: false, endpoint: '198.51.100.10:3977' },
+        { id: 'b2', name: 'EU-2', iface: 'awg2', index: 1, healthy: true, endpoint: '198.51.100.20:3977' }
+    ];
+    const script = internals.cascadeBalanceScript(['awg0'], [], exits, {});
+    assert.match(script, /^EXIT_IFS=\("awg2"\)$/m);
+    assert.match(script, /^EXIT_MARKS=\("0x2002"\)$/m);
+    assert.match(script, /^AWG1_IF="\$\{EXIT_IFS\[0\]\}"$/m);
+    assert.match(script, /^FWMARK="\$\{EXIT_MARKS\[0\]\}"$/m);
+    assert.match(script, /proxy-cascade\.enabled/);
+});
+
 test('выход закрывает доступ', async () => {
     await request('/api/logout', { method: 'POST' });
     const r = await request('/api/stats');
