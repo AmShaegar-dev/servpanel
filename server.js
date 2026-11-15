@@ -3544,10 +3544,10 @@ fi
 
 # Чистим только свои цепочки; чужие правила не трогаем.
 iptables -t mangle -D PREROUTING -j AWG_POLICY 2>/dev/null || true
-iptables -t mangle -N AWG_POLICY -exist
+iptables -t mangle -N AWG_POLICY 2>/dev/null || true
 iptables -t mangle -F AWG_POLICY
-iptables -t mangle -N AWG_BALANCE_RU -exist
-iptables -t mangle -N AWG_BALANCE_EXITS -exist
+iptables -t mangle -N AWG_BALANCE_RU 2>/dev/null || true
+iptables -t mangle -N AWG_BALANCE_EXITS 2>/dev/null || true
 if [ ! -f "$ACCOUNTING_MARK" ]; then
     iptables -t mangle -F AWG_BALANCE_RU
     iptables -t mangle -F AWG_BALANCE_EXITS
@@ -5306,7 +5306,9 @@ echo "OK: маршруты каскада применены ($(date '+%Y-%m-%d 
 function cascadeScriptIfaces() {
     const script = readTextSafe(ROUTING_SCRIPT);
     const m = script.match(/^CASC_IFACES=\(([^)]*)\)/m) || script.match(/^CLIENT_IFACES="([^"]*)"/m);
-    return m ? m[1].split(/\s+/).filter(Boolean) : ['awg0'];
+    return m
+        ? m[1].replace(/["']/g, '').split(/\s+/).filter(Boolean)
+        : ['awg0'];
 }
 
 function cascadeScriptExtraNets() {
@@ -5389,6 +5391,13 @@ async function cascadeBalanceApply() {
             detail += '\n' + [e2.stdout, e2.stderr, e2.message].map(x => String(x || '').trim()).filter(Boolean).join('\n');
         }
         try { writeRootFile('/root/awg/balance-error.log', detail, '0600'); } catch (err) { /* ignore */ }
+        // Не оставляем каскад без маршрутов: возвращаем обычный режим.
+        try {
+            cascadeBalanceCleanup();
+            await installRouting(ifaces, extra);
+        } catch (e3) {
+            detail += '\nrollback: ' + (e3.message || String(e3));
+        }
         throw new Error(detail.split('\n').slice(-12).join('\n'));
     }
     cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments });
