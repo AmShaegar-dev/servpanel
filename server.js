@@ -2443,7 +2443,8 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             source = 'split';
             lastTrafficSplit = { total: clientTotal, tunnel, direct, blocked, exits: exitTotals };
             saveTrafficSplitCache();
-        } else if (lastTrafficSplit && lastTrafficSplit.total > 0) {
+        } else if (lastTrafficSplit && lastTrafficSplit.total > 0 &&
+            !(balanceMode && !Array.isArray(lastTrafficSplit.exits))) {
             // Счётчики пересозданы вместе с правилами. Не показываем ложные 100% EU,
             // а масштабируем последние известные доли на текущий трафик.
             const prevTotal = lastTrafficSplit.total;
