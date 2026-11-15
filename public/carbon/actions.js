@@ -792,13 +792,15 @@ async function carbonClientRename(name) {
   const client = (carbon.clients || []).find(c => c && c.name === name) || {};
   const balance = cascade && cascade.balance;
   const balanceMode = !!(balance && balance.mode === 'balance');
+  const effectiveExit = balance && balance.assignments && balance.assignments[client.ip];
+  const effectiveName = ((balance && balance.exits) || []).find(e => e.id === effectiveExit);
   const exitOptions = balanceMode
-    ? [{ value: 'balance', label: 'Балансировка (авто)' }].concat((balance.exits || []).map(e => ({
+    ? [{ value: 'balance', label: 'Балансировка (авто)' + (effectiveName ? ' — сейчас ' + (effectiveName.name || effectiveName.id) : '') }].concat((balance.exits || []).map(e => ({
       value: e.id,
       label: (e.name || e.id) + (e.healthy ? '' : ' · нет связи')
     })))
     : [];
-  const exitValue = (balance && balance.assignments && balance.assignments[client.ip]) || 'balance';
+  const exitValue = (balance && balance.manual && balance.manual[client.ip]) || 'balance';
   const used = Number(lim.used_bytes) || 0;
   const quota = Number(lim.quota_bytes) || 0;
   const isoText = iso.mode === 'isolated' ? ' · изолирован' : iso.mode === 'open-plus' ? ' · Открытый+' : iso.mode === 'open' ? ' · Открытый' : '';

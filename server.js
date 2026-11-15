@@ -2273,7 +2273,9 @@ function attachClientSplit(clients) {
                 exitNames[e.id] = e.name;
             });
         }
-        const assigned = cascadeBalanceRead().assignments;
+        const balanceState = cascadeBalanceRead();
+        const assigned = balanceState.assignments;
+        const manual = balanceState.manual;
         return clients.map(c => {
             const ip = String(c.ip || '');
             const exitBytes = {};
@@ -2297,7 +2299,9 @@ function attachClientSplit(clients) {
                 split_exits: exitBytes,
                 split_exit_labels: exitLabels,
                 exit_id: exitId,
-                exit_name: exitNames[exitId] || ''
+                exit_name: exitNames[exitId] || '',
+                exit_mode: balance ? (manual[ip] && assigned[ip] === manual[ip] ? 'manual' : 'auto') : '',
+                exit_choice: manual[ip] || ''
             };
         });
     } catch (e) { return clients; }
@@ -3295,6 +3299,7 @@ function cascadeBalanceRead() {
     return {
         mode: j && j.mode === 'balance' ? 'balance' : 'classic',
         assignments: j && j.assignments && typeof j.assignments === 'object' ? j.assignments : {},
+        manual: j && j.manual && typeof j.manual === 'object' ? j.manual : {},
         updatedAt: (j && j.updatedAt) || 0
     };
 }
@@ -3303,6 +3308,7 @@ function cascadeBalanceWrite(value) {
     const data = {
         mode: value && value.mode === 'balance' ? 'balance' : 'classic',
         assignments: value && value.assignments && typeof value.assignments === 'object' ? value.assignments : {},
+        manual: value && value.manual && typeof value.manual === 'object' ? value.manual : {},
         updatedAt: Date.now()
     };
     writeJson(CASCADE_BALANCE_FILE, data, 0o600);
@@ -3398,20 +3404,22 @@ function cascadeClientIps() {
 
 // Распределение: сохраняем выбор пользователя, пока выход жив; новых и
 // клиентов упавшего выхода отправляем на наименее загруженный выход.
-function cascadeBalanceAssignments(exits, ips, current) {
+function cascadeBalanceAssignments(exits, ips, current, manual) {
     const pool = (exits || []).filter(e => e.healthy);
     const use = pool.length ? pool : (exits || []);
     const counts = {};
     use.forEach(e => { counts[e.id] = 0; });
     const assignments = {};
-    for (const ip of ips || []) {
-        const chosen = current && current[ip];
+    const manualMap = manual && typeof manual === 'object' ? manual : {};
+    const sorted = [...new Set((ips || []).filter(Boolean))].sort();
+    for (const ip of sorted) {
+        const chosen = manualMap[ip];
         if (chosen && use.some(e => e.id === chosen)) {
             assignments[ip] = chosen;
             counts[chosen] = (counts[chosen] || 0) + 1;
         }
     }
-    for (const ip of ips || []) {
+    for (const ip of sorted) {
         if (assignments[ip] || !use.length) continue;
         const next = use.slice().sort((a, b) =>
             (counts[a.id] - counts[b.id]) || String(a.name).localeCompare(String(b.name))
@@ -3419,14 +3427,14 @@ function cascadeBalanceAssignments(exits, ips, current) {
         assignments[ip] = next.id;
         counts[next.id] = (counts[next.id] || 0) + 1;
     }
-    return { assignments, counts };
+    return { assignments, counts, manual: manualMap };
 }
 
 function cascadeBalanceStatus(force) {
     const state = cascadeBalanceRead();
     const exits = cascadeExitSnapshot(force);
     const ips = cascadeClientIps();
-    const plan = cascadeBalanceAssignments(exits, ips, state.assignments);
+    const plan = cascadeBalanceAssignments(exits, ips, state.assignments, state.manual);
     return {
         mode: state.mode,
         enabled: state.mode === 'balance',
@@ -3444,6 +3452,7 @@ function cascadeBalanceStatus(force) {
             clients: plan.counts[e.id] || 0
         })),
         assignments: plan.assignments,
+        manual: plan.manual,
         updatedAt: state.updatedAt
     };
 }
@@ -4009,7 +4018,7 @@ async function cascadeBalanceTick() {
     try {
         const state = cascadeBalanceRead();
         const exits = cascadeExitSnapshot(true);
-        const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments);
+        const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments, state.manual);
         const healthy = exits.filter(e => e.healthy).map(e => e.id).join(',');
         const policy = String(shTry('iptables', ['-t', 'mangle', '-S', 'AWG_POLICY']) || '');
         const sig = healthy + '|' + JSON.stringify(plan.assignments) + (policy.includes('-A AWG_POLICY') ? '' : '|no-policy');
@@ -5370,8 +5379,8 @@ async function cascadeBalanceReapply(clientsOnly = false) {
     if (state.mode !== 'balance') throw new Error('Балансировка не включена');
     const exits = cascadeExitSnapshot(true);
     if (!exits.length) throw new Error('Нет выходов каскада');
-    const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments);
-    cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments });
+    const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments, state.manual);
+    cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments, manual: state.manual });
     const script = cascadeBalanceScript(cascadeScriptIfaces(), cascadeScriptExtraNets(), exits, plan.assignments);
     writeRootFile(ROUTING_SCRIPT, script, '0755');
     // Для смены выхода клиента не скачиваем RU-список заново: это делает
@@ -5426,7 +5435,8 @@ async function cascadeBalanceApply() {
     await cascadeBalancePrepareBackupExits();
     try { teardownRouting(); } catch (e) { /* ignore */ }
     const exits = cascadeExitSnapshot(true);
-    const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), {});
+    const state = cascadeBalanceRead();
+    const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments, state.manual);
     const script = cascadeBalanceScript(ifaces, extra, exits, plan.assignments);
     writeRootFile(ROUTING_SCRIPT, script, '0755');
     writeRootFile('/etc/systemd/system/awg-routing.service', ROUTING_SERVICE, '0644');
@@ -5459,7 +5469,7 @@ async function cascadeBalanceApply() {
         } catch (e3) { /* ignore */ }
         throw new Error('Скрипт балансировки не добавил правила AWG_POLICY — каскад возвращён в обычный режим');
     }
-    cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments });
+    cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments, manual: state.manual });
     resetTrafficSplitCache();
     cascadeBalanceSig = exits.filter(e => e.healthy).map(e => e.id).join(',') + '|' + JSON.stringify(plan.assignments);
     sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
@@ -5488,9 +5498,9 @@ function cascadeBalanceSwitchClient(ip, exitId) {
     if (exitId && exitId !== 'balance' && !exits.some(e => e.id === exitId)) {
         throw new Error('Неизвестный выход');
     }
-    if (exitId === 'balance' || !exitId) delete state.assignments[ip];
-    else state.assignments[ip] = exitId;
-    cascadeBalanceWrite({ mode: state.mode, assignments: state.assignments });
+    if (exitId === 'balance' || !exitId) delete state.manual[ip];
+    else state.manual[ip] = exitId;
+    cascadeBalanceWrite({ mode: state.mode, assignments: state.assignments, manual: state.manual });
     cascadeBalanceSig = '';
     return cascadeBalanceReapply(true);
 }

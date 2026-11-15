@@ -769,7 +769,7 @@ function realClientRows() {
       : '<span class="muted">0 B/s</span>';
     return `<tr data-name="${escHtml(c.name)}" data-ip="${escHtml(c.ip)}" data-speed="${totalSpeed}">
       <td class="idx-cell">${index + 1}</td>
-      <td class="name">${escHtml(c.name)}${c.exit_name ? `<span class="tag blue" style="margin-left:6px;font-size:8px;padding:2px 5px" title="Выход каскада">${escHtml(c.exit_name)}</span>` : ''}</td>
+      <td class="name">${escHtml(c.name)}${c.exit_name ? `<span class="tag blue" style="margin-left:6px;font-size:8px;padding:2px 5px" title="Выход каскада">${c.exit_mode === 'auto' ? 'Авто → ' : c.exit_mode === 'manual' ? 'Вручную → ' : ''}${escHtml(c.exit_name)}</span>` : ''}</td>
       <td class="mono">${escHtml(c.ip || '—')}</td>
       <td>${escHtml(clientStateText(c, online))}</td>
       <td>${isoCell}</td>

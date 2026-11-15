@@ -1588,12 +1588,16 @@ test('Балансировка: клиенты распределяются по
     assert.equal(plan.assignments['10.8.0.2'], 'primary');
     assert.equal(plan.assignments['10.8.0.3'], 'b2');
 
-    const kept = internals.cascadeBalanceAssignments(exits, ['10.8.0.2'], { '10.8.0.2': 'b2' });
+    const kept = internals.cascadeBalanceAssignments(exits, ['10.8.0.2'], {}, { '10.8.0.2': 'b2' });
     assert.equal(kept.assignments['10.8.0.2'], 'b2');
+
+    const auto = internals.cascadeBalanceAssignments(exits, ['10.8.0.2'], { '10.8.0.2': 'b2' }, {});
+    assert.equal(auto.assignments['10.8.0.2'], 'primary');
 
     const failed = internals.cascadeBalanceAssignments(
         [{ ...exits[0], healthy: false }, exits[1]],
         ['10.8.0.2'],
+        {},
         { '10.8.0.2': 'primary' }
     );
     assert.equal(failed.assignments['10.8.0.2'], 'b2');
