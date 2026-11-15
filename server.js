@@ -5379,7 +5379,18 @@ async function cascadeBalanceApply() {
     writeRootFile('/etc/systemd/system/awg-routing.service', ROUTING_SERVICE, '0644');
     writeRootFile('/etc/systemd/system/awg-routing.timer', ROUTING_TIMER, '0644');
     sh('sudo', ['systemctl', 'daemon-reload']);
-    sh('sudo', [ROUTING_SCRIPT], { timeout: 180000 });
+    try {
+        sh('sudo', [ROUTING_SCRIPT], { timeout: 180000 });
+    } catch (e) {
+        let detail = [e.stdout, e.stderr, e.message].map(x => String(x || '').trim()).filter(Boolean).join('\n');
+        try {
+            sh('sudo', ['bash', '-x', ROUTING_SCRIPT], { timeout: 90000 });
+        } catch (e2) {
+            detail += '\n' + [e2.stdout, e2.stderr, e2.message].map(x => String(x || '').trim()).filter(Boolean).join('\n');
+        }
+        try { writeRootFile('/root/awg/balance-error.log', detail, '0600'); } catch (err) { /* ignore */ }
+        throw new Error(detail.split('\n').slice(-12).join('\n'));
+    }
     cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments });
     cascadeBalanceSig = exits.filter(e => e.healthy).map(e => e.id).join(',') + '|' + JSON.stringify(plan.assignments);
     sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
@@ -6954,6 +6965,16 @@ app.post('/api/cascade/failover/check', checkAuth, requireAdmin, async (req, res
 app.get('/api/cascade/balance', checkAuth, (req, res) => {
     try { res.json({ success: true, ...cascadeBalanceStatus(false) }); }
     catch (e) { res.status(500).json({ error: e.message || 'Ошибка чтения балансировки' }); }
+});
+
+app.get('/api/cascade/script', checkAuth, requireAdmin, (req, res) => {
+    try {
+        res.json({
+            file: ROUTING_SCRIPT,
+            content: readTextSafe(ROUTING_SCRIPT).slice(0, 256 * 1024),
+            error: readTextSafe('/root/awg/balance-error.log').slice(-8000)
+        });
+    } catch (e) { res.status(500).json({ error: e.message || 'Ошибка чтения скрипта' }); }
 });
 
 app.post('/api/cascade/balance/mode', checkAuth, requireAdmin, async (req, res) => {
