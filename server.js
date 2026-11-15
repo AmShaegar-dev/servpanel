@@ -2219,8 +2219,8 @@ function ensureSplitAccounting(clients, force) {
 }
 
 function readSplitCounters() {
-    const ru = {}, eu = {};
-    if (TEST_MODE) return { ru, eu };
+    const ru = {}, eu = {}, marks = {};
+    if (TEST_MODE) return { ru, eu, marks };
     try {
         const out = rootShTry('bash', ['-c',
             "iptables-save -c -t mangle 2>/dev/null || /usr/sbin/iptables-save -c -t mangle 2>/dev/null || true"
@@ -2228,24 +2228,73 @@ function readSplitCounters() {
         for (const raw of String(out || '').split('\n')) {
             const line = raw.trim();
             const m = /^\[(\d+):(\d+)\]\s+-A\s+AWG_SPLIT\s+-s\s+([0-9.]+)(?:\/32)?\b/.exec(line);
-            if (!m) continue;
-            const bytes = Number(m[2]) || 0;
-            const ip = m[3];
-            if (line.includes('--match-set ru dst')) ru[ip] = (ru[ip] || 0) + bytes;
-            else eu[ip] = (eu[ip] || 0) + bytes;
+            if (m) {
+                const bytes = Number(m[2]) || 0;
+                const ip = m[3];
+                if (line.includes('--match-set ru dst')) ru[ip] = (ru[ip] || 0) + bytes;
+                else eu[ip] = (eu[ip] || 0) + bytes;
+                continue;
+            }
+            const bm = /^\[(\d+):(\d+)\]\s+-A\s+AWG_BALANCE_EXITS\s+-s\s+([0-9.]+)(?:\/32)?\s+-m\s+mark\s+--mark\s+(0x[0-9a-f]+)\s+-j\s+RETURN/.exec(line);
+            if (bm) {
+                const bytes = Number(bm[2]) || 0;
+                const ip = bm[3];
+                const mark = bm[4].toLowerCase();
+                marks[mark] = marks[mark] || {};
+                marks[mark][ip] = (marks[mark][ip] || 0) + bytes;
+                continue;
+            }
+            const brm = /^\[(\d+):(\d+)\]\s+-A\s+AWG_BALANCE_RU\s+-s\s+([0-9.]+)(?:\/32)?\b/.exec(line);
+            if (brm && line.includes('--match-set ru dst')) {
+                const bytes = Number(brm[2]) || 0;
+                const ip = brm[3];
+                ru[ip] = (ru[ip] || 0) + bytes;
+            }
         }
     } catch (e) { /* ignore */ }
-    return { ru, eu };
+    return { ru, eu, marks };
 }
 
 function attachClientSplit(clients) {
     if (TEST_MODE || cascadeRole() !== 'ru' || !existingCascadeConf()) return clients;
     try {
-        ensureSplitAccounting(clients);
+        const balance = cascadeBalanceEnabled();
+        if (!balance) ensureSplitAccounting(clients);
         const split = readSplitCounters();
+        const byMark = {};
+        const exitNames = {};
+        if (balance) {
+            cascadeExitList().forEach(e => {
+                byMark[cascadeExitMark(e.index)] = e;
+                exitNames[e.id] = e.name;
+            });
+        }
+        const assigned = cascadeBalanceRead().assignments;
         return clients.map(c => {
             const ip = String(c.ip || '');
-            return { ...c, split_cascade: split.eu[ip] || 0, split_direct: split.ru[ip] || 0 };
+            const exitBytes = {};
+            if (balance) {
+                for (const [mark, map] of Object.entries(split.marks || {})) {
+                    const bytes = map[ip] || 0;
+                    if (!bytes) continue;
+                    const exit = byMark[mark];
+                    const id = exit ? exit.id : mark;
+                    exitBytes[id] = (exitBytes[id] || 0) + bytes;
+                }
+            }
+            const exitSum = Object.values(exitBytes).reduce((a, b) => a + b, 0);
+            const exitId = assigned[ip] || '';
+            const exitLabels = {};
+            for (const id of Object.keys(exitBytes)) exitLabels[id] = exitNames[id] || id;
+            return {
+                ...c,
+                split_cascade: balance ? (exitSum || split.eu[ip] || 0) : (split.eu[ip] || 0),
+                split_direct: split.ru[ip] || 0,
+                split_exits: exitBytes,
+                split_exit_labels: exitLabels,
+                exit_id: exitId,
+                exit_name: exitNames[exitId] || ''
+            };
         });
     } catch (e) { return clients; }
 }
@@ -2348,10 +2397,26 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             }
             return res.json(payload);
         }
-        const mangle = readMangleSplit();
+        const balanceMode = cascadeBalanceEnabled();
+        const mangle = balanceMode ? { direct: 0, tunnel: 0, total: 0 } : readMangleSplit();
         let tunnel, direct, blocked, source;
         let splitTotals = null, splitCascade = 0, splitDirect = 0, splitTotal = 0;
-        if (mangle.total === 0) {
+        let exitTotals = [];
+        if (balanceMode) {
+            splitTotals = readSplitCounters();
+            const byMark = {};
+            cascadeExitList().forEach(e => { byMark[cascadeExitMark(e.index)] = e; });
+            const byId = {};
+            for (const [mark, map] of Object.entries(splitTotals.marks || {})) {
+                const exit = byMark[mark];
+                if (!exit) continue;
+                byId[exit.id] = (byId[exit.id] || 0) + Object.values(map).reduce((a, b) => a + b, 0);
+            }
+            exitTotals = cascadeExitList().map(e => ({ id: e.id, name: e.name, bytes: byId[e.id] || 0 }));
+            splitCascade = exitTotals.reduce((a, e) => a + e.bytes, 0);
+            splitDirect = Object.values(splitTotals.ru).reduce((a, b) => a + b, 0);
+            splitTotal = splitCascade + splitDirect;
+        } else if (mangle.total === 0) {
             splitTotals = readSplitCounters();
             splitCascade = Object.values(splitTotals.eu).reduce((a, b) => a + b, 0);
             splitDirect = Object.values(splitTotals.ru).reduce((a, b) => a + b, 0);
@@ -2368,10 +2433,11 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             const k = clientTotal > 0 ? clientTotal / splitTotal : 1;
             tunnel = Math.round(splitCascade * k);
             direct = Math.round(splitDirect * k);
+            exitTotals = exitTotals.map(e => ({ ...e, bytes: Math.round(e.bytes * k) }));
             const blockedScaled = Math.round(blockedRaw * k);
             blocked = Math.min(blockedScaled, Math.max(0, clientTotal - tunnel - direct));
             source = 'split';
-            lastTrafficSplit = { total: clientTotal, tunnel, direct, blocked };
+            lastTrafficSplit = { total: clientTotal, tunnel, direct, blocked, exits: exitTotals };
             saveTrafficSplitCache();
         } else if (lastTrafficSplit && lastTrafficSplit.total > 0) {
             // Счётчики пересозданы вместе с правилами. Не показываем ложные 100% EU,
@@ -2381,6 +2447,9 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             tunnel = Math.round(lastTrafficSplit.tunnel * k);
             direct = Math.round(lastTrafficSplit.direct * k);
             blocked = Math.round(lastTrafficSplit.blocked * k);
+            if (Array.isArray(lastTrafficSplit.exits)) {
+                exitTotals = lastTrafficSplit.exits.map(e => ({ ...e, bytes: Math.round((Number(e.bytes) || 0) * k) }));
+            }
             source = 'cached';
         } else {
             tunnel = 0;
@@ -2395,6 +2464,12 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             blocked = Math.max(0, clientTotal - tunnel - direct);
         }
         const total = tunnel + direct + blocked;
+        if (exitTotals.length) {
+            const sumExits = exitTotals.reduce((a, e) => a + e.bytes, 0);
+            if (sumExits > 0 && tunnel > 0 && sumExits !== tunnel) {
+                exitTotals = exitTotals.map(e => ({ ...e, bytes: Math.round(e.bytes * tunnel / sumExits) }));
+            }
+        }
         if (source === 'mangle' && total > 0) {
             lastTrafficSplit = { tunnel, direct, blocked, total, at: Date.now() };
             saveTrafficSplitCache();
@@ -2405,6 +2480,7 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             total, tunnel, direct, blocked,
             clientTotal, tunnelRaw, blockedRaw,
             source,
+            exits: exitTotals,
             mangle,
             interfaces: {
                 client: clientIface ? { rx: clientIface.rx, tx: clientIface.tx } : null,
@@ -3203,6 +3279,366 @@ function cascadeBackupsWrite(list) {
     writeJson(CASCADE_BACKUPS_FILE, { backups: list }, 0o600);
 }
 
+// ---------------------------------------------------------------------------
+// Режим балансировки каскада: несколько выходов и распределение клиентов.
+// ---------------------------------------------------------------------------
+const CASCADE_BALANCE_FILE = path.join(DATA_DIR, '.cascade_balance.json');
+
+function cascadeBalanceRead() {
+    const j = readJson(CASCADE_BALANCE_FILE, {});
+    return {
+        mode: j && j.mode === 'balance' ? 'balance' : 'classic',
+        assignments: j && j.assignments && typeof j.assignments === 'object' ? j.assignments : {},
+        updatedAt: (j && j.updatedAt) || 0
+    };
+}
+
+function cascadeBalanceWrite(value) {
+    const data = {
+        mode: value && value.mode === 'balance' ? 'balance' : 'classic',
+        assignments: value && value.assignments && typeof value.assignments === 'object' ? value.assignments : {},
+        updatedAt: Date.now()
+    };
+    writeJson(CASCADE_BALANCE_FILE, data, 0o600);
+    return data;
+}
+
+function cascadeBalanceEnabled() {
+    return cascadeBalanceRead().mode === 'balance';
+}
+
+function cascadeExitMark(index) {
+    return '0x' + (0x2001 + Number(index || 0)).toString(16);
+}
+
+function cascadeExitTable(index) {
+    return 2001 + Number(index || 0);
+}
+
+function cascadeExitList() {
+    const conf = existingCascadeConf();
+    const backups = cascadeBackupsRead();
+    const list = [];
+    if (conf) {
+        list.push({
+            id: 'primary',
+            name: 'EU-1',
+            iface: 'awg1',
+            index: 0,
+            endpoint: cascadeEndpointFromText(readTextSafe(conf)),
+            backup: null
+        });
+    }
+    backups.forEach((b, i) => {
+        list.push({
+            id: b.id,
+            name: 'EU-' + (i + 2),
+            iface: 'awg' + (i + 2),
+            index: i + 1,
+            endpoint: b.endpoint,
+            backup: b
+        });
+    });
+    return list;
+}
+
+function cascadeExitHealth(iface) {
+    if (TEST_MODE || NO_SYSTEM()) return { active: false, healthy: false, handshakeAgo: null, traffic: 0 };
+    let active = false;
+    try { active = isActive('awg-quick@' + iface) === 'active'; } catch (e) { /* ignore */ }
+    let handshakeAgo = null;
+    try {
+        const hs = shTry('sudo', ['awg', 'show', iface, 'latest-handshakes']).trim();
+        let latest = 0;
+        for (const line of hs.split('\n')) {
+            const ts = parseInt((line.split('\t')[1] || '0'), 10) || 0;
+            if (ts > latest) latest = ts;
+        }
+        if (latest > 0) handshakeAgo = Math.floor(Date.now() / 1000) - latest;
+    } catch (e) { /* ignore */ }
+    let traffic = 0;
+    try {
+        const tr = shTry('sudo', ['awg', 'show', iface, 'transfer']).trim();
+        for (const line of tr.split('\n')) {
+            const parts = line.split('\t');
+            traffic += (parseInt(parts[1], 10) || 0) + (parseInt(parts[2], 10) || 0);
+        }
+    } catch (e) { /* ignore */ }
+    return {
+        active,
+        healthy: active && handshakeAgo !== null && handshakeAgo < 180,
+        handshakeAgo,
+        traffic
+    };
+}
+
+let cascadeExitCache = { at: 0, exits: [] };
+function cascadeExitSnapshot(force) {
+    if (!force && Date.now() - cascadeExitCache.at < 5000) return cascadeExitCache.exits;
+    const exits = cascadeExitList().map(e => ({ ...e, ...cascadeExitHealth(e.iface) }));
+    cascadeExitCache = { at: Date.now(), exits };
+    return exits;
+}
+
+function cascadeClientIps() {
+    if (TEST_MODE || NO_SYSTEM()) return [];
+    try {
+        const source = Array.isArray(lastClientsSnapshot) && lastClientsSnapshot.length
+            ? lastClientsSnapshot
+            : JSON.parse(sh('sudo', ['bash', MANAGE, 'list', '--json'], { maxBuffer: 16 * 1024 * 1024 }));
+        return [...new Set((Array.isArray(source) ? source : []).map(c => String(c.ip || '')).filter(ip => IPV4_RE.test(ip)))];
+    } catch (e) { return []; }
+}
+
+// Распределение: сохраняем выбор пользователя, пока выход жив; новых и
+// клиентов упавшего выхода отправляем на наименее загруженный выход.
+function cascadeBalanceAssignments(exits, ips, current) {
+    const pool = (exits || []).filter(e => e.healthy);
+    const use = pool.length ? pool : (exits || []);
+    const counts = {};
+    use.forEach(e => { counts[e.id] = 0; });
+    const assignments = {};
+    for (const ip of ips || []) {
+        const chosen = current && current[ip];
+        if (chosen && use.some(e => e.id === chosen)) {
+            assignments[ip] = chosen;
+            counts[chosen] = (counts[chosen] || 0) + 1;
+        }
+    }
+    for (const ip of ips || []) {
+        if (assignments[ip] || !use.length) continue;
+        const next = use.slice().sort((a, b) =>
+            (counts[a.id] - counts[b.id]) || String(a.name).localeCompare(String(b.name))
+        )[0];
+        assignments[ip] = next.id;
+        counts[next.id] = (counts[next.id] || 0) + 1;
+    }
+    return { assignments, counts };
+}
+
+function cascadeBalanceStatus(force) {
+    const state = cascadeBalanceRead();
+    const exits = cascadeExitSnapshot(force);
+    const ips = cascadeClientIps();
+    const plan = cascadeBalanceAssignments(exits, ips, state.assignments);
+    return {
+        mode: state.mode,
+        enabled: state.mode === 'balance',
+        exits: exits.map(e => ({
+            id: e.id,
+            name: e.name,
+            iface: e.iface,
+            endpoint: e.endpoint,
+            mark: cascadeExitMark(e.index),
+            table: cascadeExitTable(e.index),
+            active: !!e.active,
+            healthy: !!e.healthy,
+            handshakeAgo: e.handshakeAgo,
+            traffic: e.traffic || 0,
+            clients: plan.counts[e.id] || 0
+        })),
+        assignments: plan.assignments,
+        updatedAt: state.updatedAt
+    };
+}
+
+function forceCascadeMtu(text) {
+    const lines = String(text || '').split(/\r?\n/).filter(l => !/^\s*MTU\s*=/i.test(l));
+    const idx = lines.findIndex(l => /^\s*\[Interface\]\s*$/i.test(l));
+    if (idx >= 0) lines.splice(idx + 1, 0, 'MTU = 1200');
+    return lines.join('\n').trim() + '\n';
+}
+
+async function cascadeBalancePrepareBackupExits() {
+    const exits = cascadeExitList().filter(e => e.backup);
+    for (const exit of exits) {
+        const content = forceCascadeMtu(prepareCascadeBackupConf(cascadeDecrypt(exit.backup.config_enc)));
+        writeRootFile(path.join(AWG_CONF_DIR, exit.iface + '.conf'), content, '0600');
+        sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@' + exit.iface], { timeout: 60000 });
+        await new Promise(r => setTimeout(r, 800));
+    }
+    if (exits.length) await new Promise(r => setTimeout(r, 2500));
+}
+
+function cascadeBalanceScript(ifaces, extraRuNets, exits, assignments) {
+    const list = (ifaces || []).filter(Boolean);
+    const active = (exits || []).filter(e => e.healthy);
+    const use = active.length ? active : (exits || []).slice(0, 1);
+    if (!list.length) throw new Error('Не выбраны клиентские интерфейсы');
+    if (!use.length) throw new Error('Нет доступных выходов');
+    const indexOf = id => Math.max(0, use.findIndex(e => e.id === id));
+    const defaultExit = use.slice().sort((a, b) =>
+        (assignments ? Object.values(assignments).filter(x => x === a.id).length : 0) -
+        (assignments ? Object.values(assignments).filter(x => x === b.id).length : 0)
+    )[0] || use[0];
+    const clientIps = Object.keys(assignments || {});
+    const clientIndexes = clientIps.map(ip => indexOf(assignments[ip]));
+    const extra = (extraRuNets || []).join('\n');
+    const bashArray = arr => arr.map(v => `"${String(v).replace(/"/g, '\\"')}"`).join(' ');
+    return `#!/bin/bash
+# Каскад RU -> EU: несколько выходов и балансировка. Сгенерировано панелью.
+set -euo pipefail
+
+CASC_IFACES=(${bashArray(list)})
+EXIT_IFS=(${bashArray(use.map(e => e.iface))})
+EXIT_MARKS=(${bashArray(use.map(e => cascadeExitMark(e.index)))})
+EXIT_TABLES=(${bashArray(use.map(e => String(cascadeExitTable(e.index))))})
+EXIT_ENDPOINTS=(${bashArray(use.map(e => e.endpoint || ''))})
+CLIENT_IPS=(${bashArray(clientIps)})
+CLIENT_EXITS=(${bashArray(clientIndexes.map(String))})
+DEFAULT_EXIT=${Math.max(0, use.indexOf(defaultExit))}
+RU_ZONE_URL="https://www.ipdeny.com/ipblocks/data/aggregated/ru-aggregated.zone"
+RU_ZONE_FALLBACK_URL="https://raw.githubusercontent.com/bivlked/amneziawg-installer/main/cascade/ru.zone"
+EXTRA_RU_NETS="${extra}"
+AWG_DIR="/root/awg"
+RU_ZONE="$AWG_DIR/ru.zone"
+ACCOUNTING_MARK="$AWG_DIR/.balance-accounting"
+mkdir -p "$AWG_DIR"
+exec 9>"$AWG_DIR/awg-routing.lock"
+flock -w 300 9 || exit 1
+trap 'rm -f "$RU_ZONE.tmp"' EXIT
+
+if [ "\${#CASC_IFACES[@]}" -eq 0 ]; then
+    echo "ERROR: не выбраны клиентские интерфейсы."
+    exit 1
+fi
+if [ "\${#EXIT_IFS[@]}" -eq 0 ]; then
+    echo "ERROR: нет доступных выходов."
+    exit 1
+fi
+
+# IPv6 в каскад не заворачивается.
+if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo 1)" = "0" ]; then
+    if command -v ip6tables >/dev/null 2>&1; then
+        ip6tables -N SERVPANEL_V6 2>/dev/null || true
+        ip6tables -F SERVPANEL_V6 2>/dev/null || true
+        for IFACE in "\${CASC_IFACES[@]}"; do
+            [ -n "$IFACE" ] && ip6tables -A SERVPANEL_V6 -i "$IFACE" -j DROP 2>/dev/null || true
+        done
+        ip6tables -C FORWARD -j SERVPANEL_V6 2>/dev/null || ip6tables -I FORWARD -j SERVPANEL_V6 2>/dev/null || true
+    fi
+fi
+
+fetch_ru_zone() {
+    curl -fsS --retry 2 --connect-timeout 10 --max-time 60 -o "$RU_ZONE.tmp" "$1" || return 1
+    local valid
+    valid=$(grep -cE '^[0-9]{1,3}([.][0-9]{1,3}){3}(/[0-9]{1,2})?$' "$RU_ZONE.tmp" || true)
+    [ "$valid" -ge 1000 ]
+}
+if fetch_ru_zone "$RU_ZONE_URL"; then
+    mv -f "$RU_ZONE.tmp" "$RU_ZONE"
+elif fetch_ru_zone "$RU_ZONE_FALLBACK_URL"; then
+    mv -f "$RU_ZONE.tmp" "$RU_ZONE"
+fi
+if [ -s "$RU_ZONE" ]; then
+    ipset create ru hash:net -exist
+    ipset create ru_tmp hash:net -exist
+    ipset flush ru_tmp
+    while read -r net; do [ -n "$net" ] && ipset add ru_tmp "$net" -exist; done < "$RU_ZONE"
+    if [ -n "$EXTRA_RU_NETS" ]; then
+        while read -r net; do [ -n "$net" ] && ipset add ru_tmp "$net" -exist; done <<< "$EXTRA_RU_NETS"
+    fi
+    ipset swap ru_tmp ru
+    ipset destroy ru_tmp
+fi
+
+# Чистим только свои цепочки; чужие правила не трогаем.
+iptables -t mangle -D PREROUTING -j AWG_POLICY 2>/dev/null || true
+iptables -t mangle -N AWG_POLICY -exist
+iptables -t mangle -F AWG_POLICY
+iptables -t mangle -N AWG_BALANCE_RU -exist
+iptables -t mangle -N AWG_BALANCE_EXITS -exist
+if [ ! -f "$ACCOUNTING_MARK" ]; then
+    iptables -t mangle -F AWG_BALANCE_RU
+    iptables -t mangle -F AWG_BALANCE_EXITS
+    touch "$ACCOUNTING_MARK"
+fi
+
+for idx in "\${!EXIT_IFS[@]}"; do
+    IFACE="\${EXIT_IFS[$idx]}"
+    MARK="\${EXIT_MARKS[$idx]}"
+    TABLE="\${EXIT_TABLES[$idx]}"
+    EP="\${EXIT_ENDPOINTS[$idx]}"
+    ip rule del fwmark "$MARK" table "$TABLE" 2>/dev/null || true
+    ip route flush table "$TABLE" 2>/dev/null || true
+    ip route replace default dev "$IFACE" table "$TABLE"
+    ip route replace blackhole default table "$TABLE" metric 1000
+    ip rule add fwmark "$MARK" table "$TABLE" priority $((10000 + idx))
+    EP_HOST="\${EP%%:*}"
+    if [ -n "$EP_HOST" ]; then
+        case "$EP_HOST" in
+            *[!0-9.]*) EP_HOST="$(getent ahostsv4 "$EP_HOST" 2>/dev/null | awk 'NR==1{print $1}')" ;;
+        esac
+        EP_ROUTE="$(ip -4 route get "$EP_HOST" 2>/dev/null | head -1 || true)"
+        WAN_IF="$(printf '%s' "$EP_ROUTE" | grep -oP '(^| )dev \\K\\S+' || true)"
+        WAN_GW="$(printf '%s' "$EP_ROUTE" | grep -oP '(^| )via \\K\\S+' || true)"
+        if [ -n "$EP_HOST" ] && [ -n "$WAN_IF" ] && [ "$WAN_IF" != "$IFACE" ]; then
+            if [ -n "$WAN_GW" ]; then
+                ip route replace "$EP_HOST" via "$WAN_GW" dev "$WAN_IF" onlink 2>/dev/null || true
+                ip route replace "$EP_HOST" via "$WAN_GW" dev "$WAN_IF" table "$TABLE" 2>/dev/null || true
+            else
+                ip route replace "$EP_HOST" dev "$WAN_IF" 2>/dev/null || true
+            fi
+        fi
+    fi
+    for CIFACE in "\${CASC_IFACES[@]}"; do
+        SUBNET=$(ip -o -f inet addr show "$CIFACE" 2>/dev/null | awk '{print $4}' | head -n 1 || true)
+        [ -n "$SUBNET" ] || continue
+        iptables -w 5 -t nat -D POSTROUTING -s "$SUBNET" -o "$IFACE" -j MASQUERADE 2>/dev/null || true
+        iptables -w 5 -t nat -A POSTROUTING -s "$SUBNET" -o "$IFACE" -j MASQUERADE
+        iptables -w 5 -t mangle -D FORWARD -o "$IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+        iptables -w 5 -t mangle -A FORWARD -o "$IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    done
+done
+
+# Учёт: RU-направления считаем отдельно, остальное — по метке выхода.
+for idx in "\${!CLIENT_IPS[@]}"; do
+    IP="\${CLIENT_IPS[$idx]}"
+    EXIT_IDX="\${CLIENT_EXITS[$idx]}"
+    MARK="\${EXIT_MARKS[$EXIT_IDX]}"
+    iptables -w 5 -t mangle -C AWG_BALANCE_RU -s "$IP" -m set --match-set ru dst -j RETURN 2>/dev/null || \\
+        iptables -w 5 -t mangle -A AWG_BALANCE_RU -s "$IP" -m set --match-set ru dst -j RETURN
+    iptables -w 5 -t mangle -C AWG_BALANCE_EXITS -s "$IP" -m mark --mark "$MARK" -j RETURN 2>/dev/null || \\
+        iptables -w 5 -t mangle -A AWG_BALANCE_EXITS -s "$IP" -m mark --mark "$MARK" -j RETURN
+done
+
+for CIFACE in "\${CASC_IFACES[@]}"; do
+    SUBNET=$(ip -o -f inet addr show "$CIFACE" 2>/dev/null | awk '{print $4}' | head -n 1 || true)
+    [ -n "$SUBNET" ] || continue
+    iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark
+    iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -j AWG_BALANCE_RU
+    iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$SUBNET" -m set --match-set ru dst -j RETURN
+    for idx in "\${!CLIENT_IPS[@]}"; do
+        IP="\${CLIENT_IPS[$idx]}"
+        EXIT_IDX="\${CLIENT_EXITS[$idx]}"
+        MARK="\${EXIT_MARKS[$EXIT_IDX]}"
+        iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$IP" -j MARK --set-xmark "$MARK"
+        iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$IP" -j CONNMARK --save-mark
+    done
+    DMARK="\${EXIT_MARKS[$DEFAULT_EXIT]}"
+    iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$SUBNET" -j MARK --set-xmark "$DMARK"
+    iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$SUBNET" -j CONNMARK --save-mark
+    iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -j AWG_BALANCE_EXITS
+done
+iptables -w 5 -t mangle -I PREROUTING 1 -j AWG_POLICY
+
+# Для MTProto-прокси используем первый (основной) выход.
+AWG1_IF="\${EXIT_IFS[0]}"
+AWG1_ENDPOINT="\${EXIT_ENDPOINTS[0]}"
+FWMARK="\${EXIT_MARKS[0]}"
+TABLE_ID="\${EXIT_TABLES[0]}"
+EP_HOST="\${AWG1_ENDPOINT%%:*}"
+EP_ROUTE="$(ip -4 route get "$EP_HOST" 2>/dev/null | head -1 || true)"
+WAN_IF="$(printf '%s' "$EP_ROUTE" | grep -oP '(^| )dev \\K\\S+' || true)"
+WAN_GW="$(printf '%s' "$EP_ROUTE" | grep -oP '(^| )via \\K\\S+' || true)"
+
+${sshBuild.PROXY_CASCADE_LINES.join('\n')}
+
+sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+echo "OK: балансировка каскада применена ($(date '+%Y-%m-%d %H:%M:%S'), выходов: \${#EXIT_IFS[@]})"
+`;
+}
+
 function cascadeFailoverSettingsRead() {
     const j = readJson(CASCADE_FAILOVER_FILE, null);
     const s = { ...CASCADE_FAILOVER_DEFAULTS, ...(j && typeof j === 'object' ? j : {}) };
@@ -3402,6 +3838,7 @@ async function applyCascadeTunnelContent(content) {
 }
 
 async function switchCascadeTarget(target, req) {
+    if (cascadeBalanceEnabled()) throw new Error('Сначала выключите балансировку выходов');
     if (cascadeRole() !== 'ru') throw new Error('Резервирование доступно только на RU-входе');
     if (!existingCascadeConf()) throw new Error('Сначала постройте каскад');
     const state = cascadeFailoverStateRead();
@@ -3473,6 +3910,7 @@ async function tryCascadeCandidates(currentId, settings) {
 let cascadeFailoverBusy = false;
 async function cascadeFailoverTick() {
     if (cascadeFailoverBusy || TEST_MODE || DEMO_MODE) return;
+    if (cascadeBalanceEnabled()) return;
     if (cascadeRole() !== 'ru' || !existingCascadeConf()) return;
     if (cascadeBuildJob && cascadeBuildJob.running) return;
     const settings = cascadeFailoverSettingsRead();
@@ -3515,6 +3953,29 @@ async function cascadeFailoverTick() {
     }
 }
 setInterval(cascadeFailoverTick, 15000).unref();
+
+let cascadeBalanceBusy = false;
+let cascadeBalanceSig = '';
+async function cascadeBalanceTick() {
+    if (cascadeBalanceBusy || TEST_MODE || DEMO_MODE) return;
+    if (!cascadeBalanceEnabled() || cascadeRole() !== 'ru' || !existingCascadeConf()) return;
+    try {
+        const state = cascadeBalanceRead();
+        const exits = cascadeExitSnapshot(true);
+        const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments);
+        const healthy = exits.filter(e => e.healthy).map(e => e.id).join(',');
+        const sig = healthy + '|' + JSON.stringify(plan.assignments);
+        if (sig === cascadeBalanceSig) return;
+        cascadeBalanceBusy = true;
+        await cascadeBalanceReapply();
+        cascadeBalanceSig = sig;
+    } catch (e) {
+        // Оставляем прежние правила: лучше работать, чем оборвать клиентов.
+    } finally {
+        cascadeBalanceBusy = false;
+    }
+}
+setInterval(cascadeBalanceTick, 15000).unref();
 
 function cascadeDetailsEu() {
     const confPath = path.join(AWG_CONF_DIR, 'awg0.conf');
@@ -3621,7 +4082,11 @@ function cascadeDetails() {
         const cnt = shTry('sudo', ['bash', '-c', "ipset list ru 2>/dev/null | grep -c '^[0-9]' || true"]).trim();
         out.ipsetCount = parseInt(cnt, 10) || 0;
     } catch (e) { /* ignore */ }
-    try { out.ruleExists = sh('ip', ['rule', 'show']).includes('fwmark 0x1'); } catch (e) { /* ignore */ }
+    try {
+        const balanceMode = cascadeBalanceEnabled();
+        out.balanceMode = balanceMode;
+        out.ruleExists = sh('ip', ['rule', 'show']).includes('fwmark ' + (balanceMode ? '0x2001' : '0x1'));
+    } catch (e) { /* ignore */ }
     // Почему туннель не поднялся: без журнала в интерфейсе видно только
     // «не активен», а причина (неверный Endpoint) остаётся в systemctl.
     if (conf && !out.tunnelActive) {
@@ -3633,12 +4098,17 @@ function cascadeDetails() {
             ]).trim().slice(0, 500);
         } catch (e) { /* ignore */ }
     }
-    try { out.tableRoute = shTry('ip', ['route', 'show', 'table', '100']).trim().split('\n')[0] || ''; } catch (e) { /* ignore */ }
+    try {
+        const table = cascadeBalanceEnabled() ? 2001 : 100;
+        out.tableRoute = shTry('ip', ['route', 'show', 'table', String(table)]).trim().split('\n')[0] || '';
+    } catch (e) { /* ignore */ }
     try {
         if (fs.existsSync(ROUTING_SCRIPT)) out.lastRun = fs.statSync(ROUTING_SCRIPT).mtime.toISOString();
     } catch (e) { /* ignore */ }
     try { out.failover = cascadeFailoverStatus(); }
     catch (e) { out.failover = { applicable: false, reason: e.message || String(e) }; }
+    try { out.balance = cascadeBalanceStatus(false); }
+    catch (e) { out.balance = { mode: 'classic', exits: [], assignments: {} }; }
     return out;
 }
 
@@ -4833,6 +5303,116 @@ sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
 echo "OK: маршруты каскада применены ($(date '+%Y-%m-%d %H:%M:%S'))"
 `;
 }
+function cascadeScriptIfaces() {
+    const script = readTextSafe(ROUTING_SCRIPT);
+    const m = script.match(/^CASC_IFACES=\(([^)]*)\)/m) || script.match(/^CLIENT_IFACES="([^"]*)"/m);
+    return m ? m[1].split(/\s+/).filter(Boolean) : ['awg0'];
+}
+
+function cascadeScriptExtraNets() {
+    const m = readTextSafe(ROUTING_SCRIPT).match(/^EXTRA_RU_NETS="([^"]*)"/m);
+    return m ? m[1].split(/\n/).map(s => s.trim()).filter(Boolean) : [];
+}
+
+async function cascadeBalanceReapply() {
+    const state = cascadeBalanceRead();
+    if (state.mode !== 'balance') throw new Error('Балансировка не включена');
+    const exits = cascadeExitSnapshot(true);
+    if (!exits.length) throw new Error('Нет выходов каскада');
+    const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments);
+    cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments });
+    const script = cascadeBalanceScript(cascadeScriptIfaces(), cascadeScriptExtraNets(), exits, plan.assignments);
+    writeRootFile(ROUTING_SCRIPT, script, '0755');
+    const out = sh('sudo', [ROUTING_SCRIPT], { timeout: 180000 });
+    cascadeExitCache = { at: 0, exits: [] };
+    return { out, assignments: plan.assignments };
+}
+
+function cascadeBalanceCleanup() {
+    const state = cascadeBalanceRead();
+    const exits = cascadeExitList();
+    try { sh('sudo', ['iptables', '-t', 'mangle', '-D', 'PREROUTING', '-j', 'AWG_POLICY']); } catch (e) { /* ignore */ }
+    for (const chain of ['AWG_POLICY', 'AWG_BALANCE_RU', 'AWG_BALANCE_EXITS']) {
+        try { sh('sudo', ['iptables', '-t', 'mangle', '-F', chain]); } catch (e) { /* ignore */ }
+        try { sh('sudo', ['iptables', '-t', 'mangle', '-X', chain]); } catch (e) { /* ignore */ }
+    }
+    for (const exit of exits) {
+        try { sh('sudo', ['ip', 'rule', 'del', 'fwmark', cascadeExitMark(exit.index), 'table', String(cascadeExitTable(exit.index))]); } catch (e) { /* ignore */ }
+        try { sh('sudo', ['ip', 'route', 'flush', 'table', String(cascadeExitTable(exit.index))]); } catch (e) { /* ignore */ }
+        if (exit.backup) {
+            try { sh('sudo', ['systemctl', 'stop', 'awg-quick@' + exit.iface]); } catch (e) { /* ignore */ }
+            try { sh('sudo', ['systemctl', 'disable', 'awg-quick@' + exit.iface]); } catch (e) { /* ignore */ }
+        }
+        try {
+            const nat = shTry('sudo', ['iptables', '-t', 'nat', '-S', 'POSTROUTING']);
+            for (const raw of nat.split('\n')) {
+                if (!raw.startsWith('-A POSTROUTING') || !raw.includes('-o ' + exit.iface + ' -j MASQUERADE')) continue;
+                const args = raw.replace(/^-A POSTROUTING /, '').split(/\s+/).filter(Boolean);
+                if (args.length) { try { sh('sudo', ['iptables', '-t', 'nat', '-D', 'POSTROUTING', ...args]); } catch (e) { /* ignore */ } }
+            }
+        } catch (e) { /* ignore */ }
+        try {
+            const mangle = shTry('sudo', ['iptables', '-t', 'mangle', '-S', 'FORWARD']);
+            for (const raw of mangle.split('\n')) {
+                if (!raw.startsWith('-A FORWARD') || !raw.includes('-o ' + exit.iface) || !raw.includes('TCPMSS')) continue;
+                const args = raw.replace(/^-A FORWARD /, '').split(/\s+/).filter(Boolean);
+                if (args.length) { try { sh('sudo', ['iptables', '-t', 'mangle', '-D', 'FORWARD', ...args]); } catch (e) { /* ignore */ } }
+            }
+        } catch (e) { /* ignore */ }
+    }
+    try { sh('sudo', ['rm', '-f', '/root/awg/.balance-accounting']); } catch (e) { /* ignore */ }
+    try { removeSplitAccounting(); } catch (e) { /* ignore */ }
+    cascadeExitCache = { at: 0, exits: [] };
+}
+
+async function cascadeBalanceApply() {
+    if (cascadeRole() !== 'ru') throw new Error('Балансировка настраивается на RU-входе');
+    if (!existingCascadeConf()) throw new Error('Сначала постройте каскад');
+    const ifaces = cascadeScriptIfaces();
+    const extra = cascadeScriptExtraNets();
+    await cascadeBalancePrepareBackupExits();
+    try { teardownRouting(); } catch (e) { /* ignore */ }
+    const exits = cascadeExitSnapshot(true);
+    const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), {});
+    const script = cascadeBalanceScript(ifaces, extra, exits, plan.assignments);
+    writeRootFile(ROUTING_SCRIPT, script, '0755');
+    writeRootFile('/etc/systemd/system/awg-routing.service', ROUTING_SERVICE, '0644');
+    writeRootFile('/etc/systemd/system/awg-routing.timer', ROUTING_TIMER, '0644');
+    sh('sudo', ['systemctl', 'daemon-reload']);
+    sh('sudo', [ROUTING_SCRIPT], { timeout: 180000 });
+    cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments });
+    cascadeBalanceSig = exits.filter(e => e.healthy).map(e => e.id).join(',') + '|' + JSON.stringify(plan.assignments);
+    sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
+    try { sh('sudo', ['systemctl', 'start', 'awg-routing.service']); } catch (e) { /* уже применено */ }
+    cascadeExitCache = { at: 0, exits: [] };
+    return cascadeBalanceStatus(true);
+}
+
+async function cascadeBalanceDisable() {
+    const ifaces = cascadeScriptIfaces();
+    const extra = cascadeScriptExtraNets();
+    cascadeBalanceCleanup();
+    await installRouting(ifaces, extra);
+    cascadeBalanceWrite({ mode: 'classic', assignments: {} });
+    cascadeBalanceSig = '';
+    cascadeExitCache = { at: 0, exits: [] };
+    return cascadeBalanceStatus(true);
+}
+
+function cascadeBalanceSwitchClient(ip, exitId) {
+    const state = cascadeBalanceRead();
+    if (!IPV4_RE.test(String(ip || ''))) throw new Error('Некорректный IP клиента');
+    const exits = cascadeExitList();
+    if (exitId && exitId !== 'balance' && !exits.some(e => e.id === exitId)) {
+        throw new Error('Неизвестный выход');
+    }
+    if (exitId === 'balance' || !exitId) delete state.assignments[ip];
+    else state.assignments[ip] = exitId;
+    cascadeBalanceWrite({ mode: state.mode, assignments: state.assignments });
+    cascadeBalanceSig = '';
+    return cascadeBalanceReapply();
+}
+
 function teardownRouting() {
     try { removeSplitAccounting(); } catch (e) { /* ignore */ }
     try { sh('sudo', ['systemctl', 'stop', 'awg-routing.timer', 'awg-routing.service']); } catch (e) { /* ignore */ }
@@ -6031,6 +6611,8 @@ app.post('/api/cascade/schedule', checkAuth, requireAdmin, (req, res) => {
 app.post('/api/cascade/teardown', checkAuth, requireAdmin, async (req, res) => {
     const body = req.body || {};
     const removed = [];
+    try { if (cascadeBalanceEnabled()) cascadeBalanceCleanup(); } catch (e) { /* ignore */ }
+    cascadeBalanceWrite({ mode: 'classic', assignments: {} });
     try { removeSplitAccounting(); } catch (e) { /* ignore */ }
     for (const unit of ['awg-routing.timer', 'awg-routing.service', 'awg-quick@awg1']) {
         try { sh('sudo', ['systemctl', 'stop', unit]); } catch (e) { /* не запущена */ }
@@ -6270,7 +6852,7 @@ app.post('/api/cascade/config', checkAuth, requireAdmin, async (req, res) => {
 });
 
 // --- Резервные серверы и настройки автопереключения ------------------------
-app.post('/api/cascade/backups', checkAuth, requireAdmin, (req, res) => {
+app.post('/api/cascade/backups', checkAuth, requireAdmin, async (req, res) => {
     const body = req.body || {};
     if (cascadeRole() !== 'ru') return res.status(400).json({ error: 'Резервирование настраивается на RU-входе' });
     if (!existingCascadeConf()) return res.status(400).json({ error: 'Сначала постройте каскад' });
@@ -6298,18 +6880,31 @@ app.post('/api/cascade/backups', checkAuth, requireAdmin, (req, res) => {
     });
     cascadeBackupsWrite(list);
     if (cascadeFailoverStateRead().active === 'primary') ensureCascadePrimaryCopy(false);
+    let balance = null;
+    if (cascadeBalanceEnabled()) {
+        try { balance = await cascadeBalanceApply(); }
+        catch (e) { return res.status(500).json({ error: 'Резерв сохранён, но выход не поднялся: ' + e.message }); }
+    }
     auditLog(req, 'Каскад: добавлен резервный сервер ' + name + ' (' + endpoint + ')');
-    res.json({ success: true, id, status: cascadeFailoverStatus() });
+    res.json({ success: true, id, status: cascadeFailoverStatus(), balance });
 });
 
-app.delete('/api/cascade/backups/:id', checkAuth, requireAdmin, (req, res) => {
+app.delete('/api/cascade/backups/:id', checkAuth, requireAdmin, async (req, res) => {
     const id = String(req.params.id || '');
     const state = cascadeFailoverStateRead();
     if (state.active === id) return res.status(400).json({ error: 'Сначала вернитесь на основной сервер' });
     const list = cascadeBackupsRead();
+    const index = list.findIndex(b => b.id === id);
     const next = list.filter(b => b.id !== id);
     if (next.length === list.length) return res.status(404).json({ error: 'Резерв не найден' });
     cascadeBackupsWrite(next);
+    if (cascadeBalanceEnabled() && index >= 0) {
+        const iface = 'awg' + (index + 2);
+        try { sh('sudo', ['systemctl', 'stop', 'awg-quick@' + iface]); } catch (e) { /* ignore */ }
+        try { sh('sudo', ['systemctl', 'disable', 'awg-quick@' + iface]); } catch (e) { /* ignore */ }
+        try { await cascadeBalanceApply(); }
+        catch (e) { return res.status(500).json({ error: 'Резерв удалён, но маршруты не пересобрались: ' + e.message }); }
+    }
     auditLog(req, 'Каскад: удалён резервный сервер ' + id);
     res.json({ success: true, status: cascadeFailoverStatus() });
 });
@@ -6353,6 +6948,33 @@ app.post('/api/cascade/failover/check', checkAuth, requireAdmin, async (req, res
         res.json({ ...check, settings, state });
     } catch (e) {
         res.status(500).json({ error: 'Ошибка проверки: ' + (e.message || String(e)) });
+    }
+});
+
+app.get('/api/cascade/balance', checkAuth, (req, res) => {
+    try { res.json({ success: true, ...cascadeBalanceStatus(false) }); }
+    catch (e) { res.status(500).json({ error: e.message || 'Ошибка чтения балансировки' }); }
+});
+
+app.post('/api/cascade/balance/mode', checkAuth, requireAdmin, async (req, res) => {
+    const mode = String((req.body && req.body.mode) || '') === 'balance' ? 'balance' : 'classic';
+    try {
+        const result = mode === 'balance' ? await cascadeBalanceApply() : await cascadeBalanceDisable();
+        auditLog(req, 'Каскад: режим ' + (mode === 'balance' ? 'балансировка выходов' : 'обычный'));
+        res.json({ success: true, mode, ...result });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось изменить режим: ' + (e.message || String(e)) });
+    }
+});
+
+app.post('/api/cascade/balance/client', checkAuth, requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    try {
+        const result = await cascadeBalanceSwitchClient(body.ip, body.exitId);
+        auditLog(req, 'Каскад: клиент ' + body.ip + ' → ' + (body.exitId || 'balance'));
+        res.json({ success: true, ...result });
+    } catch (e) {
+        res.status(400).json({ error: e.message || 'Не удалось изменить выход клиента' });
     }
 });
 
@@ -13907,7 +14529,8 @@ module.exports._internals = {
     readClientIsolation, writeClientIsolation, clientIsolationMode, clientIsolationPeers, CLIENT_ISOLATION_FILE,
     attachClientSpeeds,
     normalizeCascadeConf, firstIpv4, firstTunnelIp, buildRoutingScript, cascadeRole, localTunnelIps, isPublicAddress,
-    cascadeEndpointPlan, cascadeRoleFrom, cascadeHealth
+    cascadeEndpointPlan, cascadeRoleFrom, cascadeHealth,
+    cascadeBalanceScript, cascadeBalanceAssignments
 };
 
 

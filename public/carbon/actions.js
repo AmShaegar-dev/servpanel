@@ -787,6 +787,18 @@ async function carbonClientRename(name) {
   try { lim = await api('/api/clients/' + encodeURIComponent(name) + '/limits'); } catch (e) { lim = {}; }
   let iso = {};
   try { iso = await api('/api/clients/' + encodeURIComponent(name) + '/isolation'); } catch (e) { iso = {}; }
+  let cascade = null;
+  try { cascade = await api('/api/cascade/status'); } catch (e) { cascade = null; }
+  const client = (carbon.clients || []).find(c => c && c.name === name) || {};
+  const balance = cascade && cascade.balance;
+  const balanceMode = !!(balance && balance.mode === 'balance');
+  const exitOptions = balanceMode
+    ? [{ value: 'balance', label: 'Балансировка (авто)' }].concat((balance.exits || []).map(e => ({
+      value: e.id,
+      label: (e.name || e.id) + (e.healthy ? '' : ' · нет связи')
+    })))
+    : [];
+  const exitValue = (balance && balance.assignments && balance.assignments[client.ip]) || 'balance';
   const used = Number(lim.used_bytes) || 0;
   const quota = Number(lim.quota_bytes) || 0;
   const isoText = iso.mode === 'isolated' ? ' · изолирован' : iso.mode === 'open-plus' ? ' · Открытый+' : iso.mode === 'open' ? ' · Открытый' : '';
@@ -810,6 +822,7 @@ async function carbonClientRename(name) {
         { value: 'open-plus', label: 'Открытый+ — только выбранным' }
       ] },
       { name: 'peers', label: 'Кому разрешить (для «Открытый+»)', type: 'checkboxes', value: selectedPeers, options: peerOptions, showWhen: { field: 'isolation', value: 'open-plus' } },
+      ...(balanceMode ? [{ name: 'exitId', label: 'Выход каскада', type: 'select', value: exitValue, options: exitOptions }] : []),
       { name: 'reset', label: 'Сбросить использованный трафик', type: 'checkbox', value: false }
     ],
     submitText: 'Сохранить',
@@ -821,6 +834,9 @@ async function carbonClientRename(name) {
       const isoRes = await api('/api/clients/' + encodeURIComponent(name) + '/isolation', { method: 'POST', body: { mode, peers } });
       if (v.newName !== name) {
         await api('/api/clients/' + encodeURIComponent(name) + '/rename', { method: 'POST', body: { newName: v.newName } });
+      }
+      if (balanceMode && v.exitId && client.ip) {
+        await api('/api/cascade/balance/client', { method: 'POST', body: { ip: client.ip, exitId: v.exitId } });
       }
       const quotaBytes = v.quota === '' ? 0 : Math.round(Number(v.quota) * (1024 ** 3));
       const d = await api('/api/clients/' + encodeURIComponent(v.newName) + '/limits', {
@@ -1087,6 +1103,18 @@ async function carbonInstallMtproxyl() {
   const d = await api('/api/install/module', { method: 'POST', body: { module: 'mtproxyl' } });
   await carbonWatchInstall(d && d.logFile, 'Установка MTProxyL');
   await carbonRefresh();
+}
+
+async function carbonCascadeMode(mode) {
+  const balance = mode === 'balance';
+  const message = balance
+    ? 'Включить балансировку выходов? Резервные серверы будут подняты как отдельные EU-выходы, клиенты распределятся автоматически.'
+    : 'Вернуть обычный каскад? Дополнительные выходы будут остановлены, клиенты снова пойдут через основной awg1.';
+  if (!confirm(message)) return;
+  showToast(balance ? 'Включаю балансировку…' : 'Возвращаю обычный каскад…');
+  const d = await api('/api/cascade/balance/mode', { method: 'POST', body: { mode } });
+  if (carbon.cascade) carbon.cascade.balance = d;
+  await carbonRefresh(balance ? 'Балансировка включена' : 'Обычный каскад включён');
 }
 
 async function carbonCascadeIfacesSave() {
@@ -2149,6 +2177,7 @@ document.addEventListener('click', async event => {
     else if (action === 'install-mtproxyl' || action === 'mtproxyl-install') await carbonMtproxylInstall();
     else if (action === 'awg-install') await carbonAwgInstall();
     else if (action === 'cascade-build') await carbonCascadeBuild();
+    else if (action === 'cascade-mode') await carbonCascadeMode(btn.dataset.mode || 'classic');
     else if (action === 'appearance-preset') { carbonSetPalettePreset(btn.dataset.preset); render(); showToast('Шаблон применён'); }
     else if (action === 'appearance-custom') { document.getElementById('appearanceColors')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     else if (action === 'appearance-theme') { setTheme(btn.dataset.theme); render(); }

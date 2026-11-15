@@ -1576,6 +1576,53 @@ test('Каскад: маршрутизация по CASCADE.md и выбор и�
     assert.match(build.ROUTING_TIMER, /Persistent=false/);
 });
 
+test('Балансировка: клиенты распределяются по живым выходам', () => {
+    const exits = [
+        { id: 'primary', name: 'EU-1', iface: 'awg1', index: 0, healthy: true },
+        { id: 'b2', name: 'EU-2', iface: 'awg2', index: 1, healthy: true }
+    ];
+    const plan = internals.cascadeBalanceAssignments(exits, ['10.8.0.2', '10.8.0.3', '10.8.0.4', '10.8.0.5'], {});
+    assert.deepEqual(Object.keys(plan.assignments).sort(), ['10.8.0.2', '10.8.0.3', '10.8.0.4', '10.8.0.5']);
+    assert.equal(plan.counts.primary, 2);
+    assert.equal(plan.counts.b2, 2);
+    assert.equal(plan.assignments['10.8.0.2'], 'primary');
+    assert.equal(plan.assignments['10.8.0.3'], 'b2');
+
+    const kept = internals.cascadeBalanceAssignments(exits, ['10.8.0.2'], { '10.8.0.2': 'b2' });
+    assert.equal(kept.assignments['10.8.0.2'], 'b2');
+
+    const failed = internals.cascadeBalanceAssignments(
+        [{ ...exits[0], healthy: false }, exits[1]],
+        ['10.8.0.2'],
+        { '10.8.0.2': 'primary' }
+    );
+    assert.equal(failed.assignments['10.8.0.2'], 'b2');
+});
+
+test('Балансировка: скрипт содержит выходы, метки и учёт', () => {
+    const exits = [
+        { id: 'primary', name: 'EU-1', iface: 'awg1', index: 0, healthy: true, endpoint: '198.51.100.10:3977' },
+        { id: 'b2', name: 'EU-2', iface: 'awg2', index: 1, healthy: true, endpoint: '198.51.100.20:3977' }
+    ];
+    const script = internals.cascadeBalanceScript(['awg0'], ['203.0.113.0/24'], exits, {
+        '10.8.0.2': 'primary',
+        '10.8.0.3': 'b2'
+    });
+    assert.match(script, /EXIT_IFS=\("awg1" "awg2"\)/);
+    assert.match(script, /EXIT_MARKS=\("0x2001" "0x2002"\)/);
+    assert.match(script, /EXIT_TABLES=\("2001" "2002"\)/);
+    assert.match(script, /AWG_POLICY/);
+    assert.match(script, /AWG_BALANCE_RU/);
+    assert.match(script, /AWG_BALANCE_EXITS/);
+    assert.match(script, /--match-set ru dst -j RETURN/);
+    assert.match(script, /--set-xmark "\$MARK"/);
+    assert.match(script, /203\.0\.113\.0\/24/);
+    const { spawnSync } = require('node:child_process');
+    const bash = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+    const syntax = spawnSync(bash, ['-n'], { input: script, encoding: 'utf8' });
+    if (!syntax.error) assert.equal(syntax.status, 0, syntax.stderr);
+});
+
 test('выход закрывает доступ', async () => {
     await request('/api/logout', { method: 'POST' });
     const r = await request('/api/stats');
