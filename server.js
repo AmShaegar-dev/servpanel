@@ -3639,7 +3639,7 @@ function iperfStartServer(port, secs, peerIp, rule) {
     return { port, rule, peerIp, script: scriptFile, log: logFile, pid: parseInt(String(pidOut || '').trim(), 10) || 0 };
 }
 
-async function iperfAgentPrepare(seconds, req) {
+async function iperfAgentPrepare(seconds, req, preferPort) {
     iperfCleanup();
     iperfEnsureInstalled();
     const agent = iperfAgentAuth(req) || null;
@@ -3647,19 +3647,26 @@ async function iperfAgentPrepare(seconds, req) {
     if (!peerIp) throw new Error('Ключ iperf не привязан к IP');
     const secs = Math.max(5, Math.min(20, Number(seconds) || 10));
     const ufw = iperfUfwActive();
-    // Открытые в UFW и свободные порты — самый надёжный путь: их, как правило,
-    // не режет и внешний фаервол провайдера.
+    const tempRule = ufw ? 'ufw' : 'iptables';
+    // 1) порт, который указал пользователь; 2) уже открытые в UFW и свободные;
+    // 3) стандартный 5201; 4) случайный. Для всех, кроме уже открытых,
+    // временно разрешаем вход только с IP инициатора.
     const picks = [];
+    const prefer = Number(preferPort);
+    if (isPort(prefer) && !iperfPortBusy(prefer)) picks.push({ port: prefer, rule: tempRule });
     for (const port of iperfUfwTcpPorts()) {
         if (picks.length >= 2) break;
-        if (port === 22 || iperfPortBusy(port)) continue;
+        if (port === 22 || picks.some(p => p.port === port) || iperfPortBusy(port)) continue;
         picks.push({ port, rule: 'existing' });
+    }
+    if (picks.length < 3 && !picks.some(p => p.port === 5201) && !iperfPortBusy(5201)) {
+        picks.push({ port: 5201, rule: tempRule });
     }
     let guard = 0;
     while (picks.length < 3 && guard++ < 50) {
         const port = crypto.randomInt(20000, 60000);
         if (picks.some(p => p.port === port) || iperfPortBusy(port)) continue;
-        picks.push({ port, rule: ufw ? 'ufw' : 'iptables' });
+        picks.push({ port, rule: tempRule });
     }
     const items = picks.map(p => iperfStartServer(p.port, secs, peerIp, p.rule));
     await new Promise(r => setTimeout(r, 500));
@@ -3704,7 +3711,7 @@ app.get('/api/iperf/agent/status', requireIperfAgent, (req, res) => {
 
 app.post('/api/iperf/agent/prepare', requireIperfAgent, async (req, res) => {
     try {
-        const run = await iperfAgentPrepare(req.body && req.body.seconds, req);
+        const run = await iperfAgentPrepare(req.body && req.body.seconds, req, req.body && req.body.port);
         const items = run.items || [];
         res.json({
             success: true,
@@ -3723,6 +3730,45 @@ app.post('/api/iperf/agent/cleanup', requireIperfAgent, (req, res) => {
     iperfCleanup();
     res.json({ success: true });
 });
+
+// Замер по HTTPS через порт самой панели: работает там, где фаервол
+// провайдера закрывает все порты кроме панельного.
+function iperfBlobSize(req) {
+    const mb = Math.max(1, Math.min(256, Number((req.query && req.query.mb) || 32) || 32));
+    return Math.round(mb * 1024 * 1024);
+}
+function iperfBlobDownload(req, res) {
+    const size = iperfBlobSize(req);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Length', String(size));
+    res.setHeader('Cache-Control', 'no-store');
+    const chunk = Buffer.alloc(64 * 1024, 0x5a);
+    let sent = 0;
+    const pump = () => {
+        while (sent < size) {
+            const part = sent + chunk.length <= size ? chunk : chunk.subarray(0, size - sent);
+            sent += part.length;
+            if (!res.write(part)) { res.once('drain', pump); return; }
+        }
+        res.end();
+    };
+    pump();
+}
+function iperfBlobUpload(req, res) {
+    const max = 256 * 1024 * 1024;
+    let bytes = 0;
+    req.on('data', c => {
+        bytes += c.length;
+        if (bytes > max) { try { req.destroy(); } catch (e) { /* ignore */ } }
+    });
+    req.on('end', () => {
+        try { res.json({ success: true, bytes }); } catch (e) { /* ignore */ }
+    });
+    req.on('error', () => { try { res.destroy(); } catch (e) { /* ignore */ } });
+}
+app.get('/api/iperf/agent/blob', requireIperfAgent, iperfBlobDownload);
+app.post('/api/iperf/agent/blob', requireIperfAgent, iperfBlobUpload);
+app.put('/api/iperf/agent/blob', requireIperfAgent, iperfBlobUpload);
 
 function iperfBits(data, key) {
     try {
@@ -3766,6 +3812,39 @@ function iperfClientRun(target, port, seconds, reverse) {
     try { return JSON.parse(out || '{}'); } catch (e) { throw new Error('iperf3 вернул не-JSON ответ'); }
 }
 
+// Замер скорости по HTTPS через уже открытый порт панели.
+// Нужен там, где фаервол провайдера не пропускает ни 5201, ни случайные порты.
+function iperfHttpOne(base, token, seconds, upload) {
+    const url = String(base).replace(/\/+$/, '') + '/api/iperf/agent/blob?mb=32';
+    const deadline = Math.max(20, (Number(seconds) || 8) * 4);
+    const timeout = (deadline + 20) * 1000;
+    let out = '';
+    if (!upload) {
+        out = String(sh('curl', ['-4', '-fsS', '--max-time', String(deadline),
+            '-H', 'Authorization: Bearer ' + token, '-o', '/dev/null',
+            '-w', '%{speed_download} %{size_download}', url], { timeout }) || '');
+    } else {
+        const bytes = 24 * 1024 * 1024;
+        const cmd = `head -c ${bytes} /dev/zero | curl -4 -fsS --max-time ${deadline} -X POST ` +
+            `-H "Authorization: Bearer ${token}" -H "Content-Type: application/octet-stream" ` +
+            `--data-binary @- -o /dev/null -w "%{speed_upload} %{size_upload}" "${url}"`;
+        out = String(sh('bash', ['-c', cmd], { timeout }) || '');
+    }
+    const [speed, size] = out.trim().split(/\s+/).map(Number);
+    return { bps: speed || 0, bytes: size || 0 };
+}
+
+function iperfHttpTest(base, token, seconds) {
+    let down = { bps: 0 };
+    let up = { bps: 0 };
+    try { down = iperfHttpOne(base, token, seconds, false); } catch (e) { /* ignore */ }
+    try { up = iperfHttpOne(base, token, seconds, true); } catch (e) { /* ignore */ }
+    const downMbps = Math.round(down.bps / 1e6 * 10) / 10;
+    const upMbps = Math.round(up.bps / 1e6 * 10) / 10;
+    const capacity = upMbps && downMbps ? Math.min(upMbps, downMbps) : (upMbps || downMbps);
+    return { upMbps, downMbps, capacity };
+}
+
 async function iperfAgentCall(base, token, pathName, body, timeoutMs) {
     const r = await fetch(String(base).replace(/\/+$/, '') + pathName, {
         method: 'POST',
@@ -3804,30 +3883,63 @@ async function iperfRunTest(opts) {
             cascadeBalanceWrite({ ...state, agents: state.agents });
         }
     }
+    let iperfReady = false;
     try {
         iperfEnsureInstalled();
+        iperfReady = true;
     } catch (e) {
-        throw new Error('iperf3 не установлен на этой панели: ' + (e.message || e));
+        iperfReady = false;
     }
     const exits = cascadeExitList();
     const exit = exitId ? exits.find(e => e.id === exitId) : null;
     const target = exit && exit.endpoint ? String(exit.endpoint).split(':')[0] : new URL(base).hostname;
     const seconds = Math.max(5, Math.min(20, Number(body.seconds) || 10));
+    const transport = body.transport === 'https' ? 'https' : (body.transport === 'iperf3' ? 'iperf3' : 'auto');
     let port = 0;
+    let via = 'iperf3';
     const probes = [];
     try {
-        const prep = await iperfAgentCall(base, token, '/api/iperf/agent/prepare', { seconds }, 240000);
-        const candidates = Array.isArray(prep.ports) && prep.ports.length
+        let prep = null;
+        if (iperfReady && transport !== 'https') {
+            try {
+                prep = await iperfAgentCall(base, token, '/api/iperf/agent/prepare', { seconds, port: Number(body.preferPort) || 0 }, 240000);
+            } catch (e) {
+                prep = null;
+            }
+        }
+        const candidates = prep && Array.isArray(prep.ports) && prep.ports.length
             ? prep.ports.map(p => Number(p && p.port ? p.port : p)).filter(Boolean)
-            : [Number(prep.port) || 0].filter(Boolean);
-        if (!candidates.length) throw new Error('Ответная панель не открыла порт iperf');
+            : prep ? [Number(prep.port) || 0].filter(Boolean) : [];
         for (const candidate of candidates) {
             const r = await tcpProbe(target, candidate, 5000);
             probes.push({ port: candidate, result: r });
             if (r === 'ok') { port = candidate; break; }
         }
+        const saveCapacity = value => {
+            if (!exitId || !(value > 0)) return;
+            const cur = cascadeBalanceRead();
+            cur.capacities[exitId] = value;
+            cur.capacityAt[exitId] = Date.now();
+            cascadeBalanceWrite(cur);
+        };
         if (!port) {
-            throw new Error('Порт iperf недоступен с этой панели (' + probes.map(p => p.port + ': ' + p.result).join(', ') + '). Похоже, внешний фаервол закрывает эти порты.');
+            if (transport === 'iperf3') {
+                throw new Error('Порты iperf3 недоступны с этой панели (' +
+                    probes.map(p => p.port + ': ' + p.result).join(', ') + ').');
+            }
+            // Порты iperf3 закрыты: меряем через уже открытый порт самой панели.
+            via = 'https';
+            const http = iperfHttpTest(base, token, seconds);
+            if (!http.capacity) {
+                throw new Error('Порты iperf3 недоступны с этой панели (' +
+                    probes.map(p => p.port + ': ' + p.result).join(', ') +
+                    '), замер по HTTPS тоже не удался. Нужен хотя бы один открытый порт.');
+            }
+            saveCapacity(http.capacity);
+            return {
+                success: true, target: new URL(base).hostname, via, port: 0, probes, seconds,
+                upMbps: http.upMbps, downMbps: http.downMbps, capacity: http.capacity, exitId
+            };
         }
         const up = iperfClientRun(target, port, seconds, false);
         const down = iperfClientRun(target, port, seconds, true);
@@ -3835,13 +3947,8 @@ async function iperfRunTest(opts) {
         const downMbps = Math.round(iperfBits(down, 'sum_received') / 1e6 * 10) / 10;
         if (!upMbps && !downMbps) throw new Error('iperf3 не передал данные — канал не отвечает');
         const capacity = Math.round((upMbps && downMbps ? Math.min(upMbps, downMbps) : (upMbps || downMbps)) * 10) / 10;
-        if (exitId && capacity > 0) {
-            const cur = cascadeBalanceRead();
-            cur.capacities[exitId] = capacity;
-            cur.capacityAt[exitId] = Date.now();
-            cascadeBalanceWrite(cur);
-        }
-        return { success: true, target, port, probes, seconds, upMbps, downMbps, capacity, exitId };
+        saveCapacity(capacity);
+        return { success: true, target, via, port, probes, seconds, upMbps, downMbps, capacity, exitId };
     } finally {
         if (port || probes.length) {
             try { await iperfAgentCall(base, token, '/api/iperf/agent/cleanup', { port }); } catch (e) { /* ignore */ }

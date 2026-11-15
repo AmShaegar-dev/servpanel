@@ -1155,16 +1155,22 @@ async function carbonCascadeExitIperf(id) {
       { name: 'panelUrl', label: 'URL панели-ответчика', placeholder: 'https://eu.example.com:4446' },
       { name: 'panelUser', label: 'Логин панели', placeholder: 'admin' },
       { name: 'panelPass', label: 'Пароль панели', type: 'password' },
-      { name: 'seconds', label: 'Секунд', type: 'number', min: 5, max: 20, value: 10 }
+      { name: 'seconds', label: 'Секунд', type: 'number', min: 5, max: 20, value: 10 },
+      { name: 'preferPort', label: 'Порт iperf3 (необязательно)', type: 'number', min: 1, max: 65535, placeholder: '5201' },
+      { name: 'transport', label: 'Способ', type: 'select', value: 'auto', options: [
+        { value: 'auto', label: 'Авто (iperf3, иначе HTTPS)' },
+        { value: 'iperf3', label: 'Только iperf3' },
+        { value: 'https', label: 'Только HTTPS' }
+      ] }
     ],
     submitText: 'Проверить',
     onSubmit: async v => {
-      showToast('Запускаю iperf3…');
+      showToast('Запускаю замер…');
       const d = await api('/api/diag/iperf', {
         method: 'POST',
-        body: { exitId: id, panelUrl: v.panelUrl, panelUser: v.panelUser, panelPass: v.panelPass, seconds: Number(v.seconds) || 10 }
+        body: { exitId: id, panelUrl: v.panelUrl, panelUser: v.panelUser, panelPass: v.panelPass, seconds: Number(v.seconds) || 10, preferPort: Number(v.preferPort) || 0, transport: v.transport || 'auto' }
       });
-      await carbonRefresh('Канал ' + (d.capacity || 0) + ' Мбит/с');
+      await carbonRefresh('Канал ' + (d.capacity || 0) + ' Мбит/с' + (d.via === 'https' ? ' (по HTTPS)' : ''));
     }
   });
 }
@@ -1175,12 +1181,15 @@ async function carbonDiagIperf() {
     panelUrl: document.getElementById('carbonIperfUrl')?.value.trim() || '',
     panelUser: document.getElementById('carbonIperfUser')?.value.trim() || '',
     panelPass: document.getElementById('carbonIperfPass')?.value || '',
-    seconds: Number(document.getElementById('carbonIperfSeconds')?.value) || 10
+    seconds: Number(document.getElementById('carbonIperfSeconds')?.value) || 10,
+    preferPort: Number(document.getElementById('carbonIperfPort')?.value) || 0,
+    transport: document.getElementById('carbonIperfTransport')?.value || 'auto'
   };
   if (out) out.textContent = 'Запускаю iperf3… Это может занять до минуты.';
   try {
     const d = await api('/api/diag/iperf', { method: 'POST', body });
-    if (out) out.textContent = `Канал: ${d.capacity} Мбит/с\nОтдача: ${d.upMbps} Мбит/с\nЗагрузка: ${d.downMbps} Мбит/с\nСервер: ${d.target}:${d.port}`;
+    const via = d.via === 'https' ? 'HTTPS через порт панели' : 'iperf3, порт ' + d.port;
+    if (out) out.textContent = `Канал: ${d.capacity} Мбит/с\nОтдача: ${d.upMbps} Мбит/с\nЗагрузка: ${d.downMbps} Мбит/с\nСпособ: ${via}\nСервер: ${d.target}`;
     showToast('Тест канала завершён');
   } catch (e) {
     if (out) out.textContent = e.message || 'Ошибка iperf3';
