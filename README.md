@@ -1,4 +1,4 @@
-# 🌐 Servpanel 3.2.139 — веб-панель AmneziaWG, Keenetic и серверных служб
+# 🌐 Servpanel 3.2.140 — веб-панель AmneziaWG, Keenetic и серверных служб
 
 > ⚠️ **Статус: активная разработка.** Панель регулярно обновляется: интерфейс, каскад, WARP/Xray, MTProto и часть серверных сценариев продолжают развиваться. Перед обновлением рабочего сервера сделайте бэкап и проверьте новую версию на тестовом стенде.
 
@@ -8,7 +8,7 @@
 
 ---
 
-## 🆕 Что нового в 3.2.139
+## 🆕 Что нового в 3.2.140
 
 * **Балансировка выходов каскада.** Опциональный режим: основной и резервные EU-серверы поднимаются как отдельные выходы, клиенты распределяются автоматически. В карточке клиента можно выбрать конкретный выход. Обычный каскад остаётся по умолчанию.
 * **Carbon — основной интерфейс.** Панель открывается по `/`, старая версия доступна по `/old/` и кнопкой «Старая панель». Надпись «Carbon console» убрана.
@@ -997,15 +997,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.139/servpanel-3.2.139.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.139/servpanel-3.2.139.tar.gz.sha256
-sha256sum -c servpanel-3.2.139.tar.gz.sha256
-tar -xzf servpanel-3.2.139.tar.gz
-bash /root/servpanel-3.2.139/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.140/servpanel-3.2.140.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.140/servpanel-3.2.140.tar.gz.sha256
+sha256sum -c servpanel-3.2.140.tar.gz.sha256
+tar -xzf servpanel-3.2.140.tar.gz
+bash /root/servpanel-3.2.140/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.2.139`. SHA256 архива: `9ef75ae8df124d89f1360829b7233733c5f7b6b1ec67b76452df897dd5c849d4`. Если `curl` не установлен:
+Должно вывести `3.2.140`. SHA256 архива: `f458a4121ddfbf37b51bf50476149e8c88d1c81079a76fffceaa16534d585f61`. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:
