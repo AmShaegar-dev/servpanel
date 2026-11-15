@@ -2469,6 +2469,7 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             if (sumExits > 0 && tunnel > 0 && sumExits !== tunnel) {
                 exitTotals = exitTotals.map(e => ({ ...e, bytes: Math.round(e.bytes * tunnel / sumExits) }));
             }
+            if (source === 'cached' && sumExits === 0) exitTotals = [];
         }
         if (source === 'mangle' && total > 0) {
             lastTrafficSplit = { tunnel, direct, blocked, total, at: Date.now() };
