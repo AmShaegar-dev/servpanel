@@ -3997,7 +3997,7 @@ async function iperfRunTest(opts) {
             if (r === 'ok') { port = candidate; break; }
         }
         let targetHost = target;
-        if (!port) {
+        if (!port && transport === 'tunnel') {
             // Порты наружу закрыты — пробуем замер через сам туннель awg.
             // Пакет заворачиваем меткой нужного выхода: таблица маршрутов
             // каскада уже знает, как вести трафик через awg1/awg2.
@@ -4027,9 +4027,9 @@ async function iperfRunTest(opts) {
             cascadeBalanceWrite(cur);
         };
         if (!port) {
-            if (transport === 'iperf3') {
+            if (transport === 'iperf3' || transport === 'tunnel') {
                 throw new Error('Порты iperf3 недоступны с этой панели (' +
-                    probes.map(p => p.port + ': ' + p.result).join(', ') + ').');
+                    probes.map(p => (p.ip ? p.ip + ':' : '') + p.port + ': ' + p.result).join(', ') + ').');
             }
             // Порты iperf3 закрыты: меряем через уже открытый порт самой панели.
             via = 'https';
