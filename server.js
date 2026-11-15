@@ -4016,7 +4016,7 @@ async function iperfRunTest(opts) {
             if (r === 'ok') { port = candidate; break; }
         }
         let targetHost = target;
-        if (!port && transport === 'tunnel') {
+        if (!port && (transport === 'tunnel' || transport === 'auto')) {
             // Порты наружу закрыты — пробуем замер через сам туннель awg.
             // Пакет заворачиваем меткой нужного выхода: таблица маршрутов
             // каскада уже знает, как вести трафик через awg1/awg2.
@@ -4086,9 +4086,13 @@ async function iperfRunTest(opts) {
         const upMbps = Math.round(iperfBits(up, 'sum_sent') / 1e6 * 10) / 10;
         const downMbps = Math.round(iperfBits(down, 'sum_received') / 1e6 * 10) / 10;
         if (!upMbps && !downMbps) throw new Error('iperf3 не передал данные — канал не отвечает');
-        const capacity = Math.round((upMbps && downMbps ? Math.min(upMbps, downMbps) : (upMbps || downMbps)) * 10) / 10;
-        saveCapacity(capacity);
         const viaTunnel = targetHost !== target;
+        // Через туннель отдача упирается в MTU/маршруты, поэтому берём
+        // скорость скачивания — она ближе к тому, что получают клиенты.
+        const capacity = viaTunnel
+            ? Math.round((downMbps || upMbps) * 10) / 10
+            : Math.round((upMbps && downMbps ? Math.min(upMbps, downMbps) : (upMbps || downMbps)) * 10) / 10;
+        saveCapacity(capacity);
         return { success: true, target: targetHost, via: viaTunnel ? 'tunnel' : 'iperf3', port, probes, seconds, upMbps, downMbps, capacity, exitId };
     } finally {
         if (tunnelRule) { try { sh('sudo', ['iptables', ...tunnelRule]); } catch (e) { /* ignore */ } }
