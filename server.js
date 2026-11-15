@@ -3648,9 +3648,9 @@ for CIFACE in "\${CASC_IFACES[@]}"; do
         IP="\${CLIENT_IPS[$idx]}"
         EXIT_IDX="\${CLIENT_EXITS[$idx]}"
         MARK="\${EXIT_MARKS[$EXIT_IDX]}"
-        # Уже установленное соединение сохраняет выход из conntrack;
-        # новый поток получает текущий выход клиента.
-        iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$IP" -m connmark --mark 0x0 -j MARK --set-xmark "$MARK"
+        # Явный выбор клиента применяется сразу ко всем его пакетам,
+        # включая уже открытые соединения.
+        iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$IP" -j MARK --set-xmark "$MARK"
         iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$IP" -j CONNMARK --save-mark
     done
     iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -j AWG_BALANCE_EXITS
