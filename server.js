@@ -3977,6 +3977,7 @@ async function iperfRunTest(opts) {
     const transport = body.transport === 'https' ? 'https' : (body.transport === 'iperf3' ? 'iperf3' : (body.transport === 'tunnel' ? 'tunnel' : 'auto'));
     let port = 0;
     let via = 'iperf3';
+    let tunnelRule = null;
     const probes = [];
     try {
         let prep = null;
@@ -3998,10 +3999,23 @@ async function iperfRunTest(opts) {
         let targetHost = target;
         if (!port) {
             // Порты наружу закрыты — пробуем замер через сам туннель awg.
+            // Пакет заворачиваем меткой нужного выхода: таблица маршрутов
+            // каскада уже знает, как вести трафик через awg1/awg2.
+            const mark = cascadeExitMark(exit ? exit.index : 0);
             for (const t of (prep && Array.isArray(prep.tunnels) ? prep.tunnels : [])) {
+                const add = ['-t', 'mangle', '-A', 'OUTPUT', '-p', 'tcp', '-d', t.ip, '--dport', String(t.port), '-j', 'MARK', '--set-mark', mark];
+                const del = ['-t', 'mangle', '-D', 'OUTPUT', '-p', 'tcp', '-d', t.ip, '--dport', String(t.port), '-j', 'MARK', '--set-mark', mark];
+                let marked = false;
+                try { sh('sudo', ['iptables', ...add]); marked = true; } catch (e) { /* без метки попробуем напрямую */ }
                 const r = await tcpProbe(t.ip, t.port, 4000);
                 probes.push({ port: t.port, ip: t.ip, result: r, kind: 'tunnel' });
-                if (r === 'ok') { port = t.port; targetHost = t.ip; break; }
+                if (r === 'ok') {
+                    port = t.port;
+                    targetHost = t.ip;
+                    if (marked) tunnelRule = del;
+                    break;
+                }
+                if (marked) { try { sh('sudo', ['iptables', ...del]); } catch (e) { /* ignore */ } }
             }
         }
         const saveCapacity = value => {
@@ -4040,6 +4054,7 @@ async function iperfRunTest(opts) {
         const viaTunnel = targetHost !== target;
         return { success: true, target: targetHost, via: viaTunnel ? 'tunnel' : 'iperf3', port, probes, seconds, upMbps, downMbps, capacity, exitId };
     } finally {
+        if (tunnelRule) { try { sh('sudo', ['iptables', ...tunnelRule]); } catch (e) { /* ignore */ } }
         if (port || probes.length) {
             try { await iperfAgentCall(base, token, '/api/iperf/agent/cleanup', { port }); } catch (e) { /* ignore */ }
         }
