@@ -3558,10 +3558,15 @@ function iperfRunRead() {
 }
 // Убираем временный UFW/iptables-разрешатель, если он создавался под этот прогон.
 function iperfRemoveRule(item) {
-    if (!item || !item.peerIp || !item.port) return;
+    if (!item || !item.port) return;
     if (item.rule === 'ufw') {
+        if (!item.peerIp) return;
         try { sh('sudo', ['ufw', 'delete', 'allow', 'from', item.peerIp, 'to', 'any', 'port', String(item.port), 'proto', 'tcp']); } catch (e) { /* ignore */ }
+    } else if (item.rule === 'ufw-iface') {
+        if (!item.iface) return;
+        try { sh('sudo', ['ufw', 'delete', 'allow', 'in', 'on', item.iface, 'to', 'any', 'port', String(item.port), 'proto', 'tcp']); } catch (e) { /* ignore */ }
     } else if (item.rule === 'iptables') {
+        if (!item.peerIp) return;
         try { sh('sudo', ['iptables', '-D', 'INPUT', '-p', 'tcp', '-s', item.peerIp, '--dport', String(item.port), '-j', 'ACCEPT']); } catch (e) { /* ignore */ }
     }
 }
@@ -3623,20 +3628,43 @@ function iperfPortBusy(port) {
 function iperfUfwActive() {
     return /Status:\s*active/i.test(String(shTry('sudo', ['ufw', 'status']) || ''));
 }
-function iperfStartServer(port, secs, peerIp, rule) {
+function iperfStartServer(port, secs, peerIp, rule, iface, bindIp) {
     const allow = rule === 'ufw' ? `ufw allow from ${peerIp} to any port ${port} proto tcp`
-        : rule === 'iptables' ? `iptables -I INPUT -p tcp -s ${peerIp} --dport ${port} -j ACCEPT`
-            : 'true';
+        : rule === 'ufw-iface' ? `ufw allow in on ${iface} to any port ${port} proto tcp`
+            : rule === 'iptables' ? `iptables -I INPUT -p tcp -s ${peerIp} --dport ${port} -j ACCEPT`
+                : 'true';
     const deny = rule === 'ufw' ? `ufw delete allow from ${peerIp} to any port ${port} proto tcp`
-        : rule === 'iptables' ? `iptables -D INPUT -p tcp -s ${peerIp} --dport ${port} -j ACCEPT`
-            : 'true';
+        : rule === 'ufw-iface' ? `ufw delete allow in on ${iface} to any port ${port} proto tcp`
+            : rule === 'iptables' ? `iptables -D INPUT -p tcp -s ${peerIp} --dport ${port} -j ACCEPT`
+                : 'true';
+    const bind = bindIp ? ` -B ${bindIp}` : ' -B 0.0.0.0';
     const scriptFile = path.join(os.tmpdir(), `servpanel-iperf-${port}.sh`);
     const logFile = `/tmp/servpanel-iperf-${port}.log`;
     const life = secs * 3 + 25;
-    const script = `#!/bin/bash\nset -e\n${allow} >/dev/null 2>&1 || true\ncleanup(){ ${deny} >/dev/null 2>&1 || true; }\ntrap cleanup EXIT\ntimeout ${life} iperf3 -s -p ${port} -B 0.0.0.0\n`;
+    const script = `#!/bin/bash\nset -e\n${allow} >/dev/null 2>&1 || true\ncleanup(){ ${deny} >/dev/null 2>&1 || true; }\ntrap cleanup EXIT\ntimeout ${life} iperf3 -s -p ${port}${bind}\n`;
     writeRootFile(scriptFile, script, '0700');
     const pidOut = sh('sudo', ['bash', '-c', `nohup ${scriptFile} >${logFile} 2>&1 & echo $!`], { timeout: 15000 });
-    return { port, rule, peerIp, script: scriptFile, log: logFile, pid: parseInt(String(pidOut || '').trim(), 10) || 0 };
+    return { port, rule, peerIp, iface: iface || '', ip: bindIp || '', script: scriptFile, log: logFile, pid: parseInt(String(pidOut || '').trim(), 10) || 0 };
+}
+
+// Туннельные адреса каскада: к ним можно подключиться с другой панели
+// через уже поднятый awg, без открытия новых портов наружу.
+function iperfTunnelAddrs() {
+    const out = [];
+    try {
+        const txt = String(sh('ip', ['-4', '-o', 'addr', 'show'], { timeout: 10000 }) || '');
+        for (const line of txt.split(/\r?\n/)) {
+            const m = line.match(/^\d+:\s+(\S+)\s+inet\s+(\d+\.\d+\.\d+\.\d+)\/(\d+)/);
+            if (!m) continue;
+            const iface = m[1];
+            const ip = m[2];
+            if (!/^(awg|wg)\d*$/i.test(iface)) continue;
+            if (/^10\.8\./.test(ip)) continue; // клиентская подсеть входа
+            if (!IPV4_RE.test(ip)) continue;
+            out.push({ iface, ip });
+        }
+    } catch (e) { /* ignore */ }
+    return out;
 }
 
 async function iperfAgentPrepare(seconds, req, preferPort) {
@@ -3669,8 +3697,25 @@ async function iperfAgentPrepare(seconds, req, preferPort) {
         picks.push({ port, rule: tempRule });
     }
     const items = picks.map(p => iperfStartServer(p.port, secs, peerIp, p.rule));
+    // Туннельные замеры: слушаем на внутреннем адресе awg — наружу ничего
+    // открывать не нужно, порт доступен только через сам каскад.
+    for (const t of iperfTunnelAddrs().slice(0, 2)) {
+        let port = 0;
+        let guard2 = 0;
+        while (guard2++ < 50) {
+            const candidate = crypto.randomInt(20000, 60000);
+            if (items.some(it => it.port === candidate) || iperfPortBusy(candidate)) continue;
+            port = candidate;
+            break;
+        }
+        if (!port) continue;
+        const it = iperfStartServer(port, secs, peerIp, ufw ? 'ufw-iface' : 'existing', t.iface, t.ip);
+        it.kind = 'tunnel';
+        it.iface = t.iface;
+        items.push(it);
+    }
     await new Promise(r => setTimeout(r, 500));
-    for (const it of items) it.listening = iperfPortBusy(it.port);
+    for (const it of items) it.listening = !!String(shTry('ss', ['-ltnH', `sport = :${it.port}`]) || '').trim();
     if (!items.some(it => it.listening)) {
         iperfCleanup();
         throw new Error('iperf3-сервер не запустился ни на одном порту');
@@ -3713,10 +3758,12 @@ app.post('/api/iperf/agent/prepare', requireIperfAgent, async (req, res) => {
     try {
         const run = await iperfAgentPrepare(req.body && req.body.seconds, req, req.body && req.body.port);
         const items = run.items || [];
+        const plain = items.filter(it => it.kind !== 'tunnel');
         res.json({
             success: true,
-            port: items.length ? items[0].port : 0,
-            ports: items.map(it => ({ port: it.port, rule: it.rule, listening: !!it.listening })),
+            port: plain.length ? plain[0].port : 0,
+            ports: plain.map(it => ({ port: it.port, rule: it.rule, listening: !!it.listening })),
+            tunnels: items.filter(it => it.kind === 'tunnel' && it.listening).map(it => ({ ip: it.ip, port: it.port, iface: it.iface })),
             seconds: run.seconds,
             expiresAt: run.expiresAt,
             host: await cascadePublicHost()
@@ -3927,7 +3974,7 @@ async function iperfRunTest(opts) {
     const exit = exitId ? exits.find(e => e.id === exitId) : null;
     const target = exit && exit.endpoint ? String(exit.endpoint).split(':')[0] : new URL(base).hostname;
     const seconds = Math.max(5, Math.min(20, Number(body.seconds) || 10));
-    const transport = body.transport === 'https' ? 'https' : (body.transport === 'iperf3' ? 'iperf3' : 'auto');
+    const transport = body.transport === 'https' ? 'https' : (body.transport === 'iperf3' ? 'iperf3' : (body.transport === 'tunnel' ? 'tunnel' : 'auto'));
     let port = 0;
     let via = 'iperf3';
     const probes = [];
@@ -3940,13 +3987,22 @@ async function iperfRunTest(opts) {
                 prep = null;
             }
         }
-        const candidates = prep && Array.isArray(prep.ports) && prep.ports.length
+        const candidates = transport === 'tunnel' ? [] : (prep && Array.isArray(prep.ports) && prep.ports.length
             ? prep.ports.map(p => Number(p && p.port ? p.port : p)).filter(Boolean)
-            : prep ? [Number(prep.port) || 0].filter(Boolean) : [];
+            : prep ? [Number(prep.port) || 0].filter(Boolean) : []);
         for (const candidate of candidates) {
             const r = await tcpProbe(target, candidate, 5000);
             probes.push({ port: candidate, result: r });
             if (r === 'ok') { port = candidate; break; }
+        }
+        let targetHost = target;
+        if (!port) {
+            // Порты наружу закрыты — пробуем замер через сам туннель awg.
+            for (const t of (prep && Array.isArray(prep.tunnels) ? prep.tunnels : [])) {
+                const r = await tcpProbe(t.ip, t.port, 4000);
+                probes.push({ port: t.port, ip: t.ip, result: r, kind: 'tunnel' });
+                if (r === 'ok') { port = t.port; targetHost = t.ip; break; }
+            }
         }
         const saveCapacity = value => {
             if (!exitId || !(value > 0)) return;
@@ -3974,14 +4030,15 @@ async function iperfRunTest(opts) {
                 upMbps: http.upMbps, downMbps: http.downMbps, capacity: http.capacity, exitId
             };
         }
-        const up = iperfClientRun(target, port, seconds, false);
-        const down = iperfClientRun(target, port, seconds, true);
+        const up = iperfClientRun(targetHost, port, seconds, false);
+        const down = iperfClientRun(targetHost, port, seconds, true);
         const upMbps = Math.round(iperfBits(up, 'sum_sent') / 1e6 * 10) / 10;
         const downMbps = Math.round(iperfBits(down, 'sum_received') / 1e6 * 10) / 10;
         if (!upMbps && !downMbps) throw new Error('iperf3 не передал данные — канал не отвечает');
         const capacity = Math.round((upMbps && downMbps ? Math.min(upMbps, downMbps) : (upMbps || downMbps)) * 10) / 10;
         saveCapacity(capacity);
-        return { success: true, target, via, port, probes, seconds, upMbps, downMbps, capacity, exitId };
+        const viaTunnel = targetHost !== target;
+        return { success: true, target: targetHost, via: viaTunnel ? 'tunnel' : 'iperf3', port, probes, seconds, upMbps, downMbps, capacity, exitId };
     } finally {
         if (port || probes.length) {
             try { await iperfAgentCall(base, token, '/api/iperf/agent/cleanup', { port }); } catch (e) { /* ignore */ }

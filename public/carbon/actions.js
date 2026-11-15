@@ -1160,7 +1160,8 @@ async function carbonCascadeExitIperf(id) {
       { name: 'transport', label: 'Способ', type: 'select', value: 'auto', options: [
         { value: 'auto', label: 'Авто (iperf3, иначе HTTPS)' },
         { value: 'iperf3', label: 'Только iperf3' },
-        { value: 'https', label: 'Только HTTPS' }
+        { value: 'https', label: 'Только HTTPS' },
+        { value: 'tunnel', label: 'Только через туннель' }
       ] }
     ],
     submitText: 'Проверить',
@@ -1188,7 +1189,7 @@ async function carbonDiagIperf() {
   if (out) out.textContent = 'Запускаю iperf3… Это может занять до минуты.';
   try {
     const d = await api('/api/diag/iperf', { method: 'POST', body });
-    const via = d.via === 'https' ? 'HTTPS через порт панели' : 'iperf3, порт ' + d.port;
+    const via = d.via === 'https' ? 'HTTPS через порт панели' : d.via === 'tunnel' ? 'через туннель (awg)' : 'iperf3, порт ' + d.port;
     if (out) out.textContent = `Канал: ${d.capacity} Мбит/с\nОтдача: ${d.upMbps} Мбит/с\nЗагрузка: ${d.downMbps} Мбит/с\nСпособ: ${via}\nСервер: ${d.target}`;
     showToast('Тест канала завершён');
   } catch (e) {
