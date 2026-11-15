@@ -1576,6 +1576,28 @@ test('Каскад: маршрутизация по CASCADE.md и выбор и�
     assert.match(build.ROUTING_TIMER, /Persistent=false/);
 });
 
+test('Балансировка: «по ширине канала» делит пропорционально и не трогает выходы без данных', () => {
+    const exits = [
+        { id: 'primary', name: 'EU-1', iface: 'awg1', index: 0, healthy: true },
+        { id: 'b2', name: 'EU-2', iface: 'awg2', index: 1, healthy: true }
+    ];
+    const ips = Array.from({ length: 9 }, (_, i) => '10.8.0.' + (i + 2));
+    const bw = internals.cascadeBalanceAssignments(exits, ips, {}, {}, { method: 'bandwidth', capacities: { primary: 300, b2: 100 } });
+    assert.equal(bw.counts.primary, 7);
+    assert.equal(bw.counts.b2, 2);
+
+    const only = internals.cascadeBalanceAssignments(exits, ips, {}, {}, { method: 'bandwidth', capacities: { primary: 300 } });
+    assert.equal(only.counts.primary, 9);
+    assert.equal(only.counts.b2, 0);
+
+    const manual = internals.cascadeBalanceAssignments(exits, ['10.8.0.2'], {}, { '10.8.0.2': 'b2' }, { method: 'bandwidth', capacities: { primary: 300 } });
+    assert.equal(manual.assignments['10.8.0.2'], 'b2');
+
+    const clients = internals.cascadeBalanceAssignments(exits, ['10.8.0.2', '10.8.0.3'], {}, {}, { method: 'clients', capacities: { primary: 300, b2: 100 } });
+    assert.equal(clients.counts.primary, 1);
+    assert.equal(clients.counts.b2, 1);
+});
+
 test('Балансировка: клиенты распределяются по живым выходам', () => {
     const exits = [
         { id: 'primary', name: 'EU-1', iface: 'awg1', index: 0, healthy: true },

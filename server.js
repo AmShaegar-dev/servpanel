@@ -3306,6 +3306,7 @@ function cascadeBalanceRead() {
         agents: j && j.agents && typeof j.agents === 'object' ? j.agents : {},
         method: j && j.method === 'bandwidth' ? 'bandwidth' : 'clients',
         intervalHours: Math.max(1, Math.min(168, Number(j && j.intervalHours) || 24)),
+        capacityCheckedAt: Number(j && j.capacityCheckedAt) || 0,
         moves: j && j.moves && typeof j.moves === 'object' ? j.moves : {},
         lastRebalance: j && j.lastRebalance ? String(j.lastRebalance) : '',
         updatedAt: (j && j.updatedAt) || 0
@@ -3323,6 +3324,7 @@ function cascadeBalanceWrite(value) {
         agents: value && value.agents && typeof value.agents === 'object' ? value.agents : (prev.agents || {}),
         method: value && value.method === 'bandwidth' ? 'bandwidth' : (value && value.method === 'clients' ? 'clients' : (prev.method || 'clients')),
         intervalHours: Math.max(1, Math.min(168, Number(value && value.intervalHours !== undefined ? value.intervalHours : prev.intervalHours) || 24)),
+        capacityCheckedAt: value && value.capacityCheckedAt !== undefined ? Number(value.capacityCheckedAt) || 0 : (prev.capacityCheckedAt || 0),
         moves: value && value.moves && typeof value.moves === 'object' ? value.moves : (prev.moves || {}),
         lastRebalance: value && value.lastRebalance !== undefined ? String(value.lastRebalance || '') : (prev.lastRebalance || ''),
         updatedAt: Date.now()
@@ -3420,9 +3422,22 @@ function cascadeClientIps() {
 
 // Распределение: сохраняем выбор пользователя, пока выход жив; новых и
 // клиентов упавшего выхода отправляем на наименее загруженный выход.
-function cascadeBalanceAssignments(exits, ips, current, manual) {
+// В режиме «по ширине канала» клиенты делятся пропорционально capacity,
+// а выходы без данных о ширине не используются (туда не переносим).
+function cascadeBalancePlanOpts(state) {
+    return {
+        method: state && state.method === 'bandwidth' ? 'bandwidth' : 'clients',
+        capacities: (state && state.capacities) || {}
+    };
+}
+
+function cascadeBalanceAssignments(exits, ips, current, manual, opts) {
+    const o = opts || {};
+    const capacityOf = e => Math.max(0, Number((o.capacities || {})[e.id]) || 0);
     const pool = (exits || []).filter(e => e.healthy);
     const use = pool.length ? pool : (exits || []);
+    const weighted = o.method === 'bandwidth' ? use.filter(e => capacityOf(e) > 0) : [];
+    const target = weighted.length ? weighted : use;
     const counts = {};
     use.forEach(e => { counts[e.id] = 0; });
     const assignments = {};
@@ -3436,10 +3451,14 @@ function cascadeBalanceAssignments(exits, ips, current, manual) {
         }
     }
     for (const ip of sorted) {
-        if (assignments[ip] || !use.length) continue;
-        const next = use.slice().sort((a, b) =>
-            (counts[a.id] - counts[b.id]) || String(a.name).localeCompare(String(b.name))
-        )[0];
+        if (assignments[ip] || !target.length) continue;
+        const next = weighted.length
+            ? target.slice().sort((a, b) =>
+                ((counts[a.id] + 1) / capacityOf(a)) - ((counts[b.id] + 1) / capacityOf(b))
+            )[0]
+            : target.slice().sort((a, b) =>
+                (counts[a.id] - counts[b.id]) || String(a.name).localeCompare(String(b.name))
+            )[0];
         assignments[ip] = next.id;
         counts[next.id] = (counts[next.id] || 0) + 1;
     }
@@ -3450,7 +3469,7 @@ function cascadeBalanceStatus(force) {
     const state = cascadeBalanceRead();
     const exits = cascadeExitSnapshot(force);
     const ips = cascadeClientIps();
-    const plan = cascadeBalanceAssignments(exits, ips, state.assignments, state.manual);
+    const plan = cascadeBalanceAssignments(exits, ips, state.assignments, state.manual, cascadeBalancePlanOpts(state));
     return {
         mode: state.mode,
         enabled: state.mode === 'balance',
@@ -4448,10 +4467,12 @@ async function cascadeBalanceTick() {
     try {
         const state = cascadeBalanceRead();
         const exits = cascadeExitSnapshot(true);
-        const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments, state.manual);
+        const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments, state.manual, cascadeBalancePlanOpts(state));
         const healthy = exits.filter(e => e.healthy).map(e => e.id).join(',');
         const policy = String(shTry('iptables', ['-t', 'mangle', '-S', 'AWG_POLICY']) || '');
-        const sig = healthy + '|' + JSON.stringify(plan.assignments) + (policy.includes('-A AWG_POLICY') ? '' : '|no-policy');
+        const sig = healthy + '|' + JSON.stringify(plan.assignments) +
+            '|' + (state.method || 'clients') + '|' + JSON.stringify(state.capacities || {}) +
+            (policy.includes('-A AWG_POLICY') ? '' : '|no-policy');
         if (sig === cascadeBalanceSig) return;
         cascadeBalanceBusy = true;
         await cascadeBalanceReapply();
@@ -4463,6 +4484,38 @@ async function cascadeBalanceTick() {
     }
 }
 setInterval(cascadeBalanceTick, 15000).unref();
+
+// Периодический замер ширины канала для режима «по ширине канала».
+// Сам замер делает iperf3 через агентские ключи, интервал задаёт пользователь.
+let cascadeCapacityBusy = false;
+async function cascadeCapacityTick(force) {
+    if (cascadeCapacityBusy || TEST_MODE || DEMO_MODE) return;
+    if (!cascadeBalanceEnabled() || cascadeRole() !== 'ru' || !existingCascadeConf()) return;
+    const state = cascadeBalanceRead();
+    if (state.method !== 'bandwidth') return;
+    const intervalMs = Math.max(1, Number(state.intervalHours) || 24) * 3600000;
+    if (!force && Date.now() - (Number(state.capacityCheckedAt) || 0) < intervalMs) return;
+    cascadeCapacityBusy = true;
+    let tested = 0;
+    try {
+        for (const exit of cascadeExitList()) {
+            if (!state.agents || !state.agents[exit.id]) continue;
+            try {
+                const r = await iperfRunTest({ exitId: exit.id, seconds: 8 });
+                if (r && r.capacity > 0) tested++;
+            } catch (e) { /* один выход не ответил — остальные проверим */ }
+        }
+        const cur = cascadeBalanceRead();
+        cur.capacityCheckedAt = Date.now();
+        cascadeBalanceWrite(cur);
+    } finally {
+        cascadeCapacityBusy = false;
+    }
+    if (tested) {
+        try { await cascadeBalanceReapply(true); } catch (e) { /* ignore */ }
+    }
+}
+setInterval(cascadeCapacityTick, 10 * 60 * 1000).unref();
 
 function cascadeDetailsEu() {
     const confPath = path.join(AWG_CONF_DIR, 'awg0.conf');
@@ -5809,7 +5862,7 @@ async function cascadeBalanceReapply(clientsOnly = false) {
     if (state.mode !== 'balance') throw new Error('Балансировка не включена');
     const exits = cascadeExitSnapshot(true);
     if (!exits.length) throw new Error('Нет выходов каскада');
-    const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments, state.manual);
+    const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments, state.manual, cascadeBalancePlanOpts(state));
     cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments, manual: state.manual });
     const script = cascadeBalanceScript(cascadeScriptIfaces(), cascadeScriptExtraNets(), exits, plan.assignments);
     writeRootFile(ROUTING_SCRIPT, script, '0755');
@@ -5867,7 +5920,7 @@ async function cascadeBalanceApply() {
     try { teardownRouting(); } catch (e) { /* ignore */ }
     const exits = cascadeExitSnapshot(true);
     const state = cascadeBalanceRead();
-    const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments, state.manual);
+    const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments, state.manual, cascadeBalancePlanOpts(state));
     const script = cascadeBalanceScript(ifaces, extra, exits, plan.assignments);
     writeRootFile(ROUTING_SCRIPT, script, '0755');
     writeRootFile('/etc/systemd/system/awg-routing.service', ROUTING_SERVICE, '0644');
@@ -5903,7 +5956,8 @@ async function cascadeBalanceApply() {
     const proxy = syncProxyCascadeExit(true);
     cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments, manual: state.manual });
     resetTrafficSplitCache();
-    cascadeBalanceSig = exits.filter(e => e.healthy).map(e => e.id).join(',') + '|' + JSON.stringify(plan.assignments);
+    cascadeBalanceSig = exits.filter(e => e.healthy).map(e => e.id).join(',') + '|' + JSON.stringify(plan.assignments) +
+        '|' + (state.method || 'clients') + '|' + JSON.stringify(state.capacities || {});
     sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
     try { sh('sudo', ['systemctl', 'start', 'awg-routing.service']); } catch (e) { /* уже применено */ }
     cascadeExitCache = { at: 0, exits: [] };
@@ -7553,6 +7607,9 @@ app.post('/api/cascade/balance/mode', checkAuth, requireAdmin, async (req, res) 
     try {
         const result = mode === 'balance' ? await cascadeBalanceApply() : await cascadeBalanceDisable();
         auditLog(req, 'Каскад: режим ' + (mode === 'balance' ? 'балансировка выходов' : 'обычный'));
+        if (mode === 'balance' && result && result.method === 'bandwidth') {
+            setTimeout(() => { cascadeCapacityTick(true).catch(() => {}); }, 3000).unref();
+        }
         res.json({ success: true, mode, ...result });
     } catch (e) {
         res.status(500).json({ error: 'Не удалось изменить режим: ' + (e.message || String(e)) });
@@ -7562,10 +7619,15 @@ app.post('/api/cascade/balance/mode', checkAuth, requireAdmin, async (req, res) 
 app.post('/api/cascade/balance/settings', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     const state = cascadeBalanceRead();
+    const prevMethod = state.method;
     state.method = body.method === 'bandwidth' ? 'bandwidth' : 'clients';
     state.intervalHours = Math.max(1, Math.min(168, Number(body.intervalHours) || 24));
+    if (state.method !== prevMethod) state.capacityCheckedAt = 0;
     cascadeBalanceWrite(state);
     auditLog(req, `Каскад: метод ${state.method}, интервал ${state.intervalHours} ч`);
+    if (state.method === 'bandwidth' && state.mode === 'balance') {
+        setTimeout(() => { cascadeCapacityTick(true).catch(() => {}); }, 3000).unref();
+    }
     res.json({ success: true, ...cascadeBalanceStatus(false) });
 });
 
