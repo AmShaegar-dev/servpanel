@@ -2444,7 +2444,7 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             lastTrafficSplit = { total: clientTotal, tunnel, direct, blocked, exits: exitTotals };
             saveTrafficSplitCache();
         } else if (lastTrafficSplit && lastTrafficSplit.total > 0 &&
-            !(balanceMode && !Array.isArray(lastTrafficSplit.exits))) {
+            !(balanceMode && !(Array.isArray(lastTrafficSplit.exits) && lastTrafficSplit.exits.length))) {
             // Счётчики пересозданы вместе с правилами. Не показываем ложные 100% EU,
             // а масштабируем последние известные доли на текущий трафик.
             const prevTotal = lastTrafficSplit.total;
