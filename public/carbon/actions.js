@@ -1205,7 +1205,7 @@ function carbonMtuRows(items) {
   if (!list.length) return '<div class="muted">Каскадные интерфейсы не найдены.</div>';
   const color = l => l === 'ok' ? 'var(--good)' : l === 'warn' ? 'var(--warn)' : 'var(--bad)';
   const rulesText = it => (it.rules && it.rules.length)
-    ? it.rules.map(r => (r.clamp ? 'PMTU' : 'MSS ' + r.mss) + ' (' + (r.dir === 'out' ? '→' : '←') + ')').join(' · ')
+    ? it.rules.map(r => (r.clamp ? 'PMTU' : 'MSS ' + r.mss) + (r.global ? ' (общий)' : ' (' + (r.dir === 'out' ? '→' : r.dir === 'in' ? '←' : '↔') + ')')).join(' · ')
     : 'нет правил';
   return `<div class="list">${list.map(it => `<div class="list-row" style="display:block">
       <div style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline">
@@ -1283,7 +1283,7 @@ function carbonMtuApply() {
       carbonMtuLast = d.items || null;
       carbonMtuPaint(d.items || []);
       const out = document.getElementById('carbonMtuOut');
-      if (out) out.textContent = (d.applied || []).map(a => `${a.iface}: MTU ${a.mtu}, MSS ${a.mode === 'set' ? a.mss : 'по PMTU'}, снято старых правил ${a.removed}`).join('\n');
+      if (out) out.textContent = (d.applied || []).map(a => `${a.iface}: MTU ${a.mtu}, MSS ${a.mode === 'set' ? a.mss : 'по PMTU'}, снято старых правил ${a.removed}${a.confPatched ? ', PostUp обновлён' : ''}`).join('\n');
       await carbonRefresh('MTU и клампинг обновлены');
     }
   });
@@ -1312,7 +1312,7 @@ async function carbonMtuRemote(apply) {
       const applied = (d.result && d.result.applied) || [];
       const persist = d.result && d.result.persist;
       if (out) {
-        out.textContent = `Ответная панель ${d.url}\n` + applied.map(a => `${a.iface}: MSS ${a.mode === 'set' ? a.mss : 'по PMTU'}, снято старых правил ${a.removed}`).join('\n')
+        out.textContent = `Ответная панель ${d.url}\n` + applied.map(a => `${a.iface}: MSS ${a.mode === 'set' ? a.mss : 'по PMTU'}, снято старых правил ${a.removed}${a.confPatched ? ', PostUp обновлён' : ''}`).join('\n')
           + (persist ? `\nСохранение: ${persist.unit} ${persist.enabled ? 'включён' : 'не включён'}${persist.active ? ', активен' : ''}` : '');
       }
       const remoteItems = (d.result && d.result.items) || [];

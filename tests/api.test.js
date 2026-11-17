@@ -1678,6 +1678,15 @@ test('MTU каскада: клампинг MSS проверяется по MTU �
     const down = internals.mtuRecommend(0, []);
     assert.equal(down.ok, false);
     assert.equal(down.level, 'error');
+
+    // Общее правило FORWARD (без -o/-i) покрывает оба направления.
+    const globalClamp = internals.mtuRecommend(1200, [{ dir: 'both', mss: 0, clamp: true, global: true }]);
+    assert.equal(globalClamp.ok, true);
+    assert.equal(globalClamp.expectedMss, 1160);
+
+    const globalBad = internals.mtuRecommend(1200, [{ dir: 'both', mss: 1240, clamp: false, global: true }]);
+    assert.equal(globalBad.ok, false);
+    assert.equal(globalBad.level, 'error');
 });
 
 test('Балансировка: MTProto-прокси идёт через первый живой выход', () => {

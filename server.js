@@ -4180,15 +4180,19 @@ function mssRulesOf(iface) {
     if (!/^[A-Za-z0-9_.-]+$/.test(name)) return [];
     const rules = [];
     const out = String(shTry('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-S', 'FORWARD']) || '');
-    const re = new RegExp('(?:-o|-i)\\s+' + name + '(?:\\s|$)');
     for (const line of out.split(/\r?\n/)) {
         const raw = line.trim();
         if (!raw.startsWith('-A FORWARD') || !raw.includes('TCPMSS')) continue;
-        if (!re.test(raw)) continue;
+        const isOut = raw.includes('-o ' + name);
+        const isIn = raw.includes('-i ' + name);
+        // Правило без -o/-i действует на весь FORWARD — оно тоже покрывает туннель.
+        const global = !/(?:^|\s)-[oi]\s+\S+/.test(raw);
+        if (!isOut && !isIn && !global) continue;
         const m = raw.match(/--set-mss\s+(\d+)/);
         rules.push({
             raw,
-            dir: raw.includes('-o ' + name) ? 'out' : 'in',
+            dir: isOut ? 'out' : isIn ? 'in' : 'both',
+            global,
             mss: m ? Number(m[1]) : 0,
             clamp: raw.includes('--clamp-mss-to-pmtu')
         });
@@ -4221,7 +4225,11 @@ function mtuRecommend(mtu, rules) {
             message: `MSS ${bad} больше допустимого ${expectedMss} при MTU ${value}: пакеты до ${bad + 40} байт будут теряться. Замените на --clamp-mss-to-pmtu или --set-mss ${expectedMss}.`
         };
     }
-    if (new Set(list.map(r => r.dir)).size < 2) {
+    const dirs = new Set();
+    for (const r of list) {
+        if (r.dir === 'both') { dirs.add('out'); dirs.add('in'); } else dirs.add(r.dir);
+    }
+    if (dirs.size < 2) {
         return {
             ok: false,
             level: 'warn',
@@ -4299,6 +4307,29 @@ function mssApplyOne(iface, mss, mode) {
             '-p', 'tcp', '--tcp-flags', 'SYN,RST', 'SYN', '-j', 'TCPMSS', ...spec]);
     }
     return removed;
+}
+
+// Установщик AmneziaWG прописывает MSS в PostUp/PostDown. После смены MTU эти
+// строки возвращают старое значение при каждом рестарте интерфейса, поэтому
+// убираем TCPMSS из PostUp/PostDown: клампинг делает servpanel-mss.service.
+function mssPatchConf(iface) {
+    const name = String(iface || '');
+    if (!/^[A-Za-z0-9_.-]+$/.test(name)) return false;
+    const file = path.join(AWG_CONF_DIR, name + '.conf');
+    if (!fs.existsSync(file)) return false;
+    const kept = [];
+    let changed = false;
+    for (const line of readTextSafe(file).split(/\r?\n/)) {
+        const m = line.match(/^(\s*(?:PostUp|PostDown)\s*=\s*)(.*)$/i);
+        if (!m) { kept.push(line); continue; }
+        const parts = m[2].split(';').map(s => s.trim()).filter(Boolean);
+        const rest = parts.filter(p => !/TCPMSS/i.test(p));
+        if (rest.length === parts.length) { kept.push(line); continue; }
+        changed = true;
+        if (rest.length) kept.push(m[1] + rest.join('; '));
+    }
+    if (changed) writeRootFile(file, kept.join('\n').trim() + '\n', '0600');
+    return changed;
 }
 
 function mssPersist(list) {
@@ -4404,7 +4435,8 @@ app.post('/api/cascade/mtu/apply', checkAuth, requireAdmin, (req, res) => {
             const mtu = wantMtu || ifaceMtuOf(item.iface) || item.mtu;
             const mss = Math.max(MSS_MIN, (Number(body.mss) || (mtu - 40)));
             const removed = mssApplyOne(item.iface, mss, mode);
-            done.push({ iface: item.iface, mtu, mss: mode === 'set' ? mss : 0, mode, removed });
+            const confPatched = mssPatchConf(item.iface);
+            done.push({ iface: item.iface, mtu, mss: mode === 'set' ? mss : 0, mode, removed, confPatched });
         }
         mssPersist(done.map(d => ({ iface: d.iface, mss: d.mss, mode: d.mode })));
         for (const d of done) auditLog(req, `MTU ${d.iface}: MSS ${d.mode === 'set' ? d.mss : 'PMTU'}, MTU ${d.mtu}`);
