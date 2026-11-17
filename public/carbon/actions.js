@@ -1204,10 +1204,18 @@ function carbonMtuRows(items) {
   const list = Array.isArray(items) ? items : [];
   if (!list.length) return '<div class="muted">Каскадные интерфейсы не найдены.</div>';
   const color = l => l === 'ok' ? 'var(--good)' : l === 'warn' ? 'var(--warn)' : 'var(--bad)';
-  const rules = it => (it.rules && it.rules.length)
-    ? it.rules.map(r => (r.clamp ? 'PMTU' : r.mss) + ' (' + (r.dir === 'out' ? 'o' : 'i') + ')').join(', ')
-    : 'нет';
-  return `<div class="table-scroll"><table class="table"><thead><tr><th>Интерфейс</th><th>MTU</th><th>MSS</th><th>Вердикт</th></tr></thead><tbody>${list.map(it => `<tr><td class="mono">${escHtml(it.iface || '')}${it.name ? ' · ' + escHtml(it.name) : ''}</td><td class="mono">${it.mtu || '—'}</td><td class="mono">${escHtml(rules(it))}</td><td style="color:${color(it.level)}">${escHtml(it.advice || '')}</td></tr>`).join('')}</tbody></table></div>`;
+  const rulesText = it => (it.rules && it.rules.length)
+    ? it.rules.map(r => (r.clamp ? 'PMTU' : 'MSS ' + r.mss) + ' (' + (r.dir === 'out' ? '→' : '←') + ')').join(' · ')
+    : 'нет правил';
+  return `<div class="list">${list.map(it => `<div class="list-row" style="display:block">
+      <div style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline">
+        <b>${escHtml(it.name || it.iface || '')}</b>
+        <span class="muted mono">${escHtml(it.iface || '')}</span>
+        <span class="mono">MTU ${it.mtu || '—'}</span>
+        <span class="mono muted">${escHtml(rulesText(it))}</span>
+      </div>
+      <div style="margin-top:5px;font-size:12.5px;line-height:1.45;color:${color(it.level)}">${escHtml(it.advice || '')}</div>
+    </div>`).join('')}</div>`;
 }
 
 function carbonMtuPaint(items) {
@@ -1216,7 +1224,7 @@ function carbonMtuPaint(items) {
   const tagEl = document.getElementById('carbonMtuTag');
   if (tagEl) {
     const bad = (items || []).filter(i => !i.ok).length;
-    tagEl.textContent = bad ? bad + ' проблем' : 'в порядке';
+    tagEl.textContent = bad ? 'проблем: ' + bad : 'в порядке';
     tagEl.className = 'tag ' + (bad ? 'warn' : 'good');
   }
 }
@@ -1281,26 +1289,45 @@ function carbonMtuApply() {
   });
 }
 
-async function carbonMtuRemote() {
+function carbonMtuCreds() {
+  return {
+    panelUrl: document.getElementById('carbonIperfUrl')?.value.trim() || '',
+    panelUser: document.getElementById('carbonIperfUser')?.value.trim() || '',
+    panelPass: document.getElementById('carbonIperfPass')?.value || ''
+  };
+}
+
+async function carbonMtuRemote(apply) {
   const out = document.getElementById('carbonMtuOut');
-  if (out) out.textContent = 'Запрашиваю MTU у ответной панели…';
+  const box = document.getElementById('carbonMtuBox');
+  const creds = carbonMtuCreds();
+  if (!creds.panelUrl || !creds.panelUser || !creds.panelPass) {
+    if (out) out.textContent = 'Заполните URL, логин и пароль панели-ответчика в блоке «Тест канала iperf3» выше — эти же данные используются для проверки и правки MTU на второй стороне.';
+    return;
+  }
+  if (out) out.textContent = apply ? 'Применяю клампинг на ответной панели…' : 'Читаю MTU с ответной панели…';
   try {
-    const st = await api('/api/cascade/status');
-    const exits = (st.balance && st.balance.exits) || [];
-    let lastErr = '';
-    for (const ex of exits) {
-      try {
-        const d = await api('/api/cascade/mtu/remote', { method: 'POST', body: { exitId: ex.id } });
-        const items = (d.remote && d.remote.items) || [];
-        if (out) {
-          out.textContent = `Ответная панель ${d.url}\n\n` + (items.length
-            ? items.map(i => `${i.iface}: MTU ${i.mtu || '—'} · MSS ${i.expectedMss || '—'}\n  ${i.advice}`).join('\n')
-            : 'Панель не вернула каскадных интерфейсов.');
-        }
-        return;
-      } catch (e) { lastErr = e.message || String(e); }
+    if (apply) {
+      const d = await api('/api/cascade/mtu/remote-apply', { method: 'POST', body: { ...creds, mode: 'clamp' } });
+      const applied = (d.result && d.result.applied) || [];
+      const persist = d.result && d.result.persist;
+      if (out) {
+        out.textContent = `Ответная панель ${d.url}\n` + applied.map(a => `${a.iface}: MSS ${a.mode === 'set' ? a.mss : 'по PMTU'}, снято старых правил ${a.removed}`).join('\n')
+          + (persist ? `\nСохранение: ${persist.unit} ${persist.enabled ? 'включён' : 'не включён'}${persist.active ? ', активен' : ''}` : '');
+      }
+      const remoteItems = (d.result && d.result.items) || [];
+      if (box && remoteItems.length) box.innerHTML = `<div class="muted" style="margin-bottom:6px">Ответная панель ${escHtml(d.url)}</div>` + carbonMtuRows(remoteItems);
+      showToast('Клампинг на ответной панели обновлён');
+      return;
     }
-    if (out) out.textContent = lastErr || 'Нет сохранённых ключей iperf — сначала выполните тест канала.';
+    const d = await api('/api/cascade/mtu/remote', { method: 'POST', body: creds });
+    const items = (d.remote && d.remote.items) || [];
+    if (out) {
+      out.textContent = `Ответная панель ${d.url}${d.via === 'agent' ? ' (по ключу iperf)' : ''}\n\n` + (items.length
+        ? items.map(i => `${i.iface}: MTU ${i.mtu || '—'} · MSS ${i.expectedMss || '—'}\n  ${i.advice}`).join('\n')
+        : 'Панель не вернула каскадных интерфейсов.');
+    }
+    if (box && items.length) box.innerHTML = `<div class="muted" style="margin-bottom:6px">Ответная панель ${escHtml(d.url)}</div>` + carbonMtuRows(items);
   } catch (e) {
     if (out) out.textContent = e.message || 'Ошибка';
   }
@@ -2374,7 +2401,8 @@ document.addEventListener('click', async event => {
     else if (action === 'mtu-load') await carbonMtuLoad();
     else if (action === 'mtu-test') await carbonMtuTest();
     else if (action === 'mtu-apply') await carbonMtuApply();
-    else if (action === 'mtu-remote') await carbonMtuRemote();
+    else if (action === 'mtu-remote') await carbonMtuRemote(false);
+    else if (action === 'mtu-remote-apply') await carbonMtuRemote(true);
     else if (action === 'appearance-preset') { carbonSetPalettePreset(btn.dataset.preset); render(); showToast('Шаблон применён'); }
     else if (action === 'appearance-custom') { document.getElementById('appearanceColors')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     else if (action === 'appearance-theme') { setTheme(btn.dataset.theme); render(); }

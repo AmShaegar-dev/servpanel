@@ -4426,26 +4426,67 @@ app.get('/api/iperf/agent/mtu', requireIperfAgent, (req, res) => {
     }
 });
 
+async function remotePanelLogin(body) {
+    const raw = String((body && body.panelUrl) || '').trim();
+    const user = String((body && body.panelUser) || '').trim();
+    const pass = String((body && body.panelPass) || '');
+    if (!raw || !user || !pass) return null;
+    const base = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw;
+    const remote = new Panel(base, user, pass);
+    const login = await remote.login();
+    if (!login.ok) throw new Error(login.error || 'Не удалось войти в панель-ответчик');
+    return { base, remote };
+}
+
 app.post('/api/cascade/mtu/remote', checkAuth, requireAdmin, async (req, res) => {
-    const exitId = String((req.body && req.body.exitId) || '');
-    const state = cascadeBalanceRead();
-    const agent = state.agents && state.agents[exitId];
-    if (!agent || !agent.url) {
-        return res.status(404).json({ error: 'Для этого выхода нет ключа iperf — сначала выполните тест канала' });
-    }
-    let token = '';
-    try { token = cascadeDecrypt(agent.token); } catch (e) { token = ''; }
-    if (!token) return res.status(400).json({ error: 'Не удалось расшифровать ключ ответной панели' });
+    const body = req.body || {};
     try {
+        // Основной путь: логин в панель-ответчик по URL/логину/паролю из блока iperf.
+        const session = await remotePanelLogin(body);
+        if (session) {
+            const r = await session.remote.get('/api/cascade/mtu', 20000);
+            if (r.status !== 200 || !r.json) {
+                return res.status(502).json({ error: 'Ответная панель вернула ' + (r.error || ('HTTP ' + r.status)) });
+            }
+            return res.json({ success: true, url: session.base, via: 'panel', remote: r.json });
+        }
+        const exitId = String(body.exitId || '');
+        const state = cascadeBalanceRead();
+        const agent = state.agents && state.agents[exitId];
+        if (!agent || !agent.url) {
+            return res.status(404).json({ error: 'Укажите URL, логин и пароль панели-ответчика (или сначала выполните тест канала, чтобы сохранить ключ iperf)' });
+        }
+        let token = '';
+        try { token = cascadeDecrypt(agent.token); } catch (e) { token = ''; }
+        if (!token) return res.status(400).json({ error: 'Не удалось расшифровать ключ ответной панели' });
         const r = await fetch(String(agent.url).replace(/\/+$/, '') + '/api/iperf/agent/mtu', {
             headers: { Authorization: 'Bearer ' + token },
             signal: AbortSignal.timeout(15000)
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) return res.status(r.status).json({ error: data.error || ('HTTP ' + r.status) });
-        res.json({ success: true, exitId, url: agent.url, remote: data });
+        res.json({ success: true, exitId, url: agent.url, via: 'agent', remote: data });
     } catch (e) {
-        res.status(502).json({ error: 'Ответная панель недоступна: ' + (e.message || e) });
+        res.status(502).json({ error: 'Не удалось получить MTU с ответной панели: ' + (e.message || e) });
+    }
+});
+
+app.post('/api/cascade/mtu/remote-apply', checkAuth, requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    try {
+        const session = await remotePanelLogin(body);
+        if (!session) return res.status(400).json({ error: 'Нужны URL, логин и пароль панели-ответчика' });
+        const payload = { mode: body.mode === 'set' ? 'set' : 'clamp' };
+        const mtu = Number(body.mtu) || 0;
+        if (mtu) payload.mtu = mtu;
+        const r = await session.remote.post('/api/cascade/mtu/apply', payload, 90000);
+        if (r.status !== 200 || !r.json) {
+            return res.status(502).json({ error: (r.json && r.json.error) || r.error || ('HTTP ' + r.status) });
+        }
+        auditLog(req, `MTU на ответной панели ${session.base}: ${payload.mode === 'set' ? 'MSS ' + payload.mtu : 'клампинг по PMTU'}`);
+        res.json({ success: true, url: session.base, result: r.json });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось исправить на ответной панели: ' + (e.message || e) });
     }
 });
 
