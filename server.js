@@ -4406,7 +4406,12 @@ app.post('/api/cascade/mtu/apply', checkAuth, requireAdmin, (req, res) => {
         }
         mssPersist(done.map(d => ({ iface: d.iface, mss: d.mss, mode: d.mode })));
         for (const d of done) auditLog(req, `MTU ${d.iface}: MSS ${d.mode === 'set' ? d.mss : 'PMTU'}, MTU ${d.mtu}`);
-        res.json({ success: true, applied: done, items: mtuLocalReport() });
+        res.json({
+            success: true,
+            applied: done,
+            persist: { unit: 'servpanel-mss.service', enabled: isEnabled('servpanel-mss.service') === 'enabled', active: isActive('servpanel-mss.service') === 'active' },
+            items: mtuLocalReport()
+        });
     } catch (e) {
         res.status(500).json({ error: 'Не удалось применить клампинг: ' + (e.message || e) });
     }
@@ -4635,6 +4640,7 @@ for idx in "\${!EXIT_IFS[@]}"; do
         iptables -w 5 -t mangle -S FORWARD | grep -F TCPMSS | grep -F " $IFACE " | sed -n "s/^-A FORWARD /iptables -w 5 -t mangle -D FORWARD /p" | sh || true
         iptables -w 5 -t mangle -D FORWARD -o "$IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
         iptables -w 5 -t mangle -A FORWARD -o "$IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+        iptables -w 5 -t mangle -A FORWARD -i "$IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
     done
 done
 fi
