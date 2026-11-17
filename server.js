@@ -14593,11 +14593,26 @@ app.get('/api/diag/wan-speed', checkAuth, requireAdmin, (req, res) => {
             raw: String(out).slice(0, 300)
         });
     }
+    const upOut = String(shTry('bash', ['-c',
+        'head -c 10485760 /dev/zero | curl -4 -sS --max-time 30 -X POST ' +
+        '--data-binary @- -H "Content-Type: application/octet-stream" ' +
+        '-o /dev/null -w "%{speed_upload} %{time_total} %{size_upload}" ' +
+        'https://speed.cloudflare.com/__up'
+    ], { timeout: 45000 }) || '');
+    const upParts = upOut.trim().split(/\s+/);
+    const upBps = Number(upParts[0]) || 0;
+    const upload = {
+        bytes: Number(upParts[2]) || 0,
+        seconds: Number(upParts[1]) || 0,
+        bytesPerSec: upBps,
+        mbps: (upBps * 8 / 1e6).toFixed(2),
+        raw: upOut.slice(0, 300)
+    };
     const telegram = String(shTry('curl', [
         '-4', '-sS', '-o', '/dev/null', '-w', '%{http_code} %{time_total}',
         '--max-time', '12', 'https://core.telegram.org/'
     ], { timeout: 18000 }) || '');
-    res.json({ results, telegram });
+    res.json({ results, upload, telegram });
 });
 
 app.get('/api/diag/log', checkAuth, (req, res) => {

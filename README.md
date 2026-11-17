@@ -1,4 +1,4 @@
-# 🌐 Servpanel 3.2.149 — веб-панель AmneziaWG, Keenetic и серверных служб
+# 🌐 Servpanel 3.2.150 — веб-панель AmneziaWG, Keenetic и серверных служб
 
 > ⚠️ **Статус: активная разработка.** Панель регулярно обновляется: интерфейс, каскад, WARP/Xray, MTProto и часть серверных сценариев продолжают развиваться. Перед обновлением рабочего сервера сделайте бэкап и проверьте новую версию на тестовом стенде.
 
@@ -8,7 +8,7 @@
 
 ---
 
-## 🆕 Что нового в 3.2.149
+## 🆕 Что нового в 3.2.150
 
 * **MTU и MSS каскада.** В «Диагностике» появился блок «MTU и MSS каскада»: для каждого туннеля показывает MTU интерфейса, действующие правила MSS и вердикт. Рассинхрон виден сразу: «MSS 1240 больше допустимого 1160 при MTU 1200 — пакеты до 1280 байт будут теряться».
 * **Замер MTU.** Кнопка «Измерить MTU» бинарным поиском (ping с DF через туннель) находит реальный PMTU и предлагает MTU и MSS. Если путь держит MTU интерфейса, хватает одной пробы, поэтому замер занимает доли секунды.
@@ -1019,15 +1019,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.149/servpanel-3.2.149.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.149/servpanel-3.2.149.tar.gz.sha256
-sha256sum -c servpanel-3.2.149.tar.gz.sha256
-tar -xzf servpanel-3.2.149.tar.gz
-bash /root/servpanel-3.2.149/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.150/servpanel-3.2.150.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.150/servpanel-3.2.150.tar.gz.sha256
+sha256sum -c servpanel-3.2.150.tar.gz.sha256
+tar -xzf servpanel-3.2.150.tar.gz
+bash /root/servpanel-3.2.150/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.2.149`. Хеш архива лежит рядом в файле `servpanel-3.2.149.tar.gz.sha256` — `sha256sum -c` проверит его автоматически. Если `curl` не установлен:
+Должно вывести `3.2.150`. Хеш архива лежит рядом в файле `servpanel-3.2.150.tar.gz.sha256` — `sha256sum -c` проверит его автоматически. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:
