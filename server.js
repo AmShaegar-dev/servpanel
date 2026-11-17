@@ -4259,10 +4259,12 @@ function pingDfOk(host, mtu, iface) {
 }
 
 // Бинарный поиск PMTU: ping с DF, payload = MTU − 28 (IP+ICMP).
-function pmtuMeasure(host, iface) {
-    if (pingDfOk(host, 1500, iface)) return 1500;
+// Верхняя граница — MTU интерфейса: если путь его держит, хватает одной пробы.
+function pmtuMeasure(host, iface, maxMtu) {
+    const top = Math.max(MSS_MIN + 28, Math.min(1500, Number(maxMtu) || 1500));
+    if (pingDfOk(host, top, iface)) return top;
     let lo = MSS_MIN + 28;
-    let hi = 1499;
+    let hi = top - 1;
     let best = 0;
     while (lo <= hi) {
         const mid = Math.floor((lo + hi) / 2);
@@ -4367,7 +4369,7 @@ app.post('/api/cascade/mtu/test', checkAuth, requireAdmin, (req, res) => {
         const target = body.iface ? all.filter(i => i.iface === String(body.iface)) : all;
         if (!target.length) return res.status(404).json({ error: 'Каскадный интерфейс не найден' });
         const items = target.map(item => {
-            const pmtu = item.mtu ? pmtuMeasure(host, item.iface) : 0;
+            const pmtu = item.mtu ? pmtuMeasure(host, item.iface, item.mtu) : 0;
             const baseMtu = pmtu || item.mtu || 0;
             const recommendedMss = baseMtu ? Math.max(MSS_MIN, baseMtu - 40) : 0;
             return {
