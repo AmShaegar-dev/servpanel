@@ -1649,6 +1649,37 @@ test('Балансировка: скрипт содержит выходы, ме
     if (!syntax.error) assert.equal(syntax.status, 0, syntax.stderr);
 });
 
+test('MTU каскада: клампинг MSS проверяется по MTU интерфейса', () => {
+    const bad = internals.mtuRecommend(1200, [
+        { dir: 'out', mss: 1240, clamp: false },
+        { dir: 'in', mss: 1240, clamp: false }
+    ]);
+    assert.equal(bad.ok, false);
+    assert.equal(bad.level, 'error');
+    assert.equal(bad.expectedMss, 1160);
+    assert.match(bad.message, /1240/);
+
+    const good = internals.mtuRecommend(1200, [
+        { dir: 'out', mss: 0, clamp: true },
+        { dir: 'in', mss: 0, clamp: true }
+    ]);
+    assert.equal(good.ok, true);
+    assert.equal(good.expectedMss, 1160);
+
+    const missing = internals.mtuRecommend(1280, []);
+    assert.equal(missing.ok, false);
+    assert.equal(missing.level, 'warn');
+    assert.equal(missing.expectedMss, 1240);
+
+    const oneDir = internals.mtuRecommend(1280, [{ dir: 'out', mss: 1240, clamp: false }]);
+    assert.equal(oneDir.ok, false);
+    assert.equal(oneDir.level, 'warn');
+
+    const down = internals.mtuRecommend(0, []);
+    assert.equal(down.ok, false);
+    assert.equal(down.level, 'error');
+});
+
 test('Балансировка: MTProto-прокси идёт через первый живой выход', () => {
     const exits = [
         { id: 'primary', name: 'EU-1', iface: 'awg1', index: 0, healthy: false, endpoint: '198.51.100.10:3977' },

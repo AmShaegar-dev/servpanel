@@ -3486,7 +3486,8 @@ function cascadeBalanceStatus(force) {
             traffic: e.traffic || 0,
             clients: plan.counts[e.id] || 0,
             capacity: Number(state.capacities[e.id]) || 0,
-            capacityAt: Number(state.capacityAt[e.id]) || 0
+            capacityAt: Number(state.capacityAt[e.id]) || 0,
+            mtu: ifaceMtuOf(e.iface)
         })),
         assignments: plan.assignments,
         manual: plan.manual,
@@ -4147,6 +4148,302 @@ app.get('/api/diag/iperf/agent', checkAuth, requireAdmin, (req, res) => {
     });
 });
 
+// ---------------------------------------------------------------------------
+// MTU и MSS каскада: замер пути, проверка клампинга и авто-исправление.
+// ---------------------------------------------------------------------------
+const MSS_MIN = 536;
+const MSS_SCRIPT = '/usr/local/sbin/servpanel-mss.sh';
+const MSS_UNIT = '/etc/systemd/system/servpanel-mss.service';
+
+function cascadeTunnelTargets() {
+    const out = [];
+    if (cascadeRole() === 'eu') {
+        out.push({ id: 'eu', name: 'EU', iface: 'awg0', endpoint: '' });
+        return out;
+    }
+    try {
+        for (const e of cascadeExitList()) out.push({ id: e.id, name: e.name, iface: e.iface, endpoint: e.endpoint || '' });
+    } catch (e) { /* ignore */ }
+    return out;
+}
+
+function ifaceMtuOf(iface) {
+    const name = String(iface || '');
+    if (!/^[A-Za-z0-9_.-]+$/.test(name)) return 0;
+    const out = String(shTry('ip', ['-o', 'link', 'show', 'dev', name]) || '');
+    const m = out.match(/\bmtu\s+(\d+)/);
+    return m ? Number(m[1]) : 0;
+}
+
+function mssRulesOf(iface) {
+    const name = String(iface || '');
+    if (!/^[A-Za-z0-9_.-]+$/.test(name)) return [];
+    const rules = [];
+    const out = String(shTry('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-S', 'FORWARD']) || '');
+    const re = new RegExp('(?:-o|-i)\\s+' + name + '(?:\\s|$)');
+    for (const line of out.split(/\r?\n/)) {
+        const raw = line.trim();
+        if (!raw.startsWith('-A FORWARD') || !raw.includes('TCPMSS')) continue;
+        if (!re.test(raw)) continue;
+        const m = raw.match(/--set-mss\s+(\d+)/);
+        rules.push({
+            raw,
+            dir: raw.includes('-o ' + name) ? 'out' : 'in',
+            mss: m ? Number(m[1]) : 0,
+            clamp: raw.includes('--clamp-mss-to-pmtu')
+        });
+    }
+    return rules;
+}
+
+function mtuRecommend(mtu, rules) {
+    const value = Number(mtu) || 0;
+    const expectedMss = value > 0 ? Math.max(MSS_MIN, value - 40) : 0;
+    const list = Array.isArray(rules) ? rules : [];
+    if (!value) {
+        return { ok: false, level: 'error', expectedMss: 0, message: 'Интерфейс не поднят — MTU неизвестен.' };
+    }
+    if (!list.length) {
+        return {
+            ok: false,
+            level: 'warn',
+            expectedMss,
+            message: `Клампинга MSS нет. Нужно ${expectedMss} (MTU ${value} − 40); лучше автоматически: --clamp-mss-to-pmtu.`
+        };
+    }
+    const over = list.filter(r => r.mss > 0 && r.mss > expectedMss);
+    if (over.length) {
+        const bad = Math.max(...over.map(r => r.mss));
+        return {
+            ok: false,
+            level: 'error',
+            expectedMss,
+            message: `MSS ${bad} больше допустимого ${expectedMss} при MTU ${value}: пакеты до ${bad + 40} байт будут теряться. Замените на --clamp-mss-to-pmtu или --set-mss ${expectedMss}.`
+        };
+    }
+    if (new Set(list.map(r => r.dir)).size < 2) {
+        return {
+            ok: false,
+            level: 'warn',
+            expectedMss,
+            message: 'Клампинг стоит только в одну сторону — нужно и -o, и -i.'
+        };
+    }
+    if (list.some(r => r.clamp)) {
+        return { ok: true, level: 'ok', expectedMss, message: `Клампинг по PMTU, MSS ${expectedMss} — корректно.` };
+    }
+    return { ok: true, level: 'ok', expectedMss, message: `MSS ${expectedMss} соответствует MTU ${value}.` };
+}
+
+function mtuLocalReport() {
+    return cascadeTunnelTargets().map(t => {
+        const mtu = ifaceMtuOf(t.iface);
+        const rules = mssRulesOf(t.iface);
+        const rec = mtuRecommend(mtu, rules);
+        return { ...t, mtu, expectedMss: rec.expectedMss, ok: rec.ok, level: rec.level, advice: rec.message, rules };
+    });
+}
+
+function pingDfOk(host, mtu, iface) {
+    const payload = Math.max(0, Number(mtu) - 28);
+    const args = ['-n', '-c', '1', '-W', '2', '-M', 'do', '-s', String(payload)];
+    if (iface) args.push('-I', String(iface));
+    args.push(String(host));
+    let out = '';
+    try {
+        out = String(sh('ping', args, { timeout: 6000 }) || '');
+    } catch (e) {
+        out = String((e && e.stdout) || '') + String((e && e.stderr) || '');
+    }
+    return /ttl=/i.test(out);
+}
+
+// Бинарный поиск PMTU: ping с DF, payload = MTU − 28 (IP+ICMP).
+function pmtuMeasure(host, iface) {
+    if (pingDfOk(host, 1500, iface)) return 1500;
+    let lo = MSS_MIN + 28;
+    let hi = 1499;
+    let best = 0;
+    while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (pingDfOk(host, mid, iface)) {
+            best = mid;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return best;
+}
+
+function mssApplyOne(iface, mss, mode) {
+    const name = String(iface || '');
+    if (!/^[A-Za-z0-9_.-]+$/.test(name)) throw new Error('Неверный интерфейс');
+    const out = String(shTry('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-S', 'FORWARD']) || '');
+    const re = new RegExp('(?:-o|-i)\\s+' + name + '(?:\\s|$)');
+    let removed = 0;
+    for (const line of out.split(/\r?\n/)) {
+        const raw = line.trim();
+        if (!raw.startsWith('-A FORWARD') || !raw.includes('TCPMSS') || !re.test(raw)) continue;
+        const args = raw.replace(/^-A FORWARD\s+/, '').split(/\s+/).filter(Boolean);
+        try {
+            sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-D', 'FORWARD', ...args]);
+            removed++;
+        } catch (e) { /* ignore */ }
+    }
+    const spec = mode === 'set' ? ['--set-mss', String(Math.max(MSS_MIN, Number(mss) || 0))] : ['--clamp-mss-to-pmtu'];
+    for (const dir of ['-o', '-i']) {
+        sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-A', 'FORWARD', dir, name,
+            '-p', 'tcp', '--tcp-flags', 'SYN,RST', 'SYN', '-j', 'TCPMSS', ...spec]);
+    }
+    return removed;
+}
+
+function mssPersist(list) {
+    const items = Array.isArray(list) ? list.filter(it => it && it.iface) : [];
+    const script = [
+        '#!/bin/sh',
+        '# Servpanel: MSS clamping для каскадных туннелей',
+        'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+        ''
+    ];
+    for (const it of items) {
+        const spec = it.mode === 'set' ? `--set-mss ${Math.max(MSS_MIN, Number(it.mss) || 0)}` : '--clamp-mss-to-pmtu';
+        script.push('for d in -o -i; do');
+        script.push(`    iptables -w 5 -t mangle -C FORWARD $d ${it.iface} -p tcp --tcp-flags SYN,RST SYN -j TCPMSS ${spec} 2>/dev/null || \\`);
+        script.push(`        iptables -w 5 -t mangle -A FORWARD $d ${it.iface} -p tcp --tcp-flags SYN,RST SYN -j TCPMSS ${spec}`);
+        script.push('done');
+    }
+    writeRootFile(MSS_SCRIPT, script.join('\n') + '\n', '0755');
+    writeRootFile(MSS_UNIT, [
+        '[Unit]',
+        'Description=Servpanel MSS clamp for cascade tunnels',
+        'After=network-online.target',
+        'Wants=network-online.target',
+        '',
+        '[Service]',
+        'Type=oneshot',
+        `ExecStart=${MSS_SCRIPT}`,
+        'RemainAfterExit=yes',
+        '',
+        '[Install]',
+        'WantedBy=multi-user.target',
+        ''
+    ].join('\n'), '0644');
+    sh('sudo', ['systemctl', 'daemon-reload']);
+    try { sh('sudo', ['systemctl', 'enable', '--now', 'servpanel-mss.service'], { timeout: 30000 }); } catch (e) { /* ignore */ }
+}
+
+function setCascadeIfaceMtu(iface, mtu) {
+    const name = String(iface || '');
+    if (!/^[A-Za-z0-9_.-]+$/.test(name)) throw new Error('Неверный интерфейс');
+    const value = Number(mtu);
+    if (!Number.isInteger(value) || value < 576 || value > 1500) throw new Error('MTU должен быть 576…1500');
+    const file = path.join(AWG_CONF_DIR, name + '.conf');
+    if (!fs.existsSync(file)) throw new Error('Конфиг ' + name + '.conf не найден');
+    const lines = readTextSafe(file).split(/\r?\n/).filter(l => !/^\s*MTU\s*=/i.test(l));
+    const idx = lines.findIndex(l => /^\s*\[Interface\]\s*$/i.test(l));
+    if (idx < 0) throw new Error('В конфиге нет секции [Interface]');
+    lines.splice(idx + 1, 0, 'MTU = ' + value);
+    writeRootFile(file, lines.join('\n').trim() + '\n', '0600');
+    try { sh('sudo', ['systemctl', 'restart', 'awg-quick@' + name], { timeout: 60000 }); } catch (e) { /* ignore */ }
+    return ifaceMtuOf(name);
+}
+
+app.get('/api/cascade/mtu', checkAuth, requireAdmin, (req, res) => {
+    try {
+        res.json({ success: true, role: cascadeRole(), items: mtuLocalReport() });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось прочитать MTU: ' + (e.message || e) });
+    }
+});
+
+app.post('/api/cascade/mtu/test', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    const host = String(body.host || '').trim() || '1.1.1.1';
+    if (!IPV4_RE.test(host) && !/^[A-Za-z0-9.-]+$/.test(host)) return res.status(400).json({ error: 'Неверный хост' });
+    try {
+        const all = mtuLocalReport();
+        const target = body.iface ? all.filter(i => i.iface === String(body.iface)) : all;
+        if (!target.length) return res.status(404).json({ error: 'Каскадный интерфейс не найден' });
+        const items = target.map(item => {
+            const pmtu = item.mtu ? pmtuMeasure(host, item.iface) : 0;
+            const baseMtu = pmtu || item.mtu || 0;
+            const recommendedMss = baseMtu ? Math.max(MSS_MIN, baseMtu - 40) : 0;
+            return {
+                ...item,
+                pmtu,
+                recommendedMtu: baseMtu,
+                recommendedMss,
+                suggestion: pmtu && item.mtu && pmtu < item.mtu
+                    ? `Путь держит ${pmtu} байт, а интерфейс ${item.mtu}. Поставьте MTU ${pmtu} на клиентском туннеле и MSS ${recommendedMss} (клампинг по PMTU).`
+                    : (pmtu ? `Путь держит ${pmtu} байт. Рекомендуется MSS ${recommendedMss} (MTU − 40) и клампинг по PMTU.` : 'ICMP с DF не прошёл — проверьте доступность хоста через туннель.')
+            };
+        });
+        res.json({ success: true, host, items });
+    } catch (e) {
+        res.status(500).json({ error: 'Ошибка замера MTU: ' + (e.message || e) });
+    }
+});
+
+app.post('/api/cascade/mtu/apply', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    try {
+        const all = mtuLocalReport();
+        const target = body.iface ? all.filter(i => i.iface === String(body.iface)) : all;
+        if (!target.length) return res.status(404).json({ error: 'Каскадный интерфейс не найден' });
+        const mode = body.mode === 'set' ? 'set' : 'clamp';
+        const wantMtu = Number(body.mtu) || 0;
+        const done = [];
+        for (const item of target) {
+            if (wantMtu && wantMtu !== item.mtu) {
+                setCascadeIfaceMtu(item.iface, wantMtu);
+            }
+            const mtu = wantMtu || ifaceMtuOf(item.iface) || item.mtu;
+            const mss = Math.max(MSS_MIN, (Number(body.mss) || (mtu - 40)));
+            const removed = mssApplyOne(item.iface, mss, mode);
+            done.push({ iface: item.iface, mtu, mss: mode === 'set' ? mss : 0, mode, removed });
+        }
+        mssPersist(done.map(d => ({ iface: d.iface, mss: d.mss, mode: d.mode })));
+        for (const d of done) auditLog(req, `MTU ${d.iface}: MSS ${d.mode === 'set' ? d.mss : 'PMTU'}, MTU ${d.mtu}`);
+        res.json({ success: true, applied: done, items: mtuLocalReport() });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось применить клампинг: ' + (e.message || e) });
+    }
+});
+
+// Отчёт о MTU/MSS на ответной панели (по ключу iperf-агента).
+app.get('/api/iperf/agent/mtu', requireIperfAgent, (req, res) => {
+    try {
+        res.json({ success: true, role: cascadeRole(), items: mtuLocalReport() });
+    } catch (e) {
+        res.status(500).json({ error: e.message || 'Ошибка чтения MTU' });
+    }
+});
+
+app.post('/api/cascade/mtu/remote', checkAuth, requireAdmin, async (req, res) => {
+    const exitId = String((req.body && req.body.exitId) || '');
+    const state = cascadeBalanceRead();
+    const agent = state.agents && state.agents[exitId];
+    if (!agent || !agent.url) {
+        return res.status(404).json({ error: 'Для этого выхода нет ключа iperf — сначала выполните тест канала' });
+    }
+    let token = '';
+    try { token = cascadeDecrypt(agent.token); } catch (e) { token = ''; }
+    if (!token) return res.status(400).json({ error: 'Не удалось расшифровать ключ ответной панели' });
+    try {
+        const r = await fetch(String(agent.url).replace(/\/+$/, '') + '/api/iperf/agent/mtu', {
+            headers: { Authorization: 'Bearer ' + token },
+            signal: AbortSignal.timeout(15000)
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) return res.status(r.status).json({ error: data.error || ('HTTP ' + r.status) });
+        res.json({ success: true, exitId, url: agent.url, remote: data });
+    } catch (e) {
+        res.status(502).json({ error: 'Ответная панель недоступна: ' + (e.message || e) });
+    }
+});
+
 app.post('/api/cascade/balance/capacity', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     const id = String(body.id || '');
@@ -4334,6 +4631,8 @@ for idx in "\${!EXIT_IFS[@]}"; do
         [ -n "$SUBNET" ] || continue
         iptables -w 5 -t nat -D POSTROUTING -s "$SUBNET" -o "$IFACE" -j MASQUERADE 2>/dev/null || true
         iptables -w 5 -t nat -A POSTROUTING -s "$SUBNET" -o "$IFACE" -j MASQUERADE
+        # Старые правила MSS (например, --set-mss 1240) перекрывают клампинг по PMTU.
+        iptables -w 5 -t mangle -S FORWARD | grep -F TCPMSS | grep -F " $IFACE " | sed -n "s/^-A FORWARD /iptables -w 5 -t mangle -D FORWARD /p" | sh || true
         iptables -w 5 -t mangle -D FORWARD -o "$IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
         iptables -w 5 -t mangle -A FORWARD -o "$IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
     done
@@ -15451,7 +15750,7 @@ module.exports._internals = {
     attachClientSpeeds,
     normalizeCascadeConf, firstIpv4, firstTunnelIp, buildRoutingScript, cascadeRole, localTunnelIps, isPublicAddress,
     cascadeEndpointPlan, cascadeRoleFrom, cascadeHealth,
-    cascadeBalanceScript, cascadeBalanceAssignments
+    cascadeBalanceScript, cascadeBalanceAssignments, mtuRecommend, mssRulesOf
 };
 
 

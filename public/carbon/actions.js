@@ -1198,6 +1198,114 @@ async function carbonDiagIperf() {
   }
 }
 
+let carbonMtuLast = null;
+
+function carbonMtuRows(items) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return '<div class="muted">Каскадные интерфейсы не найдены.</div>';
+  const color = l => l === 'ok' ? 'var(--good)' : l === 'warn' ? 'var(--warn)' : 'var(--bad)';
+  const rules = it => (it.rules && it.rules.length)
+    ? it.rules.map(r => (r.clamp ? 'PMTU' : r.mss) + ' (' + (r.dir === 'out' ? 'o' : 'i') + ')').join(', ')
+    : 'нет';
+  return `<div class="table-scroll"><table class="table"><thead><tr><th>Интерфейс</th><th>MTU</th><th>MSS</th><th>Вердикт</th></tr></thead><tbody>${list.map(it => `<tr><td class="mono">${escHtml(it.iface || '')}${it.name ? ' · ' + escHtml(it.name) : ''}</td><td class="mono">${it.mtu || '—'}</td><td class="mono">${escHtml(rules(it))}</td><td style="color:${color(it.level)}">${escHtml(it.advice || '')}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+function carbonMtuPaint(items) {
+  const box = document.getElementById('carbonMtuBox');
+  if (box) box.innerHTML = carbonMtuRows(items);
+  const tagEl = document.getElementById('carbonMtuTag');
+  if (tagEl) {
+    const bad = (items || []).filter(i => !i.ok).length;
+    tagEl.textContent = bad ? bad + ' проблем' : 'в порядке';
+    tagEl.className = 'tag ' + (bad ? 'warn' : 'good');
+  }
+}
+
+async function carbonMtuLoad() {
+  const box = document.getElementById('carbonMtuBox');
+  try {
+    const d = await api('/api/cascade/mtu');
+    carbonMtuPaint(d.items || []);
+  } catch (e) {
+    if (box) box.innerHTML = `<div class="muted">${escHtml(e.message || 'Не удалось прочитать MTU')}</div>`;
+  }
+}
+
+async function carbonMtuTest() {
+  const out = document.getElementById('carbonMtuOut');
+  const host = document.getElementById('carbonMtuHost')?.value.trim() || '1.1.1.1';
+  if (out) out.textContent = 'Измеряю PMTU через туннель (ping с DF), это несколько секунд…';
+  try {
+    const d = await api('/api/cascade/mtu/test', { method: 'POST', body: { host } });
+    carbonMtuLast = d.items || [];
+    carbonMtuPaint(d.items || []);
+    const lines = (d.items || []).map(i => {
+      const head = `${i.iface}: PMTU ${i.pmtu || '—'}${i.mtu ? ' (интерфейс ' + i.mtu + ')' : ''} · рекомендуется MSS ${i.recommendedMss || '—'}`;
+      return head + '\n  ' + (i.suggestion || '');
+    });
+    if (out) out.textContent = lines.join('\n\n') || 'Нет данных';
+    showToast('Замер MTU готов — панель предлагает параметры');
+  } catch (e) {
+    if (out) out.textContent = e.message || 'Ошибка замера MTU';
+  }
+}
+
+function carbonMtuApply() {
+  const first = (carbonMtuLast && carbonMtuLast[0]) || {};
+  const prefMtu = first.recommendedMtu || first.pmtu || '';
+  const prefMss = first.recommendedMss || '';
+  showCarbonForm({
+    title: 'Применить MTU и клампинг',
+    sub: 'MTU меняется в конфиге туннеля и перезапускает интерфейс. Клампинг ставится в обе стороны и сохраняется в systemd.',
+    fields: [
+      { name: 'mtu', label: 'MTU (пусто — не менять)', type: 'number', min: 576, max: 1500, placeholder: String(prefMtu || '') },
+      { name: 'mode', label: 'Клампинг', type: 'select', value: 'clamp', options: [
+        { value: 'clamp', label: 'По PMTU (рекомендуется)' },
+        { value: 'set', label: 'Явный MSS' }
+      ] },
+      { name: 'mss', label: 'MSS (для явного режима)', type: 'number', min: 536, max: 1460, placeholder: String(prefMss || '') }
+    ],
+    submitText: 'Применить',
+    onSubmit: async v => {
+      const body = { mode: v.mode === 'set' ? 'set' : 'clamp' };
+      const mtu = Number(v.mtu) || 0;
+      if (mtu) body.mtu = mtu;
+      if (body.mode === 'set' && Number(v.mss)) body.mss = Number(v.mss);
+      const d = await api('/api/cascade/mtu/apply', { method: 'POST', body });
+      carbonMtuLast = d.items || null;
+      carbonMtuPaint(d.items || []);
+      const out = document.getElementById('carbonMtuOut');
+      if (out) out.textContent = (d.applied || []).map(a => `${a.iface}: MTU ${a.mtu}, MSS ${a.mode === 'set' ? a.mss : 'по PMTU'}, снято старых правил ${a.removed}`).join('\n');
+      await carbonRefresh('MTU и клампинг обновлены');
+    }
+  });
+}
+
+async function carbonMtuRemote() {
+  const out = document.getElementById('carbonMtuOut');
+  if (out) out.textContent = 'Запрашиваю MTU у ответной панели…';
+  try {
+    const st = await api('/api/cascade/status');
+    const exits = (st.balance && st.balance.exits) || [];
+    let lastErr = '';
+    for (const ex of exits) {
+      try {
+        const d = await api('/api/cascade/mtu/remote', { method: 'POST', body: { exitId: ex.id } });
+        const items = (d.remote && d.remote.items) || [];
+        if (out) {
+          out.textContent = `Ответная панель ${d.url}\n\n` + (items.length
+            ? items.map(i => `${i.iface}: MTU ${i.mtu || '—'} · MSS ${i.expectedMss || '—'}\n  ${i.advice}`).join('\n')
+            : 'Панель не вернула каскадных интерфейсов.');
+        }
+        return;
+      } catch (e) { lastErr = e.message || String(e); }
+    }
+    if (out) out.textContent = lastErr || 'Нет сохранённых ключей iperf — сначала выполните тест канала.';
+  } catch (e) {
+    if (out) out.textContent = e.message || 'Ошибка';
+  }
+}
+
 async function carbonCascadeIfacesSave() {
   const ifaces = [...document.querySelectorAll('[data-cascade-iface]:checked')].map(x => x.value);
   if (!ifaces.length) throw new Error('Выберите хотя бы один интерфейс');
@@ -2263,6 +2371,10 @@ document.addEventListener('click', async event => {
     else if (action === 'cascade-exit-capacity') await carbonCascadeExitCapacity(btn.dataset.id);
     else if (action === 'cascade-exit-iperf') await carbonCascadeExitIperf(btn.dataset.id);
     else if (action === 'diag-iperf') await carbonDiagIperf();
+    else if (action === 'mtu-load') await carbonMtuLoad();
+    else if (action === 'mtu-test') await carbonMtuTest();
+    else if (action === 'mtu-apply') await carbonMtuApply();
+    else if (action === 'mtu-remote') await carbonMtuRemote();
     else if (action === 'appearance-preset') { carbonSetPalettePreset(btn.dataset.preset); render(); showToast('Шаблон применён'); }
     else if (action === 'appearance-custom') { document.getElementById('appearanceColors')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     else if (action === 'appearance-theme') { setTheme(btn.dataset.theme); render(); }
@@ -2341,3 +2453,8 @@ document.addEventListener('click', async event => {
     finishBusy();
   }
 }, true);
+
+// Хук после отрисовки вкладки: автоматически подтягиваем MTU каскада.
+window.carbonAfterRender = function (tab) {
+  if (tab === 'diagnostics') carbonMtuLoad().catch(function () {});
+};
