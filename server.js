@@ -1252,6 +1252,23 @@ function diskUsageCached() {
 diskUsageCached.at = 0;
 diskUsageCached.value = null;
 
+// Счётчики интерфейсов из /sys/class/net: не требуют root и дают
+// честные байты по eth0/awg0/awg1, а не только сумму по клиентам.
+function ifaceCounters() {
+    const out = [];
+    let names = [];
+    try { names = fs.readdirSync('/sys/class/net'); } catch (e) { names = []; }
+    for (const name of names) {
+        if (name === 'lo') continue;
+        try {
+            const rx = Number(readTextSafe(`/sys/class/net/${name}/statistics/rx_bytes`).trim()) || 0;
+            const tx = Number(readTextSafe(`/sys/class/net/${name}/statistics/tx_bytes`).trim()) || 0;
+            out.push({ iface: name, rx, tx });
+        } catch (e) { /* пропускаем */ }
+    }
+    return out.sort((a, b) => a.iface.localeCompare(b.iface));
+}
+
 function metricsSnapshot() {
     const mem = memoryUsage();
     const disk = diskUsageCached();
@@ -1304,6 +1321,7 @@ function metricsSnapshot() {
             totalRx,
             totalTx
         },
+        net: ifaceCounters(),
         interfaces: existingIfaces()
     };
 }
@@ -1338,6 +1356,10 @@ function prometheusMetrics(s) {
     metric('servpanel_traffic_tx_bytes_per_second', 'Current TX speed', 'gauge', s.traffic.tx);
     metric('servpanel_traffic_rx_bytes_total', 'Cumulative RX bytes', 'counter', s.traffic.totalRx);
     metric('servpanel_traffic_tx_bytes_total', 'Cumulative TX bytes', 'counter', s.traffic.totalTx);
+    for (const n of (s.net || [])) {
+        metric('servpanel_iface_rx_bytes_total', 'Interface received bytes', 'counter', n.rx, { iface: n.iface });
+        metric('servpanel_iface_tx_bytes_total', 'Interface transmitted bytes', 'counter', n.tx, { iface: n.iface });
+    }
     return lines.join('\n') + '\n';
 }
 
@@ -14795,6 +14817,181 @@ app.post('/api/diag/traceroute', checkAuth, (req, res) => {
 
 // Диагностика шейпинга и сетевых счётчиков: помогает понять, почему
 // скорость через туннель отличается от канала.
+// ---------------------------------------------------------------------------
+// Мониторинг канала: периодический замер iperf3 через туннель.
+// Нужен, чтобы увидеть шейпер во времени: разовый Speedtest попадает в burst
+// и показывает не тот потолок, который держится через минуту.
+// ---------------------------------------------------------------------------
+const CHANNEL_MONITOR_FILE = path.join(DATA_DIR, '.channel_monitor.json');
+let channelMonitorTimer = null;
+
+function channelMonitorState() {
+    try {
+        const j = JSON.parse(readTextSafe(CHANNEL_MONITOR_FILE) || '{}');
+        return {
+            running: !!j.running,
+            intervalMin: Math.max(1, Math.min(1440, Number(j.intervalMin) || 15)),
+            seconds: Math.max(5, Math.min(20, Number(j.seconds) || 15)),
+            exitId: String(j.exitId || 'primary'),
+            iface: String(j.iface || 'awg1'),
+            startedAt: Number(j.startedAt) || 0,
+            until: Number(j.until) || 0,
+            points: Array.isArray(j.points) ? j.points.slice(-5000) : []
+        };
+    } catch (e) {
+        return { running: false, intervalMin: 15, seconds: 15, exitId: 'primary', iface: 'awg1', startedAt: 0, until: 0, points: [] };
+    }
+}
+
+function channelMonitorWrite(state) {
+    try { writeJson(CHANNEL_MONITOR_FILE, state, 0o600); } catch (e) { /* ignore */ }
+}
+
+function channelMonitorStop() {
+    if (channelMonitorTimer) {
+        clearInterval(channelMonitorTimer);
+        channelMonitorTimer = null;
+    }
+}
+
+async function channelMonitorTick() {
+    const state = channelMonitorState();
+    if (state.until && Date.now() > state.until) {
+        channelMonitorStop();
+        state.running = false;
+        channelMonitorWrite(state);
+        return state;
+    }
+    const net = ifaceCounters().find(n => n.iface === state.iface) || null;
+    let up = 0;
+    let down = 0;
+    let ok = false;
+    let error = '';
+    try {
+        const r = await iperfRunTest({ exitId: state.exitId, transport: 'tunnel', seconds: state.seconds });
+        up = Number(r.upMbps) || 0;
+        down = Number(r.downMbps) || 0;
+        ok = true;
+    } catch (e) {
+        error = String((e && e.message) || e).slice(0, 200);
+    }
+    const snap = metricsSnapshot();
+    state.points.push({
+        t: Date.now(),
+        up,
+        down,
+        ok,
+        error,
+        cpu: snap.cpu.percent,
+        ifaceRx: net ? net.rx : 0,
+        ifaceTx: net ? net.tx : 0
+    });
+    if (state.points.length > 5000) state.points = state.points.slice(-5000);
+    channelMonitorWrite(state);
+    return state;
+}
+
+function channelMonitorStart(intervalMin, opts) {
+    channelMonitorStop();
+    const o = opts || {};
+    const state = channelMonitorState();
+    state.running = true;
+    state.intervalMin = Math.max(1, Math.min(1440, Number(intervalMin) || 15));
+    state.seconds = Math.max(5, Math.min(20, Number(o.seconds) || state.seconds || 15));
+    state.exitId = String(o.exitId || state.exitId || 'primary');
+    state.iface = String(o.iface || state.iface || 'awg1');
+    const hours = Number(o.hours) || 0;
+    state.startedAt = Date.now();
+    state.until = hours > 0 ? Date.now() + hours * 3600000 : 0;
+    channelMonitorWrite(state);
+    channelMonitorTimer = setInterval(() => {
+        channelMonitorTick().catch(() => { /* следующий тик попробует снова */ });
+    }, state.intervalMin * 60000);
+    if (channelMonitorTimer.unref) channelMonitorTimer.unref();
+    channelMonitorTick().catch(() => { /* первый замер не критичен */ });
+    return state;
+}
+
+// После перезапуска панели мониторинг продолжается сам.
+function channelMonitorEnsure() {
+    const state = channelMonitorState();
+    if (state.running && !channelMonitorTimer) channelMonitorStart(state.intervalMin, state);
+}
+const channelMonitorBoot = setTimeout(() => { try { channelMonitorEnsure(); } catch (e) { /* ignore */ } }, 5000);
+if (channelMonitorBoot.unref) channelMonitorBoot.unref();
+
+app.get('/api/diag/monitor', checkAuth, (req, res) => {
+    res.json({ success: true, ...channelMonitorState() });
+});
+
+app.post('/api/diag/monitor/start', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    const state = channelMonitorStart(body.intervalMin, body);
+    auditLog(req, `Мониторинг канала: старт, интервал ${state.intervalMin} мин` +
+        (state.until ? `, до ${new Date(state.until).toISOString()}` : ''));
+    res.json({ success: true, ...state });
+});
+
+app.post('/api/diag/monitor/stop', checkAuth, requireAdmin, (req, res) => {
+    channelMonitorStop();
+    const state = channelMonitorState();
+    state.running = false;
+    channelMonitorWrite(state);
+    auditLog(req, 'Мониторинг канала: остановлен');
+    res.json({ success: true, ...state });
+});
+
+app.get('/api/diag/monitor/csv', checkAuth, requireAdmin, (req, res) => {
+    const state = channelMonitorState();
+    const rows = ['time,tcp_up_mbps,tcp_down_mbps,cpu_percent,ok,error'];
+    for (const p of state.points) {
+        rows.push([
+            new Date(p.t).toISOString(),
+            p.up,
+            p.down,
+            p.cpu,
+            p.ok ? 1 : 0,
+            String(p.error || '').replace(/[",\r\n]/g, ' ')
+        ].join(','));
+    }
+    res.setHeader('Content-Disposition', 'attachment; filename="channel-monitor.csv"');
+    res.type('text/csv').send(rows.join('\n') + '\n');
+});
+
+// TCP BBR: к UDP-каскаду не применяется, но ускоряет TCP на длинных RTT
+// и безвреден для сервера. Ставим вместе с fq, иначе растёт задержка.
+app.get('/api/system/bbr', checkAuth, (req, res) => {
+    const read = k => String(shTry('sysctl', ['-n', k]) || '').trim();
+    const current = read('net.ipv4.tcp_congestion_control');
+    res.json({
+        success: true,
+        enabled: current === 'bbr',
+        current,
+        qdisc: read('net.core.default_qdisc'),
+        available: read('net.ipv4.tcp_available_congestion_control')
+    });
+});
+
+app.post('/api/system/bbr', checkAuth, requireAdmin, (req, res) => {
+    const enabled = !!(req.body && req.body.enabled);
+    try {
+        if (enabled) {
+            writeRootFile('/etc/sysctl.d/99-bbr.conf',
+                'net.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr\n', '0644');
+            sh('sudo', ['sysctl', '-w', 'net.core.default_qdisc=fq']);
+            sh('sudo', ['sysctl', '-w', 'net.ipv4.tcp_congestion_control=bbr']);
+        } else {
+            try { sh('sudo', ['rm', '-f', '/etc/sysctl.d/99-bbr.conf']); } catch (e) { /* ignore */ }
+            sh('sudo', ['sysctl', '-w', 'net.ipv4.tcp_congestion_control=cubic']);
+        }
+        auditLog(req, 'TCP BBR: ' + (enabled ? 'включён' : 'выключен'));
+        const current = String(shTry('sysctl', ['-n', 'net.ipv4.tcp_congestion_control']) || '').trim();
+        res.json({ success: true, enabled: current === 'bbr', current });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось изменить BBR: ' + (e.message || e) });
+    }
+});
+
 app.get('/api/diag/tc', checkAuth, requireAdmin, (req, res) => {
     if (NO_SYSTEM()) return res.json({ demo: true });
     const run = (cmd, args) => {

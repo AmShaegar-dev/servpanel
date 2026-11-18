@@ -1236,6 +1236,78 @@ function carbonMtuPaint(items) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Мониторинг канала: график отдачи/скачивания через туннель.
+// ---------------------------------------------------------------------------
+function carbonMonitorPaint(d) {
+  const tag = document.getElementById('carbonMonitorTag');
+  const out = document.getElementById('carbonMonitorOut');
+  const chart = document.getElementById('carbonMonitorChart');
+  const pts = (d && d.points) || [];
+  if (tag) tag.textContent = d && d.running ? ('идёт · каждые ' + d.intervalMin + ' мин') : 'остановлен';
+  if (chart) {
+    const last = pts.slice(-120);
+    if (last.length < 2) {
+      chart.innerHTML = '<div class="muted">Пока нет данных — запустите мониторинг.</div>';
+    } else {
+      const w = 600, h = 120, pad = 6;
+      const max = Math.max(10, ...last.map(p => Math.max(Number(p.up) || 0, Number(p.down) || 0)));
+      const x = i => pad + i * (w - pad * 2) / (last.length - 1);
+      const y = v => h - pad - (Math.max(0, Number(v) || 0) / max) * (h - pad * 2);
+      const line = k => last.map((p, i) => `${x(i).toFixed(1)},${y(p[k]).toFixed(1)}`).join(' ');
+      chart.innerHTML = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:120px;background:var(--surface-2);border-radius:8px"><polyline fill="none" stroke="#5b8cff" stroke-width="2" points="${line('up')}"/><polyline fill="none" stroke="#2dd4a7" stroke-width="2" points="${line('down')}"/></svg>` +
+        `<div class="muted" style="margin-top:4px">синий — отдача, зелёный — скачивание · максимум ${max.toFixed(1)} Мбит/с · точек ${last.length}</div>`;
+    }
+  }
+  if (out) {
+    const last = pts.slice(-8).reverse();
+    out.textContent = last.length
+      ? last.map(p => `${new Date(p.t).toLocaleString()} · ↑ ${Number(p.up).toFixed(1)} · ↓ ${Number(p.down).toFixed(1)} Мбит/с · CPU ${p.cpu}%${p.ok ? '' : ' · ' + (p.error || 'ошибка')}`).join('\n')
+      : 'Данных пока нет.';
+  }
+}
+
+async function carbonMonitorLoad() {
+  try { carbonMonitorPaint(await api('/api/diag/monitor')); } catch (e) { /* тихо */ }
+}
+
+async function carbonMonitorStart() {
+  const intervalMin = Number(document.getElementById('carbonMonitorInterval')?.value) || 5;
+  const hours = Number(document.getElementById('carbonMonitorHours')?.value) || 0;
+  try {
+    const d = await api('/api/diag/monitor/start', { method: 'POST', body: { intervalMin, hours, seconds: 10, exitId: 'primary', iface: 'awg1' } });
+    carbonMonitorPaint(d);
+    showToast('Мониторинг запущен: каждые ' + d.intervalMin + ' мин');
+  } catch (e) { showToast(e.message || 'Не удалось запустить'); }
+}
+
+async function carbonMonitorStop() {
+  try {
+    const d = await api('/api/diag/monitor/stop', { method: 'POST', body: {} });
+    carbonMonitorPaint(d);
+    showToast('Мониторинг остановлен');
+  } catch (e) { showToast(e.message || 'Не удалось остановить'); }
+}
+
+async function carbonBbrLoad() {
+  try {
+    const d = await api('/api/system/bbr');
+    const tag = document.getElementById('carbonBbrTag');
+    const out = document.getElementById('carbonBbrOut');
+    if (tag) tag.textContent = d.enabled ? 'BBR включён' : 'BBR выключен';
+    if (out) out.textContent = `Алгоритм: ${d.current}\nОчередь: ${d.qdisc}\nДоступно: ${d.available}`;
+  } catch (e) { /* тихо */ }
+}
+
+async function carbonBbrToggle() {
+  try {
+    const cur = await api('/api/system/bbr');
+    const d = await api('/api/system/bbr', { method: 'POST', body: { enabled: !cur.enabled } });
+    await carbonBbrLoad();
+    showToast(d.enabled ? 'BBR включён' : 'BBR выключен');
+  } catch (e) { showToast(e.message || 'Не удалось переключить BBR'); }
+}
+
 async function carbonMtuLoad() {
   const box = document.getElementById('carbonMtuBox');
   try {
@@ -2443,6 +2515,11 @@ document.addEventListener('click', async event => {
     else if (action === 'mtu-remote') await carbonMtuRemote(false);
     else if (action === 'mtu-remote-apply') await carbonMtuRemote(true);
     else if (action === 'mtu-clients') await carbonMtuClients();
+    else if (action === 'monitor-start') await carbonMonitorStart();
+    else if (action === 'monitor-stop') await carbonMonitorStop();
+    else if (action === 'monitor-refresh') await carbonMonitorLoad();
+    else if (action === 'bbr-load') await carbonBbrLoad();
+    else if (action === 'bbr-toggle') await carbonBbrToggle();
     else if (action === 'appearance-preset') { carbonSetPalettePreset(btn.dataset.preset); render(); showToast('Шаблон применён'); }
     else if (action === 'appearance-custom') { document.getElementById('appearanceColors')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     else if (action === 'appearance-theme') { setTheme(btn.dataset.theme); render(); }
@@ -2524,5 +2601,9 @@ document.addEventListener('click', async event => {
 
 // Хук после отрисовки вкладки: автоматически подтягиваем MTU каскада.
 window.carbonAfterRender = function (tab) {
-  if (tab === 'diagnostics') carbonMtuLoad().catch(function () {});
+  if (tab === 'diagnostics') {
+    carbonMtuLoad().catch(function () {});
+    carbonMonitorLoad().catch(function () {});
+    carbonBbrLoad().catch(function () {});
+  }
 };

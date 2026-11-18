@@ -1,4 +1,4 @@
-# 🌐 Servpanel 3.2.151 — веб-панель AmneziaWG, Keenetic и серверных служб
+# 🌐 Servpanel 3.2.152 — веб-панель AmneziaWG, Keenetic и серверных служб
 
 > ⚠️ **Статус: активная разработка.** Панель регулярно обновляется: интерфейс, каскад, WARP/Xray, MTProto и часть серверных сценариев продолжают развиваться. Перед обновлением рабочего сервера сделайте бэкап и проверьте новую версию на тестовом стенде.
 
@@ -7,6 +7,13 @@
 Панель работает напрямую с AmneziaWG (DKMS-модуль ядра) без накладных расходов Docker, обеспечивая максимальную производительность даже на недорогих VPS.
 
 ---
+
+## 🆕 Что нового в 3.2.152
+
+* **Мониторинг канала.** В «Диагностике» новая карточка: панель каждые N минут сама запускает iperf3 через туннель и записывает отдачу, скачивание, CPU и счётчики интерфейса. Задаётся интервал и срок (например, 5 минут на 20 часов), результаты переживают перезапуск и выгружаются в CSV.
+* **Замер длиннее всплеска.** Тест идёт 10–20 секунд, поэтому показывает устойчивый потолок, а не «льготные» первые секунды, которые видны в коротком Speedtest.
+* **Метрики по интерфейсам.** В Prometheus добавлены `servpanel_iface_rx_bytes_total` и `servpanel_iface_tx_bytes_total` с меткой `iface` — видно, какое плечо (eth0, awg0, awg1) проседает.
+* **Переключатель BBR.** В «Диагностике» можно включить TCP BBR (`fq` + `bbr` через `sysctl`, сохраняется в `/etc/sysctl.d/99-bbr.conf`). На UDP-каскад не влияет, но ускоряет TCP на длинных RTT.
 
 ## 🆕 Что нового в 3.2.151
 
@@ -1027,15 +1034,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.151/servpanel-3.2.151.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.151/servpanel-3.2.151.tar.gz.sha256
-sha256sum -c servpanel-3.2.151.tar.gz.sha256
-tar -xzf servpanel-3.2.151.tar.gz
-bash /root/servpanel-3.2.151/upgrade.sh
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.152/servpanel-3.2.152.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.152/servpanel-3.2.152.tar.gz.sha256
+sha256sum -c servpanel-3.2.152.tar.gz.sha256
+tar -xzf servpanel-3.2.152.tar.gz
+bash /root/servpanel-3.2.152/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.2.151`. Хеш архива лежит рядом в файле `servpanel-3.2.151.tar.gz.sha256` — `sha256sum -c` проверит его автоматически. Если `curl` не установлен:
+Должно вывести `3.2.152`. Хеш архива лежит рядом в файле `servpanel-3.2.152.tar.gz.sha256` — `sha256sum -c` проверит его автоматически. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:
