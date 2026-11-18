@@ -787,6 +787,8 @@ async function carbonClientRename(name) {
   try { lim = await api('/api/clients/' + encodeURIComponent(name) + '/limits'); } catch (e) { lim = {}; }
   let iso = {};
   try { iso = await api('/api/clients/' + encodeURIComponent(name) + '/isolation'); } catch (e) { iso = {}; }
+  let mtuInfo = {};
+  try { mtuInfo = await api('/api/clients/' + encodeURIComponent(name) + '/mtu'); } catch (e) { mtuInfo = {}; }
   let cascade = null;
   try { cascade = await api('/api/cascade/status'); } catch (e) { cascade = null; }
   const client = (carbon.clients || []).find(c => c && c.name === name) || {};
@@ -812,11 +814,12 @@ async function carbonClientRename(name) {
   const selectedPeers = Array.isArray(iso.peers) ? iso.peers : [];
   showCarbonForm({
     title: 'Редактировать клиента',
-    sub: `Использовано: ${fmtBytes(used)}${quota ? ' из ' + fmtBytes(quota) : ' · лимит не задан'}${lim.blocked ? ' · лимит исчерпан' : ''}${isoText}`,
+    sub: `Использовано: ${fmtBytes(used)}${quota ? ' из ' + fmtBytes(quota) : ' · лимит не задан'}${lim.blocked ? ' · лимит исчерпан' : ''}${isoText} · MTU ${mtuInfo.mtu || '—'}${mtuInfo.ok === false ? ' · ' + mtuInfo.advice : ''}`,
     fields: [
       { name: 'newName', label: 'Имя клиента', value: name },
       { name: 'rate', label: 'Скорость, Мбит/с (0 — без лимита)', type: 'number', value: Number(lim.rate) || 0, min: 0, step: 1 },
       { name: 'quota', label: 'Лимит трафика, ГБ (0 — без лимита)', type: 'number', value: gbValue(quota), min: 0, step: 0.1 },
+      { name: 'mtu', label: 'MTU клиента (рекомендуется ' + (mtuInfo.suggested || '—') + ', 0 — как в установщике)', type: 'number', value: mtuInfo.mtu || mtuInfo.suggested || 0, min: 576, max: 1500 },
       { name: 'isolation', label: 'Изоляция от других клиентов', type: 'select', value: iso.mode || 'default', options: [
         { value: 'default', label: 'Как на сервере (по умолчанию)' },
         { value: 'isolated', label: 'Изолировать от других клиентов' },
@@ -843,6 +846,10 @@ async function carbonClientRename(name) {
           throw new Error('Балансировка выходов выключена — выход клиента недоступен');
         }
         await api('/api/cascade/balance/client', { method: 'POST', body: { ip: client.ip, exitId: v.exitId } });
+      }
+      const wantMtu = Number(v.mtu) || 0;
+      if (wantMtu !== (Number(mtuInfo.mtu) || 0)) {
+        await api('/api/clients/' + encodeURIComponent(v.newName) + '/mtu', { method: 'POST', body: { mtu: wantMtu } });
       }
       const quotaBytes = v.quota === '' ? 0 : Math.round(Number(v.quota) * (1024 ** 3));
       const d = await api('/api/clients/' + encodeURIComponent(v.newName) + '/limits', {
@@ -1285,6 +1292,38 @@ function carbonMtuApply() {
       const out = document.getElementById('carbonMtuOut');
       if (out) out.textContent = (d.applied || []).map(a => `${a.iface}: MTU ${a.mtu}, MSS ${a.mode === 'set' ? a.mss : 'по PMTU'}, снято старых правил ${a.removed}${a.confPatched ? ', PostUp обновлён' : ''}`).join('\n');
       await carbonRefresh('MTU и клампинг обновлены');
+    }
+  });
+}
+
+async function carbonMtuClients() {
+  let d = {};
+  try {
+    d = await api('/api/cascade/mtu/clients');
+  } catch (e) {
+    showToast(e.message || 'Не удалось прочитать MTU клиентов');
+    return;
+  }
+  const bad = d.mismatched || [];
+  const names = bad.slice(0, 5).map(c => c.name + ' (' + (c.mtu || 'без MTU') + ')').join(', ');
+  showCarbonForm({
+    title: 'MTU клиентских конфигов',
+    sub: `Путь держит ${d.suggested || '—'} байт · конфигов ${d.total || 0}${bad.length ? ' · расходятся ' + bad.length + (names ? ': ' + names + (bad.length > 5 ? '…' : '') : '') : ' · все совпадают'}. Значение хранится в панели и возвращается после перегенерации конфигов.`,
+    fields: [
+      { name: 'mtu', label: 'MTU для всех клиентов', type: 'number', value: d.suggested || d.default || 1200, min: 576, max: 1500 }
+    ],
+    submitText: 'Применить всем',
+    onSubmit: async v => {
+      const mtu = Number(v.mtu) || 0;
+      if (!mtu) throw new Error('Укажите MTU 576…1500');
+      const r = await api('/api/cascade/mtu/clients', { method: 'POST', body: { mtu } });
+      const out = document.getElementById('carbonMtuOut');
+      if (out) {
+        out.textContent = `MTU клиентских конфигов: ${r.mtu}\nОбновлено: ${r.applied} из ${r.total}`
+          + ((r.failed || []).length ? '\nОшибки: ' + r.failed.map(f => f.name + ': ' + f.error).join('; ') : '')
+          + '\nКлиенты должны переимпортировать профиль, иначе останется старый MTU.';
+      }
+      await carbonRefresh('MTU клиентов обновлён: ' + r.mtu);
     }
   });
 }
@@ -2403,6 +2442,7 @@ document.addEventListener('click', async event => {
     else if (action === 'mtu-apply') await carbonMtuApply();
     else if (action === 'mtu-remote') await carbonMtuRemote(false);
     else if (action === 'mtu-remote-apply') await carbonMtuRemote(true);
+    else if (action === 'mtu-clients') await carbonMtuClients();
     else if (action === 'appearance-preset') { carbonSetPalettePreset(btn.dataset.preset); render(); showToast('Шаблон применён'); }
     else if (action === 'appearance-custom') { document.getElementById('appearanceColors')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     else if (action === 'appearance-theme') { setTheme(btn.dataset.theme); render(); }

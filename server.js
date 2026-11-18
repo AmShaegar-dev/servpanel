@@ -967,6 +967,9 @@ let lastClientsSnapshot = [];
 const TRAFFIC_SPLIT_FILE = path.join(DATA_DIR, '.traffic_split.json');
 const CLIENT_LIMITS_FILE = path.join(DATA_DIR, '.client_limits.json');
 const CLIENT_ISOLATION_FILE = path.join(DATA_DIR, '.client_isolation.json');
+// MTU клиентских конфигов: { default: 1200, clients: { имя: 1200 } }.
+// Хранится отдельно, чтобы переживать regen/rename конфигов установщиком.
+const CLIENT_MTU_FILE = path.join(DATA_DIR, '.client_mtu.json');
 let lastTrafficSplit = (() => {
     try {
         const j = JSON.parse(fs.readFileSync(TRAFFIC_SPLIT_FILE, 'utf8'));
@@ -4521,6 +4524,83 @@ app.post('/api/cascade/mtu/remote-apply', checkAuth, requireAdmin, async (req, r
         res.json({ success: true, url: session.base, result: r.json });
     } catch (e) {
         res.status(500).json({ error: 'Не удалось исправить на ответной панели: ' + (e.message || e) });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// MTU клиентских конфигов: общая сводка, массовая правка и правка по клиенту.
+// ---------------------------------------------------------------------------
+app.get('/api/cascade/mtu/clients', checkAuth, requireAdmin, (req, res) => {
+    try {
+        res.json({ success: true, ...clientMtuReport() });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось прочитать MTU клиентов: ' + (e.message || e) });
+    }
+});
+
+app.post('/api/cascade/mtu/clients', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    const mtu = Number(body.mtu) || 0;
+    if (!mtu || mtu < 576 || mtu > 1500) return res.status(400).json({ error: 'MTU должен быть 576…1500' });
+    const store = readClientMtuStore();
+    const failed = [];
+    let applied = 0;
+    for (const name of clientNamesOnDisk()) {
+        // Пир каскада живёт на MTU туннеля — его не переписываем.
+        if (name === 'ru_host') continue;
+        try {
+            if (clientConfMtuOf(name) !== mtu) {
+                setClientConfMtu(name, mtu);
+                applied++;
+            }
+            store.clients[name] = mtu;
+        } catch (e) {
+            failed.push({ name, error: e.message || String(e) });
+        }
+    }
+    store.default = mtu;
+    writeClientMtuStore(store);
+    auditLog(req, `MTU клиентских конфигов: ${mtu} (обновлено ${applied} из ${clientNamesOnDisk().length})`);
+    res.json({ success: true, mtu, applied, failed, ...clientMtuReport() });
+});
+
+app.get('/api/clients/:name/mtu', checkAuth, (req, res) => {
+    const name = String(req.params.name);
+    if (!NAME_RE.test(name)) return res.status(400).json({ error: 'Неверное имя' });
+    if (!fs.existsSync(clientConfPath(name))) return res.status(404).json({ error: 'Конфиг клиента не найден' });
+    const suggested = clientPathMtu();
+    const mtu = clientConfMtuOf(name);
+    const rec = clientMtuAdvice(mtu, suggested);
+    const store = readClientMtuStore();
+    res.json({
+        name,
+        mtu,
+        suggested,
+        remembered: Number(store.clients[name]) || Number(store.default) || 0,
+        ok: rec.ok,
+        level: rec.level,
+        advice: rec.message
+    });
+});
+
+app.post('/api/clients/:name/mtu', checkAuth, requireAdmin, (req, res) => {
+    const name = String(req.params.name);
+    if (!NAME_RE.test(name)) return res.status(400).json({ error: 'Неверное имя' });
+    const body = req.body || {};
+    const mtu = Number(body.mtu) || 0;
+    if (mtu && (mtu < 576 || mtu > 1500)) return res.status(400).json({ error: 'MTU должен быть 576…1500' });
+    try {
+        setClientConfMtu(name, mtu);
+        const store = readClientMtuStore();
+        if (mtu) store.clients[name] = mtu;
+        else delete store.clients[name];
+        writeClientMtuStore(store);
+        auditLog(req, `Клиент ${name}: MTU ${mtu || 'по умолчанию'}`);
+        const suggested = clientPathMtu();
+        const rec = clientMtuAdvice(mtu, suggested);
+        res.json({ success: true, name, mtu, suggested, ok: rec.ok, level: rec.level, advice: rec.message });
+    } catch (e) {
+        res.status(500).json({ error: e.message || 'Не удалось изменить MTU' });
     }
 });
 
@@ -9230,6 +9310,7 @@ app.post('/api/create', checkAuth, (req, res) => {
             if (epType === 'domain') replaceEndpointWithDomain(r.conf, epDomain);
             else if (!epType) replaceEndpointWithDomain(r.conf);
             syncClient31Params(name);
+            applyStoredClientMtu(name);
             auditLog(req, `Создан клиент ${name}`);
             res.download(r.conf, `${serverFileBase()}_${name}.conf`);
         } catch (e) { res.status(500).json({ error: 'Ошибка обработки' }); }
@@ -9260,6 +9341,7 @@ app.post('/api/create-bulk', checkAuth, (req, res) => {
                 if (epType === 'domain') replaceEndpointWithDomain(r.conf, epDomain);
                 else if (!epType) replaceEndpointWithDomain(r.conf);
                 syncClient31Params(clientName);
+                applyStoredClientMtu(clientName);
                 generated.push({ name: clientName, content: sh('sudo', ['cat', r.conf]) });
             }
         } catch (e) { /* пропускаем неудачные */ }
@@ -9457,6 +9539,15 @@ app.post('/api/clients/:name/rename', checkAuth, (req, res) => {
         }
         if (historyData[oldName]) { historyData[newName] = historyData[oldName]; delete historyData[oldName]; }
         if (lastHistoryStats[oldName]) { lastHistoryStats[newName] = lastHistoryStats[oldName]; delete lastHistoryStats[oldName]; }
+        try {
+            const store = readClientMtuStore();
+            if (store.clients[oldName] !== undefined) {
+                store.clients[newName] = store.clients[oldName];
+                delete store.clients[oldName];
+                writeClientMtuStore(store);
+            }
+        } catch (e) { /* ignore */ }
+        try { applyStoredClientMtu(newName); } catch (e) { /* ignore */ }
         auditLog(req, `Клиент ${oldName} переименован в ${newName}`);
         res.json({ success: true, name: newName });
     } catch (e) {
@@ -9857,6 +9948,157 @@ function findClientByName(name) {
         }
     } catch (e) { /* ignore */ }
     return item;
+}
+
+// ---------------------------------------------------------------------------
+// MTU клиентских конфигов.
+//
+// Клиентский туннель должен иметь MTU не больше узкого места пути (обычно это
+// внутренний туннель каскада, 1200). Если поставить больше, пакеты такого
+// размера не влезают в туннель выхода и теряются: TCP частично прикрывает
+// клампинг MSS, а QUIC/UDP — нет.
+// ---------------------------------------------------------------------------
+function readClientMtuStore() {
+    try {
+        const j = JSON.parse(fs.readFileSync(CLIENT_MTU_FILE, 'utf8').replace(/^\uFEFF/, ''));
+        if (!j || typeof j !== 'object' || Array.isArray(j)) return { default: 0, clients: {} };
+        const clients = {};
+        const src = (j.clients && typeof j.clients === 'object' && !Array.isArray(j.clients)) ? j.clients : j;
+        for (const name of Object.keys(src)) {
+            const mtu = Number(src[name]);
+            if (Number.isInteger(mtu) && mtu >= 576 && mtu <= 1500) clients[String(name)] = mtu;
+        }
+        const def = Number(j.default);
+        return {
+            default: Number.isInteger(def) && def >= 576 && def <= 1500 ? def : 0,
+            clients
+        };
+    } catch (e) { return { default: 0, clients: {} }; }
+}
+
+function writeClientMtuStore(store) {
+    const clients = {};
+    const src = (store && store.clients) || {};
+    for (const name of Object.keys(src)) {
+        const mtu = Number(src[name]);
+        if (Number.isInteger(mtu) && mtu >= 576 && mtu <= 1500) clients[name] = mtu;
+    }
+    const def = Number(store && store.default);
+    try {
+        writeJson(CLIENT_MTU_FILE, {
+            default: Number.isInteger(def) && def >= 576 && def <= 1500 ? def : 0,
+            clients
+        }, 0o600);
+    } catch (e) { /* ignore */ }
+}
+
+function clientConfPath(name) {
+    const n = String(name || '');
+    if (!NAME_RE.test(n)) return '';
+    return path.join(AWG_DIR, n + '.conf');
+}
+
+function clientConfMtuOf(name) {
+    const file = clientConfPath(name);
+    if (!file) return 0;
+    const m = readTextSafe(file).match(/^\s*MTU\s*=\s*(\d+)/im);
+    return m ? Number(m[1]) : 0;
+}
+
+// 0 — убрать строку MTU (вернуть значение установщика).
+function setClientConfMtu(name, mtu) {
+    const file = clientConfPath(name);
+    if (!file) throw new Error('Неверное имя клиента');
+    if (!fs.existsSync(file)) throw new Error('Конфиг клиента не найден');
+    const value = Number(mtu) || 0;
+    if (value && (value < 576 || value > 1500)) throw new Error('MTU должен быть 576…1500');
+    const lines = readTextSafe(file).split(/\r?\n/);
+    if (!lines.some(l => /^\s*\[Interface\]\s*$/i.test(l))) throw new Error('В конфиге нет секции [Interface]');
+    const out = lines.filter(l => !/^\s*MTU\s*=/i.test(l));
+    if (value) {
+        const idx = out.findIndex(l => /^\s*\[Interface\]\s*$/i.test(l));
+        out.splice(idx + 1, 0, 'MTU = ' + value);
+    }
+    writeRootFile(file, out.join('\n').trim() + '\n', '0600');
+    return value;
+}
+
+// MTU, который стоит ставить клиентским конфигам: минимум по интерфейсам
+// каскада (именно туда уходит трафик клиентов), иначе MTU клиентского.
+function clientPathMtu() {
+    let items = [];
+    try { items = mtuLocalReport(); } catch (e) { items = []; }
+    const up = items.map(i => Number(i.mtu) || 0).filter(v => v > 0);
+    if (up.length) return Math.min(...up);
+    const iface = clientIsolationIface();
+    return (iface && ifaceMtuOf(iface)) || 1280;
+}
+
+function clientMtuAdvice(mtu, suggested) {
+    const cur = Number(mtu) || 0;
+    const need = Number(suggested) || 0;
+    if (!need) return { ok: true, level: 'ok', message: 'MTU пути неизвестен — оставьте значение установщика.' };
+    if (!cur) return { ok: false, level: 'warn', message: `В конфиге нет MTU. Рекомендуется ${need} (по узкому месту пути).` };
+    if (cur > need) return { ok: false, level: 'error', message: `MTU ${cur} больше пути ${need}: пакеты ${need + 1}…${cur} байт будут теряться. Поставьте ${need}.` };
+    return { ok: true, level: 'ok', message: `MTU ${cur} не больше пути ${need} — корректно.` };
+}
+
+function clientNamesOnDisk() {
+    try {
+        return fs.readdirSync(AWG_DIR)
+            .filter(f => f.endsWith('.conf'))
+            .map(f => f.slice(0, -5))
+            .filter(n => NAME_RE.test(n));
+    } catch (e) { return []; }
+}
+
+function clientMtuReport() {
+    const suggested = clientPathMtu();
+    const store = readClientMtuStore();
+    const names = clientNamesOnDisk();
+    const clients = names.map(name => {
+        const mtu = clientConfMtuOf(name);
+        const rec = clientMtuAdvice(mtu, suggested);
+        return {
+            name,
+            mtu,
+            remembered: Number(store.clients[name]) || 0,
+            ok: rec.ok,
+            level: rec.level,
+            advice: rec.message
+        };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+    const mismatched = clients.filter(c => !c.ok);
+    return {
+        suggested,
+        default: Number(store.default) || 0,
+        total: clients.length,
+        ok: mismatched.length === 0,
+        mismatched: mismatched.map(c => ({ name: c.name, mtu: c.mtu, advice: c.advice })),
+        clients
+    };
+}
+
+// Возвращает сохранённый MTU в конфиги после regen/rename установщика.
+// Пир каскада (ru_host) не трогаем: у него свой MTU, равный MTU туннеля.
+function applyStoredClientMtu(onlyName) {
+    if (DEMO_MODE || TEST_MODE || process.platform === 'win32') return { applied: 0, simulated: true };
+    const store = readClientMtuStore();
+    const names = clientNamesOnDisk();
+    let applied = 0;
+    for (const name of names) {
+        if (onlyName && name !== onlyName) continue;
+        if (!NAME_RE.test(name) || name === 'ru_host') continue;
+        const want = Number(store.clients[name]) || Number(store.default) || 0;
+        if (!want) continue;
+        try {
+            if (clientConfMtuOf(name) !== want) {
+                setClientConfMtu(name, want);
+                applied++;
+            }
+        } catch (e) { /* пропускаем клиента */ }
+    }
+    return { applied };
 }
 
 const AWG_LIMIT_SCRIPT = '/root/awg-limit.sh';
@@ -10703,7 +10945,10 @@ function regenClientsSafe() {
     const out = sh('sudo', ['bash', MANAGE, 'regen', '--json'], { maxBuffer: 32 * 1024 * 1024 });
     const data = JSON.parse(out);
     syncClient31Params();
-    return { regenerated: data.regenerated, simulated: false };
+    // Установщик пересобирает конфиги со своим MTU (обычно 1280) — возвращаем
+    // сохранённое значение, иначе правка «жила» бы до первого regen.
+    const mtu = applyStoredClientMtu();
+    return { regenerated: data.regenerated, simulated: false, mtuApplied: mtu.applied };
 }
 
 // manage_amneziawg.sh сверяет server_hpk.key с awg0.conf. После смены
@@ -15846,7 +16091,7 @@ module.exports._internals = {
     attachClientSpeeds,
     normalizeCascadeConf, firstIpv4, firstTunnelIp, buildRoutingScript, cascadeRole, localTunnelIps, isPublicAddress,
     cascadeEndpointPlan, cascadeRoleFrom, cascadeHealth,
-    cascadeBalanceScript, cascadeBalanceAssignments, mtuRecommend, mssRulesOf
+    cascadeBalanceScript, cascadeBalanceAssignments, mtuRecommend, mssRulesOf, clientMtuAdvice
 };
 
 

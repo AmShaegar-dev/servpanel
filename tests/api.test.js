@@ -1689,6 +1689,30 @@ test('MTU каскада: клампинг MSS проверяется по MTU �
     assert.equal(globalBad.level, 'error');
 });
 
+test('MTU клиентских конфигов: рекомендации по узкому месту пути', () => {
+    const ok = internals.clientMtuAdvice(1200, 1200);
+    assert.equal(ok.ok, true);
+    assert.equal(ok.level, 'ok');
+
+    const smaller = internals.clientMtuAdvice(1160, 1200);
+    assert.equal(smaller.ok, true);
+
+    const big = internals.clientMtuAdvice(1280, 1200);
+    assert.equal(big.ok, false);
+    assert.equal(big.level, 'error');
+    assert.match(big.message, /1280/);
+    assert.match(big.message, /1200/);
+
+    const missing = internals.clientMtuAdvice(0, 1200);
+    assert.equal(missing.ok, false);
+    assert.equal(missing.level, 'warn');
+
+    // Путь неизвестен — ничего не навязываем.
+    const unknown = internals.clientMtuAdvice(1280, 0);
+    assert.equal(unknown.ok, true);
+    assert.equal(unknown.level, 'ok');
+});
+
 test('Балансировка: MTProto-прокси идёт через первый живой выход', () => {
     const exits = [
         { id: 'primary', name: 'EU-1', iface: 'awg1', index: 0, healthy: false, endpoint: '198.51.100.10:3977' },
