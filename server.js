@@ -10062,13 +10062,15 @@ function clientMtuReport() {
         return {
             name,
             mtu,
+            // Пир каскада (ru_host) — не клиентский профиль: у него MTU туннеля.
+            peer: name === 'ru_host',
             remembered: Number(store.clients[name]) || 0,
             ok: rec.ok,
             level: rec.level,
             advice: rec.message
         };
     }).sort((a, b) => a.name.localeCompare(b.name));
-    const mismatched = clients.filter(c => !c.ok);
+    const mismatched = clients.filter(c => !c.ok && !c.peer);
     return {
         suggested,
         default: Number(store.default) || 0,
