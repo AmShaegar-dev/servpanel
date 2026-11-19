@@ -15649,6 +15649,63 @@ function xrayProfileExport(p) {
     };
 }
 
+// История загрузки CPU: короткие замеры не ловят пик, а история ловит.
+const CPU_HISTORY = [];
+let cpuHistPrev = null;
+try {
+    setInterval(() => {
+        const cur = readCpuTimes();
+        if (!cur) return;
+        if (!cpuHistPrev) { cpuHistPrev = cur; return; }
+        const dt = cur.total - cpuHistPrev.total;
+        const di = cur.idle - cpuHistPrev.idle;
+        cpuHistPrev = cur;
+        if (dt <= 0) return;
+        CPU_HISTORY.push({ at: Date.now(), cpu: Number((100 * (1 - di / dt)).toFixed(1)) });
+        if (CPU_HISTORY.length > 400) CPU_HISTORY.shift();
+    }, 3000).unref();
+} catch (e) { /* ignore */ }
+
+app.get('/api/diag/cpu-history', checkAuth, requireAdmin, (req, res) => {
+    const seconds = Math.max(30, Math.min(1200, Number(req.query.seconds) || 300));
+    const from = Date.now() - seconds * 1000;
+    const items = CPU_HISTORY.filter(x => x.at >= from);
+    const peak = items.reduce((a, b) => (b.cpu > a ? b.cpu : a), 0);
+    res.json({ success: true, peak, items });
+});
+
+// iperf3-сервер на туннельном адресе: клиент мерит плечо RU → клиент
+// чистым TCP, без nginx и буферизации. Одна сессия — один замер.
+let xrayIperfRun = null;
+function xrayIperfStop() {
+    if (!xrayIperfRun) return;
+    try { sh('sudo', ['pkill', '-f', 'iperf3 -s -p ' + xrayIperfRun.port]); } catch (e) { /* ignore */ }
+    try { sh('sudo', ['ufw', 'delete', 'allow', 'in', 'on', xrayIperfRun.iface, 'to', 'any', 'port', String(xrayIperfRun.port), 'proto', 'tcp']); } catch (e) { /* ignore */ }
+    xrayIperfRun = null;
+}
+app.post('/api/xray/iperf', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const iface = existingIfaces().find(i => i === 'awg0') || 'awg0';
+        const m = String(shTry('ip', ['-o', '-f', 'inet', 'addr', 'show', iface]) || '').match(/inet\s+(\d+\.\d+\.\d+\.\d+)/);
+        const host = m ? m[1] : '';
+        if (!host) throw new Error('у ' + iface + ' нет IPv4');
+        xrayIperfStop();
+        iperfEnsureInstalled();
+        const port = crypto.randomInt(20000, 60000);
+        sh('sudo', ['bash', '-c', 'nohup iperf3 -s -p ' + port + ' -B ' + host + ' -1 >/tmp/servpanel-iperf.log 2>&1 &'], { timeout: 15000 });
+        try { sh('sudo', ['ufw', 'allow', 'in', 'on', iface, 'to', 'any', 'port', String(port), 'proto', 'tcp']); } catch (e) { /* ignore */ }
+        xrayIperfRun = { port, host, iface, startedAt: Date.now() };
+        auditLog(req, 'iperf3 на ' + host + ':' + port);
+        res.json({ success: true, ip: host, port, wait: 5 });
+    } catch (e) {
+        res.status(500).json({ error: 'iperf3: ' + (e.message || e) });
+    }
+});
+app.post('/api/xray/iperf/stop', checkAuth, requireAdmin, (req, res) => {
+    xrayIperfStop();
+    res.json({ success: true });
+});
+
 // Замер плеча RU → клиент: отдаёт N мегабайт напрямую с RU-сервера.
 // Только по токену из панели, иначе это был бы открытый генератор трафика.
 function readCpuTimes() {
