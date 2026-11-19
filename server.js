@@ -15107,7 +15107,7 @@ function xrayClientConfig(st) {
         inbounds: [
             { listen: '127.0.0.1', port: 10808, protocol: 'socks' },
             {
-                listen: '127.0.0.1',
+                listen: '0.0.0.0',
                 port: 12345,
                 protocol: 'dokodemo-door',
                 settings: { network: 'tcp,udp', followRedirect: true },
@@ -15369,6 +15369,7 @@ app.get('/api/diag/tc', checkAuth, requireAdmin, (req, res) => {
         ss: run('ss', ['-s']),
         listeners: run('ss', ['-ltnp']),
         udpListeners: run('ss', ['-lunp']),
+        manglePre: run('iptables', ['-t', 'mangle', '-L', 'PREROUTING', '-v', '-n']),
         routes: run('ip', ['route', 'show', 'table', 'all'])
     });
 });
