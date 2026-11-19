@@ -15021,6 +15021,7 @@ function xrayReadState() {
             dest: String(j.dest || 'vimeo.com:443'),
             serverName: String(j.serverName || 'vimeo.com'),
             path: String(j.path || '/xhttp'),
+            xhttpMode: ['auto', 'packet-up', 'stream-up', 'stream-one'].includes(String(j.xhttpMode)) ? String(j.xhttpMode) : 'auto',
             privateKey: String(j.privateKey || ''),
             publicKey: String(j.publicKey || ''),
             shortId: String(j.shortId || ''),
@@ -15032,7 +15033,7 @@ function xrayReadState() {
             updatedAt: Number(j.updatedAt) || 0
         };
     } catch (e) {
-        return { role: '', mode: 'awg', port: 443, dest: 'vimeo.com:443', serverName: 'vimeo.com', path: '/xhttp', privateKey: '', publicKey: '', shortId: '', clientId: '', address: '', clients: [], debug: false, lastTest: null, updatedAt: 0 };
+        return { role: '', mode: 'awg', port: 443, dest: 'vimeo.com:443', serverName: 'vimeo.com', path: '/xhttp', xhttpMode: 'auto', privateKey: '', publicKey: '', shortId: '', clientId: '', address: '', clients: [], debug: false, lastTest: null, updatedAt: 0 };
     }
 }
 
@@ -15094,7 +15095,7 @@ function xrayServerConfig(st) {
             },
             streamSettings: {
                 network: 'xhttp',
-                xhttpSettings: { path: st.path },
+                xhttpSettings: { path: st.path, mode: st.xhttpMode || 'auto' },
                 security: 'reality',
                 realitySettings: {
                     target: st.dest,
@@ -15137,7 +15138,7 @@ function xrayClientConfig(st) {
             settings: { address: st.address, port: st.port, id: st.clientId, encryption: 'none', flow: '' },
             streamSettings: {
                 network: 'xhttp',
-                xhttpSettings: { path: st.path },
+                xhttpSettings: { path: st.path, mode: st.xhttpMode || 'auto' },
                 security: 'reality',
                 realitySettings: {
                     serverName: st.serverName,
@@ -15232,7 +15233,7 @@ app.post('/api/xray/server', checkAuth, requireAdmin, (req, res) => {
             dest: String(body.dest || 'vimeo.com:443'),
             serverName: String(body.serverName || 'vimeo.com'),
             path: String(body.path || '/xhttp'),
-            privateKey: keys.privateKey,
+            xhttpMode: ['auto', 'packet-up', 'stream-up', 'stream-one'].includes(String(body.xhttpMode)) ? String(body.xhttpMode) : 'auto',
             publicKey: keys.publicKey,
             shortId,
             clientId,
@@ -15261,7 +15262,8 @@ app.post('/api/xray/client', checkAuth, requireAdmin, (req, res) => {
             publicKey: String(body.publicKey || '').trim(),
             shortId: String(body.shortId || '').trim(),
             serverName: String(body.serverName || 'vimeo.com'),
-            path: String(body.path || '/xhttp')
+            path: String(body.path || '/xhttp'),
+            xhttpMode: ['auto', 'packet-up', 'stream-up', 'stream-one'].includes(String(body.xhttpMode)) ? String(body.xhttpMode) : 'auto'
         });
         if (!st.address || !st.clientId || !st.publicKey) throw new Error('Нужны address, id и publicKey');
         xrayApplyConfig(xrayClientConfig(st));
