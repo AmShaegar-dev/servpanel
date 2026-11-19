@@ -15301,6 +15301,19 @@ function xrayTproxy(enable) {
     const exits = cascadeExitList();
     const iface = existingIfaces().find(i => i === 'awg0') || 'awg0';
     const port = 12345;
+    // Подсеть клиентов: ответы Xray должны уходить в awg0, а не в local-таблицу.
+    let clientNet = '';
+    try {
+        const addr = String(sh('ip', ['-o', '-f', 'inet', 'addr', 'show', iface]) || '');
+        const m = addr.match(/inet\s+(\d+)\.(\d+)\.(\d+)\.(\d+)\/(\d+)/);
+        if (m) {
+            const ipNum = ((+m[1] << 24) | (+m[2] << 16) | (+m[3] << 8) | +m[4]) >>> 0;
+            const prefix = Number(m[5]);
+            const mask = prefix === 0 ? 0 : (0xFFFFFFFF << (32 - prefix)) >>> 0;
+            const net = (ipNum & mask) >>> 0;
+            clientNet = [net >>> 24, (net >> 16) & 255, (net >> 8) & 255, net & 255].join('.') + '/' + prefix;
+        }
+    } catch (e) { /* без подсети */ }
     for (const e of exits) {
         const mark = cascadeExitMark(e.index);
         const table = String(cascadeExitTable(e.index));
@@ -15317,6 +15330,7 @@ function xrayTproxy(enable) {
         try { sh('sudo', ['iptables'].concat(inDel)); } catch (err) { /* правила нет */ }
         if (enable) {
             sh('sudo', ['ip', 'route', 'replace', 'local', 'default', 'dev', 'lo', 'table', table]);
+            if (clientNet) sh('sudo', ['ip', 'route', 'replace', clientNet, 'dev', iface, 'table', table]);
             sh('sudo', ['iptables', '-w', '5', '-t', 'nat', '-A', 'PREROUTING', '-i', iface, '-p', 'tcp',
                 '-m', 'mark', '--mark', mark, '-j', 'REDIRECT', '--to-ports', String(port)]);
             sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-A', 'PREROUTING', '-i', iface, '-p', 'udp',
@@ -15365,6 +15379,15 @@ app.get('/api/xray/log', checkAuth, requireAdmin, (req, res) => {
         res.type('text/plain').send(out || 'Лог пуст');
     } catch (e) {
         res.type('text/plain').send('Не удалось прочитать лог: ' + (e.message || e));
+    }
+});
+
+app.get('/api/xray/capture', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const out = String(sh('sudo', ['timeout', '8', 'tcpdump', '-nn', '-i', 'any', '-c', '40', 'port', '12345'], { timeout: 15000 }) || '');
+        res.type('text/plain').send(out || 'Пакетов нет');
+    } catch (e) {
+        res.type('text/plain').send('tcpdump не сработал: ' + (e.stdout || e.message || e));
     }
 });
 
