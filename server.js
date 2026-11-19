@@ -15325,6 +15325,12 @@ function xrayTproxy(enable) {
     const exits = cascadeExitList();
     const iface = existingIfaces().find(i => i === 'awg0') || 'awg0';
     const port = 12345;
+    // Xray терминирует TCP локально и объявляет MSS по MTU awg0 (1280 -> 1240),
+    // а у клиента MTU 1200. Без клампинга скачиваемые пакеты 1280 байт
+    // не влезают в клиентский туннель и теряются.
+    const clampDel = ['-w', '5', '-t', 'mangle', '-D', 'OUTPUT', '-o', iface, '-p', 'tcp',
+        '--tcp-flags', 'SYN,RST', 'SYN', '-j', 'TCPMSS', '--set-mss', '1160'];
+    try { sh('sudo', ['iptables'].concat(clampDel)); } catch (err) { /* правила нет */ }
     // Подсеть клиентов: ответы Xray должны уходить в awg0, а не в local-таблицу.
     let clientNet = '';
     try {
@@ -15360,6 +15366,8 @@ function xrayTproxy(enable) {
         if (enable) {
             sh('sudo', ['ip', 'route', 'replace', 'local', 'default', 'dev', 'lo', 'table', table]);
             if (clientNet) sh('sudo', ['ip', 'route', 'replace', clientNet, 'dev', iface, 'table', table]);
+            sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-A', 'OUTPUT', '-o', iface, '-p', 'tcp',
+                '--tcp-flags', 'SYN,RST', 'SYN', '-j', 'TCPMSS', '--set-mss', '1160']);
             sh('sudo', ['iptables', '-w', '5', '-t', 'nat', '-A', 'PREROUTING', '-i', iface, '-p', 'tcp',
                 '-m', 'mark', '--mark', mark, '-j', 'REDIRECT', '--to-ports', '12345']);
             sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-A', 'PREROUTING', '-i', iface, '-p', 'udp',
