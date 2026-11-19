@@ -15479,6 +15479,20 @@ function xrayTproxy(enable) {
             clientNet = [net >>> 24, (net >> 16) & 255, (net >> 8) & 255, net & 255].join('.') + '/' + prefix;
         }
     } catch (e) { /* без подсети */ }
+    // Трафик клиентов к самому серверу (панель, SOCKS, SSH по туннельному
+    // адресу) не должен перехватываться: иначе он идёт через Xray дважды —
+    // REDIRECT в dokodemo, обратно в локальный порт и ещё раз в туннель.
+    const selfAddr = (clientNet || '').split('/')[0];
+    const dropSelfRules = () => {
+        if (!selfAddr) return;
+        for (const table of ['nat', 'mangle']) {
+            for (let i = 0; i < 4; i++) {
+                try { sh('sudo', ['iptables', '-w', '5', '-t', table, '-D', 'PREROUTING', '-i', iface, '-d', selfAddr, '-j', 'RETURN']); }
+                catch (err) { break; }
+            }
+        }
+    };
+    dropSelfRules();
     for (const e of exits) {
         const mark = cascadeExitMark(e.index);
         const table = String(cascadeExitTable(e.index));
@@ -15499,6 +15513,11 @@ function xrayTproxy(enable) {
         const inDel = ['-w', '5', '-t', 'filter', '-D', 'INPUT', '-m', 'mark', '--mark', mark, '-j', 'ACCEPT'];
         try { sh('sudo', ['iptables'].concat(inDel)); } catch (err) { /* правила нет */ }
         if (enable) {
+            // Свои сервисы — напрямую, до всех перехватов.
+            if (selfAddr) {
+                sh('sudo', ['iptables', '-w', '5', '-t', 'nat', '-I', 'PREROUTING', '1', '-i', iface, '-d', selfAddr, '-j', 'RETURN']);
+                sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-I', 'PREROUTING', '1', '-i', iface, '-d', selfAddr, '-j', 'RETURN']);
+            }
             sh('sudo', ['ip', 'route', 'replace', 'local', 'default', 'dev', 'lo', 'table', table]);
             if (clientNet) sh('sudo', ['ip', 'route', 'replace', clientNet, 'dev', iface, 'table', table]);
             sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-A', 'OUTPUT', '-o', iface, '-p', 'tcp',
