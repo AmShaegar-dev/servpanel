@@ -15267,6 +15267,15 @@ app.post('/api/xray/clients', checkAuth, requireAdmin, (req, res) => {
     }
 });
 
+app.get('/api/xray/log', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const out = String(sh('sudo', ['journalctl', '-u', 'xray', '-n', '120', '--no-pager', '--output', 'cat'], { timeout: 20000 }) || '');
+        res.type('text/plain').send(out || 'Лог пуст');
+    } catch (e) {
+        res.type('text/plain').send('Не удалось прочитать лог: ' + (e.message || e));
+    }
+});
+
 app.get('/api/diag/tc', checkAuth, requireAdmin, (req, res) => {
     if (NO_SYSTEM()) return res.json({ demo: true });
     const run = (cmd, args) => {
@@ -15282,6 +15291,8 @@ app.get('/api/diag/tc', checkAuth, requireAdmin, (req, res) => {
         awg1: run('ip', ['-s', 'link', 'show', 'awg1']),
         ens3: run('ip', ['-s', 'link', 'show', 'ens3']),
         ss: run('ss', ['-s']),
+        listeners: run('ss', ['-ltnp']),
+        udpListeners: run('ss', ['-lunp']),
         routes: run('ip', ['route', 'show', 'table', 'all'])
     });
 });
