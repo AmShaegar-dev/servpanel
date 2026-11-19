@@ -15156,7 +15156,9 @@ function xrayClientConfig(st) {
                     publicKey: st.publicKey,
                     shortId: st.shortId,
                     spiderX: '/',
-                    fingerprint: 'firefox'
+                    fingerprint: 'firefox',
+                    // HTTP/1.1 убирает per-stream окна HTTP/2, которые режут скачивание.
+                    alpn: ['http/1.1']
                 }
             },
             tag: 'proxy'
