@@ -15293,14 +15293,27 @@ app.post('/api/xray/client', checkAuth, requireAdmin, (req, res) => {
 
 app.post('/api/xray/test', checkAuth, requireAdmin, (req, res) => {
     try {
-        const ip = String(sh('curl', ['-sS', '--max-time', '15', '--socks5-hostname', '127.0.0.1:10808', 'https://ifconfig.me'], { timeout: 20000 }) || '').trim();
-        const speed = String(sh('curl', ['-sS', '-o', '/dev/null', '-w', '%{speed_download}', '--max-time', '20',
-            '--socks5-hostname', '127.0.0.1:10808', 'https://speed.cloudflare.com/__down?bytes=10000000'], { timeout: 30000 }) || '').trim();
-        const mbps = ((Number(speed) || 0) * 8 / 1e6).toFixed(2);
-        const test = { at: Date.now(), ip, mbps: Number(mbps) };
+        const streams = Math.max(1, Math.min(16, Number((req.body || {}).streams) || 1));
+        let ip = '';
+        let mbps = 0;
+        if (streams > 1) {
+            const script = 'n=' + streams + '; s=$(date +%s%N); ' +
+                'for i in $(seq $n); do curl -sS -o /dev/null --max-time 30 --socks5-hostname 127.0.0.1:10808 ' +
+                '"https://speed.cloudflare.com/__down?bytes=10000000" & done; wait; e=$(date +%s%N); ' +
+                'echo $(( (e-s)/1000000 ))';
+            const ms = Number(String(sh('bash', ['-c', script], { timeout: 60000 }) || '').trim()) || 0;
+            const bytes = streams * 10000000;
+            mbps = ms > 0 ? (bytes * 8 / (ms / 1000) / 1e6) : 0;
+        } else {
+            ip = String(sh('curl', ['-sS', '--max-time', '15', '--socks5-hostname', '127.0.0.1:10808', 'https://ifconfig.me'], { timeout: 20000 }) || '').trim();
+            const speed = String(sh('curl', ['-sS', '-o', '/dev/null', '-w', '%{speed_download}', '--max-time', '20',
+                '--socks5-hostname', '127.0.0.1:10808', 'https://speed.cloudflare.com/__down?bytes=10000000'], { timeout: 30000 }) || '').trim();
+            mbps = Number(speed) * 8 / 1e6;
+        }
+        const test = { at: Date.now(), ip, mbps: Number(mbps.toFixed(2)), streams };
         xrayWriteState({ lastTest: test });
-        auditLog(req, `Xray: тест через туннель — ${ip || 'нет ответа'}, ${mbps} Мбит/с`);
-        res.json({ success: true, ip, mbps: Number(mbps) });
+        auditLog(req, `Xray: тест — ${ip || '-'}, ${mbps.toFixed(2)} Мбит/с, потоков ${streams}`);
+        res.json({ success: true, ip, mbps: Number(mbps.toFixed(2)), streams });
     } catch (e) {
         res.status(500).json({ error: 'Тест через Xray не удался: ' + (e.message || e) });
     }
