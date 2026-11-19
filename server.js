@@ -15177,6 +15177,47 @@ function xraySpeedToken() {
     return t;
 }
 
+// Тюнинг TCP для туннеля: один поток упирается в окно (~20 Мбит/с при
+// RTT 39 мс), хотя несколько потоков дают 70+. Снимаем htb с awg0
+// (у него burst 1680 байт — режет пачки), ставим fq и большие буферы.
+function xrayTuneTcp() {
+    const sysctls = {
+        'net.core.default_qdisc': 'fq',
+        'net.core.rmem_max': '16777216',
+        'net.core.wmem_max': '16777216',
+        'net.ipv4.tcp_rmem': '4096 87380 16777216',
+        'net.ipv4.tcp_wmem': '4096 65536 16777216',
+        'net.ipv4.tcp_mtu_probing': '1',
+        'net.ipv4.tcp_slow_start_after_idle': '0'
+    };
+    const errors = [];
+    for (const [k, v] of Object.entries(sysctls)) {
+        try { sh('sudo', ['sysctl', '-w', k + '=' + v]); } catch (e) { errors.push(k); }
+    }
+    try {
+        sh('sudo', ['bash', '-c',
+            'sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1 || true']);
+    } catch (e) { /* нет bbr */ }
+    // Постоянно, чтобы переживало перезагрузку.
+    try {
+        writeRootFile('/etc/sysctl.d/99-servpanel-tunnel.conf',
+            Object.entries(sysctls).map(([k, v]) => k + '=' + v).join('\n') + '\n', '0644');
+        try { sh('sudo', ['sysctl', '--system']); } catch (e) { /* ignore */ }
+    } catch (e) { /* ignore */ }
+    const iface = existingIfaces().find(i => i === 'awg0') || 'awg0';
+    let qdisc = '';
+    try {
+        sh('sudo', ['tc', 'qdisc', 'replace', 'dev', iface, 'root', 'fq'], { timeout: 15000 });
+        qdisc = 'fq';
+    } catch (e) {
+        try {
+            sh('sudo', ['tc', 'qdisc', 'replace', 'dev', iface, 'root', 'fq_codel'], { timeout: 15000 });
+            qdisc = 'fq_codel';
+        } catch (e2) { qdisc = 'htb'; }
+    }
+    return { qdisc, errors };
+}
+
 function xrayXhttpSettings(st) {
     // Для auto поле mode не передаём: Xray сам выбирает режим.
     const x = { path: st.path };
@@ -15460,6 +15501,7 @@ function xrayTproxy(enable) {
     // Панель, SSH и RustDesk живут на этом же сервере: их адрес исключаем
     // из туннеля, иначе клиент ходит к ним через петлю RU → EU → RU.
     if (enable) xraySelfDirect(true);
+    if (enable) { try { xrayTuneTcp(); } catch (e) { /* не критично */ } }
     // Xray терминирует TCP локально и объявляет MSS по MTU awg0 (1280 -> 1240),
     // а у клиента MTU 1200. Без клампинга скачиваемые пакеты 1280 байт
     // не влезают в клиентский туннель и теряются.
@@ -15704,6 +15746,16 @@ app.post('/api/xray/iperf', checkAuth, requireAdmin, (req, res) => {
 app.post('/api/xray/iperf/stop', checkAuth, requireAdmin, (req, res) => {
     xrayIperfStop();
     res.json({ success: true });
+});
+
+app.post('/api/xray/tune', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const r = xrayTuneTcp();
+        auditLog(req, 'Тюнинг TCP туннеля: ' + r.qdisc);
+        res.json({ success: true, ...r });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось применить тюнинг: ' + (e.message || e) });
+    }
 });
 
 // Замер плеча RU → клиент: отдаёт N мегабайт напрямую с RU-сервера.
