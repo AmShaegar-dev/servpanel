@@ -15116,17 +15116,20 @@ function xrayDestCheck(dest) {
     const host = m[1];
     const port = Number(m[2]) || 443;
     const script = 'echo | timeout 12 openssl s_client -connect ' + host + ':' + port +
-        ' -servername ' + host + ' -alpn h2 -tls1_3 2>/dev/null | grep -E "Protocol|ALPN" || true';
+        ' -servername ' + host + ' -alpn h2 -tls1_3 2>&1 | head -60';
     const out = String(shTry('bash', ['-c', script], { timeout: 20000 }) || '');
-    const tls13 = /TLSv1\.3/i.test(out);
-    const alpn = /ALPN protocol:\s*h2/i.test(out);
+    // Версию смотрим по всему выводу: разные сборки печатают
+    // «New, TLSv1.3» или «Protocol  : TLSv1.3», а иногда только второе.
     const rtt = String(shTry('curl', ['-4', '-sS', '-o', '/dev/null', '-k', '--max-time', '8',
         '--tlsv1.3', '--tls-max', '1.3', '-w', '%{time_connect}', 'https://' + host + ':' + port + '/'], { timeout: 15000 }) || '').trim();
     const rttMs = Math.round((Number(rtt) || 0) * 1000);
+    // Если TLS 1.3 прошёл в curl — сайт его поддерживает, даже когда openssl молчит.
+    const tls13 = /TLSv1\.3/i.test(out) || !!rtt;
+    const alpn = /ALPN protocol:\s*h2/i.test(out);
     return {
         host, port, tls13, alpn, rttMs,
         ok: tls13 && alpn,
-        raw: out.trim()
+        raw: out.trim().split(/\r?\n/).filter(l => /TLSv1|ALPN|Cipher|CONNECTED/i.test(l)).slice(0, 4).join('\n')
     };
 }
 
