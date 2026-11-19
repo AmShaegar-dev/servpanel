@@ -15497,6 +15497,18 @@ function xrayTproxy(enable) {
         }
     };
     dropSelfRules();
+    // Ставим исключение один раз до цикла выходов: иначе на каждый выход
+    // появляется свой дубль правила.
+    const addSelfRules = () => {
+        if (!selfAddr) return;
+        for (const table of ['nat', 'mangle']) {
+            try { sh('sudo', ['iptables', '-w', '5', '-t', table, '-C', 'PREROUTING', '-i', iface, '-d', selfAddr, '-j', 'RETURN']); }
+            catch (err) {
+                sh('sudo', ['iptables', '-w', '5', '-t', table, '-I', 'PREROUTING', '1', '-i', iface, '-d', selfAddr, '-j', 'RETURN']);
+            }
+        }
+    };
+    if (enable) addSelfRules();
     for (const e of exits) {
         const mark = cascadeExitMark(e.index);
         const table = String(cascadeExitTable(e.index));
@@ -15517,11 +15529,6 @@ function xrayTproxy(enable) {
         const inDel = ['-w', '5', '-t', 'filter', '-D', 'INPUT', '-m', 'mark', '--mark', mark, '-j', 'ACCEPT'];
         try { sh('sudo', ['iptables'].concat(inDel)); } catch (err) { /* правила нет */ }
         if (enable) {
-            // Свои сервисы — напрямую, до всех перехватов.
-            if (selfAddr) {
-                sh('sudo', ['iptables', '-w', '5', '-t', 'nat', '-I', 'PREROUTING', '1', '-i', iface, '-d', selfAddr, '-j', 'RETURN']);
-                sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-I', 'PREROUTING', '1', '-i', iface, '-d', selfAddr, '-j', 'RETURN']);
-            }
             sh('sudo', ['ip', 'route', 'replace', 'local', 'default', 'dev', 'lo', 'table', table]);
             if (clientNet) sh('sudo', ['ip', 'route', 'replace', clientNet, 'dev', iface, 'table', table]);
             sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-A', 'OUTPUT', '-o', iface, '-p', 'tcp',
