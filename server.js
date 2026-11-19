@@ -15493,6 +15493,8 @@ app.get('/api/xray/debug', checkAuth, requireAdmin, (req, res) => {
         table2001: run('ip', ['route', 'show', 'table', '2001']),
         tcp: run('ss', ['-ltnp']),
         udp: run('ss', ['-lunp']),
+        ssTcp: run('ss', ['-tin']),
+        retrans: run('bash', ['-c', 'nstat -az 2>/dev/null | grep -Ei "TcpRetransSegs|TcpExtTCPLostRetransmit|TcpExtTCPTimeouts|TcpExtListenDrops" || true']),
         conntrack: run('conntrack', ['-L', '-p', 'tcp', '--dport', '12345', '--src', '172.16.17.3']),
         log: run('journalctl', ['-u', XRAY_UNIT, '-n', '60', '--no-pager', '--output', 'cat'])
     });
