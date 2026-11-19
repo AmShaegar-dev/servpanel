@@ -15245,6 +15245,7 @@ app.post('/api/xray/server', checkAuth, requireAdmin, (req, res) => {
             serverName: String(body.serverName || 'vimeo.com'),
             path: String(body.path || '/xhttp'),
             xhttpMode: ['auto', 'packet-up', 'stream-up', 'stream-one'].includes(String(body.xhttpMode)) ? String(body.xhttpMode) : 'auto',
+            privateKey: keys.privateKey,
             publicKey: keys.publicKey,
             shortId,
             clientId,
