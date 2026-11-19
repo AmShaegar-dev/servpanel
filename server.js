@@ -15110,7 +15110,8 @@ function xrayClientConfig(st) {
                 listen: '0.0.0.0',
                 port: 12345,
                 protocol: 'dokodemo-door',
-                settings: { network: 'tcp', followRedirect: true }
+                settings: { network: 'tcp', followRedirect: true },
+                streamSettings: { sockopt: { tproxy: 'redirect' } }
             },
             {
                 listen: '0.0.0.0',
