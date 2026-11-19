@@ -15132,7 +15132,7 @@ function xrayClientConfig(st) {
     return {
         log: { loglevel: st.debug ? 'debug' : 'warning' },
         inbounds: [
-            { listen: '127.0.0.1', port: 10808, protocol: 'socks' },
+            { listen: '0.0.0.0', port: 10808, protocol: 'socks' },
             {
                 listen: '0.0.0.0',
                 port: 12345,
