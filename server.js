@@ -15748,6 +15748,24 @@ app.post('/api/xray/iperf/stop', checkAuth, requireAdmin, (req, res) => {
     res.json({ success: true });
 });
 
+// Второй UDP-порт для AWG: пакеты на 443/udp перенаправляются на боевой
+// порт интерфейса. Нужно, пока часть профилей ещё смотрит на старый порт.
+app.post('/api/xray/alias', checkAuth, requireAdmin, (req, res) => {
+    const b = req.body || {};
+    const from = Math.max(1, Math.min(65535, Number(b.from) || 443));
+    const to = Math.max(1, Math.min(65535, Number(b.to) || 3977));
+    if (from === to) return res.status(400).json({ error: 'Порты совпадают' });
+    const del = ['iptables', '-t', 'nat', '-D', 'PREROUTING', '-p', 'udp', '--dport', String(from), '-j', 'REDIRECT', '--to-ports', String(to)];
+    try { sh('sudo', del); } catch (e) { /* правила нет */ }
+    try {
+        sh('sudo', ['iptables', '-t', 'nat', '-A', 'PREROUTING', '-p', 'udp', '--dport', String(from), '-j', 'REDIRECT', '--to-ports', String(to)]);
+        auditLog(req, 'AWG: ' + from + '/udp перенаправлен на ' + to);
+        res.json({ success: true, from, to });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось добавить правило: ' + (e.message || e) });
+    }
+});
+
 app.post('/api/xray/tune', checkAuth, requireAdmin, (req, res) => {
     try {
         const r = xrayTuneTcp();
