@@ -15991,12 +15991,15 @@ app.get('/api/xray/download', checkAuth, requireAdmin, (req, res) => {
     const cacheDir = path.join(DATA_DIR, '.xray-dl');
     const cache = path.join(cacheDir, name);
     try {
-        try { fs.mkdirSync(cacheDir, { recursive: true }); } catch (e) { /* ignore */ }
         if (!fs.existsSync(cache) || fs.statSync(cache).size < 1024 * 1024) {
             const url = 'https://github.com/XTLS/Xray-core/releases/latest/download/' + name;
-            sh('curl', ['-fsSL', '--retry', '2', '-o', cache, url], { timeout: 180000 });
+            const res1 = String(shTry('curl', ['-fSL', '--retry', '1', '-o', cache, url], { timeout: 180000 }) || '');
+            if (!fs.existsSync(cache)) {
+                return res.status(502).json({ error: 'GitHub не отдал ' + name, detail: res1.slice(-300) });
+            }
         }
-        auditLog(req, 'Xray: скачивание клиента ' + name);
+        const size = fs.statSync(cache).size;
+        auditLog(req, 'Xray: скачивание клиента ' + name + ' (' + size + ' Б)');
         res.download(cache, name);
     } catch (e) {
         res.status(500).json({ error: 'Не удалось скачать ' + name + ': ' + (e.message || e) });
