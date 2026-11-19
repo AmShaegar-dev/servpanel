@@ -15098,10 +15098,10 @@ function xrayXhttpSettings(st) {
 function xrayServerConfig(st) {
     const xhttp = xrayXhttpSettings(st);
     // Штатное поле Xray: окна HTTP/2 сервера (по умолчанию 1 МБ).
-    xhttp.h2Params = {
+    xhttp.h2Params = JSON.stringify({
         maxReceiveBufferPerConnection: 10 << 20,
         maxReceiveBufferPerStream: 10 << 20
-    };
+    });
     return {
         log: { loglevel: st.debug ? 'debug' : 'warning' },
         inbounds: [{
