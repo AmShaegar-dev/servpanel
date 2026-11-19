@@ -15104,7 +15104,16 @@ function xrayServerConfig(st) {
 function xrayClientConfig(st) {
     return {
         log: { loglevel: 'warning' },
-        inbounds: [{ listen: '127.0.0.1', port: 10808, protocol: 'socks' }],
+        inbounds: [
+            { listen: '127.0.0.1', port: 10808, protocol: 'socks' },
+            {
+                listen: '127.0.0.1',
+                port: 12345,
+                protocol: 'dokodemo-door',
+                settings: { network: 'tcp,udp', followRedirect: true },
+                streamSettings: { sockopt: { tproxy: 'tproxy' } }
+            }
+        ],
         outbounds: [{
             protocol: 'vless',
             settings: { address: st.address, port: st.port, id: st.clientId, encryption: 'none', flow: '' },
@@ -15262,10 +15271,55 @@ app.post('/api/xray/test', checkAuth, requireAdmin, (req, res) => {
 
 app.post('/api/xray/mode', checkAuth, requireAdmin, (req, res) => {
     const mode = String((req.body || {}).mode || '') === 'xray' ? 'xray' : 'awg';
-    const st = xrayWriteState({ mode });
-    auditLog(req, 'Протокол каскада: ' + mode);
-    res.json({ success: true, mode: st.mode });
+    const st = xrayReadState();
+    try {
+        if (mode === 'xray') {
+            if (st.role !== 'ru') throw new Error('Переключение делается на RU-панели (клиент каскада)');
+            if (!st.address || !st.publicKey) throw new Error('Сначала настройте клиент Xray');
+            xrayApplyConfig(xrayClientConfig(st));
+            xrayTproxy(true);
+        } else {
+            xrayTproxy(false);
+        }
+        const next = xrayWriteState({ mode });
+        auditLog(req, 'Протокол каскада: ' + mode);
+        res.json({ success: true, mode: next.mode });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось переключить протокол: ' + (e.message || e) });
+    }
 });
+
+function xrayTproxy(enable) {
+    const exits = cascadeExitList();
+    const iface = existingIfaces().find(i => i === 'awg0') || 'awg0';
+    const port = 12345;
+    for (const e of exits) {
+        const mark = cascadeExitMark(e.index);
+        const table = String(cascadeExitTable(e.index));
+        for (const proto of ['tcp', 'udp']) {
+            const del = ['-w', '5', '-t', 'mangle', '-D', 'PREROUTING', '-i', iface, '-p', proto,
+                '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', String(port), '--tproxy-mark', mark];
+            try { sh('sudo', ['iptables'].concat(del)); } catch (err) { /* правила нет */ }
+        }
+        if (enable) {
+            sh('sudo', ['ip', 'route', 'replace', 'local', 'default', 'dev', 'lo', 'table', table]);
+            for (const proto of ['tcp', 'udp']) {
+                sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-A', 'PREROUTING', '-i', iface, '-p', proto,
+                    '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', String(port), '--tproxy-mark', mark]);
+            }
+        } else {
+            sh('sudo', ['ip', 'route', 'replace', 'default', 'dev', e.iface, 'table', table]);
+        }
+    }
+    if (enable) {
+        // Таймер маршрутов перезаписывает таблицы — на время Xray его останавливаем.
+        try { sh('sudo', ['systemctl', 'stop', 'awg-routing.timer']); } catch (e) { /* ignore */ }
+    } else {
+        try { sh('sudo', ['systemctl', 'start', 'awg-routing.timer']); } catch (e) { /* ignore */ }
+        try { sh('sudo', ['bash', ROUTING_SCRIPT, '--no-list'], { timeout: 180000 }); } catch (e) { /* ignore */ }
+    }
+    return true;
+}
 
 app.get('/api/xray/clients', checkAuth, (req, res) => {
     res.json({ success: true, clients: xrayReadState().clients });

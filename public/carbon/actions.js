@@ -1397,6 +1397,18 @@ async function carbonXrayTest() {
   }
 }
 
+async function carbonXrayMode(btn) {
+  const mode = (btn && btn.dataset && btn.dataset.mode) === 'xray' ? 'xray' : 'awg';
+  if (mode === 'xray' && !confirm('Переключить каскад клиентов на VLESS + XHTTP + Reality?')) return;
+  if (mode === 'awg' && !confirm('Вернуть каскад на AWG и восстановить маршруты?')) return;
+  showToast(mode === 'xray' ? 'Включаю Xray…' : 'Возвращаю AWG…');
+  try {
+    const d = await api('/api/xray/mode', { method: 'POST', body: { mode } });
+    await carbonXrayLoad();
+    showToast('Каскад: ' + d.mode);
+  } catch (e) { showToast(e.message || 'Не удалось переключить'); }
+}
+
 async function carbonMtuLoad() {
   const box = document.getElementById('carbonMtuBox');
   try {
@@ -2614,6 +2626,7 @@ document.addEventListener('click', async event => {
     else if (action === 'xray-server') await carbonXrayServer();
     else if (action === 'xray-client') await carbonXrayClient();
     else if (action === 'xray-test') await carbonXrayTest();
+    else if (action === 'xray-mode') await carbonXrayMode(btn);
     else if (action === 'appearance-preset') { carbonSetPalettePreset(btn.dataset.preset); render(); showToast('Шаблон применён'); }
     else if (action === 'appearance-custom') { document.getElementById('appearanceColors')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     else if (action === 'appearance-theme') { setTheme(btn.dataset.theme); render(); }
