@@ -14920,6 +14920,16 @@ function channelMonitorEnsure() {
 const channelMonitorBoot = setTimeout(() => { try { channelMonitorEnsure(); } catch (e) { /* ignore */ } }, 5000);
 if (channelMonitorBoot.unref) channelMonitorBoot.unref();
 
+// После перезагрузки панели возвращаем режим Xray: маршруты и правила
+// не сохраняются в ядре, поэтому их надо накатить заново.
+const xrayBoot = setTimeout(() => {
+    try {
+        const st = xrayReadState();
+        if (st.mode === 'xray' && st.role === 'ru' && xrayInstalled()) xrayTproxy(true);
+    } catch (e) { /* ignore */ }
+}, 20000);
+if (xrayBoot.unref) xrayBoot.unref();
+
 app.get('/api/diag/monitor', checkAuth, (req, res) => {
     res.json({ success: true, ...channelMonitorState() });
 });
@@ -15350,6 +15360,27 @@ function xrayTproxy(enable) {
     }
     return true;
 }
+
+app.post('/api/xray/service', checkAuth, requireAdmin, (req, res) => {
+    const action = String((req.body || {}).action || '');
+    try {
+        if (action === 'restart') sh('sudo', ['systemctl', 'restart', XRAY_UNIT], { timeout: 60000 });
+        else if (action === 'stop') sh('sudo', ['systemctl', 'stop', XRAY_UNIT], { timeout: 60000 });
+        else if (action === 'start') sh('sudo', ['systemctl', 'start', XRAY_UNIT], { timeout: 60000 });
+        else if (action === 'remove') {
+            try { sh('sudo', ['systemctl', 'disable', '--now', XRAY_UNIT], { timeout: 60000 }); } catch (e) { /* ignore */ }
+            try { sh('sudo', ['rm', '-f', '/etc/systemd/system/' + XRAY_UNIT]); } catch (e) { /* ignore */ }
+            try { sh('sudo', ['systemctl', 'daemon-reload']); } catch (e) { /* ignore */ }
+            xrayWriteState({ role: '', mode: 'awg' });
+        } else {
+            throw new Error('Неизвестное действие');
+        }
+        auditLog(req, 'Xray: служба ' + action);
+        res.json({ success: true, action, running: xrayRunning() });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось выполнить: ' + (e.message || e) });
+    }
+});
 
 app.get('/api/xray/clients', checkAuth, (req, res) => {
     res.json({ success: true, clients: xrayReadState().clients });
