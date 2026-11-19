@@ -15435,8 +15435,8 @@ app.post('/api/xray/test', checkAuth, requireAdmin, (req, res) => {
 
 app.post('/api/xray/mode', checkAuth, requireAdmin, (req, res) => {
     const mode = String((req.body || {}).mode || '') === 'xray' ? 'xray' : 'awg';
-    const st = xrayReadState();
     try {
+        const st = xrayReadState();
         if (mode === 'xray') {
             if (st.role !== 'ru') throw new Error('Переключение делается на RU-панели (клиент каскада)');
             if (!st.address || !st.publicKey) throw new Error('Сначала настройте клиент Xray');
@@ -16030,6 +16030,16 @@ app.get('/api/diag/log', checkAuth, (req, res) => {
         const lines = readLogTail(logFile).split(/\r?\n/);
         res.type('text/plain').send(lines.slice(-300).join('\n'));
     } catch (e) { res.send('Ошибка чтения лога'); }
+});
+
+// Последние необработанные ошибки панели: помогает разобрать 500 без SSH.
+app.get('/api/diag/last-error', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const p = path.join(DATA_DIR, '.last-error.log');
+        if (!fs.existsSync(p)) return res.type('text/plain').send('Ошибок нет');
+        const lines = fs.readFileSync(p, 'utf8').trim().split(/\n/);
+        res.type('text/plain').send(lines.slice(-60).join('\n'));
+    } catch (e) { res.type('text/plain').send('Не удалось прочитать: ' + (e.message || e)); }
 });
 
 // ---------------------------------------------------------------------------
@@ -17089,9 +17099,18 @@ const PANEL_API_HOST = process.env.PANEL_API_HOST || '0.0.0.0';
 
 app.use((err, req, res, next) => {
     if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'Файл слишком большой' });
-    console.error('Ошибка запроса:', err && err.message);
+    console.error('Ошибка запроса:', err && (err.stack || err.message));
+    try {
+        fs.appendFileSync(path.join(DATA_DIR, '.last-error.log'),
+            '[' + new Date().toISOString() + '] ' + req.method + ' ' + req.originalUrl + '\n' + String((err && (err.stack || err.message)) || err) + '\n\n');
+    } catch (e) { /* ignore */ }
     if (res.headersSent) return next(err);
-    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    // Администратору показываем причину: без этого 500 нечем диагностировать.
+    const admin = !!(req.session && req.session.role === 'admin');
+    res.status(500).json({
+        error: 'Внутренняя ошибка сервера',
+        detail: admin ? String((err && err.message) || err).slice(0, 400) : undefined
+    });
 });
 
 if (require.main === module) {
