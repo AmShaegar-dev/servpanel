@@ -15988,8 +15988,10 @@ app.get('/api/xray/download', checkAuth, requireAdmin, (req, res) => {
     const os = ['windows', 'linux', 'macos'].includes(String(req.query.os)) ? String(req.query.os) : 'windows';
     const arch = ['64', 'arm64', '32'].includes(String(req.query.arch)) ? String(req.query.arch) : '64';
     const name = 'Xray-' + os + '-' + arch + (os === 'windows' ? '.zip' : '.zip');
-    const cache = path.join(os.tmpdir(), name);
+    const cacheDir = path.join(DATA_DIR, '.xray-dl');
+    const cache = path.join(cacheDir, name);
     try {
+        try { fs.mkdirSync(cacheDir, { recursive: true }); } catch (e) { /* ignore */ }
         if (!fs.existsSync(cache) || fs.statSync(cache).size < 1024 * 1024) {
             const url = 'https://github.com/XTLS/Xray-core/releases/latest/download/' + name;
             sh('curl', ['-fsSL', '--retry', '2', '-o', cache, url], { timeout: 180000 });
