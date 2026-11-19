@@ -15758,30 +15758,28 @@ app.post('/api/xray/tune', checkAuth, requireAdmin, (req, res) => {
     }
 });
 
-// UDP-проба сервер → клиент: чистая проверка направления без TCP-окон.
-// Клиент слушает UDP-порт, сервер шлёт пакеты N секунд и считает отправленное.
+// UDP-проба сервер → клиент через iperf3: -b 0 (unlimited), режим -R.
+// Показывает чистую доставку без TCP-окон и потери в процентах.
 app.post('/api/xray/udp-blast', checkAuth, requireAdmin, (req, res) => {
     const b = req.body || {};
     const host = String(b.ip || '');
     const port = Math.max(1, Math.min(65535, Number(b.port) || 0));
-    const seconds = Math.max(3, Math.min(30, Number(b.seconds) || 12));
+    const seconds = Math.max(3, Math.min(30, Number(b.seconds) || 10));
     if (!/^\d+\.\d+\.\d+\.\d+$/.test(host) || !port) {
         return res.status(400).json({ error: 'Нужны ip и port' });
     }
     try {
-        const script = 'exec 3<>/dev/udp/' + host + '/' + port + '; ' +
-            'p=$(head -c 1100 /dev/zero | tr "\\0" "a"); ' +
-            'n=0; s=$(date +%s%N); ' +
-            'while [ $(( ($(date +%s%N)-s)/1000000 )) -lt ' + (seconds * 1000) + ' ]; do printf "%s" "$p" >&3; n=$((n+1)); done; ' +
-            'e=$(date +%s%N); echo "$n $(( (e-s)/1000000 ))"';
-        const out = String(sh('bash', ['-c', script], { timeout: (seconds + 10) * 1000 }) || '').trim();
-        const [packets, ms] = out.split(/\s+/).map(Number);
-        const bytes = (packets || 0) * 1100;
-        const mbps = ms > 0 ? (bytes * 8 / 1e6) / (ms / 1000) : 0;
-        auditLog(req, 'UDP-проба на ' + host + ':' + port + ' — ' + mbps.toFixed(1) + ' Мбит/с');
-        res.json({ success: true, packets: packets || 0, ms: ms || 0, mbps: Number(mbps.toFixed(2)) });
+        iperfEnsureInstalled();
+        const out = String(sh('iperf3', ['-c', host, '-p', String(port), '-u', '-b', '0', '-R', '-t', String(seconds), '-J'], { timeout: (seconds + 20) * 1000 }) || '');
+        let j;
+        try { j = JSON.parse(out); } catch (e) { throw new Error('iperf3 не вернул JSON: ' + out.slice(-200)); }
+        const sum = (j.end && j.end.sum) || {};
+        const mbps = (Number(sum.bits_per_second) || 0) / 1e6;
+        const lost = Number(sum.lost_percent) || 0;
+        auditLog(req, 'UDP-проба ' + host + ':' + port + ' — ' + mbps.toFixed(1) + ' Мбит/с, потери ' + lost + '%');
+        res.json({ success: true, mbps: Number(mbps.toFixed(2)), lost, seconds });
     } catch (e) {
-        res.status(500).json({ error: 'UDP-проба не удалась: ' + (e.message || e) });
+        res.status(500).json({ error: 'UDP-проба не удалась: ' + String((e.stderr || e.message || e)).slice(0, 300) });
     }
 });
 
