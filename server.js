@@ -15857,6 +15857,26 @@ app.get('/api/diag/tc', checkAuth, requireAdmin, (req, res) => {
     });
 });
 
+// Диагностика плеча AWG: ядро/модуль, ingress-шейпер и CPU.
+// Нужна, когда туннель упирается в ~20 Мбит/с при быстром интернете.
+app.get('/api/diag/awg', checkAuth, requireAdmin, (req, res) => {
+    const run = (cmd, args, timeout) => {
+        try { return String(shTry(cmd, args, { timeout: timeout || 15000 }) || ''); }
+        catch (e) { return String(e.stdout || e.message || ''); }
+    };
+    res.json({
+        success: true,
+        ingressFilters: run('tc', ['-s', 'filter', 'show', 'dev', 'awg0', 'parent', 'ffff:']),
+        egressFilters: run('tc', ['-s', 'filter', 'show', 'dev', 'awg0']),
+        link: run('ip', ['-d', 'link', 'show', 'awg0']),
+        module: run('bash', ['-c', 'lsmod 2>/dev/null | grep -i -E "amneziawg|wireguard" || true']),
+        processes: run('bash', ['-c', 'ps aux 2>/dev/null | grep -i -E "amneziawg|awg-quick" | grep -v grep || true']),
+        cpuModel: run('bash', ['-c', 'grep -m2 "model name" /proc/cpuinfo | sed "s/.*: //" || true']),
+        cores: run('nproc', []),
+        softirq: run('bash', ['-c', 'head -1 /proc/stat; sleep 1; head -1 /proc/stat'])
+    });
+});
+
 // Скорость внешнего канала сервера (не через VPN): помогает понять,
 // ограничен ли сам сервер или проблема на пути EU→RU/телефон.
 app.get('/api/diag/wan-speed', checkAuth, requireAdmin, (req, res) => {
