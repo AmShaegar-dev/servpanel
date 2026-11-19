@@ -15758,6 +15758,33 @@ app.post('/api/xray/tune', checkAuth, requireAdmin, (req, res) => {
     }
 });
 
+// UDP-проба сервер → клиент: чистая проверка направления без TCP-окон.
+// Клиент слушает UDP-порт, сервер шлёт пакеты N секунд и считает отправленное.
+app.post('/api/xray/udp-blast', checkAuth, requireAdmin, (req, res) => {
+    const b = req.body || {};
+    const host = String(b.ip || '');
+    const port = Math.max(1, Math.min(65535, Number(b.port) || 0));
+    const seconds = Math.max(3, Math.min(30, Number(b.seconds) || 12));
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(host) || !port) {
+        return res.status(400).json({ error: 'Нужны ip и port' });
+    }
+    try {
+        const script = 'exec 3<>/dev/udp/' + host + '/' + port + '; ' +
+            'p=$(head -c 1100 /dev/zero | tr "\\0" "a"); ' +
+            'n=0; s=$(date +%s%N); ' +
+            'while [ $(( ($(date +%s%N)-s)/1000000 )) -lt ' + (seconds * 1000) + ' ]; do printf "%s" "$p" >&3; n=$((n+1)); done; ' +
+            'e=$(date +%s%N); echo "$n $(( (e-s)/1000000 ))"';
+        const out = String(sh('bash', ['-c', script], { timeout: (seconds + 10) * 1000 }) || '').trim();
+        const [packets, ms] = out.split(/\s+/).map(Number);
+        const bytes = (packets || 0) * 1100;
+        const mbps = ms > 0 ? (bytes * 8 / 1e6) / (ms / 1000) : 0;
+        auditLog(req, 'UDP-проба на ' + host + ':' + port + ' — ' + mbps.toFixed(1) + ' Мбит/с');
+        res.json({ success: true, packets: packets || 0, ms: ms || 0, mbps: Number(mbps.toFixed(2)) });
+    } catch (e) {
+        res.status(500).json({ error: 'UDP-проба не удалась: ' + (e.message || e) });
+    }
+});
+
 // Замер плеча RU → клиент: отдаёт N мегабайт напрямую с RU-сервера.
 // Только по токену из панели, иначе это был бы открытый генератор трафика.
 function readCpuTimes() {
