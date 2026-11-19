@@ -1294,6 +1294,7 @@ function realXray() {
   const modeXray = s.mode === 'xray';
   const selfIp = (d.selfDirect && d.selfDirect.ip) || '';
   const selfIn = !!(d.selfDirect && d.selfDirect.inRu);
+  const speedUrl = d.speedPath ? (location.origin + d.speedPath) : '';
   const roleText = s.role === 'eu' ? 'сервер EU' : (s.role === 'ru' ? 'клиент RU' : 'не настроен');
   const profRows = prof.map(p => `<div class="list-row"><b>${escHtml(p.name || p.id)}</b><span class="mono">${escHtml((p.role === 'ru' ? 'клиент' : 'сервер') + ' · ' + (p.serverName || '—') + ' · ' + (p.xhttpMode || 'auto'))}</span><span class="page-actions" style="margin:0"><button class="row-action" data-carbon-action="xray-profile-apply" data-id="${escHtml(p.id)}" title="Применить">${icon('check')}</button><button class="row-action" data-carbon-action="xray-profile-export" data-id="${escHtml(p.id)}" title="Экспорт">${icon('download')}</button><button class="row-action" data-carbon-action="xray-profile-delete" data-id="${escHtml(p.id)}" title="Удалить">${icon('trash')}</button></span></div>`).join('');
   return `<div class="page-head"><div><div class="page-title">Xray</div><div class="page-sub">VLESS + XHTTP + Reality: установка, Архитектор, профили и переключение каскада.</div></div><div class="page-actions">
@@ -1327,7 +1328,9 @@ function realXray() {
         ${d.clientProfile ? `<div class="code" style="margin-top:10px"><div class="code-head"><span>Профиль клиента (JSON)</span><button class="copy" data-copy="${escHtml(JSON.stringify(d.clientProfile, null, 2))}">Копировать</button></div><pre>${escHtml(JSON.stringify(d.clientProfile, null, 2))}</pre></div>` : ''}
       </section>
       <section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Служба</div><div class="card-sub">servpanel-xray.service</div></div>${tag(d.running || '—', d.running === 'active' ? 'good' : 'warn')}</div>
-        <div class="list"><div class="list-row"><b>Бинарник</b><span class="mono">/usr/local/bin/xray</span></div><div class="list-row"><b>Конфиг</b><span class="mono">/usr/local/etc/xray/servpanel.json</span></div><div class="list-row"><b>Версия</b><span class="mono">${escHtml(d.version || '—')}</span></div></div>
+        <div class="list"><div class="list-row"><b>Бинарник</b><span class="mono">/usr/local/bin/xray</span></div><div class="list-row"><b>Конфиг</b><span class="mono">/usr/local/etc/xray/servpanel.json</span></div><div class="list-row"><b>Версия</b><span class="mono">${escHtml(d.version || '—')}</span></div>
+        ${speedUrl ? `<div class="list-row"><b>Замер до клиента</b><span class="mono" style="word-break:break-all;white-space:normal">${escHtml(d.speedPath)}</span><button class="row-action" data-copy="${escHtml(speedUrl)}" title="Скопировать ссылку на 25 МБ">${icon('copy')}</button></div>` : ''}</div>
+        ${speedUrl ? `<div class="donut-note" style="margin-top:8px">Скачивание по этой ссылке идёт напрямую с RU-сервера, без EU и Xray. Запустите на клиенте: <span class="mono">curl.exe -s -o NUL -w "%{speed_download}" "${escHtml(speedUrl)}"</span> — это чистая скорость плеча RU → клиент.</div>` : ''}
         <div class="page-actions" style="margin-top:12px"><button class="btn" data-carbon-action="xray-service" data-act="restart">${icon('refresh')}Перезапустить</button><button class="btn" data-carbon-action="xray-service" data-act="stop">${icon('stop')}Остановить</button><button class="btn" data-carbon-action="xray-log">${icon('terminal')}Журнал</button><button class="btn" data-carbon-action="xray-capture">${icon('pulse')}Пакеты</button><button class="btn btn-danger" data-carbon-action="xray-service" data-act="remove">${icon('trash')}Удалить</button></div>
       </section>
     </div>`;

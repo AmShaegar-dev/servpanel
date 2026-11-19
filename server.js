@@ -15030,12 +15030,13 @@ function xrayReadState() {
             address: String(j.address || ''),
             clients: Array.isArray(j.clients) ? j.clients : [],
             profiles: Array.isArray(j.profiles) ? j.profiles : [],
+            speedToken: String(j.speedToken || ''),
             debug: !!j.debug,
             lastTest: j.lastTest || null,
             updatedAt: Number(j.updatedAt) || 0
         };
     } catch (e) {
-        return { role: '', mode: 'awg', port: 443, dest: 'vimeo.com:443', serverName: 'vimeo.com', path: '/xhttp', xhttpMode: 'auto', fingerprint: 'firefox', privateKey: '', publicKey: '', shortId: '', clientId: '', address: '', clients: [], profiles: [], debug: false, lastTest: null, updatedAt: 0 };
+        return { role: '', mode: 'awg', port: 443, dest: 'vimeo.com:443', serverName: 'vimeo.com', path: '/xhttp', xhttpMode: 'auto', fingerprint: 'firefox', privateKey: '', publicKey: '', shortId: '', clientId: '', address: '', clients: [], profiles: [], speedToken: '', debug: false, lastTest: null, updatedAt: 0 };
     }
 }
 
@@ -15163,6 +15164,16 @@ function xraySelfDirectState() {
     let inRu = false;
     try { inRu = !!ip && readIpsetEntries('ru').has(ip); } catch (e) { /* ignore */ }
     return { ip, inRu };
+}
+
+// Токен для замера «скачать с самого RU-сервера»: клиент качает через
+// панель напрямую, минуя EU и Xray, — видно чистое плечо RU → клиент.
+function xraySpeedToken() {
+    const st = xrayReadState();
+    if (st.speedToken) return st.speedToken;
+    const t = crypto.randomBytes(16).toString('hex');
+    xrayWriteState({ speedToken: t });
+    return t;
 }
 
 function xrayXhttpSettings(st) {
@@ -15297,6 +15308,7 @@ app.get('/api/xray/status', checkAuth, (req, res) => {
         presets: XRAY_PRESETS,
         fingerprints: XRAY_FINGERPRINTS,
         selfDirect: xraySelfDirectState(),
+        speedPath: '/api/speed/down?t=' + encodeURIComponent(xraySpeedToken()) + '&mb=25',
         clientProfile: st.publicKey ? {
             address: '',
             port: st.port,
@@ -15604,6 +15616,36 @@ function xrayProfileExport(p) {
         }
     };
 }
+
+// Замер плеча RU → клиент: отдаёт N мегабайт напрямую с RU-сервера.
+// Только по токену из панели, иначе это был бы открытый генератор трафика.
+app.get('/api/speed/down', (req, res) => {
+    const token = String(req.query.t || '');
+    const st = xrayReadState();
+    if (!st.speedToken || token !== st.speedToken) {
+        return res.status(403).type('text/plain').send('Нет доступа');
+    }
+    const mb = Math.max(1, Math.min(200, Number(req.query.mb) || 25));
+    const total = mb * 1024 * 1024;
+    const chunk = Buffer.alloc(64 * 1024, 0x61);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Length', String(total));
+    res.setHeader('Cache-Control', 'no-store');
+    let sent = 0;
+    let stopped = false;
+    res.on('close', () => { stopped = true; });
+    const pump = () => {
+        if (stopped) return;
+        while (sent < total) {
+            const size = Math.min(chunk.length, total - sent);
+            sent += size;
+            const buf = size === chunk.length ? chunk : chunk.subarray(0, size);
+            if (!res.write(buf)) { res.once('drain', pump); return; }
+        }
+        res.end();
+    };
+    pump();
+});
 
 app.get('/api/xray/presets', checkAuth, (req, res) => {
     res.json({ success: true, presets: XRAY_PRESETS, fingerprints: XRAY_FINGERPRINTS });
