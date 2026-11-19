@@ -15096,6 +15096,12 @@ function xrayXhttpSettings(st) {
 }
 
 function xrayServerConfig(st) {
+    const xhttp = xrayXhttpSettings(st);
+    // Штатное поле Xray: окна HTTP/2 сервера (по умолчанию 1 МБ).
+    xhttp.h2Params = Buffer.from(JSON.stringify({
+        maxReceiveBufferPerConnection: 10 << 20,
+        maxReceiveBufferPerStream: 10 << 20
+    })).toString('base64');
     return {
         log: { loglevel: st.debug ? 'debug' : 'warning' },
         inbounds: [{
@@ -15109,7 +15115,7 @@ function xrayServerConfig(st) {
             },
             streamSettings: {
                 network: 'xhttp',
-                xhttpSettings: xrayXhttpSettings(st),
+                xhttpSettings: xhttp,
                 security: 'reality',
                 realitySettings: {
                     target: st.dest,
@@ -15228,6 +15234,18 @@ app.get('/api/xray/status', checkAuth, (req, res) => {
 
 app.post('/api/xray/install', checkAuth, requireAdmin, (req, res) => {
     try {
+        const url = String((req.body || {}).url || '').trim();
+        if (url) {
+            if (!/^https?:\/\//i.test(url)) throw new Error('Нужен http(s)-URL');
+            const tmp = path.join(os.tmpdir(), 'servpanel-xray-bin');
+            sh('curl', ['-fsSL', '-o', tmp, url], { timeout: 300000 });
+            sh('sudo', ['install', '-m', '0755', '-o', 'root', '-g', 'root', tmp, XRAY_BIN], { timeout: 60000 });
+            try { fs.unlinkSync(tmp); } catch (e) { /* ignore */ }
+            sh('sudo', ['systemctl', 'restart', XRAY_UNIT], { timeout: 60000 });
+            const r = { installed: xrayInstalled(), version: xrayVersion(), running: xrayRunning(), custom: true };
+            auditLog(req, 'Xray: установлен свой бинарник ' + url);
+            return res.json({ success: true, ...r });
+        }
         const r = xrayInstall();
         auditLog(req, 'Xray: установлен ' + (r.version || ''));
         res.json({ success: true, ...r, running: xrayRunning() });
