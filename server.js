@@ -15022,18 +15022,20 @@ function xrayReadState() {
             serverName: String(j.serverName || 'vimeo.com'),
             path: String(j.path || '/xhttp'),
             xhttpMode: ['auto', 'packet-up', 'stream-up', 'stream-one'].includes(String(j.xhttpMode)) ? String(j.xhttpMode) : 'auto',
+            fingerprint: String(j.fingerprint || 'firefox'),
             privateKey: String(j.privateKey || ''),
             publicKey: String(j.publicKey || ''),
             shortId: String(j.shortId || ''),
             clientId: String(j.clientId || ''),
             address: String(j.address || ''),
             clients: Array.isArray(j.clients) ? j.clients : [],
+            profiles: Array.isArray(j.profiles) ? j.profiles : [],
             debug: !!j.debug,
             lastTest: j.lastTest || null,
             updatedAt: Number(j.updatedAt) || 0
         };
     } catch (e) {
-        return { role: '', mode: 'awg', port: 443, dest: 'vimeo.com:443', serverName: 'vimeo.com', path: '/xhttp', xhttpMode: 'auto', privateKey: '', publicKey: '', shortId: '', clientId: '', address: '', clients: [], debug: false, lastTest: null, updatedAt: 0 };
+        return { role: '', mode: 'awg', port: 443, dest: 'vimeo.com:443', serverName: 'vimeo.com', path: '/xhttp', xhttpMode: 'auto', fingerprint: 'firefox', privateKey: '', publicKey: '', shortId: '', clientId: '', address: '', clients: [], profiles: [], debug: false, lastTest: null, updatedAt: 0 };
     }
 }
 
@@ -15083,6 +15085,49 @@ function xrayUuid() {
     const out = String(sh(XRAY_BIN, ['uuid']) || '').trim();
     if (!/^[0-9a-f-]{36}$/i.test(out)) throw new Error('Не удалось сгенерировать UUID');
     return out;
+}
+
+// Готовые пары dest/SNI для Reality: сайты с TLS 1.3 и HTTP/2,
+// популярные и нейтральные по ASN.
+const XRAY_PRESETS = [
+    { id: 'vimeo', label: 'Vimeo', dest: 'vimeo.com:443', serverName: 'vimeo.com', note: 'CDN, проверено на тестах' },
+    { id: 'cloudflare', label: 'Cloudflare', dest: 'www.cloudflare.com:443', serverName: 'www.cloudflare.com', note: 'огромная CDN' },
+    { id: 'microsoft', label: 'Microsoft', dest: 'www.microsoft.com:443', serverName: 'www.microsoft.com', note: 'крупный сайт, TLS 1.3' },
+    { id: 'google', label: 'Google (dl)', dest: 'dl.google.com:443', serverName: 'dl.google.com', note: 'раздача, много трафика' },
+    { id: 'apple', label: 'Apple', dest: 'www.apple.com:443', serverName: 'www.apple.com', note: 'стабильный H2' },
+    { id: 'icloud', label: 'iCloud', dest: 'gateway.icloud.com:443', serverName: 'gateway.icloud.com', note: 'служебный домен Apple' },
+    { id: 'mozilla', label: 'Mozilla', dest: 'addons.mozilla.org:443', serverName: 'addons.mozilla.org', note: 'магазин расширений' },
+    { id: 'samsung', label: 'Samsung', dest: 'www.samsung.com:443', serverName: 'www.samsung.com', note: 'крупный медиа-домен' }
+];
+
+const XRAY_FINGERPRINTS = ['firefox', 'chrome', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'];
+
+function xrayFingerprint(v) {
+    const s = String(v || '').toLowerCase();
+    return XRAY_FINGERPRINTS.includes(s) ? s : 'firefox';
+}
+
+// Проверка dest: TLS 1.3, ALPN h2 и RTT. Если сайт не даёт H2 или 1.3 —
+// Reality с ним будет выглядеть подозрительно.
+function xrayDestCheck(dest) {
+    const s = String(dest || '').trim();
+    const m = s.match(/^([a-z0-9.-]+)(?::(\d+))?$/i);
+    if (!m) throw new Error('Формат dest: host:port');
+    const host = m[1];
+    const port = Number(m[2]) || 443;
+    const script = 'echo | timeout 12 openssl s_client -connect ' + host + ':' + port +
+        ' -servername ' + host + ' -alpn h2 -tls1_3 2>/dev/null | grep -E "Protocol|ALPN" || true';
+    const out = String(shTry('bash', ['-c', script], { timeout: 20000 }) || '');
+    const tls13 = /TLSv1\.3/i.test(out);
+    const alpn = /ALPN protocol:\s*h2/i.test(out);
+    const rtt = String(shTry('curl', ['-4', '-sS', '-o', '/dev/null', '-k', '--max-time', '8',
+        '--tlsv1.3', '--tls-max', '1.3', '-w', '%{time_connect}', 'https://' + host + ':' + port + '/'], { timeout: 15000 }) || '').trim();
+    const rttMs = Math.round((Number(rtt) || 0) * 1000);
+    return {
+        host, port, tls13, alpn, rttMs,
+        ok: tls13 && alpn,
+        raw: out.trim()
+    };
 }
 
 function xrayXhttpSettings(st) {
@@ -15160,7 +15205,7 @@ function xrayClientConfig(st) {
                     publicKey: st.publicKey,
                     shortId: st.shortId,
                     spiderX: '/',
-                    fingerprint: 'firefox',
+                    fingerprint: xrayFingerprint(st.fingerprint),
                     // HTTP/1.1 убирает per-stream окна HTTP/2, которые режут скачивание.
                     alpn: ['http/1.1']
                 }
@@ -15214,6 +15259,8 @@ app.get('/api/xray/status', checkAuth, (req, res) => {
         version: xrayVersion(),
         running: xrayRunning(),
         state: st,
+        presets: XRAY_PRESETS,
+        fingerprints: XRAY_FINGERPRINTS,
         clientProfile: st.publicKey ? {
             address: '',
             port: st.port,
@@ -15222,7 +15269,8 @@ app.get('/api/xray/status', checkAuth, (req, res) => {
             shortId: st.shortId,
             serverName: st.serverName,
             path: st.path,
-            fingerprint: 'firefox'
+            xhttpMode: st.xhttpMode,
+            fingerprint: xrayFingerprint(st.fingerprint)
         } : null
     });
 });
@@ -15263,6 +15311,7 @@ app.post('/api/xray/server', checkAuth, requireAdmin, (req, res) => {
             serverName: String(body.serverName || 'vimeo.com'),
             path: String(body.path || '/xhttp'),
             xhttpMode: ['auto', 'packet-up', 'stream-up', 'stream-one'].includes(String(body.xhttpMode)) ? String(body.xhttpMode) : 'auto',
+            fingerprint: xrayFingerprint(body.fingerprint),
             privateKey: keys.privateKey,
             publicKey: keys.publicKey,
             shortId,
@@ -15273,7 +15322,8 @@ app.post('/api/xray/server', checkAuth, requireAdmin, (req, res) => {
         auditLog(req, `Xray: сервер на ${st.port}, dest ${st.dest}`);
         res.json({ success: true, running: xrayRunning(), state: st, clientProfile: {
             port: st.port, id: clientId, publicKey: st.publicKey, shortId: st.shortId,
-            serverName: st.serverName, path: st.path, fingerprint: 'firefox'
+            serverName: st.serverName, path: st.path, xhttpMode: st.xhttpMode,
+            fingerprint: xrayFingerprint(st.fingerprint)
         } });
     } catch (e) {
         res.status(500).json({ error: 'Не удалось настроить сервер Xray: ' + (e.message || e) });
@@ -15293,7 +15343,8 @@ app.post('/api/xray/client', checkAuth, requireAdmin, (req, res) => {
             shortId: String(body.shortId || '').trim(),
             serverName: String(body.serverName || 'vimeo.com'),
             path: String(body.path || '/xhttp'),
-            xhttpMode: ['auto', 'packet-up', 'stream-up', 'stream-one'].includes(String(body.xhttpMode)) ? String(body.xhttpMode) : 'auto'
+            xhttpMode: ['auto', 'packet-up', 'stream-up', 'stream-one'].includes(String(body.xhttpMode)) ? String(body.xhttpMode) : 'auto',
+            fingerprint: xrayFingerprint(body.fingerprint)
         });
         if (!st.address || !st.clientId || !st.publicKey) throw new Error('Нужны address, id и publicKey');
         xrayApplyConfig(xrayClientConfig(st));
@@ -15468,6 +15519,152 @@ app.get('/api/xray/log', checkAuth, requireAdmin, (req, res) => {
         res.type('text/plain').send(out || 'Лог пуст');
     } catch (e) {
         res.type('text/plain').send('Не удалось прочитать лог: ' + (e.message || e));
+    }
+});
+
+// ---------------------------------------------------------------------------
+// Профили Xray: наборы параметров «сервер» и «клиент» с импортом/экспортом.
+// ---------------------------------------------------------------------------
+function xrayProfileFromBody(body, base) {
+    const st = base || xrayReadState();
+    const p = {
+        id: String(body.id || ('p' + crypto.randomBytes(4).toString('hex'))),
+        name: String(body.name || '').trim().slice(0, 60) || 'Профиль',
+        role: String(body.role || st.role || 'eu') === 'ru' ? 'ru' : 'eu',
+        port: Math.max(1, Math.min(65535, Number(body.port) || st.port || 443)),
+        dest: String(body.dest || st.dest || 'vimeo.com:443'),
+        serverName: String(body.serverName || st.serverName || 'vimeo.com'),
+        path: String(body.path || st.path || '/xhttp'),
+        xhttpMode: ['auto', 'packet-up', 'stream-up', 'stream-one'].includes(String(body.xhttpMode)) ? String(body.xhttpMode) : (st.xhttpMode || 'auto'),
+        fingerprint: xrayFingerprint(body.fingerprint || st.fingerprint),
+        address: String(body.address || st.address || ''),
+        privateKey: String(body.privateKey || st.privateKey || ''),
+        publicKey: String(body.publicKey || st.publicKey || ''),
+        shortId: String(body.shortId || st.shortId || ''),
+        clientId: String(body.clientId || body.id_client || st.clientId || ''),
+        createdAt: Number(body.createdAt) || Date.now()
+    };
+    return p;
+}
+
+function xrayProfileExport(p) {
+    return {
+        kind: 'servpanel-xray-profile',
+        version: 1,
+        profile: p,
+        client: {
+            address: p.address,
+            port: p.port,
+            id: p.clientId,
+            publicKey: p.publicKey,
+            shortId: p.shortId,
+            serverName: p.serverName,
+            path: p.path,
+            xhttpMode: p.xhttpMode,
+            fingerprint: p.fingerprint
+        }
+    };
+}
+
+app.get('/api/xray/presets', checkAuth, (req, res) => {
+    res.json({ success: true, presets: XRAY_PRESETS, fingerprints: XRAY_FINGERPRINTS });
+});
+
+app.post('/api/xray/destcheck', checkAuth, requireAdmin, (req, res) => {
+    try {
+        res.json({ success: true, ...xrayDestCheck((req.body || {}).dest) });
+    } catch (e) {
+        res.status(500).json({ error: e.message || 'Не удалось проверить dest' });
+    }
+});
+
+app.get('/api/xray/profiles', checkAuth, (req, res) => {
+    res.json({ success: true, profiles: xrayReadState().profiles });
+});
+
+app.post('/api/xray/profiles', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    try {
+        const st = xrayReadState();
+        const p = xrayProfileFromBody(body, st);
+        const profiles = st.profiles.filter(x => x.id !== p.id).concat([p]);
+        xrayWriteState({ profiles });
+        auditLog(req, 'Xray: сохранён профиль ' + p.name);
+        res.json({ success: true, profile: p, profiles });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось сохранить профиль: ' + (e.message || e) });
+    }
+});
+
+app.post('/api/xray/profiles/:id/apply', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const st = xrayReadState();
+        const p = st.profiles.find(x => x.id === String(req.params.id));
+        if (!p) throw new Error('Профиль не найден');
+        if (!xrayInstalled()) throw new Error('Сначала установите Xray');
+        const next = xrayWriteState({
+            role: p.role,
+            port: p.port,
+            dest: p.dest,
+            serverName: p.serverName,
+            path: p.path,
+            xhttpMode: p.xhttpMode,
+            fingerprint: p.fingerprint,
+            address: p.address,
+            privateKey: p.privateKey,
+            publicKey: p.publicKey,
+            shortId: p.shortId,
+            clientId: p.clientId
+        });
+        if (p.role === 'eu') {
+            if (!next.privateKey) throw new Error('В профиле нет privateKey');
+            if (!next.clients.length) next.clients = [{ id: next.clientId || xrayUuid(), name: 'cascade', createdAt: Date.now() }];
+            xrayApplyConfig(xrayServerConfig(xrayWriteState({ clients: next.clients })));
+        } else {
+            if (!next.address || !next.publicKey) throw new Error('В профиле нет адреса или publicKey');
+            xrayApplyConfig(xrayClientConfig(next));
+        }
+        auditLog(req, 'Xray: применён профиль ' + p.name);
+        res.json({ success: true, running: xrayRunning(), profile: p, state: xrayReadState() });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось применить профиль: ' + (e.message || e) });
+    }
+});
+
+app.post('/api/xray/profiles/:id/delete', checkAuth, requireAdmin, (req, res) => {
+    const st = xrayReadState();
+    const profiles = st.profiles.filter(x => x.id !== String(req.params.id));
+    xrayWriteState({ profiles });
+    auditLog(req, 'Xray: удалён профиль ' + req.params.id);
+    res.json({ success: true, profiles });
+});
+
+app.get('/api/xray/profiles/:id/export', checkAuth, requireAdmin, (req, res) => {
+    const p = xrayReadState().profiles.find(x => x.id === String(req.params.id));
+    if (!p) return res.status(404).json({ error: 'Профиль не найден' });
+    const name = (p.name || 'xray').replace(/[^a-z0-9._-]+/gi, '-');
+    res.setHeader('Content-Disposition', 'attachment; filename="xray-' + name + '.json"');
+    res.type('application/json').send(JSON.stringify(xrayProfileExport(p), null, 2));
+});
+
+app.post('/api/xray/import', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    try {
+        let data = body.json || body.profile || body;
+        if (typeof data === 'string') data = JSON.parse(data);
+        const src = data && data.profile ? data.profile : data;
+        if (!src || typeof src !== 'object') throw new Error('В файле нет профиля');
+        const st = xrayReadState();
+        const p = xrayProfileFromBody(src, st);
+        // Импортированный профиль всегда получает новый id, чтобы не затирать существующий.
+        p.id = 'p' + crypto.randomBytes(4).toString('hex');
+        p.createdAt = Date.now();
+        const profiles = st.profiles.concat([p]);
+        xrayWriteState({ profiles });
+        auditLog(req, 'Xray: импортирован профиль ' + p.name);
+        res.json({ success: true, profile: p, profiles });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось импортировать профиль: ' + (e.message || e) });
     }
 });
 

@@ -518,6 +518,8 @@ function assignCarbonPath(path, data) {
   else if (p === '/api/cascade/proxy') carbon.cascadeProxy = data;
   else if (p === '/api/obf/current') carbon.obf = data;
   else if (p === '/api/obf/profiles') carbon.profiles = data;
+  else if (p === '/api/xray/status') carbon.xray = data;
+  else if (p === '/api/xray/profiles') carbon.xrayProfiles = data;
   else if (p === '/api/ssl/status') carbon.ssl = data;
   else if (p === '/api/app/status') carbon.app = data;
   else if (p === '/api/rustdesk/status') carbon.rustdesk = data;
@@ -572,6 +574,7 @@ const TAB_DATA = {
   install: ['/api/modules'],
   network: ['/api/interfaces', '/api/ufw', '/api/iptables', '/api/awg/config'],
   cascade: ['/api/cascade/status', '/api/cascade/proxy', '/api/cascade/interfaces', '/api/cascade/schedule'],
+  xray: ['/api/xray/status', '/api/xray/profiles'],
   obfuscation: ['/api/obf/current', '/api/obf/profiles'],
   services: ['/api/services', '/api/warp/status'],
   domains: ['/api/ssl/status'],
@@ -1282,6 +1285,51 @@ function realRustdesk() {
     </div>`;
 }
 
+function realXray() {
+  const d = carbon.xray && carbon.xray.state ? carbon.xray : { state: {} };
+  const s = d.state || {};
+  const prof = carbon.xrayProfiles && Array.isArray(carbon.xrayProfiles.profiles) ? carbon.xrayProfiles.profiles : (s.profiles || []);
+  const clients = s.clients || [];
+  const last = s.lastTest;
+  const modeXray = s.mode === 'xray';
+  const roleText = s.role === 'eu' ? 'сервер EU' : (s.role === 'ru' ? 'клиент RU' : 'не настроен');
+  const profRows = prof.map(p => `<div class="list-row"><b>${escHtml(p.name || p.id)}</b><span class="mono">${escHtml((p.role === 'ru' ? 'клиент' : 'сервер') + ' · ' + (p.serverName || '—') + ' · ' + (p.xhttpMode || 'auto'))}</span><span class="page-actions" style="margin:0"><button class="row-action" data-carbon-action="xray-profile-apply" data-id="${escHtml(p.id)}" title="Применить">${icon('check')}</button><button class="row-action" data-carbon-action="xray-profile-export" data-id="${escHtml(p.id)}" title="Экспорт">${icon('download')}</button><button class="row-action" data-carbon-action="xray-profile-delete" data-id="${escHtml(p.id)}" title="Удалить">${icon('trash')}</button></span></div>`).join('');
+  return `<div class="page-head"><div><div class="page-title">Xray</div><div class="page-sub">VLESS + XHTTP + Reality: установка, Архитектор, профили и переключение каскада.</div></div><div class="page-actions">
+      <button class="btn btn-primary" data-carbon-action="xray-install">${icon('download')}${d.installed ? 'Переустановить' : 'Установить Xray'}</button>
+      <button class="btn" data-carbon-action="xray-architect">${icon('wrench')}Архитектор</button>
+      <button class="btn" data-carbon-action="xray-client-json">${icon('link')}Клиент из JSON</button>
+      <button class="btn" data-carbon-action="xray-test">${icon('pulse')}Тест туннеля</button>
+      <button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button>
+    </div></div>
+    <div class="mini-grid">${mini('Xray', d.installed ? (d.version || 'установлен') : 'не установлен', d.running || '—')}${mini('Роль', roleText, s.port ? ':' + s.port : '—')}${mini('Каскад', modeXray ? 'Xray' : 'AWG', s.mode || 'awg')}${mini('dest / SNI', s.dest || '—', s.serverName || '—')}${mini('Клиентов', String(clients.length), 'UUID')}${mini('Последний тест', last ? (last.mbps + ' Мбит/с') : '—', last ? (last.ip || 'без IP') : 'не запускался')}</div>
+    <div class="grid">
+      <section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Архитектор Xray</div><div class="card-sub">dest/SNI, режим XHTTP, fingerprint и профили</div></div>${tag(d.installed ? (d.running || 'служба') : 'нет Xray', d.installed ? (d.running === 'active' ? 'good' : 'warn') : 'warn')}</div>
+        <div class="list">
+          <div class="list-row"><b>Режим каскада</b><span class="mono">${escHtml(s.mode || 'awg')}</span><span class="page-actions" style="margin:0"><button class="btn btn-sm ${modeXray ? '' : 'btn-primary'}" data-carbon-action="xray-mode" data-mode="xray">${icon('send')}Включить Xray</button><button class="btn btn-sm ${modeXray ? 'btn-primary' : ''}" data-carbon-action="xray-mode" data-mode="awg">${icon('cascade')}Вернуть AWG</button></span></div>
+          <div class="list-row"><b>dest</b><span class="mono">${escHtml(s.dest || '—')}</span></div>
+          <div class="list-row"><b>SNI</b><span class="mono">${escHtml(s.serverName || '—')}</span></div>
+          <div class="list-row"><b>XHTTP</b><span class="mono">${escHtml((s.path || '—') + ' · ' + (s.xhttpMode || 'auto'))}</span></div>
+          <div class="list-row"><b>fingerprint</b><span class="mono">${escHtml(s.fingerprint || 'firefox')}</span></div>
+          <div class="list-row"><b>Ключи Reality</b><span class="mono">${s.publicKey ? 'заданы' : '—'}</span><span class="page-actions" style="margin:0"><button class="btn btn-sm" data-carbon-action="xray-selfcheck">${icon('shield')}Проверить</button></span></div>
+        </div>
+        <div class="page-actions" style="margin-top:12px"><button class="btn" data-carbon-action="xray-destcheck">${icon('globe')}Проверить dest</button><button class="btn" data-carbon-action="xray-profile-save">${icon('box')}Сохранить профиль</button><button class="btn" data-carbon-action="xray-profile-import">${icon('upload')}Импорт профиля</button></div>
+        <pre id="carbonXrayDiag" class="code" style="margin-top:12px;padding:10px;white-space:pre-wrap;min-height:60px">Проверка dest, selfcheck и журнал выводятся здесь.</pre>
+      </section>
+      <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Профили</div><div class="card-sub">Хранятся в панели, применяются одним нажатием</div></div>${tag(String(prof.length), 'muted')}</div>
+        <div class="list">${profRows || '<div class="list-row"><b>Профилей нет</b><span class="mono">сохраните текущий</span></div>'}</div>
+        <div class="page-actions" style="margin-top:12px"><button class="btn btn-sm" data-carbon-action="xray-profile-save">${icon('plus')}Текущий как профиль</button><button class="btn btn-sm" data-carbon-action="xray-profile-import">${icon('upload')}Импорт</button></div>
+      </section>
+      <section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Клиенты (EU)</div><div class="card-sub">UUID для подключения RU-панели</div></div><button class="btn btn-sm" data-carbon-action="xray-add-client">${icon('plus')}Добавить</button></div>
+        <div class="list">${clients.map(c => `<div class="list-row"><b>${escHtml(c.name || '—')}</b><span class="mono" style="word-break:break-all;white-space:normal">${escHtml(c.id)}</span><button class="row-action" data-copy="${escHtml(c.id)}" title="Скопировать UUID">${icon('copy')}</button></div>`).join('') || '<div class="list-row"><b>Клиентов нет</b><span class="mono">настройте сервер</span></div>'}</div>
+        ${d.clientProfile ? `<div class="code" style="margin-top:10px"><div class="code-head"><span>Профиль клиента (JSON)</span><button class="copy" data-copy="${escHtml(JSON.stringify(d.clientProfile, null, 2))}">Копировать</button></div><pre>${escHtml(JSON.stringify(d.clientProfile, null, 2))}</pre></div>` : ''}
+      </section>
+      <section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Служба</div><div class="card-sub">servpanel-xray.service</div></div>${tag(d.running || '—', d.running === 'active' ? 'good' : 'warn')}</div>
+        <div class="list"><div class="list-row"><b>Бинарник</b><span class="mono">/usr/local/bin/xray</span></div><div class="list-row"><b>Конфиг</b><span class="mono">/usr/local/etc/xray/servpanel.json</span></div><div class="list-row"><b>Версия</b><span class="mono">${escHtml(d.version || '—')}</span></div></div>
+        <div class="page-actions" style="margin-top:12px"><button class="btn" data-carbon-action="xray-service" data-act="restart">${icon('refresh')}Перезапустить</button><button class="btn" data-carbon-action="xray-service" data-act="stop">${icon('stop')}Остановить</button><button class="btn" data-carbon-action="xray-log">${icon('terminal')}Журнал</button><button class="btn" data-carbon-action="xray-capture">${icon('pulse')}Пакеты</button><button class="btn btn-danger" data-carbon-action="xray-service" data-act="remove">${icon('trash')}Удалить</button></div>
+      </section>
+    </div>`;
+}
+
 function realDiagnostics() {
   const logs = [
     ['/var/log/awg_install.log', 'Установка AWG'],
@@ -1332,6 +1380,7 @@ function bindRealData() {
   tabs.update = realUpdate;
   tabs.network = realNetwork;
   tabs.cascade = realCascade;
+  tabs.xray = realXray;
   tabs.obfuscation = realObfuscation;
   tabs.proxy = realProxy;
   tabs.domains = realDomains;

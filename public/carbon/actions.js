@@ -1313,6 +1313,7 @@ async function carbonXrayLoad() {
   const tag = document.getElementById('carbonXrayTag');
   try {
     const d = await api('/api/xray/status');
+    carbon.xray = d;
     if (tag) tag.textContent = d.installed ? (d.running ? 'работает' : 'остановлен') : 'не установлен';
     if (out) {
       const s = d.state || {};
@@ -1325,6 +1326,7 @@ async function carbonXrayLoad() {
         d.state && d.state.lastTest ? 'Последний тест: ' + d.state.lastTest.ip + ' · ' + d.state.lastTest.mbps + ' Мбит/с' : ''
       ].filter(Boolean).join('\n');
     }
+    if (!out && typeof state !== 'undefined' && state.tab === 'xray' && typeof render === 'function') render();
   } catch (e) {
     if (out) out.textContent = e.message || 'Xray недоступен';
   }
@@ -1407,6 +1409,224 @@ async function carbonXrayMode(btn) {
     await carbonXrayLoad();
     showToast('Каскад: ' + d.mode);
   } catch (e) { showToast(e.message || 'Не удалось переключить'); }
+}
+
+function carbonXrayState() {
+  return (carbon.xray && carbon.xray.state) || {};
+}
+
+function carbonXrayProfiles() {
+  if (carbon.xrayProfiles && Array.isArray(carbon.xrayProfiles.profiles)) return carbon.xrayProfiles.profiles;
+  return carbonXrayState().profiles || [];
+}
+
+function carbonXrayDiagText(kind) {
+  const el = document.getElementById('carbonXrayDiag');
+  if (!el) return null;
+  el.textContent = 'Загрузка…';
+  return el;
+}
+
+async function carbonXrayArchitect() {
+  const st = carbonXrayState();
+  const presets = (carbon.xray && carbon.xray.presets) || [];
+  const fps = (carbon.xray && carbon.xray.fingerprints) || ['firefox'];
+  showCarbonForm({
+    title: 'Архитектор Xray',
+    sub: 'Параметры VLESS + XHTTP + Reality. Профиль сохраняется в панели.',
+    fields: [
+      { name: 'preset', label: 'Пресет dest/SNI', type: 'select', value: '', options: [{ value: '', label: 'Свои значения' }].concat(presets.map(p => ({ value: p.id, label: p.label + ' · ' + p.dest }))) },
+      { name: 'role', label: 'Роль', type: 'select', value: st.role || 'eu', options: [{ value: 'eu', label: 'Сервер (EU)' }, { value: 'ru', label: 'Клиент (RU)' }] },
+      { name: 'name', label: 'Имя профиля', value: (st.serverName || 'vimeo.com') + ' · ' + (st.xhttpMode || 'auto') },
+      { name: 'port', label: 'Порт', type: 'number', value: st.port || 443, min: 1, max: 65535 },
+      { name: 'dest', label: 'dest (host:port)', value: st.dest || 'vimeo.com:443' },
+      { name: 'serverName', label: 'SNI (serverName)', value: st.serverName || 'vimeo.com' },
+      { name: 'path', label: 'XHTTP path', value: st.path || '/xhttp' },
+      { name: 'xhttpMode', label: 'Режим XHTTP', type: 'select', value: st.xhttpMode || 'auto', options: [
+        { value: 'auto', label: 'auto' },
+        { value: 'packet-up', label: 'packet-up' },
+        { value: 'stream-up', label: 'stream-up' },
+        { value: 'stream-one', label: 'stream-one' }
+      ] },
+      { name: 'fingerprint', label: 'fingerprint (клиент)', type: 'select', value: st.fingerprint || 'firefox', options: fps.map(f => ({ value: f, label: f })) },
+      { name: 'apply', label: 'Применить сразу', type: 'checkbox', value: true }
+    ],
+    submitText: 'Сохранить',
+    onSubmit: async (v, fail) => {
+      const p = presets.find(x => x.id === v.preset);
+      const body = {
+        name: v.name, role: v.role, port: Number(v.port) || 443,
+        dest: p ? p.dest : v.dest,
+        serverName: p ? p.serverName : v.serverName,
+        path: v.path, xhttpMode: v.xhttpMode, fingerprint: v.fingerprint
+      };
+      const saved = await api('/api/xray/profiles', { method: 'POST', body });
+      if (v.apply) {
+        if (v.role === 'eu' && !saved.profile.privateKey) fail('Для сервера нужны ключи Reality: сначала примените «Сервер (EU)» или импортируйте профиль.');
+        else if (v.role === 'ru' && (!saved.profile.address || !saved.profile.publicKey)) fail('Для клиента нужны адрес, UUID и publicKey: используйте «Клиент из JSON».');
+        else await api('/api/xray/profiles/' + encodeURIComponent(saved.profile.id) + '/apply', { method: 'POST', body: {} });
+      }
+      await carbonRefresh('Профиль Xray сохранён');
+    }
+  });
+}
+
+async function carbonXrayClientJson() {
+  showCarbonForm({
+    title: 'Клиент из JSON',
+    sub: 'Вставьте профиль клиента с EU-панели (кнопка «Копировать» в блоке профиля).',
+    fields: [{ name: 'json', label: 'JSON профиля', type: 'textarea', rows: 10, placeholder: '{ "address": "…", "port": 443, "id": "…", "publicKey": "…", "shortId": "…", "serverName": "…", "path": "/xhttp" }' }],
+    submitText: 'Применить',
+    onSubmit: async (v, fail) => {
+      let data;
+      try { data = JSON.parse(v.json); } catch (e) { fail('Некорректный JSON'); return; }
+      const c = data.client || data.profile || data;
+      const body = {
+        address: c.address || c.host || '',
+        port: Number(c.port) || 443,
+        id: c.id || c.clientId || c.uuid || '',
+        publicKey: c.publicKey || '',
+        shortId: c.shortId || '',
+        serverName: c.serverName || c.sni || 'vimeo.com',
+        path: c.path || '/xhttp',
+        xhttpMode: c.xhttpMode || 'auto',
+        fingerprint: c.fingerprint || 'firefox'
+      };
+      if (!body.address || !body.id || !body.publicKey) { fail('Нужны address, id и publicKey'); return; }
+      await api('/api/xray/client', { method: 'POST', body });
+      // Заодно сохраняем профиль, чтобы клиента можно было применить повторно.
+      await api('/api/xray/profiles', {
+        method: 'POST',
+        body: { name: 'клиент ' + body.serverName, role: 'ru', port: body.port, dest: body.serverName + ':' + body.port, serverName: body.serverName, path: body.path, xhttpMode: body.xhttpMode, fingerprint: body.fingerprint, address: body.address, publicKey: body.publicKey, shortId: body.shortId, clientId: body.id }
+      }).catch(() => null);
+      await carbonRefresh('Клиент Xray настроен');
+    }
+  });
+}
+
+async function carbonXrayDestCheck() {
+  const st = carbonXrayState();
+  showCarbonForm({
+    title: 'Проверка dest',
+    sub: 'TLS 1.3, ALPN h2 и RTT. Для Reality нужны оба: TLS 1.3 и h2.',
+    fields: [{ name: 'dest', label: 'dest (host:port)', value: st.dest || 'vimeo.com:443' }],
+    submitText: 'Проверить',
+    onSubmit: async v => {
+      const d = await api('/api/xray/destcheck', { method: 'POST', body: { dest: v.dest } });
+      const el = carbonXrayDiagText();
+      if (el) el.textContent = [
+        'dest: ' + d.host + ':' + d.port,
+        'TLS 1.3: ' + (d.tls13 ? 'да' : 'нет'),
+        'ALPN h2: ' + (d.alpn ? 'да' : 'нет'),
+        'RTT: ' + (d.rttMs ? d.rttMs + ' мс' : '—'),
+        d.ok ? 'Итог: подходит для Reality' : 'Итог: не подходит — выберите другой dest'
+      ].join('\n');
+      showToast(d.ok ? 'dest подходит для Reality' : 'dest не подходит');
+    }
+  });
+}
+
+async function carbonXrayProfileSave() {
+  const st = carbonXrayState();
+  showCarbonForm({
+    title: 'Сохранить профиль',
+    sub: 'Текущие параметры панели сохранятся как профиль.',
+    fields: [
+      { name: 'name', label: 'Имя', value: (st.serverName || 'xray') + ' · ' + new Date().toISOString().slice(0, 10) },
+      { name: 'role', label: 'Роль', type: 'select', value: st.role || 'eu', options: [{ value: 'eu', label: 'Сервер (EU)' }, { value: 'ru', label: 'Клиент (RU)' }] }
+    ],
+    submitText: 'Сохранить',
+    onSubmit: async v => {
+      await api('/api/xray/profiles', { method: 'POST', body: { name: v.name, role: v.role } });
+      await carbonRefresh('Профиль сохранён');
+    }
+  });
+}
+
+async function carbonXrayProfileApply(id) {
+  if (!confirm('Применить профиль и перезапустить Xray?')) return;
+  showToast('Применяю профиль…');
+  try {
+    await api('/api/xray/profiles/' + encodeURIComponent(id) + '/apply', { method: 'POST', body: {} });
+    await carbonRefresh('Профиль применён');
+  } catch (e) { showToast(e.message || 'Не удалось применить профиль'); }
+}
+
+async function carbonXrayProfileDelete(id) {
+  if (!confirm('Удалить профиль?')) return;
+  try {
+    await api('/api/xray/profiles/' + encodeURIComponent(id) + '/delete', { method: 'POST', body: {} });
+    await carbonRefresh('Профиль удалён');
+  } catch (e) { showToast(e.message || 'Не удалось удалить профиль'); }
+}
+
+function carbonXrayProfileExport(id) {
+  window.location.href = '/api/xray/profiles/' + encodeURIComponent(id) + '/export';
+}
+
+async function carbonXrayProfileImport() {
+  showCarbonForm({
+    title: 'Импорт профиля',
+    sub: 'JSON-файл профиля (экспорт с другой панели) или профиль клиента.',
+    fields: [{ name: 'file', label: 'Файл профиля', type: 'file', accept: '.json,application/json' }],
+    submitText: 'Импортировать',
+    onSubmit: async (v, fail) => {
+      if (!v.file) { fail('Выберите файл'); return; }
+      const text = await v.file.text();
+      await api('/api/xray/import', { method: 'POST', body: { json: text } });
+      await carbonRefresh('Профиль импортирован');
+    }
+  });
+}
+
+async function carbonXrayAddClient() {
+  showCarbonForm({
+    title: 'Новый клиент Xray',
+    sub: 'UUID добавится в серверный конфиг и перезапустит службу.',
+    fields: [{ name: 'name', label: 'Имя клиента', placeholder: 'ru-panel-2' }],
+    submitText: 'Добавить',
+    onSubmit: async v => {
+      await api('/api/xray/clients', { method: 'POST', body: { name: v.name } });
+      await carbonRefresh('Клиент добавлен');
+    }
+  });
+}
+
+async function carbonXrayServiceBtn(act) {
+  const labels = { restart: 'Перезапустить Xray?', stop: 'Остановить Xray?', start: 'Запустить Xray?', remove: 'Удалить службу Xray и её юнит? Конфиг останется на диске.' };
+  if (!confirm(labels[act] || 'Выполнить?')) return;
+  try {
+    await api('/api/xray/service', { method: 'POST', body: { action: act } });
+    await carbonRefresh('Служба Xray: ' + act);
+  } catch (e) { showToast(e.message || 'Не удалось выполнить'); }
+}
+
+async function carbonXrayLog() {
+  const el = carbonXrayDiagText();
+  try { const text = await api('/api/xray/log'); if (el) el.textContent = String(text || 'Лог пуст'); }
+  catch (e) { if (el) el.textContent = e.message || 'Журнал недоступен'; }
+}
+
+async function carbonXraySelfcheck() {
+  const el = carbonXrayDiagText();
+  try {
+    const d = await api('/api/xray/selfcheck');
+    if (el) el.textContent = [
+      'Роль: ' + (d.state.role || '—'),
+      'publicKey: ' + (d.state.publicKey || '—'),
+      'Ключи согласованы: ' + (d.state.keysMatch ? 'да' : 'НЕТ'),
+      'shortId: ' + (d.state.shortId || '—'),
+      'SNI: ' + (d.state.serverName || '—'),
+      'path: ' + (d.state.path || '—') + ' · ' + (d.state.xhttpMode || 'auto')
+    ].join('\n');
+    showToast(d.state.keysMatch ? 'Ключи согласованы' : 'Ключи не совпадают!');
+  } catch (e) { if (el) el.textContent = e.message || 'Проверка не удалась'; }
+}
+
+async function carbonXrayCapture() {
+  const el = carbonXrayDiagText();
+  try { const text = await api('/api/xray/capture'); if (el) el.textContent = String(text || 'Пакетов нет'); }
+  catch (e) { if (el) el.textContent = e.message || 'tcpdump не сработал'; }
 }
 
 async function carbonMtuLoad() {
@@ -2627,6 +2847,19 @@ document.addEventListener('click', async event => {
     else if (action === 'xray-client') await carbonXrayClient();
     else if (action === 'xray-test') await carbonXrayTest();
     else if (action === 'xray-mode') await carbonXrayMode(btn);
+    else if (action === 'xray-architect') await carbonXrayArchitect();
+    else if (action === 'xray-client-json') await carbonXrayClientJson();
+    else if (action === 'xray-destcheck') await carbonXrayDestCheck();
+    else if (action === 'xray-profile-save') await carbonXrayProfileSave();
+    else if (action === 'xray-profile-apply') await carbonXrayProfileApply(btn.dataset.id);
+    else if (action === 'xray-profile-delete') await carbonXrayProfileDelete(btn.dataset.id);
+    else if (action === 'xray-profile-export') carbonXrayProfileExport(btn.dataset.id);
+    else if (action === 'xray-profile-import') await carbonXrayProfileImport();
+    else if (action === 'xray-add-client') await carbonXrayAddClient();
+    else if (action === 'xray-service') await carbonXrayServiceBtn(btn.dataset.act);
+    else if (action === 'xray-log') await carbonXrayLog();
+    else if (action === 'xray-selfcheck') await carbonXraySelfcheck();
+    else if (action === 'xray-capture') await carbonXrayCapture();
     else if (action === 'appearance-preset') { carbonSetPalettePreset(btn.dataset.preset); render(); showToast('Шаблон применён'); }
     else if (action === 'appearance-custom') { document.getElementById('appearanceColors')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     else if (action === 'appearance-theme') { setTheme(btn.dataset.theme); render(); }
