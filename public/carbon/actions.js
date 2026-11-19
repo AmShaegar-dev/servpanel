@@ -1308,6 +1308,95 @@ async function carbonBbrToggle() {
   } catch (e) { showToast(e.message || 'Не удалось переключить BBR'); }
 }
 
+async function carbonXrayLoad() {
+  const out = document.getElementById('carbonXrayOut');
+  const tag = document.getElementById('carbonXrayTag');
+  try {
+    const d = await api('/api/xray/status');
+    if (tag) tag.textContent = d.installed ? (d.running ? 'работает' : 'остановлен') : 'не установлен';
+    if (out) {
+      const s = d.state || {};
+      out.textContent = [
+        'Установлен: ' + (d.installed ? 'да' : 'нет') + (d.version ? ' · ' + d.version : ''),
+        'Служба: ' + (d.running || '—'),
+        'Роль: ' + (s.role || '—') + ' · режим: ' + (s.mode || 'awg'),
+        'Порт: ' + (s.port || '—') + ' · dest: ' + (s.dest || '—') + ' · SNI: ' + (s.serverName || '—'),
+        'Клиентов: ' + ((s.clients || []).length || 0),
+        d.state && d.state.lastTest ? 'Последний тест: ' + d.state.lastTest.ip + ' · ' + d.state.lastTest.mbps + ' Мбит/с' : ''
+      ].filter(Boolean).join('\n');
+    }
+  } catch (e) {
+    if (out) out.textContent = e.message || 'Xray недоступен';
+  }
+}
+
+async function carbonXrayInstall() {
+  showToast('Устанавливаю Xray…');
+  try {
+    const d = await api('/api/xray/install', { method: 'POST', body: {} });
+    await carbonXrayLoad();
+    showToast(d.installed ? 'Xray установлен' : 'Не удалось установить');
+  } catch (e) { showToast(e.message || 'Ошибка установки'); }
+}
+
+async function carbonXrayServer() {
+  const st = (await api('/api/xray/status').catch(() => ({}))).state || {};
+  showCarbonForm({
+    title: 'Xray: сервер (EU)',
+    sub: 'Reality без сертификата: dest — сайт с TLS 1.3 и H2. Ключи и shortId создаются здесь.',
+    fields: [
+      { name: 'port', label: 'Порт', type: 'number', value: st.port || 443, min: 1, max: 65535 },
+      { name: 'dest', label: 'dest (host:port)', value: st.dest || 'vimeo.com:443' },
+      { name: 'serverName', label: 'SNI (serverName)', value: st.serverName || 'vimeo.com' },
+      { name: 'path', label: 'XHTTP path', value: st.path || '/xhttp' },
+      { name: 'clientName', label: 'Имя первого клиента', value: 'cascade' }
+    ],
+    submitText: 'Применить',
+    onSubmit: async v => {
+      const d = await api('/api/xray/server', { method: 'POST', body: v });
+      await carbonXrayLoad();
+      const out = document.getElementById('carbonXrayOut');
+      if (out && d.clientProfile) out.textContent += '\n\nПрофиль для клиента:\n' + JSON.stringify(d.clientProfile, null, 2);
+      showToast('Сервер Xray настроен');
+    }
+  });
+}
+
+async function carbonXrayClient() {
+  const st = (await api('/api/xray/status').catch(() => ({}))).state || {};
+  showCarbonForm({
+    title: 'Xray: клиент (RU)',
+    sub: 'Вставьте параметры с EU-панели: адрес, UUID, publicKey, shortId, SNI и path.',
+    fields: [
+      { name: 'address', label: 'Адрес EU', value: st.address || '' },
+      { name: 'port', label: 'Порт', type: 'number', value: st.port || 443, min: 1, max: 65535 },
+      { name: 'id', label: 'UUID клиента', value: st.clientId || '' },
+      { name: 'publicKey', label: 'publicKey', value: st.publicKey || '' },
+      { name: 'shortId', label: 'shortId', value: st.shortId || '' },
+      { name: 'serverName', label: 'SNI', value: st.serverName || 'vimeo.com' },
+      { name: 'path', label: 'XHTTP path', value: st.path || '/xhttp' }
+    ],
+    submitText: 'Применить',
+    onSubmit: async v => {
+      await api('/api/xray/client', { method: 'POST', body: v });
+      await carbonXrayLoad();
+      showToast('Клиент Xray настроен');
+    }
+  });
+}
+
+async function carbonXrayTest() {
+  const out = document.getElementById('carbonXrayOut');
+  if (out) out.textContent = 'Тестирую туннель через SOCKS 127.0.0.1:10808…';
+  try {
+    const d = await api('/api/xray/test', { method: 'POST', body: {} });
+    if (out) out.textContent = `Выходной IP: ${d.ip || 'нет ответа'}\nСкачивание: ${d.mbps} Мбит/с`;
+    showToast('Тест Xray: ' + (d.ip || 'нет ответа'));
+  } catch (e) {
+    if (out) out.textContent = e.message || 'Тест не удался';
+  }
+}
+
 async function carbonMtuLoad() {
   const box = document.getElementById('carbonMtuBox');
   try {
@@ -2520,6 +2609,11 @@ document.addEventListener('click', async event => {
     else if (action === 'monitor-refresh') await carbonMonitorLoad();
     else if (action === 'bbr-load') await carbonBbrLoad();
     else if (action === 'bbr-toggle') await carbonBbrToggle();
+    else if (action === 'xray-load') await carbonXrayLoad();
+    else if (action === 'xray-install') await carbonXrayInstall();
+    else if (action === 'xray-server') await carbonXrayServer();
+    else if (action === 'xray-client') await carbonXrayClient();
+    else if (action === 'xray-test') await carbonXrayTest();
     else if (action === 'appearance-preset') { carbonSetPalettePreset(btn.dataset.preset); render(); showToast('Шаблон применён'); }
     else if (action === 'appearance-custom') { document.getElementById('appearanceColors')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     else if (action === 'appearance-theme') { setTheme(btn.dataset.theme); render(); }
@@ -2605,5 +2699,6 @@ window.carbonAfterRender = function (tab) {
     carbonMtuLoad().catch(function () {});
     carbonMonitorLoad().catch(function () {});
     carbonBbrLoad().catch(function () {});
+    carbonXrayLoad().catch(function () {});
   }
 };

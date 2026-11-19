@@ -14992,6 +14992,277 @@ app.post('/api/system/bbr', checkAuth, requireAdmin, (req, res) => {
     }
 });
 
+// ---------------------------------------------------------------------------
+// Xray: VLESS + XHTTP + Reality. Ставится по кнопке, конфиги генерирует
+// панель. Используется как TCP-транспорт каскада вместо UDP-туннеля AWG.
+// ---------------------------------------------------------------------------
+const XRAY_BIN = '/usr/local/bin/xray';
+const XRAY_CONF = '/usr/local/etc/xray/config.json';
+const XRAY_STATE_FILE = path.join(DATA_DIR, '.xray.json');
+
+function xrayReadState() {
+    try {
+        const j = JSON.parse(readTextSafe(XRAY_STATE_FILE) || '{}');
+        return {
+            role: j.role === 'eu' ? 'eu' : (j.role === 'ru' ? 'ru' : ''),
+            mode: j.mode === 'xray' ? 'xray' : 'awg',
+            port: Number(j.port) || 443,
+            dest: String(j.dest || 'vimeo.com:443'),
+            serverName: String(j.serverName || 'vimeo.com'),
+            path: String(j.path || '/xhttp'),
+            privateKey: String(j.privateKey || ''),
+            publicKey: String(j.publicKey || ''),
+            shortId: String(j.shortId || ''),
+            clientId: String(j.clientId || ''),
+            address: String(j.address || ''),
+            clients: Array.isArray(j.clients) ? j.clients : [],
+            lastTest: j.lastTest || null,
+            updatedAt: Number(j.updatedAt) || 0
+        };
+    } catch (e) {
+        return { role: '', mode: 'awg', port: 443, dest: 'vimeo.com:443', serverName: 'vimeo.com', path: '/xhttp', privateKey: '', publicKey: '', shortId: '', clientId: '', address: '', clients: [], lastTest: null, updatedAt: 0 };
+    }
+}
+
+function xrayWriteState(patch) {
+    const next = { ...xrayReadState(), ...(patch || {}), updatedAt: Date.now() };
+    try { writeJson(XRAY_STATE_FILE, next, 0o600); } catch (e) { /* ignore */ }
+    return next;
+}
+
+function xrayInstalled() {
+    try { return fs.existsSync(XRAY_BIN); } catch (e) { return false; }
+}
+
+function xrayVersion() {
+    try { return String(sh(XRAY_BIN, ['version']) || '').split(/\r?\n/)[0].trim(); } catch (e) { return ''; }
+}
+
+function xrayRunning() {
+    try { return isActive('xray'); } catch (e) { return ''; }
+}
+
+function xrayInstall() {
+    const script = path.join(os.tmpdir(), 'servpanel-xray-install.sh');
+    sh('sudo', ['bash', '-c',
+        'curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh -o ' + script +
+        ' && bash ' + script + ' install'], { timeout: 300000 });
+    return { installed: xrayInstalled(), version: xrayVersion() };
+}
+
+function xrayKeypair() {
+    const out = String(sh(XRAY_BIN, ['x25519']) || '');
+    const priv = (out.match(/Private\s*key\s*:\s*(\S+)/i) || out.match(/PrivateKey\s*:\s*(\S+)/i) || [])[1] || '';
+    const pub = (out.match(/Public\s*key\s*:\s*(\S+)/i) || out.match(/PublicKey\s*:\s*(\S+)/i) || [])[1] || '';
+    if (!priv || !pub) throw new Error('Не удалось сгенерировать ключи Reality');
+    return { privateKey: priv, publicKey: pub };
+}
+
+function xrayUuid() {
+    const out = String(sh(XRAY_BIN, ['uuid']) || '').trim();
+    if (!/^[0-9a-f-]{36}$/i.test(out)) throw new Error('Не удалось сгенерировать UUID');
+    return out;
+}
+
+function xrayServerConfig(st) {
+    return {
+        log: { loglevel: 'warning' },
+        inbounds: [{
+            listen: '0.0.0.0',
+            port: st.port,
+            protocol: 'vless',
+            settings: {
+                clients: (st.clients.length ? st.clients : [{ id: st.clientId || xrayUuid(), name: 'default' }])
+                    .map(c => ({ id: c.id, flow: '' })),
+                decryption: 'none'
+            },
+            streamSettings: {
+                network: 'xhttp',
+                xhttpSettings: { path: st.path },
+                security: 'reality',
+                realitySettings: {
+                    target: st.dest,
+                    serverNames: [st.serverName],
+                    privateKey: st.privateKey,
+                    shortIds: [st.shortId]
+                }
+            },
+            sniffing: { enabled: true, destOverride: ['http', 'tls', 'quic'] }
+        }],
+        outbounds: [
+            { protocol: 'freedom', tag: 'direct' },
+            { protocol: 'blackhole', tag: 'block' }
+        ]
+    };
+}
+
+function xrayClientConfig(st) {
+    return {
+        log: { loglevel: 'warning' },
+        inbounds: [{ listen: '127.0.0.1', port: 10808, protocol: 'socks' }],
+        outbounds: [{
+            protocol: 'vless',
+            settings: { address: st.address, port: st.port, id: st.clientId, encryption: 'none', flow: '' },
+            streamSettings: {
+                network: 'xhttp',
+                xhttpSettings: { path: st.path },
+                security: 'reality',
+                realitySettings: {
+                    serverName: st.serverName,
+                    publicKey: st.publicKey,
+                    shortId: st.shortId,
+                    spiderX: '/',
+                    fingerprint: 'firefox'
+                }
+            },
+            tag: 'proxy'
+        }, { protocol: 'freedom', tag: 'direct' }, { protocol: 'blackhole', tag: 'block' }],
+        routing: { rules: [{ ip: ['geoip:private'], outboundTag: 'direct' }] }
+    };
+}
+
+function xrayApplyConfig(config) {
+    const text = JSON.stringify(config, null, 2);
+    const tmp = path.join(os.tmpdir(), 'xray-check-' + crypto.randomBytes(6).toString('hex') + '.json');
+    fs.writeFileSync(tmp, text, { mode: 0o600 });
+    try {
+        sh('sudo', [XRAY_BIN, '-test', '-config', tmp], { timeout: 30000 });
+    } finally {
+        try { fs.unlinkSync(tmp); } catch (e) { /* ignore */ }
+    }
+    writeRootFile(XRAY_CONF, text + '\n', '0644');
+    sh('sudo', ['systemctl', 'enable', '--now', 'xray'], { timeout: 60000 });
+    return true;
+}
+
+app.get('/api/xray/status', checkAuth, (req, res) => {
+    const st = xrayReadState();
+    res.json({
+        success: true,
+        installed: xrayInstalled(),
+        version: xrayVersion(),
+        running: xrayRunning(),
+        state: st,
+        clientProfile: st.publicKey ? {
+            address: '',
+            port: st.port,
+            id: st.clients[0] ? st.clients[0].id : st.clientId,
+            publicKey: st.publicKey,
+            shortId: st.shortId,
+            serverName: st.serverName,
+            path: st.path,
+            fingerprint: 'firefox'
+        } : null
+    });
+});
+
+app.post('/api/xray/install', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const r = xrayInstall();
+        auditLog(req, 'Xray: установлен ' + (r.version || ''));
+        res.json({ success: true, ...r, running: xrayRunning() });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось установить Xray: ' + (e.message || e) });
+    }
+});
+
+app.post('/api/xray/server', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    try {
+        if (!xrayInstalled()) throw new Error('Сначала установите Xray');
+        const keys = (body.privateKey && body.publicKey) ? { privateKey: body.privateKey, publicKey: body.publicKey } : xrayKeypair();
+        const shortId = String(body.shortId || crypto.randomBytes(4).toString('hex')).replace(/[^0-9a-f]/gi, '').slice(0, 16) || '00';
+        const clientId = String(body.clientId || '') || xrayUuid();
+        const st = xrayWriteState({
+            role: 'eu',
+            port: Math.max(1, Math.min(65535, Number(body.port) || 443)),
+            dest: String(body.dest || 'vimeo.com:443'),
+            serverName: String(body.serverName || 'vimeo.com'),
+            path: String(body.path || '/xhttp'),
+            privateKey: keys.privateKey,
+            publicKey: keys.publicKey,
+            shortId,
+            clientId,
+            clients: [{ id: clientId, name: String(body.clientName || 'cascade'), createdAt: Date.now() }]
+        });
+        xrayApplyConfig(xrayServerConfig(st));
+        auditLog(req, `Xray: сервер на ${st.port}, dest ${st.dest}`);
+        res.json({ success: true, running: xrayRunning(), state: st, clientProfile: {
+            port: st.port, id: clientId, publicKey: st.publicKey, shortId: st.shortId,
+            serverName: st.serverName, path: st.path, fingerprint: 'firefox'
+        } });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось настроить сервер Xray: ' + (e.message || e) });
+    }
+});
+
+app.post('/api/xray/client', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    try {
+        if (!xrayInstalled()) throw new Error('Сначала установите Xray');
+        const st = xrayWriteState({
+            role: 'ru',
+            address: String(body.address || '').trim(),
+            port: Math.max(1, Math.min(65535, Number(body.port) || 443)),
+            clientId: String(body.id || '').trim(),
+            publicKey: String(body.publicKey || '').trim(),
+            shortId: String(body.shortId || '').trim(),
+            serverName: String(body.serverName || 'vimeo.com'),
+            path: String(body.path || '/xhttp')
+        });
+        if (!st.address || !st.clientId || !st.publicKey) throw new Error('Нужны address, id и publicKey');
+        xrayApplyConfig(xrayClientConfig(st));
+        auditLog(req, `Xray: клиент на ${st.address}:${st.port}`);
+        res.json({ success: true, running: xrayRunning(), state: st });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось настроить клиент Xray: ' + (e.message || e) });
+    }
+});
+
+app.post('/api/xray/test', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const ip = String(sh('curl', ['-sS', '--max-time', '15', '--socks5-hostname', '127.0.0.1:10808', 'https://ifconfig.me'], { timeout: 20000 }) || '').trim();
+        const speed = String(sh('curl', ['-sS', '-o', '/dev/null', '-w', '%{speed_download}', '--max-time', '20',
+            '--socks5-hostname', '127.0.0.1:10808', 'https://speed.cloudflare.com/__down?bytes=10000000'], { timeout: 30000 }) || '').trim();
+        const mbps = ((Number(speed) || 0) * 8 / 1e6).toFixed(2);
+        const test = { at: Date.now(), ip, mbps: Number(mbps) };
+        xrayWriteState({ lastTest: test });
+        auditLog(req, `Xray: тест через туннель — ${ip || 'нет ответа'}, ${mbps} Мбит/с`);
+        res.json({ success: true, ip, mbps: Number(mbps) });
+    } catch (e) {
+        res.status(500).json({ error: 'Тест через Xray не удался: ' + (e.message || e) });
+    }
+});
+
+app.post('/api/xray/mode', checkAuth, requireAdmin, (req, res) => {
+    const mode = String((req.body || {}).mode || '') === 'xray' ? 'xray' : 'awg';
+    const st = xrayWriteState({ mode });
+    auditLog(req, 'Протокол каскада: ' + mode);
+    res.json({ success: true, mode: st.mode });
+});
+
+app.get('/api/xray/clients', checkAuth, (req, res) => {
+    res.json({ success: true, clients: xrayReadState().clients });
+});
+
+app.post('/api/xray/clients', checkAuth, requireAdmin, (req, res) => {
+    const body = req.body || {};
+    try {
+        const st = xrayReadState();
+        if (st.role !== 'eu') throw new Error('Добавлять клиентов можно только на сервере (EU)');
+        const name = String(body.name || '').trim().slice(0, 40);
+        if (!name) throw new Error('Укажите имя клиента');
+        const id = xrayUuid();
+        const clients = st.clients.concat([{ id, name, createdAt: Date.now() }]);
+        const next = xrayWriteState({ clients });
+        xrayApplyConfig(xrayServerConfig(next));
+        auditLog(req, `Xray: клиент ${name}`);
+        res.json({ success: true, id, name, clients });
+    } catch (e) {
+        res.status(500).json({ error: e.message || 'Не удалось добавить клиента' });
+    }
+});
+
 app.get('/api/diag/tc', checkAuth, requireAdmin, (req, res) => {
     if (NO_SYSTEM()) return res.json({ demo: true });
     const run = (cmd, args) => {

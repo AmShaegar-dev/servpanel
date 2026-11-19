@@ -1,4 +1,4 @@
-# 🌐 Servpanel 3.2.152 — веб-панель AmneziaWG, Keenetic и серверных служб
+# 🌐 Servpanel 3.2.153 — веб-панель AmneziaWG, Keenetic и серверных служб
 
 > ⚠️ **Статус: активная разработка.** Панель регулярно обновляется: интерфейс, каскад, WARP/Xray, MTProto и часть серверных сценариев продолжают развиваться. Перед обновлением рабочего сервера сделайте бэкап и проверьте новую версию на тестовом стенде.
 
@@ -7,6 +7,13 @@
 Панель работает напрямую с AmneziaWG (DKMS-модуль ядра) без накладных расходов Docker, обеспечивая максимальную производительность даже на недорогих VPS.
 
 ---
+
+## 🆕 Что нового в 3.2.153
+
+* **Xray: VLESS + XHTTP + Reality.** В «Диагностике» новая карточка: установка Xray одной кнопкой, генерация ключей Reality, shortId и UUID, конфиг сервера на EU (порт 443, dest vimeo.com) и клиента на RU (локальный SOCKS 10808, uTLS firefox). Тест через туннель показывает выходной IP и скорость.
+* **Без сертификатов.** Reality использует TLS-рукопожатие dest-сайта, поэтому домен и Let's Encrypt не нужны; заглушкой служит сам dest.
+* **Клиенты Xray.** UUID-клиенты добавляются на сервере и хранятся в состоянии панели.
+* **Переключатель режима** `awg`/`xray` — задел на следующий этап; маршрутизацию пока не меняет.
 
 ## 🆕 Что нового в 3.2.152
 
@@ -1034,15 +1041,15 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.152/servpanel-3.2.152.tar.gz
-curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.152/servpanel-3.2.152.tar.gz.sha256
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.153/servpanel-3.2.153.tar.gz
+curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v3.2.152/servpanel-3.2.153.tar.gz.sha256
 sha256sum -c servpanel-3.2.152.tar.gz.sha256
 tar -xzf servpanel-3.2.152.tar.gz
-bash /root/servpanel-3.2.152/upgrade.sh
+bash /root/servpanel-3.2.153/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.2.152`. Хеш архива лежит рядом в файле `servpanel-3.2.152.tar.gz.sha256` — `sha256sum -c` проверит его автоматически. Если `curl` не установлен:
+Должно вывести `3.2.153`. Хеш архива лежит рядом в файле `servpanel-3.2.152.tar.gz.sha256` — `sha256sum -c` проверит его автоматически. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Проверьте, что в git нет локальных изменений кода:
