@@ -15089,6 +15089,9 @@ function xrayXhttpSettings(st) {
     // Для auto поле mode не передаём: Xray сам выбирает режим.
     const x = { path: st.path };
     if (st.xhttpMode && st.xhttpMode !== 'auto') x.mode = st.xhttpMode;
+    // Несколько HTTP/2-соединений вместо одного: у каждого своё окно,
+    // иначе скачивание упирается в per-stream окно.
+    x.xmux = { maxConcurrency: '8-16', cMaxReuseTimes: '64-128' };
     return x;
 }
 
