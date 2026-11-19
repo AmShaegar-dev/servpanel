@@ -15134,7 +15134,7 @@ function xrayClientConfig(st) {
                 port: 12345,
                 protocol: 'dokodemo-door',
                 settings: { network: 'tcp', followRedirect: true },
-                streamSettings: { sockopt: { tproxy: 'tproxy' } }
+                streamSettings: { sockopt: { tproxy: 'redirect' } }
             },
             {
                 listen: '0.0.0.0',
@@ -15341,10 +15341,15 @@ function xrayTproxy(enable) {
     for (const e of exits) {
         const mark = cascadeExitMark(e.index);
         const table = String(cascadeExitTable(e.index));
-        // TCP — через TPROXY (маршрут клиентской подсети в таблице уже есть).
-        const tcpDel = ['-w', '5', '-t', 'mangle', '-D', 'PREROUTING', '-i', iface, '-p', 'tcp',
-            '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', '12345', '--tproxy-mark', mark];
+        // TCP — через NAT REDIRECT.
+        const tcpDel = ['-w', '5', '-t', 'nat', '-D', 'PREROUTING', '-i', iface, '-p', 'tcp',
+            '-m', 'mark', '--mark', mark, '-j', 'REDIRECT', '--to-ports', '12345'];
         try { sh('sudo', ['iptables'].concat(tcpDel)); } catch (err) { /* правила нет */ }
+        // Чистим и старый TPROXY для TCP, если остался от прежних сборок.
+        try {
+            sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-D', 'PREROUTING', '-i', iface, '-p', 'tcp',
+                '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', '12345', '--tproxy-mark', mark]);
+        } catch (err) { /* правила нет */ }
         // UDP — через TPROXY (REDIRECT для UDP не работает).
         const udpDel = ['-w', '5', '-t', 'mangle', '-D', 'PREROUTING', '-i', iface, '-p', 'udp',
             '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', '12346', '--tproxy-mark', mark];
@@ -15355,8 +15360,8 @@ function xrayTproxy(enable) {
         if (enable) {
             sh('sudo', ['ip', 'route', 'replace', 'local', 'default', 'dev', 'lo', 'table', table]);
             if (clientNet) sh('sudo', ['ip', 'route', 'replace', clientNet, 'dev', iface, 'table', table]);
-            sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-A', 'PREROUTING', '-i', iface, '-p', 'tcp',
-                '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', '12345', '--tproxy-mark', mark]);
+            sh('sudo', ['iptables', '-w', '5', '-t', 'nat', '-A', 'PREROUTING', '-i', iface, '-p', 'tcp',
+                '-m', 'mark', '--mark', mark, '-j', 'REDIRECT', '--to-ports', '12345']);
             sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-A', 'PREROUTING', '-i', iface, '-p', 'udp',
                 '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', '12346', '--tproxy-mark', mark]);
             sh('sudo', ['iptables', '-w', '5', '-t', 'filter', '-I', 'INPUT', '1',
