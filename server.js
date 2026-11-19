@@ -15692,18 +15692,40 @@ function xrayProfileExport(p) {
 }
 
 // История загрузки CPU: короткие замеры не ловят пик, а история ловит.
+function readCpuCores() {
+    try {
+        const lines = fs.readFileSync('/proc/stat', 'utf8').split('\n').filter(l => /^cpu\d+\s/.test(l));
+        return lines.map(line => {
+            const n = line.trim().split(/\s+/).slice(1).map(Number);
+            const idle = (n[3] || 0) + (n[4] || 0);
+            const total = n.reduce((a, b) => a + (b || 0), 0);
+            return { idle, total };
+        });
+    } catch (e) { return []; }
+}
+
 const CPU_HISTORY = [];
 let cpuHistPrev = null;
+let cpuHistCoresPrev = null;
 try {
     setInterval(() => {
         const cur = readCpuTimes();
+        const cores = readCpuCores();
         if (!cur) return;
-        if (!cpuHistPrev) { cpuHistPrev = cur; return; }
+        if (!cpuHistPrev) { cpuHistPrev = cur; cpuHistCoresPrev = cores; return; }
         const dt = cur.total - cpuHistPrev.total;
         const di = cur.idle - cpuHistPrev.idle;
+        const perCore = cores.map((c, i) => {
+            const p = cpuHistCoresPrev && cpuHistCoresPrev[i];
+            if (!p) return 0;
+            const d = c.total - p.total;
+            const k = c.idle - p.idle;
+            return d > 0 ? Number((100 * (1 - k / d)).toFixed(0)) : 0;
+        });
         cpuHistPrev = cur;
+        cpuHistCoresPrev = cores;
         if (dt <= 0) return;
-        CPU_HISTORY.push({ at: Date.now(), cpu: Number((100 * (1 - di / dt)).toFixed(1)) });
+        CPU_HISTORY.push({ at: Date.now(), cpu: Number((100 * (1 - di / dt)).toFixed(1)), cores: perCore });
         if (CPU_HISTORY.length > 400) CPU_HISTORY.shift();
     }, 3000).unref();
 } catch (e) { /* ignore */ }
