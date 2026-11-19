@@ -15110,7 +15110,13 @@ function xrayClientConfig(st) {
                 listen: '0.0.0.0',
                 port: 12345,
                 protocol: 'dokodemo-door',
-                settings: { network: 'tcp,udp', followRedirect: true },
+                settings: { network: 'tcp', followRedirect: true }
+            },
+            {
+                listen: '0.0.0.0',
+                port: 12346,
+                protocol: 'dokodemo-door',
+                settings: { network: 'udp', followRedirect: true },
                 streamSettings: { sockopt: { tproxy: 'tproxy' } }
             }
         ],
@@ -15302,7 +15308,7 @@ function xrayTproxy(enable) {
         try { sh('sudo', ['iptables'].concat(tcpDel)); } catch (err) { /* правила нет */ }
         // UDP — через TPROXY (REDIRECT для UDP не работает).
         const udpDel = ['-w', '5', '-t', 'mangle', '-D', 'PREROUTING', '-i', iface, '-p', 'udp',
-            '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', String(port), '--tproxy-mark', mark];
+            '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', '12346', '--tproxy-mark', mark];
         try { sh('sudo', ['iptables'].concat(udpDel)); } catch (err) { /* правила нет */ }
         // TPROXY доставляет пакеты локально, и UFW режет их на INPUT.
         const inDel = ['-w', '5', '-t', 'filter', '-D', 'INPUT', '-m', 'mark', '--mark', mark, '-j', 'ACCEPT'];
@@ -15312,7 +15318,7 @@ function xrayTproxy(enable) {
             sh('sudo', ['iptables', '-w', '5', '-t', 'nat', '-A', 'PREROUTING', '-i', iface, '-p', 'tcp',
                 '-m', 'mark', '--mark', mark, '-j', 'REDIRECT', '--to-ports', String(port)]);
             sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-A', 'PREROUTING', '-i', iface, '-p', 'udp',
-                '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', String(port), '--tproxy-mark', mark]);
+                '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', '12346', '--tproxy-mark', mark]);
             sh('sudo', ['iptables', '-w', '5', '-t', 'filter', '-I', 'INPUT', '1',
                 '-m', 'mark', '--mark', mark, '-j', 'ACCEPT']);
         } else {
@@ -15378,6 +15384,7 @@ app.get('/api/diag/tc', checkAuth, requireAdmin, (req, res) => {
         listeners: run('ss', ['-ltnp']),
         udpListeners: run('ss', ['-lunp']),
         manglePre: run('iptables', ['-t', 'mangle', '-L', 'PREROUTING', '-v', '-n']),
+        natPre: run('iptables', ['-t', 'nat', '-L', 'PREROUTING', '-v', '-n']),
         routes: run('ip', ['route', 'show', 'table', 'all'])
     });
 });
