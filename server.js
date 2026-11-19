@@ -14997,7 +14997,8 @@ app.post('/api/system/bbr', checkAuth, requireAdmin, (req, res) => {
 // панель. Используется как TCP-транспорт каскада вместо UDP-туннеля AWG.
 // ---------------------------------------------------------------------------
 const XRAY_BIN = '/usr/local/bin/xray';
-const XRAY_CONF = '/usr/local/etc/xray/config.json';
+const XRAY_CONF = '/usr/local/etc/xray/servpanel.json';
+const XRAY_UNIT = 'servpanel-xray.service';
 const XRAY_STATE_FILE = path.join(DATA_DIR, '.xray.json');
 
 function xrayReadState() {
@@ -15039,7 +15040,7 @@ function xrayVersion() {
 }
 
 function xrayRunning() {
-    try { return isActive('xray'); } catch (e) { return ''; }
+    try { return isActive(XRAY_UNIT.replace(/\.service$/, '')); } catch (e) { return ''; }
 }
 
 function xrayInstall() {
@@ -15135,7 +15136,28 @@ function xrayApplyConfig(config) {
         try { fs.unlinkSync(tmp); } catch (e) { /* ignore */ }
     }
     writeRootFile(XRAY_CONF, text + '\n', '0644');
-    sh('sudo', ['systemctl', 'enable', '--now', 'xray'], { timeout: 60000 });
+    // Отдельный юнит: на серверах может уже работать xray для WARP/AdGuard,
+    // и перезапуск общего xray.service поднял бы чужой конфиг.
+    writeRootFile('/etc/systemd/system/' + XRAY_UNIT, [
+        '[Unit]',
+        'Description=Servpanel Xray (VLESS + XHTTP + Reality)',
+        'After=network-online.target',
+        'Wants=network-online.target',
+        '',
+        '[Service]',
+        'Type=simple',
+        'ExecStart=' + XRAY_BIN + ' run -config ' + XRAY_CONF,
+        'Restart=on-failure',
+        'RestartSec=2',
+        'LimitNOFILE=1048576',
+        '',
+        '[Install]',
+        'WantedBy=multi-user.target',
+        ''
+    ].join('\n'), '0644');
+    sh('sudo', ['systemctl', 'daemon-reload']);
+    sh('sudo', ['systemctl', 'enable', '--now', XRAY_UNIT], { timeout: 60000 });
+    sh('sudo', ['systemctl', 'restart', XRAY_UNIT], { timeout: 60000 });
     return true;
 }
 
@@ -15269,7 +15291,7 @@ app.post('/api/xray/clients', checkAuth, requireAdmin, (req, res) => {
 
 app.get('/api/xray/log', checkAuth, requireAdmin, (req, res) => {
     try {
-        const out = String(sh('sudo', ['journalctl', '-u', 'xray', '-n', '120', '--no-pager', '--output', 'cat'], { timeout: 20000 }) || '');
+        const out = String(sh('sudo', ['journalctl', '-u', XRAY_UNIT, '-n', '120', '--no-pager', '--output', 'cat'], { timeout: 20000 }) || '');
         res.type('text/plain').send(out || 'Лог пуст');
     } catch (e) {
         res.type('text/plain').send('Не удалось прочитать лог: ' + (e.message || e));
