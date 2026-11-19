@@ -15301,12 +15301,18 @@ function xrayTproxy(enable) {
                 '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', String(port), '--tproxy-mark', mark];
             try { sh('sudo', ['iptables'].concat(del)); } catch (err) { /* правила нет */ }
         }
+        // TPROXY доставляет пакеты локально, и UFW режет их на INPUT.
+        // Разрешаем только помеченный (то есть перехваченный) трафик.
+        const inDel = ['-w', '5', '-t', 'filter', '-D', 'INPUT', '-m', 'mark', '--mark', mark, '-j', 'ACCEPT'];
+        try { sh('sudo', ['iptables'].concat(inDel)); } catch (err) { /* правила нет */ }
         if (enable) {
             sh('sudo', ['ip', 'route', 'replace', 'local', 'default', 'dev', 'lo', 'table', table]);
             for (const proto of ['tcp', 'udp']) {
                 sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-A', 'PREROUTING', '-i', iface, '-p', proto,
                     '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', String(port), '--tproxy-mark', mark]);
             }
+            sh('sudo', ['iptables', '-w', '5', '-t', 'filter', '-I', 'INPUT', '1',
+                '-m', 'mark', '--mark', mark, '-j', 'ACCEPT']);
         } else {
             sh('sudo', ['ip', 'route', 'replace', 'default', 'dev', e.iface, 'table', table]);
         }
