@@ -15017,11 +15017,12 @@ function xrayReadState() {
             clientId: String(j.clientId || ''),
             address: String(j.address || ''),
             clients: Array.isArray(j.clients) ? j.clients : [],
+            debug: !!j.debug,
             lastTest: j.lastTest || null,
             updatedAt: Number(j.updatedAt) || 0
         };
     } catch (e) {
-        return { role: '', mode: 'awg', port: 443, dest: 'vimeo.com:443', serverName: 'vimeo.com', path: '/xhttp', privateKey: '', publicKey: '', shortId: '', clientId: '', address: '', clients: [], lastTest: null, updatedAt: 0 };
+        return { role: '', mode: 'awg', port: 443, dest: 'vimeo.com:443', serverName: 'vimeo.com', path: '/xhttp', privateKey: '', publicKey: '', shortId: '', clientId: '', address: '', clients: [], debug: false, lastTest: null, updatedAt: 0 };
     }
 }
 
@@ -15071,7 +15072,7 @@ function xrayUuid() {
 
 function xrayServerConfig(st) {
     return {
-        log: { loglevel: 'warning' },
+        log: { loglevel: st.debug ? 'debug' : 'warning' },
         inbounds: [{
             listen: '0.0.0.0',
             port: st.port,
@@ -15103,7 +15104,7 @@ function xrayServerConfig(st) {
 
 function xrayClientConfig(st) {
     return {
-        log: { loglevel: 'warning' },
+        log: { loglevel: st.debug ? 'debug' : 'warning' },
         inbounds: [
             { listen: '127.0.0.1', port: 10808, protocol: 'socks' },
             {
@@ -15360,10 +15361,43 @@ app.post('/api/xray/clients', checkAuth, requireAdmin, (req, res) => {
 
 app.get('/api/xray/log', checkAuth, requireAdmin, (req, res) => {
     try {
-        const out = String(sh('sudo', ['journalctl', '-u', XRAY_UNIT, '-n', '120', '--no-pager', '--output', 'cat'], { timeout: 20000 }) || '');
+        const out = String(sh('sudo', ['journalctl', '-u', XRAY_UNIT, '-n', '200', '--no-pager', '--output', 'cat'], { timeout: 20000 }) || '');
         res.type('text/plain').send(out || 'Лог пуст');
     } catch (e) {
         res.type('text/plain').send('Не удалось прочитать лог: ' + (e.message || e));
+    }
+});
+
+app.get('/api/xray/debug', checkAuth, requireAdmin, (req, res) => {
+    const run = (cmd, args) => {
+        try { return String(sh('sudo', [cmd].concat(args), { timeout: 15000 })); }
+        catch (e) { return String(e.stdout || e.message || ''); }
+    };
+    res.json({
+        success: true,
+        nat: run('iptables', ['-t', 'nat', '-L', 'PREROUTING', '-v', '-n']),
+        mangle: run('iptables', ['-t', 'mangle', '-L', 'PREROUTING', '-v', '-n']),
+        filterInput: run('iptables', ['-t', 'filter', '-L', 'INPUT', '-v', '-n']),
+        raw: run('iptables', ['-t', 'raw', '-L', 'PREROUTING', '-v', '-n']),
+        rules: run('ip', ['rule', 'show']),
+        table2001: run('ip', ['route', 'show', 'table', '2001']),
+        tcp: run('ss', ['-ltnp']),
+        udp: run('ss', ['-lunp']),
+        conntrack: run('conntrack', ['-L', '-p', 'tcp', '--dport', '12345', '--src', '172.16.17.3']),
+        log: run('journalctl', ['-u', XRAY_UNIT, '-n', '60', '--no-pager', '--output', 'cat'])
+    });
+});
+
+app.post('/api/xray/debugmode', checkAuth, requireAdmin, (req, res) => {
+    const enabled = !!(req.body && req.body.enabled);
+    try {
+        const st = xrayReadState();
+        xrayWriteState({ debug: enabled });
+        if (st.role === 'eu') xrayApplyConfig(xrayServerConfig(xrayReadState()));
+        else if (st.role === 'ru') xrayApplyConfig(xrayClientConfig(xrayReadState()));
+        res.json({ success: true, enabled });
+    } catch (e) {
+        res.status(500).json({ error: e.message || 'Не удалось включить debug' });
     }
 });
 
