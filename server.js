@@ -15431,6 +15431,35 @@ app.get('/api/xray/capture', checkAuth, requireAdmin, (req, res) => {
     }
 });
 
+app.get('/api/xray/selfcheck', checkAuth, requireAdmin, (req, res) => {
+    const st = xrayReadState();
+    let derived = '';
+    try {
+        if (st.privateKey) {
+            const out = String(sh(XRAY_BIN, ['x25519', '-i', st.privateKey]) || '');
+            derived = (out.match(/Password\s*\(PublicKey\)\s*:\s*(\S+)/i)
+                || out.match(/Public\s*key\s*:\s*(\S+)/i) || [])[1] || '';
+        }
+    } catch (e) { /* ignore */ }
+    let config = '';
+    try { config = fs.readFileSync(XRAY_CONF, 'utf8'); } catch (e) { config = ''; }
+    res.json({
+        success: true,
+        state: {
+            role: st.role,
+            publicKey: st.publicKey,
+            shortId: st.shortId,
+            serverName: st.serverName,
+            clientId: st.clientId,
+            path: st.path,
+            xhttpMode: st.xhttpMode,
+            keysMatch: !st.privateKey || (derived && derived === st.publicKey)
+        },
+        derived,
+        config
+    });
+});
+
 app.get('/api/xray/debug', checkAuth, requireAdmin, (req, res) => {
     const run = (cmd, args) => {
         try { return String(sh('sudo', [cmd].concat(args), { timeout: 15000 })); }
