@@ -15135,6 +15135,36 @@ function xrayDestCheck(dest) {
     };
 }
 
+// Свой публичный адрес не должен уходить в туннель: иначе панель, SSH и
+// RustDesk (hbbs/hbbr на этом же сервере) доступны клиентам только через
+// петлю RU → EU → RU, и релей отвечает «нет соединения».
+function xraySelfIp() {
+    try {
+        const out = String(shTry('ip', ['-4', 'route', 'get', '1.1.1.1']) || '');
+        const m = out.match(/\bsrc\s+(\d+\.\d+\.\d+\.\d+)/);
+        if (m) return m[1];
+    } catch (e) { /* ignore */ }
+    return '';
+}
+
+function xraySelfDirect(enable) {
+    const ip = xraySelfIp();
+    if (!ip) return { ip: '', applied: false };
+    try { sh('sudo', ['ipset', 'create', 'ru', 'hash:net', '-exist']); } catch (e) { /* нет ipset */ }
+    try {
+        if (enable === false) sh('sudo', ['ipset', 'del', 'ru', ip]);
+        else sh('sudo', ['ipset', 'add', 'ru', ip, '-exist']);
+    } catch (e) { /* записи нет */ }
+    return { ip, applied: true };
+}
+
+function xraySelfDirectState() {
+    const ip = xraySelfIp();
+    let inRu = false;
+    try { inRu = !!ip && readIpsetEntries('ru').has(ip); } catch (e) { /* ignore */ }
+    return { ip, inRu };
+}
+
 function xrayXhttpSettings(st) {
     // Для auto поле mode не передаём: Xray сам выбирает режим.
     const x = { path: st.path };
@@ -15266,6 +15296,7 @@ app.get('/api/xray/status', checkAuth, (req, res) => {
         state: st,
         presets: XRAY_PRESETS,
         fingerprints: XRAY_FINGERPRINTS,
+        selfDirect: xraySelfDirectState(),
         clientProfile: st.publicKey ? {
             address: '',
             port: st.port,
@@ -15412,6 +15443,9 @@ function xrayTproxy(enable) {
     const exits = cascadeExitList();
     const iface = existingIfaces().find(i => i === 'awg0') || 'awg0';
     const port = 12345;
+    // Панель, SSH и RustDesk живут на этом же сервере: их адрес исключаем
+    // из туннеля, иначе клиент ходит к ним через петлю RU → EU → RU.
+    if (enable) xraySelfDirect(true);
     // Xray терминирует TCP локально и объявляет MSS по MTU awg0 (1280 -> 1240),
     // а у клиента MTU 1200. Без клампинга скачиваемые пакеты 1280 байт
     // не влезают в клиентский туннель и теряются.
@@ -15573,6 +15607,18 @@ function xrayProfileExport(p) {
 
 app.get('/api/xray/presets', checkAuth, (req, res) => {
     res.json({ success: true, presets: XRAY_PRESETS, fingerprints: XRAY_FINGERPRINTS });
+});
+
+app.post('/api/xray/selfdirect', checkAuth, requireAdmin, (req, res) => {
+    const enabled = (req.body || {}).enabled !== false;
+    try {
+        const r = xraySelfDirect(enabled);
+        const state = xraySelfDirectState();
+        auditLog(req, 'Xray: свой адрес ' + (enabled ? 'выведен из туннеля' : 'возвращён в туннель') + (r.ip ? ' (' + r.ip + ')' : ''));
+        res.json({ success: true, ...state, applied: r.applied });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось изменить исключение: ' + (e.message || e) });
+    }
 });
 
 app.post('/api/xray/destcheck', checkAuth, requireAdmin, (req, res) => {

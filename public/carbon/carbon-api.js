@@ -1292,6 +1292,8 @@ function realXray() {
   const clients = s.clients || [];
   const last = s.lastTest;
   const modeXray = s.mode === 'xray';
+  const selfIp = (d.selfDirect && d.selfDirect.ip) || '';
+  const selfIn = !!(d.selfDirect && d.selfDirect.inRu);
   const roleText = s.role === 'eu' ? 'сервер EU' : (s.role === 'ru' ? 'клиент RU' : 'не настроен');
   const profRows = prof.map(p => `<div class="list-row"><b>${escHtml(p.name || p.id)}</b><span class="mono">${escHtml((p.role === 'ru' ? 'клиент' : 'сервер') + ' · ' + (p.serverName || '—') + ' · ' + (p.xhttpMode || 'auto'))}</span><span class="page-actions" style="margin:0"><button class="row-action" data-carbon-action="xray-profile-apply" data-id="${escHtml(p.id)}" title="Применить">${icon('check')}</button><button class="row-action" data-carbon-action="xray-profile-export" data-id="${escHtml(p.id)}" title="Экспорт">${icon('download')}</button><button class="row-action" data-carbon-action="xray-profile-delete" data-id="${escHtml(p.id)}" title="Удалить">${icon('trash')}</button></span></div>`).join('');
   return `<div class="page-head"><div><div class="page-title">Xray</div><div class="page-sub">VLESS + XHTTP + Reality: установка, Архитектор, профили и переключение каскада.</div></div><div class="page-actions">
@@ -1310,6 +1312,7 @@ function realXray() {
           <div class="list-row"><b>SNI</b><span class="mono">${escHtml(s.serverName || '—')}</span></div>
           <div class="list-row"><b>XHTTP</b><span class="mono">${escHtml((s.path || '—') + ' · ' + (s.xhttpMode || 'auto'))}</span></div>
           <div class="list-row"><b>fingerprint</b><span class="mono">${escHtml(s.fingerprint || 'firefox')}</span></div>
+          <div class="list-row"><b>Свой адрес вне туннеля</b><span class="mono">${selfIp ? (selfIn ? 'да · ' + escHtml(selfIp) : 'нет · ' + escHtml(selfIp)) : '—'}</span><span class="page-actions" style="margin:0">${selfIp && !selfIn ? `<button class="btn btn-sm" data-carbon-action="xray-selfdirect">${icon('shield')}Вывести</button>` : ''}</span></div>
           <div class="list-row"><b>Ключи Reality</b><span class="mono">${s.publicKey ? 'заданы' : '—'}</span><span class="page-actions" style="margin:0"><button class="btn btn-sm" data-carbon-action="xray-selfcheck">${icon('shield')}Проверить</button></span></div>
         </div>
         <div class="page-actions" style="margin-top:12px"><button class="btn" data-carbon-action="xray-destcheck">${icon('globe')}Проверить dest</button><button class="btn" data-carbon-action="xray-profile-save">${icon('box')}Сохранить профиль</button><button class="btn" data-carbon-action="xray-profile-import">${icon('upload')}Импорт профиля</button></div>

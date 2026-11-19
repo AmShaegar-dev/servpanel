@@ -1629,6 +1629,14 @@ async function carbonXrayCapture() {
   catch (e) { if (el) el.textContent = e.message || 'tcpdump не сработал'; }
 }
 
+async function carbonXraySelfDirect() {
+  try {
+    const d = await api('/api/xray/selfdirect', { method: 'POST', body: { enabled: true } });
+    await carbonXrayLoad();
+    showToast(d.inRu ? 'Адрес ' + d.ip + ' выведен из туннеля' : 'Не удалось: нет ipset ru');
+  } catch (e) { showToast(e.message || 'Не удалось вывести адрес'); }
+}
+
 async function carbonMtuLoad() {
   const box = document.getElementById('carbonMtuBox');
   try {
@@ -2860,6 +2868,7 @@ document.addEventListener('click', async event => {
     else if (action === 'xray-log') await carbonXrayLog();
     else if (action === 'xray-selfcheck') await carbonXraySelfcheck();
     else if (action === 'xray-capture') await carbonXrayCapture();
+    else if (action === 'xray-selfdirect') await carbonXraySelfDirect();
     else if (action === 'appearance-preset') { carbonSetPalettePreset(btn.dataset.preset); render(); showToast('Шаблон применён'); }
     else if (action === 'appearance-custom') { document.getElementById('appearanceColors')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     else if (action === 'appearance-theme') { setTheme(btn.dataset.theme); render(); }
