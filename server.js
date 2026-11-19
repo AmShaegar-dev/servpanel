@@ -15982,6 +15982,25 @@ app.post('/api/xray/import', checkAuth, requireAdmin, (req, res) => {
     }
 });
 
+// Скачивание Xray для ПК через панель: GitHub из РФ часто недоступен,
+// а панель до него достаёт.
+app.get('/api/xray/download', checkAuth, requireAdmin, (req, res) => {
+    const os = ['windows', 'linux', 'macos'].includes(String(req.query.os)) ? String(req.query.os) : 'windows';
+    const arch = ['64', 'arm64', '32'].includes(String(req.query.arch)) ? String(req.query.arch) : '64';
+    const name = 'Xray-' + os + '-' + arch + (os === 'windows' ? '.zip' : '.zip');
+    const cache = path.join(os.tmpdir(), name);
+    try {
+        if (!fs.existsSync(cache) || fs.statSync(cache).size < 1024 * 1024) {
+            const url = 'https://github.com/XTLS/Xray-core/releases/latest/download/' + name;
+            sh('curl', ['-fsSL', '--retry', '2', '-o', cache, url], { timeout: 180000 });
+        }
+        auditLog(req, 'Xray: скачивание клиента ' + name);
+        res.download(cache, name);
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось скачать ' + name + ': ' + (e.message || e) });
+    }
+});
+
 app.get('/api/xray/capture', checkAuth, requireAdmin, (req, res) => {
     try {
         const out = String(sh('sudo', ['timeout', '8', 'tcpdump', '-nn', '-i', 'any', '-c', '40', 'port', '12345'], { timeout: 15000 }) || '');
