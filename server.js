@@ -15052,9 +15052,13 @@ function xrayInstall() {
 
 function xrayKeypair() {
     const out = String(sh(XRAY_BIN, ['x25519']) || '');
-    const priv = (out.match(/Private\s*key\s*:\s*(\S+)/i) || out.match(/PrivateKey\s*:\s*(\S+)/i) || [])[1] || '';
-    const pub = (out.match(/Public\s*key\s*:\s*(\S+)/i) || out.match(/PublicKey\s*:\s*(\S+)/i) || [])[1] || '';
-    if (!priv || !pub) throw new Error('Не удалось сгенерировать ключи Reality');
+    // Xray 25+: "PrivateKey: ...", "Password (PublicKey): ...", "Hash32: ..."
+    // Старые сборки: "Private key: ...", "Public key: ..."
+    const priv = (out.match(/Private\s*key\s*:\s*(\S+)/i) || [])[1] || '';
+    const pub = (out.match(/Password\s*\(PublicKey\)\s*:\s*(\S+)/i)
+        || out.match(/Public\s*key\s*:\s*(\S+)/i)
+        || out.match(/PublicKey\s*:\s*(\S+)/i) || [])[1] || '';
+    if (!priv || !pub) throw new Error('Не удалось сгенерировать ключи Reality: ' + out.replace(/\s+/g, ' ').slice(0, 120));
     return { privateKey: priv, publicKey: pub };
 }
 
