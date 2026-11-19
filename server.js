@@ -15081,6 +15081,13 @@ function xrayUuid() {
     return out;
 }
 
+function xrayXhttpSettings(st) {
+    // Для auto поле mode не передаём: Xray сам выбирает режим.
+    const x = { path: st.path };
+    if (st.xhttpMode && st.xhttpMode !== 'auto') x.mode = st.xhttpMode;
+    return x;
+}
+
 function xrayServerConfig(st) {
     return {
         log: { loglevel: st.debug ? 'debug' : 'warning' },
@@ -15095,7 +15102,7 @@ function xrayServerConfig(st) {
             },
             streamSettings: {
                 network: 'xhttp',
-                xhttpSettings: { path: st.path, mode: st.xhttpMode || 'auto' },
+                xhttpSettings: xrayXhttpSettings(st),
                 security: 'reality',
                 realitySettings: {
                     target: st.dest,
@@ -15138,7 +15145,7 @@ function xrayClientConfig(st) {
             settings: { address: st.address, port: st.port, id: st.clientId, encryption: 'none', flow: '' },
             streamSettings: {
                 network: 'xhttp',
-                xhttpSettings: { path: st.path, mode: st.xhttpMode || 'auto' },
+                xhttpSettings: xrayXhttpSettings(st),
                 security: 'reality',
                 realitySettings: {
                     serverName: st.serverName,
