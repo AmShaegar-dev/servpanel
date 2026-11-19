@@ -15031,6 +15031,7 @@ function xrayReadState() {
             clients: Array.isArray(j.clients) ? j.clients : [],
             profiles: Array.isArray(j.profiles) ? j.profiles : [],
             speedToken: String(j.speedToken || ''),
+            lastSpeedTest: j.lastSpeedTest || null,
             debug: !!j.debug,
             lastTest: j.lastTest || null,
             updatedAt: Number(j.updatedAt) || 0
@@ -15309,6 +15310,7 @@ app.get('/api/xray/status', checkAuth, (req, res) => {
         fingerprints: XRAY_FINGERPRINTS,
         selfDirect: xraySelfDirectState(),
         speedPath: '/api/speed/down?t=' + encodeURIComponent(xraySpeedToken()) + '&mb=25',
+        lastSpeedTest: st.lastSpeedTest || null,
         clientProfile: st.publicKey ? {
             address: '',
             port: st.port,
@@ -15619,6 +15621,16 @@ function xrayProfileExport(p) {
 
 // Замер плеча RU → клиент: отдаёт N мегабайт напрямую с RU-сервера.
 // Только по токену из панели, иначе это был бы открытый генератор трафика.
+function readCpuTimes() {
+    try {
+        const line = (fs.readFileSync('/proc/stat', 'utf8').split('\n')[0] || '').trim();
+        const n = line.split(/\s+/).slice(1).map(Number);
+        const idle = (n[3] || 0) + (n[4] || 0);
+        const total = n.reduce((a, b) => a + (b || 0), 0);
+        return { idle, total };
+    } catch (e) { return null; }
+}
+
 app.get('/api/speed/down', (req, res) => {
     const token = String(req.query.t || '');
     const st = xrayReadState();
@@ -15633,7 +15645,47 @@ app.get('/api/speed/down', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     let sent = 0;
     let stopped = false;
-    res.on('close', () => { stopped = true; });
+    // CPU сервера во время передачи: покажет, упирается ли шифрование в ядра.
+    const startedAt = Date.now();
+    const hrtime = process.hrtime.bigint();
+    let cpuPrev = readCpuTimes();
+    let cpuMax = 0;
+    let cpuSum = 0;
+    let cpuCount = 0;
+    const timer = setInterval(() => {
+        const cur = readCpuTimes();
+        if (!cur || !cpuPrev) return;
+        const dt = cur.total - cpuPrev.total;
+        const di = cur.idle - cpuPrev.idle;
+        if (dt > 0) {
+            const p = 100 * (1 - di / dt);
+            cpuSum += p;
+            cpuCount++;
+            if (p > cpuMax) cpuMax = p;
+        }
+        cpuPrev = cur;
+    }, 400);
+    if (timer.unref) timer.unref();
+    const finalize = () => {
+        clearInterval(timer);
+        const seconds = Math.max(0.001, Number(process.hrtime.bigint() - hrtime) / 1e9);
+        const mbps = (sent * 8 / 1e6) / seconds;
+        try {
+            xrayWriteState({
+                lastSpeedTest: {
+                    at: Date.now(),
+                    ip: req.ip,
+                    mb,
+                    mbps: Number(mbps.toFixed(2)),
+                    seconds: Number(seconds.toFixed(2)),
+                    cpuMax: Number(cpuMax.toFixed(1)),
+                    cpuAvg: Number((cpuCount ? cpuSum / cpuCount : 0).toFixed(1)),
+                    aborted: stopped && sent < total
+                }
+            });
+        } catch (e) { /* ignore */ }
+    };
+    res.on('close', () => { stopped = true; finalize(); });
     const pump = () => {
         if (stopped) return;
         while (sent < total) {
@@ -15645,6 +15697,11 @@ app.get('/api/speed/down', (req, res) => {
         res.end();
     };
     pump();
+    void startedAt;
+});
+
+app.get('/api/speed/last', checkAuth, (req, res) => {
+    res.json({ success: true, last: xrayReadState().lastSpeedTest || null });
 });
 
 app.get('/api/xray/presets', checkAuth, (req, res) => {
