@@ -15296,21 +15296,23 @@ function xrayTproxy(enable) {
     for (const e of exits) {
         const mark = cascadeExitMark(e.index);
         const table = String(cascadeExitTable(e.index));
-        for (const proto of ['tcp', 'udp']) {
-            const del = ['-w', '5', '-t', 'mangle', '-D', 'PREROUTING', '-i', iface, '-p', proto,
-                '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', String(port), '--tproxy-mark', mark];
-            try { sh('sudo', ['iptables'].concat(del)); } catch (err) { /* правила нет */ }
-        }
+        // TCP — через NAT REDIRECT: не требует local-маршрута и TPROXY.
+        const tcpDel = ['-w', '5', '-t', 'nat', '-D', 'PREROUTING', '-i', iface, '-p', 'tcp',
+            '-m', 'mark', '--mark', mark, '-j', 'REDIRECT', '--to-ports', String(port)];
+        try { sh('sudo', ['iptables'].concat(tcpDel)); } catch (err) { /* правила нет */ }
+        // UDP — через TPROXY (REDIRECT для UDP не работает).
+        const udpDel = ['-w', '5', '-t', 'mangle', '-D', 'PREROUTING', '-i', iface, '-p', 'udp',
+            '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', String(port), '--tproxy-mark', mark];
+        try { sh('sudo', ['iptables'].concat(udpDel)); } catch (err) { /* правила нет */ }
         // TPROXY доставляет пакеты локально, и UFW режет их на INPUT.
-        // Разрешаем только помеченный (то есть перехваченный) трафик.
         const inDel = ['-w', '5', '-t', 'filter', '-D', 'INPUT', '-m', 'mark', '--mark', mark, '-j', 'ACCEPT'];
         try { sh('sudo', ['iptables'].concat(inDel)); } catch (err) { /* правила нет */ }
         if (enable) {
             sh('sudo', ['ip', 'route', 'replace', 'local', 'default', 'dev', 'lo', 'table', table]);
-            for (const proto of ['tcp', 'udp']) {
-                sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-A', 'PREROUTING', '-i', iface, '-p', proto,
-                    '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', String(port), '--tproxy-mark', mark]);
-            }
+            sh('sudo', ['iptables', '-w', '5', '-t', 'nat', '-A', 'PREROUTING', '-i', iface, '-p', 'tcp',
+                '-m', 'mark', '--mark', mark, '-j', 'REDIRECT', '--to-ports', String(port)]);
+            sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-A', 'PREROUTING', '-i', iface, '-p', 'udp',
+                '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', String(port), '--tproxy-mark', mark]);
             sh('sudo', ['iptables', '-w', '5', '-t', 'filter', '-I', 'INPUT', '1',
                 '-m', 'mark', '--mark', mark, '-j', 'ACCEPT']);
         } else {
