@@ -1,18 +1,18 @@
-'use strict';
+﻿'use strict';
 
 /*
- * Servpanel / FileManager 4.0 — backend
- * Управление AmneziaWG, каскадом (RU -> EU), AdGuard Home, UFW и DNS.
+ * Servpanel / FileManager 4.0 вЂ” backend
+ * РЈРїСЂР°РІР»РµРЅРёРµ AmneziaWG, РєР°СЃРєР°РґРѕРј (RU -> EU), AdGuard Home, UFW Рё DNS.
  *
- * Что переработано:
- *  - убран process.env.NODE_TLS_REJECT_UNAUTHORIZED
- *  - секрет сессии генерируется случайно (.secrets.json, 0600)
- *  - все внешние команды вызываются через execFile/execFileSync (без shell-инъекций)
- *  - валидация ВСЕХ пользовательских данных (интерфейсы, IP, порты, имена, URL, id)
- *  - whitelist путей для конфигов AWG, логов и восстановления из архива
- *  - защита от подбора пароля, SameSite-cookie, CSRF-проверка Origin, Security-headers
- *  - переименование клиентов, показ vpn://, импорт/экспорт обфускации (Архитектор),
- *    настройка каскада по CASCADE.md, прогресс установки, расширенный AdGuard.
+ * Р§С‚Рѕ РїРµСЂРµСЂР°Р±РѕС‚Р°РЅРѕ:
+ *  - СѓР±СЂР°РЅ process.env.NODE_TLS_REJECT_UNAUTHORIZED
+ *  - СЃРµРєСЂРµС‚ СЃРµСЃСЃРёРё РіРµРЅРµСЂРёСЂСѓРµС‚СЃСЏ СЃР»СѓС‡Р°Р№РЅРѕ (.secrets.json, 0600)
+ *  - РІСЃРµ РІРЅРµС€РЅРёРµ РєРѕРјР°РЅРґС‹ РІС‹Р·С‹РІР°СЋС‚СЃСЏ С‡РµСЂРµР· execFile/execFileSync (Р±РµР· shell-РёРЅСЉРµРєС†РёР№)
+ *  - РІР°Р»РёРґР°С†РёСЏ Р’РЎР•РҐ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊСЃРєРёС… РґР°РЅРЅС‹С… (РёРЅС‚РµСЂС„РµР№СЃС‹, IP, РїРѕСЂС‚С‹, РёРјРµРЅР°, URL, id)
+ *  - whitelist РїСѓС‚РµР№ РґР»СЏ РєРѕРЅС„РёРіРѕРІ AWG, Р»РѕРіРѕРІ Рё РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ РёР· Р°СЂС…РёРІР°
+ *  - Р·Р°С‰РёС‚Р° РѕС‚ РїРѕРґР±РѕСЂР° РїР°СЂРѕР»СЏ, SameSite-cookie, CSRF-РїСЂРѕРІРµСЂРєР° Origin, Security-headers
+ *  - РїРµСЂРµРёРјРµРЅРѕРІР°РЅРёРµ РєР»РёРµРЅС‚РѕРІ, РїРѕРєР°Р· vpn://, РёРјРїРѕСЂС‚/СЌРєСЃРїРѕСЂС‚ РѕР±С„СѓСЃРєР°С†РёРё (РђСЂС…РёС‚РµРєС‚РѕСЂ),
+ *    РЅР°СЃС‚СЂРѕР№РєР° РєР°СЃРєР°РґР° РїРѕ CASCADE.md, РїСЂРѕРіСЂРµСЃСЃ СѓСЃС‚Р°РЅРѕРІРєРё, СЂР°СЃС€РёСЂРµРЅРЅС‹Р№ AdGuard.
  */
 
 const crypto = require('crypto');
@@ -43,14 +43,14 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
 const APP_DIR = __dirname;
-// Каталог для изменяемых данных (секреты, сессии, пользователи, профили).
-// По умолчанию — каталог панели; в тестах переопределяется переменной окружения.
+// РљР°С‚Р°Р»РѕРі РґР»СЏ РёР·РјРµРЅСЏРµРјС‹С… РґР°РЅРЅС‹С… (СЃРµРєСЂРµС‚С‹, СЃРµСЃСЃРёРё, РїРѕР»СЊР·РѕРІР°С‚РµР»Рё, РїСЂРѕС„РёР»Рё).
+// РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ вЂ” РєР°С‚Р°Р»РѕРі РїР°РЅРµР»Рё; РІ С‚РµСЃС‚Р°С… РїРµСЂРµРѕРїСЂРµРґРµР»СЏРµС‚СЃСЏ РїРµСЂРµРјРµРЅРЅРѕР№ РѕРєСЂСѓР¶РµРЅРёСЏ.
 const DATA_DIR = process.env.SERVEPANEL_DATA_DIR
     ? path.resolve(process.env.SERVEPANEL_DATA_DIR)
     : APP_DIR;
 const TEST_MODE = process.env.SERVEPANEL_TEST === '1';
-// Демонстрационный режим: панель работает с локальным файлом-макетом и не
-// трогает systemd/AmneziaWG. Нужен только для скриншотов и локального показа.
+// Р”РµРјРѕРЅСЃС‚СЂР°С†РёРѕРЅРЅС‹Р№ СЂРµР¶РёРј: РїР°РЅРµР»СЊ СЂР°Р±РѕС‚Р°РµС‚ СЃ Р»РѕРєР°Р»СЊРЅС‹Рј С„Р°Р№Р»РѕРј-РјР°РєРµС‚РѕРј Рё РЅРµ
+// С‚СЂРѕРіР°РµС‚ systemd/AmneziaWG. РќСѓР¶РµРЅ С‚РѕР»СЊРєРѕ РґР»СЏ СЃРєСЂРёРЅС€РѕС‚РѕРІ Рё Р»РѕРєР°Р»СЊРЅРѕРіРѕ РїРѕРєР°Р·Р°.
 const DEMO_MODE = (process.env.SERVEPANEL_DEMO === '1' || process.env.SERVPANEL_DEMO === '1');
 const AWG_DIR = '/root/awg';
 const AWG_SERVER_NAME_FILE = path.join(DATA_DIR, '.awg_server_name');
@@ -59,7 +59,7 @@ const AWG_CONF_DIR = '/etc/amnezia/amneziawg';
 const ROUTING_SCRIPT = path.join(AWG_DIR, 'awg-routing.sh');
 const AUDIT_LOG = process.env.SERVEPANEL_AUDIT_LOG
     || (process.platform === 'win32' ? path.join(DATA_DIR, 'awg_audit.log') : '/var/log/awg_audit.log');
-// Журнал попыток входа в формате, который понимает fail2ban
+// Р–СѓСЂРЅР°Р» РїРѕРїС‹С‚РѕРє РІС…РѕРґР° РІ С„РѕСЂРјР°С‚Рµ, РєРѕС‚РѕСЂС‹Р№ РїРѕРЅРёРјР°РµС‚ fail2ban
 const AUTH_LOG = process.env.SERVEPANEL_AUTH_LOG
     || (process.platform === 'win32' ? path.join(DATA_DIR, 'servpanel_auth.log') : '/var/log/servpanel_auth.log');
 const SESSIONS_DIR = path.join(DATA_DIR, '.sessions');
@@ -70,8 +70,8 @@ const BACKUP_CONFIG_FILE = path.join(DATA_DIR, '.backup.json');
 const BACKUP_DIR = process.env.SERVEPANEL_BACKUP_DIR || '/root/backups';
 const BACKUP_SCRIPT = path.join(AWG_DIR, 'panel-backup.sh');
 const BACKUP_PASS_FILE = path.join(DATA_DIR, '.backup_pass');
-// Имя pm2-процесса и журнал обновлений. Можно переопределить переменными
-// окружения, если панель развёрнута под другим именем.
+// РРјСЏ pm2-РїСЂРѕС†РµСЃСЃР° Рё Р¶СѓСЂРЅР°Р» РѕР±РЅРѕРІР»РµРЅРёР№. РњРѕР¶РЅРѕ РїРµСЂРµРѕРїСЂРµРґРµР»РёС‚СЊ РїРµСЂРµРјРµРЅРЅС‹РјРё
+// РѕРєСЂСѓР¶РµРЅРёСЏ, РµСЃР»Рё РїР°РЅРµР»СЊ СЂР°Р·РІС‘СЂРЅСѓС‚Р° РїРѕРґ РґСЂСѓРіРёРј РёРјРµРЅРµРј.
 const PM2_NAME = process.env.SERVEPANEL_PM2_NAME || 'awg-admin';
 const UPDATE_LOG = process.env.SERVEPANEL_UPDATE_LOG
     || (process.platform === 'win32' ? path.join(DATA_DIR, 'panel_update.log') : '/var/log/servpanel_update.log');
@@ -84,18 +84,18 @@ const AWG_CONF_PATHS = [
     path.join(AWG_CONF_DIR, 'awg-eu.conf')
 ];
 const EDITABLE_CONF = new Set(AWG_CONF_PATHS);
-const CASCADE_CONF = path.join(AWG_CONF_DIR, 'awg1.conf');          // по CASCADE.md
-const CASCADE_CONF_LEGACY = path.join(AWG_CONF_DIR, 'awg-eu.conf'); // старый путь панели
+const CASCADE_CONF = path.join(AWG_CONF_DIR, 'awg1.conf');          // РїРѕ CASCADE.md
+const CASCADE_CONF_LEGACY = path.join(AWG_CONF_DIR, 'awg-eu.conf'); // СЃС‚Р°СЂС‹Р№ РїСѓС‚СЊ РїР°РЅРµР»Рё
 const RENAME_SCRIPT = path.join(AWG_DIR, '.panel-rename.sh');
 const INSTALL_STATE = path.join(DATA_DIR, '.install_state.json');
 
-// Настройки мобильного приложения и метрик. Лежат в DATA_DIR, поэтому
-// переживают обновление панели и не попадают в релизный архив.
+// РќР°СЃС‚СЂРѕР№РєРё РјРѕР±РёР»СЊРЅРѕРіРѕ РїСЂРёР»РѕР¶РµРЅРёСЏ Рё РјРµС‚СЂРёРє. Р›РµР¶Р°С‚ РІ DATA_DIR, РїРѕСЌС‚РѕРјСѓ
+// РїРµСЂРµР¶РёРІР°СЋС‚ РѕР±РЅРѕРІР»РµРЅРёРµ РїР°РЅРµР»Рё Рё РЅРµ РїРѕРїР°РґР°СЋС‚ РІ СЂРµР»РёР·РЅС‹Р№ Р°СЂС…РёРІ.
 const APP_SETTINGS_FILE = path.join(DATA_DIR, '.app_settings.json');
 const APP_APK_DIR = path.join(DATA_DIR, '.app');
 
-// Настройки самой панели (часовой пояс графиков). Лежат рядом с данными,
-// поэтому переживают обновление и не попадают в релизный архив.
+// РќР°СЃС‚СЂРѕР№РєРё СЃР°РјРѕР№ РїР°РЅРµР»Рё (С‡Р°СЃРѕРІРѕР№ РїРѕСЏСЃ РіСЂР°С„РёРєРѕРІ). Р›РµР¶Р°С‚ СЂСЏРґРѕРј СЃ РґР°РЅРЅС‹РјРё,
+// РїРѕСЌС‚РѕРјСѓ РїРµСЂРµР¶РёРІР°СЋС‚ РѕР±РЅРѕРІР»РµРЅРёРµ Рё РЅРµ РїРѕРїР°РґР°СЋС‚ РІ СЂРµР»РёР·РЅС‹Р№ Р°СЂС…РёРІ.
 const PANEL_SETTINGS_FILE = path.join(DATA_DIR, '.panel_settings.json');
 const DEFAULT_PANEL_TIMEZONE = (() => {
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
@@ -124,8 +124,8 @@ function writePanelSettings(settings) {
     return panelSettingsCache;
 }
 
-// RustDesk: настройки модуля, кэш клиентских сборок и данные сервера.
-// Кэш лежит вне каталога панели, чтобы обновление панели его не трогало.
+// RustDesk: РЅР°СЃС‚СЂРѕР№РєРё РјРѕРґСѓР»СЏ, РєСЌС€ РєР»РёРµРЅС‚СЃРєРёС… СЃР±РѕСЂРѕРє Рё РґР°РЅРЅС‹Рµ СЃРµСЂРІРµСЂР°.
+// РљСЌС€ Р»РµР¶РёС‚ РІРЅРµ РєР°С‚Р°Р»РѕРіР° РїР°РЅРµР»Рё, С‡С‚РѕР±С‹ РѕР±РЅРѕРІР»РµРЅРёРµ РїР°РЅРµР»Рё РµРіРѕ РЅРµ С‚СЂРѕРіР°Р»Рѕ.
 const RUSTDESK_SETTINGS_FILE = path.join(DATA_DIR, '.rustdesk.json');
 const RUSTDESK_CACHE_DIR = process.env.SERVEPANEL_RUSTDESK_CACHE
     || (process.platform === 'win32' ? path.join(DATA_DIR, 'rustdesk-cache') : '/var/cache/servpanel-rustdesk');
@@ -138,17 +138,17 @@ const PANEL_VERSION = (() => {
 })();
 const GITHUB_REPO = process.env.PANEL_GITHUB_REPO || 'AmShaegar-dev/servpanel';
 
-// APK публикуется в отдельном репозитории приложения. Панель не хранит файл
-// у себя: она показывает версию последнего релиза и отдаёт ссылку на него.
+// APK РїСѓР±Р»РёРєСѓРµС‚СЃСЏ РІ РѕС‚РґРµР»СЊРЅРѕРј СЂРµРїРѕР·РёС‚РѕСЂРёРё РїСЂРёР»РѕР¶РµРЅРёСЏ. РџР°РЅРµР»СЊ РЅРµ С…СЂР°РЅРёС‚ С„Р°Р№Р»
+// Сѓ СЃРµР±СЏ: РѕРЅР° РїРѕРєР°Р·С‹РІР°РµС‚ РІРµСЂСЃРёСЋ РїРѕСЃР»РµРґРЅРµРіРѕ СЂРµР»РёР·Р° Рё РѕС‚РґР°С‘С‚ СЃСЃС‹Р»РєСѓ РЅР° РЅРµРіРѕ.
 const APP_REPO = process.env.PANEL_APK_REPO || 'AmShaegar-dev/servpanel-android';
 const DEFAULT_APK_URL = `https://github.com/${APP_REPO}/releases/latest/download/servpanel-mobile.apk`;
 const APP_VERSION_TTL_MS = 10 * 60 * 1000;
 let appVersionCache = { at: 0, value: '', error: '' };
 
-// Ссылки на прежний аккаунт GitHub и на старый APK из релиза панели могли
-// сохраниться в настройках прошлых версий (.app_settings.json). Переписываем
-// их на актуальный адрес, иначе вкладка «Приложение» показывает и скачивает
-// устаревшую сборку.
+// РЎСЃС‹Р»РєРё РЅР° РїСЂРµР¶РЅРёР№ Р°РєРєР°СѓРЅС‚ GitHub Рё РЅР° СЃС‚Р°СЂС‹Р№ APK РёР· СЂРµР»РёР·Р° РїР°РЅРµР»Рё РјРѕРіР»Рё
+// СЃРѕС…СЂР°РЅРёС‚СЊСЃСЏ РІ РЅР°СЃС‚СЂРѕР№РєР°С… РїСЂРѕС€Р»С‹С… РІРµСЂСЃРёР№ (.app_settings.json). РџРµСЂРµРїРёСЃС‹РІР°РµРј
+// РёС… РЅР° Р°РєС‚СѓР°Р»СЊРЅС‹Р№ Р°РґСЂРµСЃ, РёРЅР°С‡Рµ РІРєР»Р°РґРєР° В«РџСЂРёР»РѕР¶РµРЅРёРµВ» РїРѕРєР°Р·С‹РІР°РµС‚ Рё СЃРєР°С‡РёРІР°РµС‚
+// СѓСЃС‚Р°СЂРµРІС€СѓСЋ СЃР±РѕСЂРєСѓ.
 const LEGACY_GITHUB_REPO_RE = /makar19977v-glitch[\/:]servpanel/gi;
 const LEGACY_APK_URL_RE = /^https?:\/\/github\.com\/AmShaegar-dev\/servpanel\/releases\/(?:latest\/download|download\/[^/]+)\/servpanel\.apk$/i;
 function migrateLegacyGithubUrl(value) {
@@ -156,8 +156,8 @@ function migrateLegacyGithubUrl(value) {
     return LEGACY_APK_URL_RE.test(fixed) ? DEFAULT_APK_URL : fixed;
 }
 
-// Опциональный WARP + Xray для AdGuard Home. Ничего не ставится автоматически:
-// компонент запускается только по кнопке на вкладке «Службы и DNS».
+// РћРїС†РёРѕРЅР°Р»СЊРЅС‹Р№ WARP + Xray РґР»СЏ AdGuard Home. РќРёС‡РµРіРѕ РЅРµ СЃС‚Р°РІРёС‚СЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё:
+// РєРѕРјРїРѕРЅРµРЅС‚ Р·Р°РїСѓСЃРєР°РµС‚СЃСЏ С‚РѕР»СЊРєРѕ РїРѕ РєРЅРѕРїРєРµ РЅР° РІРєР»Р°РґРєРµ В«РЎР»СѓР¶Р±С‹ Рё DNSВ».
 const WARP_INSTALLER = path.join(APP_DIR, 'install_warp_xray.sh');
 const WARP_ENV_FILE = '/root/awg/warp.env';
 const WARP_STATE_FILE = '/root/awg/warp-adguard.json';
@@ -294,13 +294,13 @@ function demoConfPath() {
     return p;
 }
 
-// Демо-клиенты: дают живые цифры и позволяют пройти мастер создания клиента
-// без sudo/AmneziaWG. В обычном режиме этот массив не используется.
+// Р”РµРјРѕ-РєР»РёРµРЅС‚С‹: РґР°СЋС‚ Р¶РёРІС‹Рµ С†РёС„СЂС‹ Рё РїРѕР·РІРѕР»СЏСЋС‚ РїСЂРѕР№С‚Рё РјР°СЃС‚РµСЂ СЃРѕР·РґР°РЅРёСЏ РєР»РёРµРЅС‚Р°
+// Р±РµР· sudo/AmneziaWG. Р’ РѕР±С‹С‡РЅРѕРј СЂРµР¶РёРјРµ СЌС‚РѕС‚ РјР°СЃСЃРёРІ РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ.
 const demoClients = [
-    { name: 'client-01', ip: '10.8.1.2', status: 'Активен', status_code: 'active', rx: 734003200, tx: 183500800, last_handshake: Math.floor(Date.now() / 1000) - 35 },
-    { name: 'client-02', ip: '10.8.1.3', status: 'Активен', status_code: 'active', rx: 418381824, tx: 96468992, last_handshake: Math.floor(Date.now() / 1000) - 90 },
-    { name: 'android-carol', ip: '10.8.1.4', status: 'Недавно', status_code: 'recent', rx: 157286400, tx: 41943040, last_handshake: Math.floor(Date.now() / 1000) - 540 },
-    { name: 'router-home', ip: '10.8.1.5', status: 'Неактивен', status_code: 'inactive', rx: 17825792, tx: 6291456, last_handshake: Math.floor(Date.now() / 1000) - 86400 }
+    { name: 'client-01', ip: '10.8.1.2', status: 'РђРєС‚РёРІРµРЅ', status_code: 'active', rx: 734003200, tx: 183500800, last_handshake: Math.floor(Date.now() / 1000) - 35 },
+    { name: 'client-02', ip: '10.8.1.3', status: 'РђРєС‚РёРІРµРЅ', status_code: 'active', rx: 418381824, tx: 96468992, last_handshake: Math.floor(Date.now() / 1000) - 90 },
+    { name: 'android-carol', ip: '10.8.1.4', status: 'РќРµРґР°РІРЅРѕ', status_code: 'recent', rx: 157286400, tx: 41943040, last_handshake: Math.floor(Date.now() / 1000) - 540 },
+    { name: 'router-home', ip: '10.8.1.5', status: 'РќРµР°РєС‚РёРІРµРЅ', status_code: 'inactive', rx: 17825792, tx: 6291456, last_handshake: Math.floor(Date.now() / 1000) - 86400 }
 ];
 function demoClientConf(name, ip) {
     return [
@@ -337,8 +337,8 @@ function serverConfPath() {
 }
 
 // ---------------------------------------------------------------------------
-// Обёртки запуска процессов. Только execFile — аргументы передаются массивом,
-// поэтому shell-инъекции невозможны в принципе.
+// РћР±С‘СЂС‚РєРё Р·Р°РїСѓСЃРєР° РїСЂРѕС†РµСЃСЃРѕРІ. РўРѕР»СЊРєРѕ execFile вЂ” Р°СЂРіСѓРјРµРЅС‚С‹ РїРµСЂРµРґР°СЋС‚СЃСЏ РјР°СЃСЃРёРІРѕРј,
+// РїРѕСЌС‚РѕРјСѓ shell-РёРЅСЉРµРєС†РёРё РЅРµРІРѕР·РјРѕР¶РЅС‹ РІ РїСЂРёРЅС†РёРїРµ.
 // ---------------------------------------------------------------------------
 function sh(cmd, args = [], opts = {}) {
     return execFileSync(cmd, args, {
@@ -352,8 +352,8 @@ function shTry(cmd, args = [], opts = {}) {
     try { return sh(cmd, args, opts); }
     catch (e) { return String(e.stdout || ''); }
 }
-// Панель обычно работает от root через pm2. Если sudo не установлен или
-// настроен с паролем, вызовы через sudo ломают даже простые операции.
+// РџР°РЅРµР»СЊ РѕР±С‹С‡РЅРѕ СЂР°Р±РѕС‚Р°РµС‚ РѕС‚ root С‡РµСЂРµР· pm2. Р•СЃР»Рё sudo РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ РёР»Рё
+// РЅР°СЃС‚СЂРѕРµРЅ СЃ РїР°СЂРѕР»РµРј, РІС‹Р·РѕРІС‹ С‡РµСЂРµР· sudo Р»РѕРјР°СЋС‚ РґР°Р¶Рµ РїСЂРѕСЃС‚С‹Рµ РѕРїРµСЂР°С†РёРё.
 const IS_ROOT = typeof process.getuid === 'function' && process.getuid() === 0;
 function rootSh(cmd, args = [], opts = {}) {
     return IS_ROOT ? sh(cmd, args, opts) : sh('sudo', [cmd, ...args], opts);
@@ -384,8 +384,8 @@ function writeRootFile(target, content, mode = '0644') {
     const tmp = path.join(os.tmpdir(), 'panel-' + crypto.randomBytes(8).toString('hex') + '.tmp');
     fs.writeFileSync(tmp, content, { mode: 0o600 });
     try {
-        // На минимальных VPS каталога /root/awg может не быть: создаём его
-        // заранее, иначе install падает и GeoIP показывает «Ошибка установки».
+        // РќР° РјРёРЅРёРјР°Р»СЊРЅС‹С… VPS РєР°С‚Р°Р»РѕРіР° /root/awg РјРѕР¶РµС‚ РЅРµ Р±С‹С‚СЊ: СЃРѕР·РґР°С‘Рј РµРіРѕ
+        // Р·Р°СЂР°РЅРµРµ, РёРЅР°С‡Рµ install РїР°РґР°РµС‚ Рё GeoIP РїРѕРєР°Р·С‹РІР°РµС‚ В«РћС€РёР±РєР° СѓСЃС‚Р°РЅРѕРІРєРёВ».
         rootSh('mkdir', ['-p', path.dirname(target)], { timeout: 15000 });
         rootSh('install', ['-m', mode, '-o', 'root', '-g', 'root', tmp, target]);
     } finally {
@@ -399,10 +399,10 @@ async function fetchWithTimeout(url, opts = {}, ms = 8000) {
     finally { clearTimeout(timer); }
 }
 
-// AdGuard Home по HTTPS обычно использует самоподписанный сертификат, который
-// встроенный fetch отвергает («fetch failed»). Для локальных запросов к
-// AdGuard это не имеет значения: сертификат всё равно не проверить, поэтому
-// ходим через http/https с rejectUnauthorized: false.
+// AdGuard Home РїРѕ HTTPS РѕР±С‹С‡РЅРѕ РёСЃРїРѕР»СЊР·СѓРµС‚ СЃР°РјРѕРїРѕРґРїРёСЃР°РЅРЅС‹Р№ СЃРµСЂС‚РёС„РёРєР°С‚, РєРѕС‚РѕСЂС‹Р№
+// РІСЃС‚СЂРѕРµРЅРЅС‹Р№ fetch РѕС‚РІРµСЂРіР°РµС‚ (В«fetch failedВ»). Р”Р»СЏ Р»РѕРєР°Р»СЊРЅС‹С… Р·Р°РїСЂРѕСЃРѕРІ Рє
+// AdGuard СЌС‚Рѕ РЅРµ РёРјРµРµС‚ Р·РЅР°С‡РµРЅРёСЏ: СЃРµСЂС‚РёС„РёРєР°С‚ РІСЃС‘ СЂР°РІРЅРѕ РЅРµ РїСЂРѕРІРµСЂРёС‚СЊ, РїРѕСЌС‚РѕРјСѓ
+// С…РѕРґРёРј С‡РµСЂРµР· http/https СЃ rejectUnauthorized: false.
 function fetchInsecure(url, opts = {}, ms = 8000) {
     return new Promise((resolve, reject) => {
         let u;
@@ -441,7 +441,7 @@ function fetchInsecure(url, opts = {}, ms = 8000) {
 }
 
 // ---------------------------------------------------------------------------
-// Валидация
+// Р’Р°Р»РёРґР°С†РёСЏ
 // ---------------------------------------------------------------------------
 const NAME_RE = /^[A-Za-z0-9_-]{1,63}$/;
 const IFACE_RE = /^[A-Za-z0-9_.:@-]{1,32}$/;
@@ -469,7 +469,7 @@ function isDnsTarget(v) {
     if (!IPV4_RE.test(parts[0])) return false;
     return parts[1] === undefined || isPort(parts[1]);
 }
-// Служебные интерфейсы каскада не годятся как клиентские.
+// РЎР»СѓР¶РµР±РЅС‹Рµ РёРЅС‚РµСЂС„РµР№СЃС‹ РєР°СЃРєР°РґР° РЅРµ РіРѕРґСЏС‚СЃСЏ РєР°Рє РєР»РёРµРЅС‚СЃРєРёРµ.
 const CASCADE_IFACE_RE = /^(awg[1-9][0-9]*|amn[1-9][0-9]*|awg-eu)$/;
 function existingIfaces() {
     return Object.keys(os.networkInterfaces()).filter(name => !CASCADE_IFACE_RE.test(name));
@@ -479,16 +479,16 @@ function validIfaces(arr) {
         arr.every(i => typeof i === 'string' && IFACE_RE.test(i) && existingIfaces().includes(i));
 }
 
-// Источники списка RU-адресов для GeoIP-блокировки.
-// OpenCCK отдаёт обычный text/cidr4 — его можно парсить тем же скриптом.
+// РСЃС‚РѕС‡РЅРёРєРё СЃРїРёСЃРєР° RU-Р°РґСЂРµСЃРѕРІ РґР»СЏ GeoIP-Р±Р»РѕРєРёСЂРѕРІРєРё.
+// OpenCCK РѕС‚РґР°С‘С‚ РѕР±С‹С‡РЅС‹Р№ text/cidr4 вЂ” РµРіРѕ РјРѕР¶РЅРѕ РїР°СЂСЃРёС‚СЊ С‚РµРј Р¶Рµ СЃРєСЂРёРїС‚РѕРј.
 const RU_GEOIP_SOURCES = {
     opencck: 'https://russia.iplist.opencck.org/?format=text&data=cidr4',
     antifilter: 'https://www.ipdeny.com/ipblocks/data/aggregated/ru-aggregated.zone'
 };
 
-// Достаём IPv4/CIDR из произвольного текста: txt, csv, json, html,
-// списков вида "1.2.3.0/24, 5.6.7.8" или ipset "ipset=/1.2.3.0/24/name".
-// JSON-формат OpenCCK экранирует слэш как \/, поэтому сначала нормализуем.
+// Р”РѕСЃС‚Р°С‘Рј IPv4/CIDR РёР· РїСЂРѕРёР·РІРѕР»СЊРЅРѕРіРѕ С‚РµРєСЃС‚Р°: txt, csv, json, html,
+// СЃРїРёСЃРєРѕРІ РІРёРґР° "1.2.3.0/24, 5.6.7.8" РёР»Рё ipset "ipset=/1.2.3.0/24/name".
+// JSON-С„РѕСЂРјР°С‚ OpenCCK СЌРєСЂР°РЅРёСЂСѓРµС‚ СЃР»СЌС€ РєР°Рє \/, РїРѕСЌС‚РѕРјСѓ СЃРЅР°С‡Р°Р»Р° РЅРѕСЂРјР°Р»РёР·СѓРµРј.
 function parseIpList(text) {
     const raw = String(text == null ? '' : text).replace(/\\\//g, '/');
     const re = /(?<![\d.])(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}(?:\/(?:3[0-2]|[12]?\d))?(?![\d.]|\/\d)/g;
@@ -503,13 +503,13 @@ function parseIpList(text) {
     return [...seen];
 }
 
-// URL списка GeoIP. OpenCCK умеет длинные ссылки с десятками site=...,
-// поэтому старый лимит в 300 символов здесь не подходит.
+// URL СЃРїРёСЃРєР° GeoIP. OpenCCK СѓРјРµРµС‚ РґР»РёРЅРЅС‹Рµ СЃСЃС‹Р»РєРё СЃ РґРµСЃСЏС‚РєР°РјРё site=...,
+// РїРѕСЌС‚РѕРјСѓ СЃС‚Р°СЂС‹Р№ Р»РёРјРёС‚ РІ 300 СЃРёРјРІРѕР»РѕРІ Р·РґРµСЃСЊ РЅРµ РїРѕРґС…РѕРґРёС‚.
 function validGeoUrl(value) {
     const s = String(value == null ? '' : value).trim();
     if (s.length < 10 || s.length > 8192) return false;
     if (/\s/.test(s)) return false;
-    // URL подставляется в bash-массив в двойных кавычках; $, `, \, " запрещены.
+    // URL РїРѕРґСЃС‚Р°РІР»СЏРµС‚СЃСЏ РІ bash-РјР°СЃСЃРёРІ РІ РґРІРѕР№РЅС‹С… РєР°РІС‹С‡РєР°С…; $, `, \, " Р·Р°РїСЂРµС‰РµРЅС‹.
     if (!/^https:\/\/[A-Za-z0-9._~:/?#\[\]@!&'()*+,;=%-]+$/.test(s)) return false;
     try {
         const u = new URL(s);
@@ -519,7 +519,7 @@ function validGeoUrl(value) {
     }
 }
 
-// --- WARP + Xray: конфигурация и список доменов для AdGuard -----------------
+// --- WARP + Xray: РєРѕРЅС„РёРіСѓСЂР°С†РёСЏ Рё СЃРїРёСЃРѕРє РґРѕРјРµРЅРѕРІ РґР»СЏ AdGuard -----------------
 function readKeyValueFile(file) {
     const out = {};
     try {
@@ -527,7 +527,7 @@ function readKeyValueFile(file) {
             const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
             if (m) out[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
         }
-    } catch (e) { /* файла ещё нет */ }
+    } catch (e) { /* С„Р°Р№Р»Р° РµС‰С‘ РЅРµС‚ */ }
     return out;
 }
 
@@ -545,27 +545,27 @@ function fileExists(p) {
 
 const XRAY_CONFIG = '/usr/local/etc/xray/config.json';
 
-// Входящий порт Xray нашего формата (dokodemo-door с исходящим тегом "warp").
-// Чужой конфиг не трогаем: если тега нет — возвращаем null.
+// Р’С…РѕРґСЏС‰РёР№ РїРѕСЂС‚ Xray РЅР°С€РµРіРѕ С„РѕСЂРјР°С‚Р° (dokodemo-door СЃ РёСЃС…РѕРґСЏС‰РёРј С‚РµРіРѕРј "warp").
+// Р§СѓР¶РѕР№ РєРѕРЅС„РёРі РЅРµ С‚СЂРѕРіР°РµРј: РµСЃР»Рё С‚РµРіР° РЅРµС‚ вЂ” РІРѕР·РІСЂР°С‰Р°РµРј null.
 function xrayInbound() {
     let cfg;
     try { cfg = JSON.parse(readTextSafe(XRAY_CONFIG)); } catch (e) { return null; }
     const outs = Array.isArray(cfg.outbounds) ? cfg.outbounds : [];
-    // Свой конфиг узнаём по структуре из инструкции: outbound SOCKS на
-    // 127.0.0.1. Служебных тегов в нём нет, поэтому тег не используем.
+    // РЎРІРѕР№ РєРѕРЅС„РёРі СѓР·РЅР°С‘Рј РїРѕ СЃС‚СЂСѓРєС‚СѓСЂРµ РёР· РёРЅСЃС‚СЂСѓРєС†РёРё: outbound SOCKS РЅР°
+    // 127.0.0.1. РЎР»СѓР¶РµР±РЅС‹С… С‚РµРіРѕРІ РІ РЅС‘Рј РЅРµС‚, РїРѕСЌС‚РѕРјСѓ С‚РµРі РЅРµ РёСЃРїРѕР»СЊР·СѓРµРј.
     const socks = outs.find(o => o && o.protocol === 'socks' &&
         Array.isArray(o.settings && o.settings.servers) &&
         o.settings.servers.some(s => s && String(s.address) === '127.0.0.1'));
     if (!socks) return null;
     const inb = (Array.isArray(cfg.inbounds) ? cfg.inbounds : []).find(i => i && i.port);
     if (!inb) return null;
-    // Без listen Xray слушает все интерфейсы — так в инструкции.
+    // Р‘РµР· listen Xray СЃР»СѓС€Р°РµС‚ РІСЃРµ РёРЅС‚РµСЂС„РµР№СЃС‹ вЂ” С‚Р°Рє РІ РёРЅСЃС‚СЂСѓРєС†РёРё.
     return { listen: String(inb.listen || '0.0.0.0'), port: String(inb.port) };
 }
 
-// WARP могли поставить вручную (пакетом Cloudflare или из snap) — тогда
-// /root/awg/warp.env отсутствует. Поэтому наличие компонента определяем не
-// только по флагу установщика, но и по бинарнику/юниту systemd.
+// WARP РјРѕРіР»Рё РїРѕСЃС‚Р°РІРёС‚СЊ РІСЂСѓС‡РЅСѓСЋ (РїР°РєРµС‚РѕРј Cloudflare РёР»Рё РёР· snap) вЂ” С‚РѕРіРґР°
+// /root/awg/warp.env РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚. РџРѕСЌС‚РѕРјСѓ РЅР°Р»РёС‡РёРµ РєРѕРјРїРѕРЅРµРЅС‚Р° РѕРїСЂРµРґРµР»СЏРµРј РЅРµ
+// С‚РѕР»СЊРєРѕ РїРѕ С„Р»Р°РіСѓ СѓСЃС‚Р°РЅРѕРІС‰РёРєР°, РЅРѕ Рё РїРѕ Р±РёРЅР°СЂРЅРёРєСѓ/СЋРЅРёС‚Сѓ systemd.
 function warpBinaryPresent() {
     const bins = ['/usr/bin/warp-cli', '/usr/local/bin/warp-cli', '/bin/warp-cli', '/snap/bin/warp-cli'];
     const units = [
@@ -579,7 +579,7 @@ function warpBinaryPresent() {
 
 function warpConfig() {
     const env = readKeyValueFile(WARP_ENV_FILE);
-    // Если warp.env нет (WARP ставили вручную), берём порт из нашего Xray.
+    // Р•СЃР»Рё warp.env РЅРµС‚ (WARP СЃС‚Р°РІРёР»Рё РІСЂСѓС‡РЅСѓСЋ), Р±РµСЂС‘Рј РїРѕСЂС‚ РёР· РЅР°С€РµРіРѕ Xray.
     const xray = xrayInbound();
     return {
         installed: env.WARP_INSTALLED === '1' || warpBinaryPresent(),
@@ -627,7 +627,7 @@ function warpCustomCatalog() {
             .map(c => ({
                 id: c.id,
                 label: String(c.label).slice(0, 80),
-                group: 'Свои',
+                group: 'РЎРІРѕРё',
                 custom: true,
                 domains: normalizeWarpDomains(c.domains)
             }))
@@ -740,7 +740,7 @@ function safeEqual(a, b) {
 }
 
 // ---------------------------------------------------------------------------
-// Пароль и секреты
+// РџР°СЂРѕР»СЊ Рё СЃРµРєСЂРµС‚С‹
 // ---------------------------------------------------------------------------
 const PASS_FILE = path.join(DATA_DIR, 'admin_pass.txt');
 const SECRETS_FILE = path.join(DATA_DIR, '.secrets.json');
@@ -750,9 +750,9 @@ function loadPassword() {
     try {
         const p = fs.readFileSync(PASS_FILE, 'utf8').trim();
         if (p) return p;
-    } catch (e) { /* нет файла */ }
-    // Файла нет — сохраняем совместимость со старыми установками,
-    // но интерфейс покажет предупреждение и попросит сменить пароль.
+    } catch (e) { /* РЅРµС‚ С„Р°Р№Р»Р° */ }
+    // Р¤Р°Р№Р»Р° РЅРµС‚ вЂ” СЃРѕС…СЂР°РЅСЏРµРј СЃРѕРІРјРµСЃС‚РёРјРѕСЃС‚СЊ СЃРѕ СЃС‚Р°СЂС‹РјРё СѓСЃС‚Р°РЅРѕРІРєР°РјРё,
+    // РЅРѕ РёРЅС‚РµСЂС„РµР№СЃ РїРѕРєР°Р¶РµС‚ РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёРµ Рё РїРѕРїСЂРѕСЃРёС‚ СЃРјРµРЅРёС‚СЊ РїР°СЂРѕР»СЊ.
     return 'admin123';
 }
 let ADMIN_PASSWORD = loadPassword();
@@ -788,11 +788,11 @@ function saveSecrets() {
 }
 
 // ---------------------------------------------------------------------------
-// Журнал действий (с ротацией)
+// Р–СѓСЂРЅР°Р» РґРµР№СЃС‚РІРёР№ (СЃ СЂРѕС‚Р°С†РёРµР№)
 // ---------------------------------------------------------------------------
 function auditLog(req, action) {
-    // clientIp() учитывает X-Forwarded-For только от локального прокси,
-    // иначе клиент мог бы подделать IP в журнале.
+    // clientIp() СѓС‡РёС‚С‹РІР°РµС‚ X-Forwarded-For С‚РѕР»СЊРєРѕ РѕС‚ Р»РѕРєР°Р»СЊРЅРѕРіРѕ РїСЂРѕРєСЃРё,
+    // РёРЅР°С‡Рµ РєР»РёРµРЅС‚ РјРѕРі Р±С‹ РїРѕРґРґРµР»Р°С‚СЊ IP РІ Р¶СѓСЂРЅР°Р»Рµ.
     let ip = '';
     try { ip = clientIp(req); } catch (e) { ip = ''; }
     if (!ip) ip = String(req.headers['x-forwarded-for'] || req.ip || (req.socket && req.socket.remoteAddress) || '').split(',')[0].trim();
@@ -818,8 +818,8 @@ app.use((req, res, next) => {
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
     if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
-    // Ответы API содержат ключи, конфиги и данные клиентов — их нельзя
-    // кэшировать в браузере или промежуточных прокси.
+    // РћС‚РІРµС‚С‹ API СЃРѕРґРµСЂР¶Р°С‚ РєР»СЋС‡Рё, РєРѕРЅС„РёРіРё Рё РґР°РЅРЅС‹Рµ РєР»РёРµРЅС‚РѕРІ вЂ” РёС… РЅРµР»СЊР·СЏ
+    // РєСЌС€РёСЂРѕРІР°С‚СЊ РІ Р±СЂР°СѓР·РµСЂРµ РёР»Рё РїСЂРѕРјРµР¶СѓС‚РѕС‡РЅС‹С… РїСЂРѕРєСЃРё.
     if (isApiRequest(req)) res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Security-Policy',
         "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
@@ -828,18 +828,18 @@ app.use((req, res, next) => {
     next();
 });
 
-// Простейшая CSRF-защита: для изменяющих запросов Origin (если передан) должен
-// совпадать с Host панели.
+// РџСЂРѕСЃС‚РµР№С€Р°СЏ CSRF-Р·Р°С‰РёС‚Р°: РґР»СЏ РёР·РјРµРЅСЏСЋС‰РёС… Р·Р°РїСЂРѕСЃРѕРІ Origin (РµСЃР»Рё РїРµСЂРµРґР°РЅ) РґРѕР»Р¶РµРЅ
+// СЃРѕРІРїР°РґР°С‚СЊ СЃ Host РїР°РЅРµР»Рё.
 app.use((req, res, next) => {
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
         const origin = req.headers.origin;
         if (origin) {
             try {
                 if (new URL(origin).host !== req.headers.host) {
-                    return res.status(403).json({ error: 'Запрос с чужого Origin отклонён' });
+                    return res.status(403).json({ error: 'Р—Р°РїСЂРѕСЃ СЃ С‡СѓР¶РѕРіРѕ Origin РѕС‚РєР»РѕРЅС‘РЅ' });
                 }
             } catch (e) {
-                return res.status(403).json({ error: 'Некорректный Origin' });
+                return res.status(403).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ Origin' });
             }
         }
     }
@@ -847,7 +847,7 @@ app.use((req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
-// Файловое хранилище сессий: вход в панель переживает перезапуск процесса
+// Р¤Р°Р№Р»РѕРІРѕРµ С…СЂР°РЅРёР»РёС‰Рµ СЃРµСЃСЃРёР№: РІС…РѕРґ РІ РїР°РЅРµР»СЊ РїРµСЂРµР¶РёРІР°РµС‚ РїРµСЂРµР·Р°РїСѓСЃРє РїСЂРѕС†РµСЃСЃР°
 // ---------------------------------------------------------------------------
 class FileSessionStore extends session.Store {
     constructor(dir) {
@@ -940,12 +940,12 @@ app.use(session({
     }
 }));
 
-// PANEL_WEB=0 выключает веб-интерфейс: статика не раздаётся, все не-API
-// маршруты отвечают 404. API (/api/*) продолжает работать как обычно.
+// PANEL_WEB=0 РІС‹РєР»СЋС‡Р°РµС‚ РІРµР±-РёРЅС‚РµСЂС„РµР№СЃ: СЃС‚Р°С‚РёРєР° РЅРµ СЂР°Р·РґР°С‘С‚СЃСЏ, РІСЃРµ РЅРµ-API
+// РјР°СЂС€СЂСѓС‚С‹ РѕС‚РІРµС‡Р°СЋС‚ 404. API (/api/*) РїСЂРѕРґРѕР»Р¶Р°РµС‚ СЂР°Р±РѕС‚Р°С‚СЊ РєР°Рє РѕР±С‹С‡РЅРѕ.
 const WEB_ENABLED = process.env.PANEL_WEB !== '0';
 
-// Строгая проверка «это запрос к API»: отсекает /api/../index.html и
-// двойное кодирование, чтобы через API-порт нельзя было достать статику.
+// РЎС‚СЂРѕРіР°СЏ РїСЂРѕРІРµСЂРєР° В«СЌС‚Рѕ Р·Р°РїСЂРѕСЃ Рє APIВ»: РѕС‚СЃРµРєР°РµС‚ /api/../index.html Рё
+// РґРІРѕР№РЅРѕРµ РєРѕРґРёСЂРѕРІР°РЅРёРµ, С‡С‚РѕР±С‹ С‡РµСЂРµР· API-РїРѕСЂС‚ РЅРµР»СЊР·СЏ Р±С‹Р»Рѕ РґРѕСЃС‚Р°С‚СЊ СЃС‚Р°С‚РёРєСѓ.
 function isApiRequest(req) {
     let p;
     try {
@@ -958,29 +958,29 @@ function isApiRequest(req) {
 }
 
 // ---------------------------------------------------------------------------
-// Мобильное приложение: APK, метрики и настройки доступа
+// РњРѕР±РёР»СЊРЅРѕРµ РїСЂРёР»РѕР¶РµРЅРёРµ: APK, РјРµС‚СЂРёРєРё Рё РЅР°СЃС‚СЂРѕР№РєРё РґРѕСЃС‚СѓРїР°
 // ---------------------------------------------------------------------------
-// Все настройки лежат в DATA_DIR: обновление панели их не перезаписывает.
-// Переменные окружения задают значения по умолчанию для первого запуска,
-// дальше приоритет у файла .app_settings.json (как у .panel_port).
+// Р’СЃРµ РЅР°СЃС‚СЂРѕР№РєРё Р»РµР¶Р°С‚ РІ DATA_DIR: РѕР±РЅРѕРІР»РµРЅРёРµ РїР°РЅРµР»Рё РёС… РЅРµ РїРµСЂРµР·Р°РїРёСЃС‹РІР°РµС‚.
+// РџРµСЂРµРјРµРЅРЅС‹Рµ РѕРєСЂСѓР¶РµРЅРёСЏ Р·Р°РґР°СЋС‚ Р·РЅР°С‡РµРЅРёСЏ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ РґР»СЏ РїРµСЂРІРѕРіРѕ Р·Р°РїСѓСЃРєР°,
+// РґР°Р»СЊС€Рµ РїСЂРёРѕСЂРёС‚РµС‚ Сѓ С„Р°Р№Р»Р° .app_settings.json (РєР°Рє Сѓ .panel_port).
 let lastClientsSnapshot = [];
 const TRAFFIC_SPLIT_FILE = path.join(DATA_DIR, '.traffic_split.json');
 const CLIENT_LIMITS_FILE = path.join(DATA_DIR, '.client_limits.json');
 const CLIENT_ISOLATION_FILE = path.join(DATA_DIR, '.client_isolation.json');
-// MTU клиентских конфигов: { default: 1200, clients: { имя: 1200 } }.
-// Хранится отдельно, чтобы переживать regen/rename конфигов установщиком.
+// MTU РєР»РёРµРЅС‚СЃРєРёС… РєРѕРЅС„РёРіРѕРІ: { default: 1200, clients: { РёРјСЏ: 1200 } }.
+// РҐСЂР°РЅРёС‚СЃСЏ РѕС‚РґРµР»СЊРЅРѕ, С‡С‚РѕР±С‹ РїРµСЂРµР¶РёРІР°С‚СЊ regen/rename РєРѕРЅС„РёРіРѕРІ СѓСЃС‚Р°РЅРѕРІС‰РёРєРѕРј.
 const CLIENT_MTU_FILE = path.join(DATA_DIR, '.client_mtu.json');
 let lastTrafficSplit = (() => {
     try {
         const j = JSON.parse(fs.readFileSync(TRAFFIC_SPLIT_FILE, 'utf8'));
         if (j && Number(j.total) > 0) return j;
-    } catch (e) { /* кэша ещё нет */ }
+    } catch (e) { /* РєСЌС€Р° РµС‰С‘ РЅРµС‚ */ }
     return null;
 })();
 let trafficSplitSavedAt = 0;
 function resetTrafficSplitCache() {
     lastTrafficSplit = null;
-    try { fs.unlinkSync(TRAFFIC_SPLIT_FILE); } catch (e) { /* кэша нет */ }
+    try { fs.unlinkSync(TRAFFIC_SPLIT_FILE); } catch (e) { /* РєСЌС€Р° РЅРµС‚ */ }
 }
 function saveTrafficSplitCache() {
     if (!lastTrafficSplit || !lastTrafficSplit.total) return;
@@ -1043,24 +1043,24 @@ function normalizeMetricsSettings(input, opts = {}) {
         if (src[key] === undefined || src[key] === '') return fallback;
         const n = Number(src[key]);
         if (!Number.isInteger(n) || n < minPort || n > 65535) {
-            if (strict) throw new Error(`Некорректный ${label}: ${src[key]} (нужно ${minPort === 0 ? 0 : 1}–65535)`);
+            if (strict) throw new Error(`РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ ${label}: ${src[key]} (РЅСѓР¶РЅРѕ ${minPort === 0 ? 0 : 1}вЂ“65535)`);
             return fallback;
         }
         return n;
     };
     const host = typeof src.host === 'string' && src.host.trim() ? src.host.trim() : base.host;
     if (!isBindHost(host)) {
-        if (strict) throw new Error('Некорректный адрес метрик: укажите IP или имя хоста');
+        if (strict) throw new Error('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ Р°РґСЂРµСЃ РјРµС‚СЂРёРє: СѓРєР°Р¶РёС‚Рµ IP РёР»Рё РёРјСЏ С…РѕСЃС‚Р°');
     }
     const token = typeof src.token === 'string' ? src.token.trim() : String(base.token || '');
     if (token && !/^[A-Za-z0-9._~+/=-]{8,256}$/.test(token)) {
-        if (strict) throw new Error('Токен метрик: допустимы латиница, цифры и символы . _ ~ + / = - (8–256)');
+        if (strict) throw new Error('РўРѕРєРµРЅ РјРµС‚СЂРёРє: РґРѕРїСѓСЃС‚РёРјС‹ Р»Р°С‚РёРЅРёС†Р°, С†РёС„СЂС‹ Рё СЃРёРјРІРѕР»С‹ . _ ~ + / = - (8вЂ“256)');
     }
     return {
         enabled: src.enabled === undefined ? !!base.enabled : !!src.enabled,
         host,
-        port: portOf('port', base.port, 'внутренний порт метрик'),
-        publicPort: portOf('publicPort', portOf('port', base.port, 'порт метрик'), 'внешний порт метрик'),
+        port: portOf('port', base.port, 'РІРЅСѓС‚СЂРµРЅРЅРёР№ РїРѕСЂС‚ РјРµС‚СЂРёРє'),
+        publicPort: portOf('publicPort', portOf('port', base.port, 'РїРѕСЂС‚ РјРµС‚СЂРёРє'), 'РІРЅРµС€РЅРёР№ РїРѕСЂС‚ РјРµС‚СЂРёРє'),
         format: src.format === 'prometheus' ? 'prometheus' : 'json',
         token,
         tls: src.tls === false || src.tls === '0' ? false : src.tls === true ? true : 'auto',
@@ -1085,8 +1085,8 @@ function writeAppSettings(settings) {
     writeJson(APP_SETTINGS_FILE, settings, 0o600);
 }
 
-// Приводим сохранённые настройки к новому адресу репозитория один раз при
-// старте: файл переживает обновления панели, поэтому сам не обновится.
+// РџСЂРёРІРѕРґРёРј СЃРѕС…СЂР°РЅС‘РЅРЅС‹Рµ РЅР°СЃС‚СЂРѕР№РєРё Рє РЅРѕРІРѕРјСѓ Р°РґСЂРµСЃСѓ СЂРµРїРѕР·РёС‚РѕСЂРёСЏ РѕРґРёРЅ СЂР°Р· РїСЂРё
+// СЃС‚Р°СЂС‚Рµ: С„Р°Р№Р» РїРµСЂРµР¶РёРІР°РµС‚ РѕР±РЅРѕРІР»РµРЅРёСЏ РїР°РЅРµР»Рё, РїРѕСЌС‚РѕРјСѓ СЃР°Рј РЅРµ РѕР±РЅРѕРІРёС‚СЃСЏ.
 function migrateLegacySettings() {
     try {
         const raw = readJson(APP_SETTINGS_FILE, null);
@@ -1095,7 +1095,7 @@ function migrateLegacySettings() {
         if (fixed === raw.apk.url) return false;
         raw.apk.url = fixed;
         writeJson(APP_SETTINGS_FILE, raw, 0o600);
-        console.log(`Настройки приложения: ссылка на APK переведена на ${fixed}`);
+        console.log(`РќР°СЃС‚СЂРѕР№РєРё РїСЂРёР»РѕР¶РµРЅРёСЏ: СЃСЃС‹Р»РєР° РЅР° APK РїРµСЂРµРІРµРґРµРЅР° РЅР° ${fixed}`);
         return true;
     } catch (e) {
         return false;
@@ -1115,7 +1115,7 @@ function resolveApkFile() {
         try {
             const st = fs.statSync(p);
             if (st.isFile() && st.size > 0) return { path: p, stat: st };
-        } catch (e) { /* нет файла */ }
+        } catch (e) { /* РЅРµС‚ С„Р°Р№Р»Р° */ }
     }
     return null;
 }
@@ -1138,7 +1138,7 @@ function apkVersionFromFile() {
     try {
         const v = fs.readFileSync(path.join(APP_DIR, 'app', 'version.txt'), 'utf8').trim();
         if (/^[0-9A-Za-z._-]{1,32}$/.test(v)) return v;
-    } catch (e) { /* нет файла */ }
+    } catch (e) { /* РЅРµС‚ С„Р°Р№Р»Р° */ }
     return '';
 }
 function apkVersionFromDisk(settings) {
@@ -1146,10 +1146,10 @@ function apkVersionFromDisk(settings) {
     return apkVersionFromFile();
 }
 
-// Версию APK берём из последнего релиза приложения, а не из файла в панели:
-// иначе после обновления приложения панель продолжает показывать старую
-// версию (кнопка «Обновить» перечитывала тот же устаревший version.txt).
-// Результат кешируется на 10 минут; ?refresh=1 обновляет его принудительно.
+// Р’РµСЂСЃРёСЋ APK Р±РµСЂС‘Рј РёР· РїРѕСЃР»РµРґРЅРµРіРѕ СЂРµР»РёР·Р° РїСЂРёР»РѕР¶РµРЅРёСЏ, Р° РЅРµ РёР· С„Р°Р№Р»Р° РІ РїР°РЅРµР»Рё:
+// РёРЅР°С‡Рµ РїРѕСЃР»Рµ РѕР±РЅРѕРІР»РµРЅРёСЏ РїСЂРёР»РѕР¶РµРЅРёСЏ РїР°РЅРµР»СЊ РїСЂРѕРґРѕР»Р¶Р°РµС‚ РїРѕРєР°Р·С‹РІР°С‚СЊ СЃС‚Р°СЂСѓСЋ
+// РІРµСЂСЃРёСЋ (РєРЅРѕРїРєР° В«РћР±РЅРѕРІРёС‚СЊВ» РїРµСЂРµС‡РёС‚С‹РІР°Р»Р° С‚РѕС‚ Р¶Рµ СѓСЃС‚Р°СЂРµРІС€РёР№ version.txt).
+// Р РµР·СѓР»СЊС‚Р°С‚ РєРµС€РёСЂСѓРµС‚СЃСЏ РЅР° 10 РјРёРЅСѓС‚; ?refresh=1 РѕР±РЅРѕРІР»СЏРµС‚ РµРіРѕ РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕ.
 async function fetchLatestAppVersion(force = false) {
     const override = appVersionOverride();
     if (override) return override;
@@ -1163,17 +1163,17 @@ async function fetchLatestAppVersion(force = false) {
             headers: { 'User-Agent': 'servpanel', Accept: 'application/vnd.github+json' },
             signal: AbortSignal.timeout(5000)
         });
-        if (!res.ok) throw new Error('GitHub ответил ' + res.status);
+        if (!res.ok) throw new Error('GitHub РѕС‚РІРµС‚РёР» ' + res.status);
         const data = await res.json();
         const version = normalizeAppVersion(data && (data.tag_name || data.name));
-        if (!version) throw new Error('в последнем релизе нет номера версии');
+        if (!version) throw new Error('РІ РїРѕСЃР»РµРґРЅРµРј СЂРµР»РёР·Рµ РЅРµС‚ РЅРѕРјРµСЂР° РІРµСЂСЃРёРё');
         appVersionCache = { at: Date.now(), value: version, error: '' };
         return version;
     } catch (e) {
         appVersionCache = {
             at: Date.now(),
             value: appVersionCache.value || '',
-            error: e && e.message ? e.message : 'ошибка запроса'
+            error: e && e.message ? e.message : 'РѕС€РёР±РєР° Р·Р°РїСЂРѕСЃР°'
         };
         return appVersionCache.value || fallback;
     }
@@ -1244,7 +1244,7 @@ function diskUsageCached() {
             percent: df[3] || '0%'
         };
         if (parsed.total > 0) disk = parsed;
-    } catch (e) { /* не Linux */ }
+    } catch (e) { /* РЅРµ Linux */ }
     diskUsageCached.at = now;
     diskUsageCached.value = disk;
     return disk;
@@ -1252,8 +1252,8 @@ function diskUsageCached() {
 diskUsageCached.at = 0;
 diskUsageCached.value = null;
 
-// Счётчики интерфейсов из /sys/class/net: не требуют root и дают
-// честные байты по eth0/awg0/awg1, а не только сумму по клиентам.
+// РЎС‡С‘С‚С‡РёРєРё РёРЅС‚РµСЂС„РµР№СЃРѕРІ РёР· /sys/class/net: РЅРµ С‚СЂРµР±СѓСЋС‚ root Рё РґР°СЋС‚
+// С‡РµСЃС‚РЅС‹Рµ Р±Р°Р№С‚С‹ РїРѕ eth0/awg0/awg1, Р° РЅРµ С‚РѕР»СЊРєРѕ СЃСѓРјРјСѓ РїРѕ РєР»РёРµРЅС‚Р°Рј.
 function ifaceCounters() {
     const out = [];
     let names = [];
@@ -1264,7 +1264,7 @@ function ifaceCounters() {
             const rx = Number(readTextSafe(`/sys/class/net/${name}/statistics/rx_bytes`).trim()) || 0;
             const tx = Number(readTextSafe(`/sys/class/net/${name}/statistics/tx_bytes`).trim()) || 0;
             out.push({ iface: name, rx, tx });
-        } catch (e) { /* пропускаем */ }
+        } catch (e) { /* РїСЂРѕРїСѓСЃРєР°РµРј */ }
     }
     return out.sort((a, b) => a.iface.localeCompare(b.iface));
 }
@@ -1391,7 +1391,7 @@ function metricsRequestHandler(settings) {
             }
         } else if (!isLoopbackHost(settings.host)) {
             return res.status(403).json({
-                error: 'Токен метрик не задан. Порт открыт наружу — задайте токен в панели.'
+                error: 'РўРѕРєРµРЅ РјРµС‚СЂРёРє РЅРµ Р·Р°РґР°РЅ. РџРѕСЂС‚ РѕС‚РєСЂС‹С‚ РЅР°СЂСѓР¶Сѓ вЂ” Р·Р°РґР°Р№С‚Рµ С‚РѕРєРµРЅ РІ РїР°РЅРµР»Рё.'
             });
         }
         const snapshot = metricsSnapshot();
@@ -1408,7 +1408,7 @@ function metricsRequestHandler(settings) {
 function stopMetricsServer() {
     if (metricsServer) {
         try {
-            // keep-alive соединения не должны держать процесс после выключения.
+            // keep-alive СЃРѕРµРґРёРЅРµРЅРёСЏ РЅРµ РґРѕР»Р¶РЅС‹ РґРµСЂР¶Р°С‚СЊ РїСЂРѕС†РµСЃСЃ РїРѕСЃР»Рµ РІС‹РєР»СЋС‡РµРЅРёСЏ.
             if (typeof metricsServer.closeAllConnections === 'function') metricsServer.closeAllConnections();
             else if (typeof metricsServer.closeIdleConnections === 'function') metricsServer.closeIdleConnections();
         } catch (e) { /* ignore */ }
@@ -1427,13 +1427,13 @@ function startMetricsServer(settings) {
     if (cfg.tls !== false) {
         try { creds = loadTlsCredentials(); } catch (e) {
             metricsRuntime = { running: false, port: null, tls: false, error: e.message };
-            console.error('Метрики: не удалось прочитать TLS-сертификат:', e.message);
+            console.error('РњРµС‚СЂРёРєРё: РЅРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ TLS-СЃРµСЂС‚РёС„РёРєР°С‚:', e.message);
             if (cfg.tls === true) return metricsRuntime;
         }
     }
     if (cfg.tls === true && !creds) {
-        metricsRuntime = { running: false, port: null, tls: false, error: 'TLS включён, но сертификат не найден' };
-        console.error('Метрики: TLS включён, но PANEL_TLS_CERT/PANEL_TLS_KEY не найдены.');
+        metricsRuntime = { running: false, port: null, tls: false, error: 'TLS РІРєР»СЋС‡С‘РЅ, РЅРѕ СЃРµСЂС‚РёС„РёРєР°С‚ РЅРµ РЅР°Р№РґРµРЅ' };
+        console.error('РњРµС‚СЂРёРєРё: TLS РІРєР»СЋС‡С‘РЅ, РЅРѕ PANEL_TLS_CERT/PANEL_TLS_KEY РЅРµ РЅР°Р№РґРµРЅС‹.');
         return metricsRuntime;
     }
     const http = require('http');
@@ -1444,7 +1444,7 @@ function startMetricsServer(settings) {
     const srv = creds ? https.createServer(creds, metricsApp) : http.createServer(metricsApp);
     srv.on('error', err => {
         metricsRuntime = { running: false, port: null, tls: !!creds, error: err.message };
-        console.error('Метрики: не удалось открыть порт', cfg.port, '-', err.message);
+        console.error('РњРµС‚СЂРёРєРё: РЅРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ РїРѕСЂС‚', cfg.port, '-', err.message);
     });
     srv.listen(cfg.port, cfg.host, () => {
         const actual = srv.address();
@@ -1459,8 +1459,8 @@ function startMetricsServer(settings) {
     metricsServer = srv;
     return metricsRuntime;
 }
-// Ждём фактического открытия порта: listen() асинхронный, а ответ API
-// должен уже содержать running/error, иначе интерфейс покажет «ошибка».
+// Р–РґС‘Рј С„Р°РєС‚РёС‡РµСЃРєРѕРіРѕ РѕС‚РєСЂС‹С‚РёСЏ РїРѕСЂС‚Р°: listen() Р°СЃРёРЅС…СЂРѕРЅРЅС‹Р№, Р° РѕС‚РІРµС‚ API
+// РґРѕР»Р¶РµРЅ СѓР¶Рµ СЃРѕРґРµСЂР¶Р°С‚СЊ running/error, РёРЅР°С‡Рµ РёРЅС‚РµСЂС„РµР№СЃ РїРѕРєР°Р¶РµС‚ В«РѕС€РёР±РєР°В».
 function waitForMetrics(timeoutMs = 2000) {
     return new Promise(resolve => {
         const started = Date.now();
@@ -1479,7 +1479,7 @@ function metricsUrl(settings, host, port, tls) {
     return `${scheme}://${h}${port === defaultPort ? '' : ':' + port}${settings.path || '/metrics'}`;
 }
 function metricsRuntimeInfo(settings, requestHost) {
-    const externalHost = panelDomain() || requestHost || '<домен-или-IP>';
+    const externalHost = panelDomain() || requestHost || '<РґРѕРјРµРЅ-РёР»Рё-IP>';
     return {
         enabled: !!settings.enabled,
         running: !!metricsRuntime.running,
@@ -1524,8 +1524,8 @@ function appUrlSuggestion(req) {
     const domain = panelDomain();
     const reqHost = String((req && req.hostname) || '').replace(/^\[|\]$/g, '');
     const usable = h => !!h && h !== '0.0.0.0' && h !== '::' && h !== '::0';
-    // Домен панели — самый надёжный адрес; иначе берём хост, по которому
-    // пришёл запрос (он точно рабочий), и только потом адрес bind.
+    // Р”РѕРјРµРЅ РїР°РЅРµР»Рё вЂ” СЃР°РјС‹Р№ РЅР°РґС‘Р¶РЅС‹Р№ Р°РґСЂРµСЃ; РёРЅР°С‡Рµ Р±РµСЂС‘Рј С…РѕСЃС‚, РїРѕ РєРѕС‚РѕСЂРѕРјСѓ
+    // РїСЂРёС€С‘Р» Р·Р°РїСЂРѕСЃ (РѕРЅ С‚РѕС‡РЅРѕ СЂР°Р±РѕС‡РёР№), Рё С‚РѕР»СЊРєРѕ РїРѕС‚РѕРј Р°РґСЂРµСЃ bind.
     const pick = bind => (domain || (usable(reqHost) ? reqHost : '') || (usable(bind) ? bind : '127.0.0.1'));
     if (PANEL_TLS_PORT) {
         const host = pick(PANEL_TLS_HOST);
@@ -1551,14 +1551,14 @@ function appStatusPayload(req, remoteVersion) {
     const warnings = [];
     if (settings.metrics.enabled) {
         if (!settings.metrics.token && !isLoopbackHost(settings.metrics.host)) {
-            warnings.push('Метрики открыты наружу без токена: любой, кто знает порт, увидит нагрузку и число клиентов.');
+            warnings.push('РњРµС‚СЂРёРєРё РѕС‚РєСЂС‹С‚С‹ РЅР°СЂСѓР¶Сѓ Р±РµР· С‚РѕРєРµРЅР°: Р»СЋР±РѕР№, РєС‚Рѕ Р·РЅР°РµС‚ РїРѕСЂС‚, СѓРІРёРґРёС‚ РЅР°РіСЂСѓР·РєСѓ Рё С‡РёСЃР»Рѕ РєР»РёРµРЅС‚РѕРІ.');
         }
         if (!metricsRuntimeInfo(settings.metrics, reqHost).tls && !isLoopbackHost(settings.metrics.host)) {
-            warnings.push('Метрики отдаются по HTTP: токен и данные видны по пути. Используйте HTTPS или VPN.');
+            warnings.push('РњРµС‚СЂРёРєРё РѕС‚РґР°СЋС‚СЃСЏ РїРѕ HTTP: С‚РѕРєРµРЅ Рё РґР°РЅРЅС‹Рµ РІРёРґРЅС‹ РїРѕ РїСѓС‚Рё. РСЃРїРѕР»СЊР·СѓР№С‚Рµ HTTPS РёР»Рё VPN.');
         }
     }
     if (!WEB_ENABLED && !resolveTlsCredentials()) {
-        warnings.push('Веб-интерфейс выключен, но HTTPS не настроен: сессия panel.sid ходит по HTTP и может быть перехвачена.');
+        warnings.push('Р’РµР±-РёРЅС‚РµСЂС„РµР№СЃ РІС‹РєР»СЋС‡РµРЅ, РЅРѕ HTTPS РЅРµ РЅР°СЃС‚СЂРѕРµРЅ: СЃРµСЃСЃРёСЏ panel.sid С…РѕРґРёС‚ РїРѕ HTTP Рё РјРѕР¶РµС‚ Р±С‹С‚СЊ РїРµСЂРµС…РІР°С‡РµРЅР°.');
     }
     return {
         apk: apkInfo(settings, { remoteVersion }),
@@ -1582,9 +1582,9 @@ function appStatusPayload(req, remoteVersion) {
 
 if (WEB_ENABLED) {
     app.use(express.static(path.join(APP_DIR, 'public'), { index: false }));
-    // Carbon — основной интерфейс. Старая панель остаётся на /old/.
-    // Корень отдаёт Carbon сразу (200), а не редирект: так проверка
-    // панели после обновления видит версию и не откатывает сборку.
+    // Carbon вЂ” РѕСЃРЅРѕРІРЅРѕР№ РёРЅС‚РµСЂС„РµР№СЃ. РЎС‚Р°СЂР°СЏ РїР°РЅРµР»СЊ РѕСЃС‚Р°С‘С‚СЃСЏ РЅР° /old/.
+    // РљРѕСЂРµРЅСЊ РѕС‚РґР°С‘С‚ Carbon СЃСЂР°Р·Сѓ (200), Р° РЅРµ СЂРµРґРёСЂРµРєС‚: С‚Р°Рє РїСЂРѕРІРµСЂРєР°
+    // РїР°РЅРµР»Рё РїРѕСЃР»Рµ РѕР±РЅРѕРІР»РµРЅРёСЏ РІРёРґРёС‚ РІРµСЂСЃРёСЋ Рё РЅРµ РѕС‚РєР°С‚С‹РІР°РµС‚ СЃР±РѕСЂРєСѓ.
     app.get('/', (req, res) => {
         try {
             let html = fs.readFileSync(path.join(APP_DIR, 'public', 'carbon', 'index.html'), 'utf8');
@@ -1604,7 +1604,7 @@ if (WEB_ENABLED) {
             if (!/<base\s/i.test(html)) html = html.replace(/<head([^>]*)>/i, '<head$1><base href="/">');
             res.type('html').send(html);
         } catch (e) {
-            res.status(500).type('text/plain').send('Старая панель недоступна');
+            res.status(500).type('text/plain').send('РЎС‚Р°СЂР°СЏ РїР°РЅРµР»СЊ РЅРµРґРѕСЃС‚СѓРїРЅР°');
         }
     });
 } else {
@@ -1615,7 +1615,7 @@ if (WEB_ENABLED) {
 }
 
 // ---------------------------------------------------------------------------
-// Ограничение частоты запросов ко всем /api/* (защита от перебора и флуда)
+// РћРіСЂР°РЅРёС‡РµРЅРёРµ С‡Р°СЃС‚РѕС‚С‹ Р·Р°РїСЂРѕСЃРѕРІ РєРѕ РІСЃРµРј /api/* (Р·Р°С‰РёС‚Р° РѕС‚ РїРµСЂРµР±РѕСЂР° Рё С„Р»СѓРґР°)
 // ---------------------------------------------------------------------------
 const RATE_WINDOWS = {
     login: { max: 30, ms: 60 * 1000 },
@@ -1629,8 +1629,8 @@ function clientIp(req) {
     const loopback = peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1';
     const xff = req.headers['x-forwarded-for'];
     if (loopback && xff) {
-        // nginx добавляет реальный IP последним; доверяем только локальному прокси,
-        // иначе клиент мог бы подделать заголовок и обойти лимиты/fail2ban.
+        // nginx РґРѕР±Р°РІР»СЏРµС‚ СЂРµР°Р»СЊРЅС‹Р№ IP РїРѕСЃР»РµРґРЅРёРј; РґРѕРІРµСЂСЏРµРј С‚РѕР»СЊРєРѕ Р»РѕРєР°Р»СЊРЅРѕРјСѓ РїСЂРѕРєСЃРё,
+        // РёРЅР°С‡Рµ РєР»РёРµРЅС‚ РјРѕРі Р±С‹ РїРѕРґРґРµР»Р°С‚СЊ Р·Р°РіРѕР»РѕРІРѕРє Рё РѕР±РѕР№С‚Рё Р»РёРјРёС‚С‹/fail2ban.
         const parts = String(xff).split(',').map(s => s.trim()).filter(Boolean);
         if (parts.length) return parts[parts.length - 1];
     }
@@ -1655,7 +1655,7 @@ app.use('/api', (req, res, next) => {
     if (b.count > conf.max) {
         const retry = Math.max(1, Math.ceil((b.start + conf.ms - now) / 1000));
         res.setHeader('Retry-After', String(retry));
-        return res.status(429).json({ error: `Слишком много запросов. Повторите через ${retry} с.` });
+        return res.status(429).json({ error: `РЎР»РёС€РєРѕРј РјРЅРѕРіРѕ Р·Р°РїСЂРѕСЃРѕРІ. РџРѕРІС‚РѕСЂРёС‚Рµ С‡РµСЂРµР· ${retry} СЃ.` });
     }
     next();
 });
@@ -1665,7 +1665,7 @@ setInterval(() => {
 }, 5 * 60 * 1000).unref();
 
 // ---------------------------------------------------------------------------
-// Аутентификация + защита от подбора
+// РђСѓС‚РµРЅС‚РёС„РёРєР°С†РёСЏ + Р·Р°С‰РёС‚Р° РѕС‚ РїРѕРґР±РѕСЂР°
 // ---------------------------------------------------------------------------
 const loginFails = new Map(); // ip -> {count, until}
 
@@ -1673,7 +1673,7 @@ function loginKey(req) { return clientIp(req); }
 function loginBlocked(key) {
     const e = loginFails.get(key);
     if (!e) return 0;
-    // until = 0 означает «ещё не заблокирован», а не «блокировка истекла»
+    // until = 0 РѕР·РЅР°С‡Р°РµС‚ В«РµС‰С‘ РЅРµ Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅВ», Р° РЅРµ В«Р±Р»РѕРєРёСЂРѕРІРєР° РёСЃС‚РµРєР»Р°В»
     if (e.until && Date.now() > e.until) { loginFails.delete(key); return 0; }
     if (!e.until) return 0;
     return Math.ceil((e.until - Date.now()) / 1000);
@@ -1694,7 +1694,7 @@ setInterval(() => {
     }
 }, 10 * 60 * 1000).unref();
 
-// Журнал входов для fail2ban (формат: "<дата> FAILED LOGIN from <IP> ...")
+// Р–СѓСЂРЅР°Р» РІС…РѕРґРѕРІ РґР»СЏ fail2ban (С„РѕСЂРјР°С‚: "<РґР°С‚Р°> FAILED LOGIN from <IP> ...")
 function authLog(ip, ok, username, note = '') {
     try {
         ensureDir(path.dirname(AUTH_LOG), 0o750);
@@ -1707,7 +1707,7 @@ function authLog(ip, ok, username, note = '') {
 }
 
 // ---------------------------------------------------------------------------
-// Пользователи и роли (admin / viewer)
+// РџРѕР»СЊР·РѕРІР°С‚РµР»Рё Рё СЂРѕР»Рё (admin / viewer)
 // ---------------------------------------------------------------------------
 function loadUsers() {
     const j = readJson(USERS_FILE, { users: [] });
@@ -1741,7 +1741,7 @@ function findUser(username) {
 }
 
 // ---------------------------------------------------------------------------
-// TOTP (2FA, RFC 6238): без внешних зависимостей
+// TOTP (2FA, RFC 6238): Р±РµР· РІРЅРµС€РЅРёС… Р·Р°РІРёСЃРёРјРѕСЃС‚РµР№
 // ---------------------------------------------------------------------------
 const B32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 function base32Encode(buf) {
@@ -1828,8 +1828,8 @@ function setTotpState(username, patch) {
     saveUsers(users);
 }
 
-// QR-коды для 2FA и экспорта клиента. Пакет qrcode необязателен: без него
-// панель продолжает работать, просто не рисует QR.
+// QR-РєРѕРґС‹ РґР»СЏ 2FA Рё СЌРєСЃРїРѕСЂС‚Р° РєР»РёРµРЅС‚Р°. РџР°РєРµС‚ qrcode РЅРµРѕР±СЏР·Р°С‚РµР»РµРЅ: Р±РµР· РЅРµРіРѕ
+// РїР°РЅРµР»СЊ РїСЂРѕРґРѕР»Р¶Р°РµС‚ СЂР°Р±РѕС‚Р°С‚СЊ, РїСЂРѕСЃС‚Рѕ РЅРµ СЂРёСЃСѓРµС‚ QR.
 let QRCodeLib = null;
 try { QRCodeLib = require('qrcode'); } catch (e) { QRCodeLib = null; }
 async function qrDataUrl(text) {
@@ -1839,15 +1839,15 @@ async function qrDataUrl(text) {
 }
 
 // ---------------------------------------------------------------------------
-// Вход
+// Р’С…РѕРґ
 // ---------------------------------------------------------------------------
 app.post('/api/login', (req, res) => {
     const key = loginKey(req);
     const blocked = loginBlocked(key);
     if (blocked > 0) {
         authLog(key, false, '-', 'blocked');
-        auditLog(req, 'Вход заблокирован (слишком много попыток)');
-        return res.status(429).json({ error: `Слишком много попыток. Повторите через ${blocked} с.` });
+        auditLog(req, 'Р’С…РѕРґ Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅ (СЃР»РёС€РєРѕРј РјРЅРѕРіРѕ РїРѕРїС‹С‚РѕРє)');
+        return res.status(429).json({ error: `РЎР»РёС€РєРѕРј РјРЅРѕРіРѕ РїРѕРїС‹С‚РѕРє. РџРѕРІС‚РѕСЂРёС‚Рµ С‡РµСЂРµР· ${blocked} СЃ.` });
     }
 
     const username = String((req.body && req.body.username) || 'admin').trim().slice(0, 64) || 'admin';
@@ -1862,8 +1862,8 @@ app.post('/api/login', (req, res) => {
     if (!passwordOk) {
         registerLoginFail(key);
         authLog(key, false, username, 'bad-password');
-        auditLog(req, `Неудачная попытка входа (пользователь ${username})`);
-        return res.status(401).json({ error: 'Неверный пароль' });
+        auditLog(req, `РќРµСѓРґР°С‡РЅР°СЏ РїРѕРїС‹С‚РєР° РІС…РѕРґР° (РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ ${username})`);
+        return res.status(401).json({ error: 'РќРµРІРµСЂРЅС‹Р№ РїР°СЂРѕР»СЊ' });
     }
 
     const st = totpState(user);
@@ -1874,14 +1874,14 @@ app.post('/api/login', (req, res) => {
             if (st.recovery.includes(h)) {
                 secondFactorOk = true;
                 setTotpState(user.username, { totpRecovery: st.recovery.filter(x => x !== h) });
-                auditLog(req, `Использован резервный код 2FA (${user.username})`);
+                auditLog(req, `РСЃРїРѕР»СЊР·РѕРІР°РЅ СЂРµР·РµСЂРІРЅС‹Р№ РєРѕРґ 2FA (${user.username})`);
             }
         }
         if (!secondFactorOk) {
             registerLoginFail(key);
             authLog(key, false, username, 'bad-2fa');
             return res.status(401).json({
-                error: code ? 'Неверный код 2FA' : 'Введите код из приложения-аутентификатора',
+                error: code ? 'РќРµРІРµСЂРЅС‹Р№ РєРѕРґ 2FA' : 'Р’РІРµРґРёС‚Рµ РєРѕРґ РёР· РїСЂРёР»РѕР¶РµРЅРёСЏ-Р°СѓС‚РµРЅС‚РёС„РёРєР°С‚РѕСЂР°',
                 need2fa: true
             });
         }
@@ -1889,12 +1889,12 @@ app.post('/api/login', (req, res) => {
 
     loginFails.delete(key);
     req.session.regenerate(err => {
-        if (err) return res.status(500).json({ error: 'Ошибка сессии' });
+        if (err) return res.status(500).json({ error: 'РћС€РёР±РєР° СЃРµСЃСЃРёРё' });
         req.session.loggedIn = true;
         req.session.user = user.username;
         req.session.role = user.role;
         req.session.save(() => {
-            auditLog(req, `Успешный вход в панель (${user.username}, ${user.role})`);
+            auditLog(req, `РЈСЃРїРµС€РЅС‹Р№ РІС…РѕРґ РІ РїР°РЅРµР»СЊ (${user.username}, ${user.role})`);
             authLog(key, true, user.username);
             res.json({
                 success: true,
@@ -1911,14 +1911,14 @@ app.post('/api/logout', (req, res) => {
     const done = () => { res.clearCookie('panel.sid'); res.json({ success: true }); };
     try {
         req.session.destroy(() => {
-            if (who) auditLog(req, `Выход из панели (${who})`);
+            if (who) auditLog(req, `Р’С‹С…РѕРґ РёР· РїР°РЅРµР»Рё (${who})`);
             done();
         });
     } catch (e) { done(); }
 });
 
-// Внутренний токен панели: её собственный код (сборка каскада) вызывает API
-// от имени администратора без сессии. Токен живёт в памяти процесса.
+// Р’РЅСѓС‚СЂРµРЅРЅРёР№ С‚РѕРєРµРЅ РїР°РЅРµР»Рё: РµС‘ СЃРѕР±СЃС‚РІРµРЅРЅС‹Р№ РєРѕРґ (СЃР±РѕСЂРєР° РєР°СЃРєР°РґР°) РІС‹Р·С‹РІР°РµС‚ API
+// РѕС‚ РёРјРµРЅРё Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° Р±РµР· СЃРµСЃСЃРёРё. РўРѕРєРµРЅ Р¶РёРІС‘С‚ РІ РїР°РјСЏС‚Рё РїСЂРѕС†РµСЃСЃР°.
 const LOCAL_ADMIN_TOKEN = crypto.randomBytes(24).toString('hex');
 function isLocalAdmin(req) {
     return String(req.headers['x-panel-local'] || '') === LOCAL_ADMIN_TOKEN;
@@ -1933,7 +1933,7 @@ const checkAuth = (req, res, next) => {
         return next();
     }
     if (req.session && req.session.loggedIn) {
-        // Совместимость с сессиями, созданными до появления ролей
+        // РЎРѕРІРјРµСЃС‚РёРјРѕСЃС‚СЊ СЃ СЃРµСЃСЃРёСЏРјРё, СЃРѕР·РґР°РЅРЅС‹РјРё РґРѕ РїРѕСЏРІР»РµРЅРёСЏ СЂРѕР»РµР№
         if (!req.session.role) req.session.role = 'admin';
         if (!req.session.user) req.session.user = 'admin';
         return next();
@@ -1942,11 +1942,11 @@ const checkAuth = (req, res, next) => {
 };
 const requireAdmin = (req, res, next) => {
     if (req.session && req.session.loggedIn && req.session.role === 'admin') return next();
-    res.status(403).json({ error: 'Недостаточно прав: нужно войти как администратор' });
+    res.status(403).json({ error: 'РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ: РЅСѓР¶РЅРѕ РІРѕР№С‚Рё РєР°Рє Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ' });
 };
 
-// Пользователи с ролью viewer могут только смотреть: любые изменения и
-// скачивание ключей/конфигов/бэкапов для них закрыты.
+// РџРѕР»СЊР·РѕРІР°С‚РµР»Рё СЃ СЂРѕР»СЊСЋ viewer РјРѕРіСѓС‚ С‚РѕР»СЊРєРѕ СЃРјРѕС‚СЂРµС‚СЊ: Р»СЋР±С‹Рµ РёР·РјРµРЅРµРЅРёСЏ Рё
+// СЃРєР°С‡РёРІР°РЅРёРµ РєР»СЋС‡РµР№/РєРѕРЅС„РёРіРѕРІ/Р±СЌРєР°РїРѕРІ РґР»СЏ РЅРёС… Р·Р°РєСЂС‹С‚С‹.
 const VIEWER_DENIED_GET = [
     /^\/audit/, /^\/users/, /^\/backup/, /^\/fail2ban/, /^\/notify/, /^\/install\//, /^\/diag\//,
     /^\/download\//, /^\/clients\/[^/]+\/key/, /^\/clients\/[^/]+\/export/,
@@ -1958,10 +1958,10 @@ app.use('/api', (req, res, next) => {
     const apiPath = req.originalUrl.replace(/^\/api/, '').split('?')[0];
     if (req.method === 'GET' && !VIEWER_DENIED_GET.some(re => re.test(apiPath))) return next();
     if (req.method === 'POST' && (apiPath === '/logout' || apiPath === '/change-password')) return next();
-    return res.status(403).json({ error: 'Недостаточно прав: режим только просмотра' });
+    return res.status(403).json({ error: 'РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ: СЂРµР¶РёРј С‚РѕР»СЊРєРѕ РїСЂРѕСЃРјРѕС‚СЂР°' });
 });
 
-// Keenetic fleet: отдельный модуль, чтобы не раздувать server.js.
+// Keenetic fleet: РѕС‚РґРµР»СЊРЅС‹Р№ РјРѕРґСѓР»СЊ, С‡С‚РѕР±С‹ РЅРµ СЂР°Р·РґСѓРІР°С‚СЊ server.js.
 const keenetic = createKeenetic({
     DATA_DIR, SECRETS, TEST_MODE, DEMO_MODE, checkAuth, requireAdmin, auditLog
 });
@@ -1969,24 +1969,24 @@ keenetic.registerRoutes(app);
 keenetic.start();
 
 // ---------------------------------------------------------------------------
-// Сбор истории трафика
+// РЎР±РѕСЂ РёСЃС‚РѕСЂРёРё С‚СЂР°С„РёРєР°
 // ---------------------------------------------------------------------------
-// Храним скорость (байт/с), а не метки времени с «плавающей» длиной массива.
-// Это даёт стабильное окно по времени и позволяет выбирать период.
+// РҐСЂР°РЅРёРј СЃРєРѕСЂРѕСЃС‚СЊ (Р±Р°Р№С‚/СЃ), Р° РЅРµ РјРµС‚РєРё РІСЂРµРјРµРЅРё СЃ В«РїР»Р°РІР°СЋС‰РµР№В» РґР»РёРЅРѕР№ РјР°СЃСЃРёРІР°.
+// Р­С‚Рѕ РґР°С‘С‚ СЃС‚Р°Р±РёР»СЊРЅРѕРµ РѕРєРЅРѕ РїРѕ РІСЂРµРјРµРЅРё Рё РїРѕР·РІРѕР»СЏРµС‚ РІС‹Р±РёСЂР°С‚СЊ РїРµСЂРёРѕРґ.
 //
-// Две серии на каждый источник:
-//   short — шаг 10 секунд, глубина 24 часа;
-//   long  — шаг 5 минут, глубина 7 суток (строится сворачиванием старых short).
-// Отдаём в график не более 360 точек, усредняя по «корзинам», поэтому кривая
-// ровная, а число точек и подписи оси X не скачут от обновления к обновлению.
-const HISTORY_STEP_MS = 10000;                 // шаг сбора — 10 секунд
-const HISTORY_SHORT_POINTS = 8640;             // 24 часа по 10 секунд
-const HISTORY_LONG_BUCKET = 30;                // 30 сэмплов = 5 минут
-const HISTORY_LONG_POINTS = 2016;              // 7 суток по 5 минут
+// Р”РІРµ СЃРµСЂРёРё РЅР° РєР°Р¶РґС‹Р№ РёСЃС‚РѕС‡РЅРёРє:
+//   short вЂ” С€Р°Рі 10 СЃРµРєСѓРЅРґ, РіР»СѓР±РёРЅР° 24 С‡Р°СЃР°;
+//   long  вЂ” С€Р°Рі 5 РјРёРЅСѓС‚, РіР»СѓР±РёРЅР° 7 СЃСѓС‚РѕРє (СЃС‚СЂРѕРёС‚СЃСЏ СЃРІРѕСЂР°С‡РёРІР°РЅРёРµРј СЃС‚Р°СЂС‹С… short).
+// РћС‚РґР°С‘Рј РІ РіСЂР°С„РёРє РЅРµ Р±РѕР»РµРµ 360 С‚РѕС‡РµРє, СѓСЃСЂРµРґРЅСЏСЏ РїРѕ В«РєРѕСЂР·РёРЅР°РјВ», РїРѕСЌС‚РѕРјСѓ РєСЂРёРІР°СЏ
+// СЂРѕРІРЅР°СЏ, Р° С‡РёСЃР»Рѕ С‚РѕС‡РµРє Рё РїРѕРґРїРёСЃРё РѕСЃРё X РЅРµ СЃРєР°С‡СѓС‚ РѕС‚ РѕР±РЅРѕРІР»РµРЅРёСЏ Рє РѕР±РЅРѕРІР»РµРЅРёСЋ.
+const HISTORY_STEP_MS = 10000;                 // С€Р°Рі СЃР±РѕСЂР° вЂ” 10 СЃРµРєСѓРЅРґ
+const HISTORY_SHORT_POINTS = 8640;             // 24 С‡Р°СЃР° РїРѕ 10 СЃРµРєСѓРЅРґ
+const HISTORY_LONG_BUCKET = 30;                // 30 СЃСЌРјРїР»РѕРІ = 5 РјРёРЅСѓС‚
+const HISTORY_LONG_POINTS = 2016;              // 7 СЃСѓС‚РѕРє РїРѕ 5 РјРёРЅСѓС‚
 const HISTORY_RANGES = { '5m': 300, '1h': 3600, '3h': 10800, '24h': 86400, '7d': 604800 };
-const HISTORY_RENDER_POINTS = 500;             // столько точек максимум рисует график
+const HISTORY_RENDER_POINTS = 500;             // СЃС‚РѕР»СЊРєРѕ С‚РѕС‡РµРє РјР°РєСЃРёРјСѓРј СЂРёСЃСѓРµС‚ РіСЂР°С„РёРє
 const HISTORY_FILE = path.join(DATA_DIR, '.traffic_history.json');
-const HISTORY_SAVE_EVERY = 6;                  // сохранять файл раз в минуту
+const HISTORY_SAVE_EVERY = 6;                  // СЃРѕС…СЂР°РЅСЏС‚СЊ С„Р°Р№Р» СЂР°Р· РІ РјРёРЅСѓС‚Сѓ
 
 let historyData = {};                          // { global: {short, long}, <client>: {short, long} }
 let lastHistoryStats = {};
@@ -2002,7 +2002,7 @@ function historyPush(view, t, rx, tx) {
     const h = historyEnsure(view);
     h.short.push({ t, rx, tx });
     if (h.short.length > HISTORY_SHORT_POINTS) {
-        // Самую старую пятёрку минут сворачиваем в одну точку длинной серии.
+        // РЎР°РјСѓСЋ СЃС‚Р°СЂСѓСЋ РїСЏС‚С‘СЂРєСѓ РјРёРЅСѓС‚ СЃРІРѕСЂР°С‡РёРІР°РµРј РІ РѕРґРЅСѓ С‚РѕС‡РєСѓ РґР»РёРЅРЅРѕР№ СЃРµСЂРёРё.
         const chunk = h.short.splice(0, HISTORY_LONG_BUCKET);
         const sum = chunk.reduce((a, s) => ({ rx: a.rx + s.rx, tx: a.tx + s.tx }), { rx: 0, tx: 0 });
         h.long.push({ t: chunk[Math.floor(chunk.length / 2)].t, rx: sum.rx / chunk.length, tx: sum.tx / chunk.length });
@@ -2028,7 +2028,7 @@ function loadTrafficHistory() {
                 long: (v.long || []).filter(s => s && s.t >= cutoff)
             };
         }
-    } catch (e) { /* файла нет или он битый — начинаем с чистого листа */ }
+    } catch (e) { /* С„Р°Р№Р»Р° РЅРµС‚ РёР»Рё РѕРЅ Р±РёС‚С‹Р№ вЂ” РЅР°С‡РёРЅР°РµРј СЃ С‡РёСЃС‚РѕРіРѕ Р»РёСЃС‚Р° */ }
 }
 
 if (DEMO_MODE) {
@@ -2056,7 +2056,7 @@ function collectHistory() {
             data.forEach(client => {
                 const prev = lastHistoryStats[client.name];
                 lastHistoryStats[client.name] = { rx: client.rx, tx: client.tx, t };
-                // Первый замер клиента пропускаем: иначе рисуется ложный ноль.
+                // РџРµСЂРІС‹Р№ Р·Р°РјРµСЂ РєР»РёРµРЅС‚Р° РїСЂРѕРїСѓСЃРєР°РµРј: РёРЅР°С‡Рµ СЂРёСЃСѓРµС‚СЃСЏ Р»РѕР¶РЅС‹Р№ РЅРѕР»СЊ.
                 if (!prev) return;
                 const dt = (t - prev.t) / 1000;
                 if (dt <= 0 || client.rx < prev.rx || client.tx < prev.tx) return;
@@ -2099,8 +2099,8 @@ function historyFormatLabel(ms, rangeSec, timeZone) {
     }
 }
 
-// Дополняет короткий ряд до maxPoints линейной интерполяцией: форма линии
-// не меняется, но график всегда получает одинаковое число точек.
+// Р”РѕРїРѕР»РЅСЏРµС‚ РєРѕСЂРѕС‚РєРёР№ СЂСЏРґ РґРѕ maxPoints Р»РёРЅРµР№РЅРѕР№ РёРЅС‚РµСЂРїРѕР»СЏС†РёРµР№: С„РѕСЂРјР° Р»РёРЅРёРё
+// РЅРµ РјРµРЅСЏРµС‚СЃСЏ, РЅРѕ РіСЂР°С„РёРє РІСЃРµРіРґР° РїРѕР»СѓС‡Р°РµС‚ РѕРґРёРЅР°РєРѕРІРѕРµ С‡РёСЃР»Рѕ С‚РѕС‡РµРє.
 function historyInterpolate(list, maxPoints) {
     if (list.length >= maxPoints || list.length < 2) return list;
     const out = [];
@@ -2120,7 +2120,7 @@ function historyInterpolate(list, maxPoints) {
     return out;
 }
 
-// Усредняет точки по равным корзинам, чтобы на график ушло не больше maxPoints.
+// РЈСЃСЂРµРґРЅСЏРµС‚ С‚РѕС‡РєРё РїРѕ СЂР°РІРЅС‹Рј РєРѕСЂР·РёРЅР°Рј, С‡С‚РѕР±С‹ РЅР° РіСЂР°С„РёРє СѓС€Р»Рѕ РЅРµ Р±РѕР»СЊС€Рµ maxPoints.
 function historyDownsample(samples, fromMs, toMs, maxPoints) {
     const list = samples.filter(s => s && s.t >= fromMs && s.t <= toMs);
     if (!list.length) return list;
@@ -2180,8 +2180,8 @@ function readMangleSplit() {
 }
 
 // ---------------------------------------------------------------------------
-// Учёт трафика по клиентам: отдельная цепочка mangle AWG_SPLIT.
-// Она только считает пакеты (RETURN), маршрутизацию не меняет.
+// РЈС‡С‘С‚ С‚СЂР°С„РёРєР° РїРѕ РєР»РёРµРЅС‚Р°Рј: РѕС‚РґРµР»СЊРЅР°СЏ С†РµРїРѕС‡РєР° mangle AWG_SPLIT.
+// РћРЅР° С‚РѕР»СЊРєРѕ СЃС‡РёС‚Р°РµС‚ РїР°РєРµС‚С‹ (RETURN), РјР°СЂС€СЂСѓС‚РёР·Р°С†РёСЋ РЅРµ РјРµРЅСЏРµС‚.
 // ---------------------------------------------------------------------------
 let splitAccountingSig = '';
 let splitAccountingAt = 0;
@@ -2211,7 +2211,7 @@ function ensureSplitAccounting(clients, force) {
         const hasRu = !!rootShTry('ipset', ['list', 'ru']).trim();
         splitAccountingDebug.hasRu = hasRu;
         const chainNow = String(rootShTry('iptables', ['-t', 'mangle', '-S', 'AWG_SPLIT']) || '');
-        // Старые правила с комментариями sp:* мешали новому формату — чистим один раз.
+        // РЎС‚Р°СЂС‹Рµ РїСЂР°РІРёР»Р° СЃ РєРѕРјРјРµРЅС‚Р°СЂРёСЏРјРё sp:* РјРµС€Р°Р»Рё РЅРѕРІРѕРјСѓ С„РѕСЂРјР°С‚Сѓ вЂ” С‡РёСЃС‚РёРј РѕРґРёРЅ СЂР°Р·.
         if (chainNow.includes('--comment "sp:')) {
             try { rootSh('iptables', ['-t', 'mangle', '-F', 'AWG_SPLIT']); } catch (e) { /* ignore */ }
         }
@@ -2475,8 +2475,8 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             saveTrafficSplitCache();
         } else if (lastTrafficSplit && lastTrafficSplit.total > 0 &&
             !(balanceMode && !(Array.isArray(lastTrafficSplit.exits) && lastTrafficSplit.exits.length))) {
-            // Счётчики пересозданы вместе с правилами. Не показываем ложные 100% EU,
-            // а масштабируем последние известные доли на текущий трафик.
+            // РЎС‡С‘С‚С‡РёРєРё РїРµСЂРµСЃРѕР·РґР°РЅС‹ РІРјРµСЃС‚Рµ СЃ РїСЂР°РІРёР»Р°РјРё. РќРµ РїРѕРєР°Р·С‹РІР°РµРј Р»РѕР¶РЅС‹Рµ 100% EU,
+            // Р° РјР°СЃС€С‚Р°Р±РёСЂСѓРµРј РїРѕСЃР»РµРґРЅРёРµ РёР·РІРµСЃС‚РЅС‹Рµ РґРѕР»Рё РЅР° С‚РµРєСѓС‰РёР№ С‚СЂР°С„РёРє.
             const prevTotal = lastTrafficSplit.total;
             const k = clientTotal > 0 ? clientTotal / prevTotal : 1;
             tunnel = Math.round(lastTrafficSplit.tunnel * k);
@@ -2532,7 +2532,7 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             };
         }
         res.json(payload);
-    } catch (e) { res.status(500).json({ error: 'Не удалось получить распределение трафика' }); }
+    } catch (e) { res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ СЂР°СЃРїСЂРµРґРµР»РµРЅРёРµ С‚СЂР°С„РёРєР°' }); }
 });
 
 app.get('/api/history', checkAuth, (req, res) => {
@@ -2541,8 +2541,8 @@ app.get('/api/history', checkAuth, (req, res) => {
         const rangeSec = HISTORY_RANGES[rangeKey] || HISTORY_RANGES['1h'];
         const view = String(req.query.view || 'global');
         const h = historyData[view] || { short: [], long: [] };
-        // Выравниваем окно по сетке сбора, чтобы «корзины» не съезжали между
-        // обновлениями и подписи оси X не дёргались.
+        // Р’С‹СЂР°РІРЅРёРІР°РµРј РѕРєРЅРѕ РїРѕ СЃРµС‚РєРµ СЃР±РѕСЂР°, С‡С‚РѕР±С‹ В«РєРѕСЂР·РёРЅС‹В» РЅРµ СЃСЉРµР·Р¶Р°Р»Рё РјРµР¶РґСѓ
+        // РѕР±РЅРѕРІР»РµРЅРёСЏРјРё Рё РїРѕРґРїРёСЃРё РѕСЃРё X РЅРµ РґС‘СЂРіР°Р»РёСЃСЊ.
         const toMs = Math.floor(Date.now() / HISTORY_STEP_MS) * HISTORY_STEP_MS;
         const fromMs = toMs - rangeSec * 1000;
         const points = historyDownsample(h.long.concat(h.short), fromMs, toMs, HISTORY_RENDER_POINTS);
@@ -2556,44 +2556,44 @@ app.get('/api/history', checkAuth, (req, res) => {
             tx: points.map(p => Math.round(p.tx)),
             views: ['global', ...Object.keys(historyData).filter(k => k !== 'global')]
         });
-    } catch (e) { res.status(500).json({ error: 'Ошибка истории трафика' }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° РёСЃС‚РѕСЂРёРё С‚СЂР°С„РёРєР°' }); }
 });
 
-// Часовой пояс панели: применяется к подписям времени на графиках.
+// Р§Р°СЃРѕРІРѕР№ РїРѕСЏСЃ РїР°РЅРµР»Рё: РїСЂРёРјРµРЅСЏРµС‚СЃСЏ Рє РїРѕРґРїРёСЃСЏРј РІСЂРµРјРµРЅРё РЅР° РіСЂР°С„РёРєР°С….
 app.get('/api/panel/settings', checkAuth, (req, res) => {
     try {
         res.json({ ...readPanelSettings(), serverTimezone: DEFAULT_PANEL_TIMEZONE, serverTime: Date.now() });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось прочитать настройки панели' });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ РЅР°СЃС‚СЂРѕР№РєРё РїР°РЅРµР»Рё' });
     }
 });
 
 app.post('/api/panel/settings', checkAuth, requireAdmin, (req, res) => {
     try {
         const requested = String((req.body && req.body.timezone) || '').trim();
-        if (!requested) return res.status(400).json({ error: 'Укажите часовой пояс' });
-        if (!isValidTimeZone(requested)) return res.status(400).json({ error: 'Неизвестный часовой пояс: ' + requested.slice(0, 64) });
+        if (!requested) return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ С‡Р°СЃРѕРІРѕР№ РїРѕСЏСЃ' });
+        if (!isValidTimeZone(requested)) return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ С‡Р°СЃРѕРІРѕР№ РїРѕСЏСЃ: ' + requested.slice(0, 64) });
         const saved = writePanelSettings({ timezone: requested });
         res.json({ success: true, ...saved, serverTimezone: DEFAULT_PANEL_TIMEZONE, serverTime: Date.now() });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось сохранить часовой пояс' });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ С‡Р°СЃРѕРІРѕР№ РїРѕСЏСЃ' });
     }
 });
 
 // ---------------------------------------------------------------------------
-// Системные метрики и статус безопасности
+// РЎРёСЃС‚РµРјРЅС‹Рµ РјРµС‚СЂРёРєРё Рё СЃС‚Р°С‚СѓСЃ Р±РµР·РѕРїР°СЃРЅРѕСЃС‚Рё
 // ---------------------------------------------------------------------------
-// loadavg — это не загрузка CPU, а число задач в очереди (включая D-state и
-// I/O). На VPS с 1–2 ядрами loadavg 2.0 легко даёт «100%», хотя htop показывает
-// 10–20%. Считаем реальную загрузку по дельтам /proc/stat (или os.cpus()).
+// loadavg вЂ” СЌС‚Рѕ РЅРµ Р·Р°РіСЂСѓР·РєР° CPU, Р° С‡РёСЃР»Рѕ Р·Р°РґР°С‡ РІ РѕС‡РµСЂРµРґРё (РІРєР»СЋС‡Р°СЏ D-state Рё
+// I/O). РќР° VPS СЃ 1вЂ“2 СЏРґСЂР°РјРё loadavg 2.0 Р»РµРіРєРѕ РґР°С‘С‚ В«100%В», С…РѕС‚СЏ htop РїРѕРєР°Р·С‹РІР°РµС‚
+// 10вЂ“20%. РЎС‡РёС‚Р°РµРј СЂРµР°Р»СЊРЅСѓСЋ Р·Р°РіСЂСѓР·РєСѓ РїРѕ РґРµР»СЊС‚Р°Рј /proc/stat (РёР»Рё os.cpus()).
 function readCpuTimes() {
     if (process.platform === 'linux') {
         try {
             const line = fs.readFileSync('/proc/stat', 'utf8').split('\n')[0].trim();
             const n = line.split(/\s+/).slice(1).map(Number);
             if (n.length >= 4 && n.every(v => Number.isFinite(v))) {
-                // user nice system idle iowait irq softirq steal (guest не считаем:
-                // он уже входит в user/nice и дал бы двойной учёт).
+                // user nice system idle iowait irq softirq steal (guest РЅРµ СЃС‡РёС‚Р°РµРј:
+                // РѕРЅ СѓР¶Рµ РІС…РѕРґРёС‚ РІ user/nice Рё РґР°Р» Р±С‹ РґРІРѕР№РЅРѕР№ СѓС‡С‘С‚).
                 const idle = n[3] + (n[4] || 0);
                 const total = n.slice(0, 8).reduce((a, b) => a + b, 0);
                 if (total > 0) return { total, idle };
@@ -2616,7 +2616,7 @@ let cpuPrev = readCpuTimes();
 let cpuCached = { usage: null, at: 0 };
 function cpuUsagePercent() {
     const now = Date.now();
-    // Не пересчитываем на каждый быстрый запрос: слишком малая дельта даёт шум.
+    // РќРµ РїРµСЂРµСЃС‡РёС‚С‹РІР°РµРј РЅР° РєР°Р¶РґС‹Р№ Р±С‹СЃС‚СЂС‹Р№ Р·Р°РїСЂРѕСЃ: СЃР»РёС€РєРѕРј РјР°Р»Р°СЏ РґРµР»СЊС‚Р° РґР°С‘С‚ С€СѓРј.
     if (cpuCached.usage !== null && now - cpuCached.at < 900) return cpuCached.usage;
     const cur = readCpuTimes();
     if (cur && cpuPrev) {
@@ -2630,7 +2630,7 @@ function cpuUsagePercent() {
         }
     }
     if (cur && cur.total > 0) {
-        // Первый запрос после старта: средняя загрузка с момента boot.
+        // РџРµСЂРІС‹Р№ Р·Р°РїСЂРѕСЃ РїРѕСЃР»Рµ СЃС‚Р°СЂС‚Р°: СЃСЂРµРґРЅСЏСЏ Р·Р°РіСЂСѓР·РєР° СЃ РјРѕРјРµРЅС‚Р° boot.
         const usage = Math.max(0, Math.min(100, ((cur.total - cur.idle) / cur.total) * 100));
         cpuPrev = cur;
         if (cpuCached.usage === null) cpuCached = { usage, at: now };
@@ -2640,8 +2640,8 @@ function cpuUsagePercent() {
     return Math.max(0, Math.min(100, (os.loadavg()[0] / cores) * 100));
 }
 function memoryUsage() {
-    // os.freemem() на Linux — это только MemFree, без кэша. Из-за этого панель
-    // показывала почти 100% RAM. MemAvailable — то же, что учитывает htop.
+    // os.freemem() РЅР° Linux вЂ” СЌС‚Рѕ С‚РѕР»СЊРєРѕ MemFree, Р±РµР· РєСЌС€Р°. РР·-Р·Р° СЌС‚РѕРіРѕ РїР°РЅРµР»СЊ
+    // РїРѕРєР°Р·С‹РІР°Р»Р° РїРѕС‡С‚Рё 100% RAM. MemAvailable вЂ” С‚Рѕ Р¶Рµ, С‡С‚Рѕ СѓС‡РёС‚С‹РІР°РµС‚ htop.
     try {
         const txt = fs.readFileSync('/proc/meminfo', 'utf8');
         const kb = key => {
@@ -2678,10 +2678,10 @@ app.get('/api/sysinfo', checkAuth, (req, res) => {
             ram: ramPercent,
             load: Number(os.loadavg()[0] || 0).toFixed(2),
             cores: os.cpus().length,
-            uptime: `${d}д ${h}ч ${m}м`,
+            uptime: `${d}Рґ ${h}С‡ ${m}Рј`,
             disk
         });
-    } catch (e) { res.status(500).json({ error: 'Ошибка чтения метрик' }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ РјРµС‚СЂРёРє' }); }
 });
 
 app.get('/api/security/status', checkAuth, (req, res) => {
@@ -2695,8 +2695,8 @@ app.get('/api/security/status', checkAuth, (req, res) => {
         passFileExists,
         secretsFileExists: fs.existsSync(SECRETS_FILE),
         https: String(req.headers['x-forwarded-proto'] || '').split(',')[0] === 'https' || req.secure === true,
-        // HTTPS настроен на сервере (сертификат и ssl в конфиге панели),
-        // независимо от того, как пришёл текущий запрос.
+        // HTTPS РЅР°СЃС‚СЂРѕРµРЅ РЅР° СЃРµСЂРІРµСЂРµ (СЃРµСЂС‚РёС„РёРєР°С‚ Рё ssl РІ РєРѕРЅС„РёРіРµ РїР°РЅРµР»Рё),
+        // РЅРµР·Р°РІРёСЃРёРјРѕ РѕС‚ С‚РѕРіРѕ, РєР°Рє РїСЂРёС€С‘Р» С‚РµРєСѓС‰РёР№ Р·Р°РїСЂРѕСЃ.
         httpsConfigured: httpsState.configured,
         httpsDomain: httpsState.domain,
         httpsPort: httpsState.port,
@@ -2715,7 +2715,7 @@ app.get('/api/security/status', checkAuth, (req, res) => {
 app.get('/api/interfaces', checkAuth, (req, res) => res.json(DEMO_MODE ? ['awg0'] : existingIfaces()));
 
 // ---------------------------------------------------------------------------
-// Администрирование: пользователи, 2FA, аудит, fail2ban, уведомления, бэкапы
+// РђРґРјРёРЅРёСЃС‚СЂРёСЂРѕРІР°РЅРёРµ: РїРѕР»СЊР·РѕРІР°С‚РµР»Рё, 2FA, Р°СѓРґРёС‚, fail2ban, СѓРІРµРґРѕРјР»РµРЅРёСЏ, Р±СЌРєР°РїС‹
 // ---------------------------------------------------------------------------
 app.get('/api/users', checkAuth, requireAdmin, (req, res) => {
     const users = loadUsers().map(u => ({
@@ -2732,51 +2732,51 @@ app.post('/api/users', checkAuth, requireAdmin, (req, res) => {
     const password = String((req.body && req.body.password) || '');
     const role = (req.body && req.body.role) === 'viewer' ? 'viewer' : 'admin';
     if (!/^[A-Za-z0-9_.-]{3,32}$/.test(username) || username === 'admin') {
-        return res.status(400).json({ error: 'Имя: 3–32 символа, буквы/цифры/._-; «admin» зарезервировано' });
+        return res.status(400).json({ error: 'РРјСЏ: 3вЂ“32 СЃРёРјРІРѕР»Р°, Р±СѓРєРІС‹/С†РёС„СЂС‹/._-; В«adminВ» Р·Р°СЂРµР·РµСЂРІРёСЂРѕРІР°РЅРѕ' });
     }
-    if (password.length < 10) return res.status(400).json({ error: 'Пароль должен быть не короче 10 символов' });
+    if (password.length < 10) return res.status(400).json({ error: 'РџР°СЂРѕР»СЊ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РЅРµ РєРѕСЂРѕС‡Рµ 10 СЃРёРјРІРѕР»РѕРІ' });
     const users = loadUsers();
-    if (users.some(u => u.username === username)) return res.status(409).json({ error: 'Такой пользователь уже есть' });
+    if (users.some(u => u.username === username)) return res.status(409).json({ error: 'РўР°РєРѕР№ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ СѓР¶Рµ РµСЃС‚СЊ' });
     users.push(makeUser(username, password, role));
     try {
         saveUsers(users);
-        auditLog(req, `Создан пользователь ${username} (${role})`);
+        auditLog(req, `РЎРѕР·РґР°РЅ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ ${username} (${role})`);
         res.json({ success: true, username, role });
-    } catch (e) { res.status(500).json({ error: 'Не удалось сохранить пользователя' }); }
+    } catch (e) { res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ' }); }
 });
 
 app.delete('/api/users/:username', checkAuth, requireAdmin, (req, res) => {
     const username = String(req.params.username);
-    if (username === 'admin') return res.status(400).json({ error: 'Встроенного администратора удалить нельзя' });
-    if (username === req.session.user) return res.status(400).json({ error: 'Нельзя удалить самого себя' });
+    if (username === 'admin') return res.status(400).json({ error: 'Р’СЃС‚СЂРѕРµРЅРЅРѕРіРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° СѓРґР°Р»РёС‚СЊ РЅРµР»СЊР·СЏ' });
+    if (username === req.session.user) return res.status(400).json({ error: 'РќРµР»СЊР·СЏ СѓРґР°Р»РёС‚СЊ СЃР°РјРѕРіРѕ СЃРµР±СЏ' });
     const users = loadUsers();
     const next = users.filter(u => u.username !== username);
-    if (next.length === users.length) return res.status(404).json({ error: 'Пользователь не найден' });
+    if (next.length === users.length) return res.status(404).json({ error: 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ' });
     saveUsers(next);
-    auditLog(req, `Удалён пользователь ${username}`);
+    auditLog(req, `РЈРґР°Р»С‘РЅ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ ${username}`);
     res.json({ success: true });
 });
 
 app.post('/api/users/:username/password', checkAuth, requireAdmin, (req, res) => {
     const username = String(req.params.username);
     const password = String((req.body && req.body.password) || '');
-    if (password.length < 10) return res.status(400).json({ error: 'Пароль должен быть не короче 10 символов' });
+    if (password.length < 10) return res.status(400).json({ error: 'РџР°СЂРѕР»СЊ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РЅРµ РєРѕСЂРѕС‡Рµ 10 СЃРёРјРІРѕР»РѕРІ' });
     if (username === 'admin') {
         try {
             fs.writeFileSync(PASS_FILE, password, { mode: 0o600 });
             ADMIN_PASSWORD = password;
-            auditLog(req, 'Изменён пароль встроенного администратора');
+            auditLog(req, 'РР·РјРµРЅС‘РЅ РїР°СЂРѕР»СЊ РІСЃС‚СЂРѕРµРЅРЅРѕРіРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°');
             return res.json({ success: true });
-        } catch (e) { return res.status(500).json({ error: 'Ошибка записи пароля' }); }
+        } catch (e) { return res.status(500).json({ error: 'РћС€РёР±РєР° Р·Р°РїРёСЃРё РїР°СЂРѕР»СЏ' }); }
     }
     const users = loadUsers();
     const u = users.find(x => x.username === username);
-    if (!u) return res.status(404).json({ error: 'Пользователь не найден' });
+    if (!u) return res.status(404).json({ error: 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ' });
     const salt = crypto.randomBytes(16).toString('hex');
     u.salt = salt;
     u.hash = hashPassword(password, salt);
     saveUsers(users);
-    auditLog(req, `Сменён пароль пользователя ${username}`);
+    auditLog(req, `РЎРјРµРЅС‘РЅ РїР°СЂРѕР»СЊ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ ${username}`);
     res.json({ success: true });
 });
 
@@ -2789,7 +2789,7 @@ app.get('/api/2fa/status', checkAuth, (req, res) => {
 
 app.post('/api/2fa/setup', checkAuth, (req, res) => {
     const me = findUser(req.session.user || 'admin');
-    if (!me) return res.status(404).json({ error: 'Пользователь не найден' });
+    if (!me) return res.status(404).json({ error: 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ' });
     const secret = newTotpSecret();
     setTotpState(me.username, { totpPending: secret });
     const uri = otpauthUri(secret, me.username);
@@ -2801,8 +2801,8 @@ app.post('/api/2fa/enable', checkAuth, (req, res) => {
     const me = findUser(req.session.user || 'admin');
     const st = totpState(me);
     const code = String((req.body && req.body.code) || '').trim();
-    if (!st.pending) return res.status(400).json({ error: 'Сначала запустите настройку 2FA' });
-    if (!verifyTotp(st.pending, code)) return res.status(400).json({ error: 'Неверный код. Проверьте время на телефоне.' });
+    if (!st.pending) return res.status(400).json({ error: 'РЎРЅР°С‡Р°Р»Р° Р·Р°РїСѓСЃС‚РёС‚Рµ РЅР°СЃС‚СЂРѕР№РєСѓ 2FA' });
+    if (!verifyTotp(st.pending, code)) return res.status(400).json({ error: 'РќРµРІРµСЂРЅС‹Р№ РєРѕРґ. РџСЂРѕРІРµСЂСЊС‚Рµ РІСЂРµРјСЏ РЅР° С‚РµР»РµС„РѕРЅРµ.' });
     const codes = makeRecoveryCodes(10);
     setTotpState(me.username, {
         totpSecret: st.pending,
@@ -2810,7 +2810,7 @@ app.post('/api/2fa/enable', checkAuth, (req, res) => {
         totpEnabled: true,
         totpRecovery: codes.map(hashCode)
     });
-    auditLog(req, `Включена 2FA для ${me.username}`);
+    auditLog(req, `Р’РєР»СЋС‡РµРЅР° 2FA РґР»СЏ ${me.username}`);
     res.json({ success: true, recoveryCodes: codes });
 });
 
@@ -2818,13 +2818,13 @@ app.post('/api/2fa/disable', checkAuth, (req, res) => {
     const me = findUser(req.session.user || 'admin');
     const password = String((req.body && req.body.password) || '');
     const passwordOk = me.builtin ? safeEqual(password, ADMIN_PASSWORD) : verifyUserPassword(me, password);
-    if (!passwordOk) return res.status(401).json({ error: 'Неверный пароль' });
+    if (!passwordOk) return res.status(401).json({ error: 'РќРµРІРµСЂРЅС‹Р№ РїР°СЂРѕР»СЊ' });
     setTotpState(me.username, { totpSecret: '', totpPending: '', totpEnabled: false, totpRecovery: [] });
-    auditLog(req, `Отключена 2FA для ${me.username}`);
+    auditLog(req, `РћС‚РєР»СЋС‡РµРЅР° 2FA РґР»СЏ ${me.username}`);
     res.json({ success: true });
 });
 
-// --- Аудит ---
+// --- РђСѓРґРёС‚ ---
 app.get('/api/audit', checkAuth, requireAdmin, (req, res) => {
     let text = '';
     try { text = fs.existsSync(AUDIT_LOG) ? readLogTail(AUDIT_LOG, 512 * 1024) : ''; } catch (e) { text = ''; }
@@ -2866,15 +2866,15 @@ app.get('/api/fail2ban/status', checkAuth, requireAdmin, (req, res) => {
 
 app.post('/api/fail2ban/unban', checkAuth, requireAdmin, (req, res) => {
     const ip = String((req.body && req.body.ip) || '').trim();
-    if (!IPV4_RE.test(ip)) return res.status(400).json({ error: 'Неверный IP' });
+    if (!IPV4_RE.test(ip)) return res.status(400).json({ error: 'РќРµРІРµСЂРЅС‹Р№ IP' });
     try {
         sh('sudo', ['fail2ban-client', 'set', 'servpanel', 'unbanip', ip]);
-        auditLog(req, `Fail2ban: разбанен ${ip}`);
+        auditLog(req, `Fail2ban: СЂР°Р·Р±Р°РЅРµРЅ ${ip}`);
         res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: 'Не удалось разбанить (fail2ban установлен?)' }); }
+    } catch (e) { res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЂР°Р·Р±Р°РЅРёС‚СЊ (fail2ban СѓСЃС‚Р°РЅРѕРІР»РµРЅ?)' }); }
 });
 
-// --- Telegram-уведомления ---
+// --- Telegram-СѓРІРµРґРѕРјР»РµРЅРёСЏ ---
 const notifyCfg = readJson(NOTIFY_FILE, {
     telegram: { enabled: false, token: '', chatId: '' },
     lastAlertAt: 0,
@@ -2886,7 +2886,7 @@ const TG_CHAT_RE = /^(-?\d{1,20}|@[A-Za-z0-9_]{5,32})$/;
 
 async function sendTelegram(text) {
     const t = notifyCfg.telegram || {};
-    if (!t.enabled || !t.token || !t.chatId) return { ok: false, error: 'Уведомления не настроены' };
+    if (!t.enabled || !t.token || !t.chatId) return { ok: false, error: 'РЈРІРµРґРѕРјР»РµРЅРёСЏ РЅРµ РЅР°СЃС‚СЂРѕРµРЅС‹' };
     try {
         const r = await fetchWithTimeout(`https://api.telegram.org/bot${t.token}/sendMessage`, {
             method: 'POST',
@@ -2913,28 +2913,28 @@ app.post('/api/notify/telegram', checkAuth, requireAdmin, (req, res) => {
     const { enabled, token, chatId } = req.body || {};
     const t = notifyCfg.telegram || {};
     if (token !== undefined && String(token).trim()) {
-        if (!TG_TOKEN_RE.test(String(token).trim())) return res.status(400).json({ error: 'Неверный формат токена бота' });
+        if (!TG_TOKEN_RE.test(String(token).trim())) return res.status(400).json({ error: 'РќРµРІРµСЂРЅС‹Р№ С„РѕСЂРјР°С‚ С‚РѕРєРµРЅР° Р±РѕС‚Р°' });
         t.token = String(token).trim();
     }
     if (chatId !== undefined && String(chatId).trim()) {
-        if (!TG_CHAT_RE.test(String(chatId).trim())) return res.status(400).json({ error: 'Неверный chat_id' });
+        if (!TG_CHAT_RE.test(String(chatId).trim())) return res.status(400).json({ error: 'РќРµРІРµСЂРЅС‹Р№ chat_id' });
         t.chatId = String(chatId).trim();
     }
     if (enabled !== undefined) t.enabled = !!enabled;
-    if (t.enabled && (!t.token || !t.chatId)) return res.status(400).json({ error: 'Для включения нужны токен и chat_id' });
+    if (t.enabled && (!t.token || !t.chatId)) return res.status(400).json({ error: 'Р”Р»СЏ РІРєР»СЋС‡РµРЅРёСЏ РЅСѓР¶РЅС‹ С‚РѕРєРµРЅ Рё chat_id' });
     notifyCfg.telegram = t;
     saveNotify();
-    auditLog(req, `Уведомления Telegram: ${t.enabled ? 'включены' : 'выключены'}`);
+    auditLog(req, `РЈРІРµРґРѕРјР»РµРЅРёСЏ Telegram: ${t.enabled ? 'РІРєР»СЋС‡РµРЅС‹' : 'РІС‹РєР»СЋС‡РµРЅС‹'}`);
     res.json({ success: true, enabled: !!t.enabled });
 });
 
 app.post('/api/notify/test', checkAuth, requireAdmin, async (req, res) => {
-    const r = await sendTelegram('🛰 <b>Servpanel</b>: тестовое уведомление. Связь есть.');
-    if (r.ok) { auditLog(req, 'Отправлено тестовое уведомление Telegram'); return res.json({ success: true }); }
-    res.status(502).json({ error: 'Telegram отклонил сообщение', detail: (r.data && r.data.description) || r.error || 'нет ответа' });
+    const r = await sendTelegram('рџ›° <b>Servpanel</b>: С‚РµСЃС‚РѕРІРѕРµ СѓРІРµРґРѕРјР»РµРЅРёРµ. РЎРІСЏР·СЊ РµСЃС‚СЊ.');
+    if (r.ok) { auditLog(req, 'РћС‚РїСЂР°РІР»РµРЅРѕ С‚РµСЃС‚РѕРІРѕРµ СѓРІРµРґРѕРјР»РµРЅРёРµ Telegram'); return res.json({ success: true }); }
+    res.status(502).json({ error: 'Telegram РѕС‚РєР»РѕРЅРёР» СЃРѕРѕР±С‰РµРЅРёРµ', detail: (r.data && r.data.description) || r.error || 'РЅРµС‚ РѕС‚РІРµС‚Р°' });
 });
 
-// --- Здоровье каскада ---
+// --- Р—РґРѕСЂРѕРІСЊРµ РєР°СЃРєР°РґР° ---
 function cascadeHealth() {
     const d = cascadeDetails();
     if (d.mode === 'exit') {
@@ -2972,10 +2972,10 @@ function cascadeHealth() {
         rule: !!d.ruleExists,
         table: !!d.tableRoute,
         ipset: d.ipsetCount > 100,
-        // Роль должна соответствовать машине: если awg0.conf есть, это вход.
+        // Р РѕР»СЊ РґРѕР»Р¶РЅР° СЃРѕРѕС‚РІРµС‚СЃС‚РІРѕРІР°С‚СЊ РјР°С€РёРЅРµ: РµСЃР»Рё awg0.conf РµСЃС‚СЊ, СЌС‚Рѕ РІС…РѕРґ.
         role: true,
-        // Endpoint должен быть доступен не через awg1 (для RU это внутренний
-        // адрес, для EU — публичный адрес RU).
+        // Endpoint РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РґРѕСЃС‚СѓРїРµРЅ РЅРµ С‡РµСЂРµР· awg1 (РґР»СЏ RU СЌС‚Рѕ РІРЅСѓС‚СЂРµРЅРЅРёР№
+        // Р°РґСЂРµСЃ, РґР»СЏ EU вЂ” РїСѓР±Р»РёС‡РЅС‹Р№ Р°РґСЂРµСЃ RU).
         endpoint: true
     };
     const details = {
@@ -2992,13 +2992,13 @@ function cascadeHealth() {
     };
     if (d.configured) {
         const confFile = existingCascadeConf();
-        details.configRole = confFile ? (cascadeRoleFrom(readTextSafe(confFile)) || 'не определена') : 'не определена';
-        checks.role = details.configRole === 'не определена' ? true : details.configRole === details.expectedRole;
+        details.configRole = confFile ? (cascadeRoleFrom(readTextSafe(confFile)) || 'РЅРµ РѕРїСЂРµРґРµР»РµРЅР°') : 'РЅРµ РѕРїСЂРµРґРµР»РµРЅР°';
+        checks.role = details.configRole === 'РЅРµ РѕРїСЂРµРґРµР»РµРЅР°' ? true : details.configRole === details.expectedRole;
         if (!checks.role) {
             details.roleHint = (details.configRole === 'ru'
-                ? 'В awg1.conf лежит клиент с маршрутом 0.0.0.0/0 — это конфиг ВХОДА (RU). '
-                : 'В awg1.conf клиент без маршрута 0.0.0.0/0 — это конфиг ВЫХОДА (EU). ') +
-                'На этой машине ожидается роль ' + details.expectedRole.toUpperCase() + '.';
+                ? 'Р’ awg1.conf Р»РµР¶РёС‚ РєР»РёРµРЅС‚ СЃ РјР°СЂС€СЂСѓС‚РѕРј 0.0.0.0/0 вЂ” СЌС‚Рѕ РєРѕРЅС„РёРі Р’РҐРћР”Рђ (RU). '
+                : 'Р’ awg1.conf РєР»РёРµРЅС‚ Р±РµР· РјР°СЂС€СЂСѓС‚Р° 0.0.0.0/0 вЂ” СЌС‚Рѕ РєРѕРЅС„РёРі Р’Р«РҐРћР”Рђ (EU). ') +
+                'РќР° СЌС‚РѕР№ РјР°С€РёРЅРµ РѕР¶РёРґР°РµС‚СЃСЏ СЂРѕР»СЊ ' + details.expectedRole.toUpperCase() + '.';
         }
     }
     const critical = [checks.config, checks.tunnel, checks.handshake, checks.role];
@@ -3012,28 +3012,28 @@ function cascadeHealth() {
 
 app.get('/api/cascade/health', checkAuth, (req, res) => {
     try { res.json(cascadeHealth()); }
-    catch (e) { res.json({ ok: false, error: 'Ошибка проверки' }); }
+    catch (e) { res.json({ ok: false, error: 'РћС€РёР±РєР° РїСЂРѕРІРµСЂРєРё' }); }
 });
 
 async function cascadeMonitor() {
     if (TEST_MODE) return;
-    if (!existingCascadeConf()) return; // каскад не настроен — не дёргаем систему
+    if (!existingCascadeConf()) return; // РєР°СЃРєР°Рґ РЅРµ РЅР°СЃС‚СЂРѕРµРЅ вЂ” РЅРµ РґС‘СЂРіР°РµРј СЃРёСЃС‚РµРјСѓ
     let h;
     try { h = cascadeHealth(); } catch (e) { return; }
-    if (!h.details || !h.details.endpoint) return; // каскад не настроен
+    if (!h.details || !h.details.endpoint) return; // РєР°СЃРєР°Рґ РЅРµ РЅР°СЃС‚СЂРѕРµРЅ
     if (!h.ok) {
         const last = notifyCfg.lastAlertAt || 0;
         if (notifyCfg.lastState !== 'fail' && Date.now() - last > 30 * 60 * 1000) {
-            const text = `⚠️ <b>Каскад RU→EU не работает</b>\n` +
+            const text = `вљ пёЏ <b>РљР°СЃРєР°Рґ RUв†’EU РЅРµ СЂР°Р±РѕС‚Р°РµС‚</b>\n` +
                 `Endpoint: <code>${h.details.endpoint}</code>\n` +
-                `Туннель: ${h.checks.tunnel ? 'ок' : 'нет'}\n` +
-                `Рукопожатие: ${h.details.handshakeAgo === null ? 'нет' : h.details.handshakeAgo + ' c. назад'}\n` +
-                `Маршрут таблицы 100: ${h.details.tableRoute || '—'}`;
+                `РўСѓРЅРЅРµР»СЊ: ${h.checks.tunnel ? 'РѕРє' : 'РЅРµС‚'}\n` +
+                `Р СѓРєРѕРїРѕР¶Р°С‚РёРµ: ${h.details.handshakeAgo === null ? 'РЅРµС‚' : h.details.handshakeAgo + ' c. РЅР°Р·Р°Рґ'}\n` +
+                `РњР°СЂС€СЂСѓС‚ С‚Р°Р±Р»РёС†С‹ 100: ${h.details.tableRoute || 'вЂ”'}`;
             const r = await sendTelegram(text);
             if (r.ok) { notifyCfg.lastAlertAt = Date.now(); notifyCfg.lastState = 'fail'; saveNotify(); }
         }
     } else if (notifyCfg.lastState === 'fail') {
-        const r = await sendTelegram('✅ <b>Каскад RU→EU восстановлен</b>. Рукопожатие с EU снова проходит.');
+        const r = await sendTelegram('вњ… <b>РљР°СЃРєР°Рґ RUв†’EU РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅ</b>. Р СѓРєРѕРїРѕР¶Р°С‚РёРµ СЃ EU СЃРЅРѕРІР° РїСЂРѕС…РѕРґРёС‚.');
         if (r.ok) { notifyCfg.lastState = 'ok'; saveNotify(); }
     }
 }
@@ -3042,7 +3042,7 @@ if (!TEST_MODE) {
     const t2 = setInterval(cascadeMonitor, 5 * 60 * 1000); if (t2.unref) t2.unref();
 }
 
-// --- Автоматические резервные копии ---
+// --- РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРёРµ СЂРµР·РµСЂРІРЅС‹Рµ РєРѕРїРёРё ---
 function backupConfig() {
     const c = readJson(BACKUP_CONFIG_FILE, {});
     const time = /^([01]\d|2[0-3]):[0-5]\d$/.test(String(c.time || '')) ? String(c.time) : '04:30';
@@ -3082,7 +3082,7 @@ function listBackups() {
 function buildBackupScript(cfg) {
     const pass = cfg.encrypt ? ensureBackupPassword() : '';
     return `#!/bin/bash
-# Автоматический бэкап Servpanel. Сгенерировано панелью.
+# РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРёР№ Р±СЌРєР°Рї Servpanel. РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅРѕ РїР°РЅРµР»СЊСЋ.
 set -euo pipefail
 umask 077
 DIR="${BACKUP_DIR}"
@@ -3096,11 +3096,11 @@ PATHS=()
 for p in /etc/amnezia/amneziawg /root/awg /root/servpanel /etc/nginx/sites-available/awg-admin /etc/nginx/.htpasswd /etc/fail2ban/filter.d/servpanel.conf /etc/fail2ban/jail.d/servpanel.local; do
   [ -e "$p" ] && PATHS+=("$p")
 done
-if [ \${#PATHS[@]} -eq 0 ]; then echo "Нечего архивировать"; exit 1; fi
+if [ \${#PATHS[@]} -eq 0 ]; then echo "РќРµС‡РµРіРѕ Р°СЂС…РёРІРёСЂРѕРІР°С‚СЊ"; exit 1; fi
 tar -czf "$OUT" --exclude='*/.backup_pass' --exclude='*/.sessions' --exclude='*/node_modules' "\${PATHS[@]}"
 ${cfg.encrypt ? `openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -in "$OUT" -out "$OUT.enc" -pass "file:$PASS_FILE"
 rm -f "$OUT"
-OUT="$OUT.enc"` : '# Шифрование отключено'}
+OUT="$OUT.enc"` : '# РЁРёС„СЂРѕРІР°РЅРёРµ РѕС‚РєР»СЋС‡РµРЅРѕ'}
 find "$DIR" -maxdepth 1 -type f -name 'servpanel-*' -mtime +"$KEEP" -delete
 echo "OK: $OUT"
 `;
@@ -3167,22 +3167,22 @@ app.post('/api/backup/auto', checkAuth, requireAdmin, (req, res) => {
     try {
         writeJson(BACKUP_CONFIG_FILE, cfg, 0o600);
         const r = installBackupTimer(cfg);
-        auditLog(req, `Автобэкап: ${cfg.enabled ? 'включён' : 'выключен'} (${cfg.schedule} ${cfg.time}, хранить ${cfg.keep}, шифрование ${cfg.encrypt ? 'да' : 'нет'})`);
+        auditLog(req, `РђРІС‚РѕР±СЌРєР°Рї: ${cfg.enabled ? 'РІРєР»СЋС‡С‘РЅ' : 'РІС‹РєР»СЋС‡РµРЅ'} (${cfg.schedule} ${cfg.time}, С…СЂР°РЅРёС‚СЊ ${cfg.keep}, С€РёС„СЂРѕРІР°РЅРёРµ ${cfg.encrypt ? 'РґР°' : 'РЅРµС‚'})`);
         res.json({ success: true, config: cfg, ...(r.simulated ? { simulated: true } : {}) });
-    } catch (e) { res.status(500).json({ error: 'Ошибка настройки автобэкапа: ' + e.message }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° РЅР°СЃС‚СЂРѕР№РєРё Р°РІС‚РѕР±СЌРєР°РїР°: ' + e.message }); }
 });
 
 app.post('/api/backup/run', checkAuth, requireAdmin, (req, res) => {
     try {
         if (DEMO_MODE) {
-            auditLog(req, '[DEMO] Ручной запуск автобэкапа');
-            return res.json({ success: true, output: 'DEMO: архив создан (имитация)', archives: listBackups() });
+            auditLog(req, '[DEMO] Р СѓС‡РЅРѕР№ Р·Р°РїСѓСЃРє Р°РІС‚РѕР±СЌРєР°РїР°');
+            return res.json({ success: true, output: 'DEMO: Р°СЂС…РёРІ СЃРѕР·РґР°РЅ (РёРјРёС‚Р°С†РёСЏ)', archives: listBackups() });
         }
-        if (!fs.existsSync(BACKUP_SCRIPT)) return res.status(400).json({ error: 'Сначала включите автобэкап' });
+        if (!fs.existsSync(BACKUP_SCRIPT)) return res.status(400).json({ error: 'РЎРЅР°С‡Р°Р»Р° РІРєР»СЋС‡РёС‚Рµ Р°РІС‚РѕР±СЌРєР°Рї' });
         const out = sh('sudo', ['bash', BACKUP_SCRIPT], { timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
-        auditLog(req, 'Ручной запуск автобэкапа');
+        auditLog(req, 'Р СѓС‡РЅРѕР№ Р·Р°РїСѓСЃРє Р°РІС‚РѕР±СЌРєР°РїР°');
         res.json({ success: true, output: out, archives: listBackups() });
-    } catch (e) { res.status(500).json({ error: 'Ошибка бэкапа: ' + (e.stdout || e.message) }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° Р±СЌРєР°РїР°: ' + (e.stdout || e.message) }); }
 });
 
 app.get('/api/backup/list', checkAuth, requireAdmin, (req, res) => {
@@ -3191,28 +3191,28 @@ app.get('/api/backup/list', checkAuth, requireAdmin, (req, res) => {
 
 app.get('/api/backup/password', checkAuth, requireAdmin, (req, res) => {
     const p = ensureBackupPassword();
-    auditLog(req, 'Просмотр пароля резервных копий');
+    auditLog(req, 'РџСЂРѕСЃРјРѕС‚СЂ РїР°СЂРѕР»СЏ СЂРµР·РµСЂРІРЅС‹С… РєРѕРїРёР№');
     res.json({ password: p });
 });
 
 app.post('/api/backup/password', checkAuth, requireAdmin, (req, res) => {
     const p = String((req.body && req.body.password) || '');
-    if (p.length < 12) return res.status(400).json({ error: 'Пароль должен быть не короче 12 символов' });
+    if (p.length < 12) return res.status(400).json({ error: 'РџР°СЂРѕР»СЊ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РЅРµ РєРѕСЂРѕС‡Рµ 12 СЃРёРјРІРѕР»РѕРІ' });
     try {
         fs.writeFileSync(BACKUP_PASS_FILE, p + '\n', { mode: 0o600 });
         const cfg = backupConfig();
         if (cfg.enabled) installBackupTimer(cfg);
-        auditLog(req, 'Изменён пароль резервных копий');
+        auditLog(req, 'РР·РјРµРЅС‘РЅ РїР°СЂРѕР»СЊ СЂРµР·РµСЂРІРЅС‹С… РєРѕРїРёР№');
         res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: 'Ошибка сохранения пароля' }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ РїР°СЂРѕР»СЏ' }); }
 });
 
 app.get('/api/backup/archive/:name', checkAuth, requireAdmin, (req, res) => {
     const name = String(req.params.name);
-    if (!/^servpanel-\d{8}-\d{6}\.tar\.gz(\.enc)?$/.test(name)) return res.status(400).json({ error: 'Неверное имя архива' });
+    if (!/^servpanel-\d{8}-\d{6}\.tar\.gz(\.enc)?$/.test(name)) return res.status(400).json({ error: 'РќРµРІРµСЂРЅРѕРµ РёРјСЏ Р°СЂС…РёРІР°' });
     const file = path.join(BACKUP_DIR, name);
-    if (!fs.existsSync(file)) return res.status(404).json({ error: 'Архив не найден' });
-    auditLog(req, `Скачивание авто-бэкапа ${name}`);
+    if (!fs.existsSync(file)) return res.status(404).json({ error: 'РђСЂС…РёРІ РЅРµ РЅР°Р№РґРµРЅ' });
+    auditLog(req, `РЎРєР°С‡РёРІР°РЅРёРµ Р°РІС‚Рѕ-Р±СЌРєР°РїР° ${name}`);
     res.download(file, name);
 });
 
@@ -3227,7 +3227,7 @@ app.get('/api/backup/encrypted', checkAuth, requireAdmin, (req, res) => {
             '--exclude=*/.backup_pass', '--exclude=*/.sessions', '--exclude=*/node_modules',
             ...paths], { timeout: 180000 });
         sh('openssl', ['enc', '-aes-256-cbc', '-pbkdf2', '-iter', '200000', '-salt', '-in', plain, '-out', enc, '-pass', `pass:${pass}`], { timeout: 180000 });
-        auditLog(req, 'Скачивание зашифрованной резервной копии');
+        auditLog(req, 'РЎРєР°С‡РёРІР°РЅРёРµ Р·Р°С€РёС„СЂРѕРІР°РЅРЅРѕР№ СЂРµР·РµСЂРІРЅРѕР№ РєРѕРїРёРё');
         res.download(enc, `servpanel-${stamp}.tar.gz.enc`, () => {
             try { fs.unlinkSync(plain); } catch (e) { /* ignore */ }
             try { fs.unlinkSync(enc); } catch (e) { /* ignore */ }
@@ -3235,15 +3235,15 @@ app.get('/api/backup/encrypted', checkAuth, requireAdmin, (req, res) => {
     } catch (e) {
         try { fs.unlinkSync(plain); } catch (e2) { /* ignore */ }
         try { fs.unlinkSync(enc); } catch (e2) { /* ignore */ }
-        res.status(500).json({ error: 'Не удалось создать зашифрованный бэкап' });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ Р·Р°С€РёС„СЂРѕРІР°РЅРЅС‹Р№ Р±СЌРєР°Рї' });
     }
 });
 // ---------------------------------------------------------------------------
-// Каскад: статус
+// РљР°СЃРєР°Рґ: СЃС‚Р°С‚СѓСЃ
 // ---------------------------------------------------------------------------
-// На EU каскад — это пир ru_host в awg0.conf, а не awg1. Ищем его по
-// комментарию #_Name = ru_host (его пишет manage_amneziawg.sh) или по
-// адресу 172.16.61.4/32.
+// РќР° EU РєР°СЃРєР°Рґ вЂ” СЌС‚Рѕ РїРёСЂ ru_host РІ awg0.conf, Р° РЅРµ awg1. РС‰РµРј РµРіРѕ РїРѕ
+// РєРѕРјРјРµРЅС‚Р°СЂРёСЋ #_Name = ru_host (РµРіРѕ РїРёС€РµС‚ manage_amneziawg.sh) РёР»Рё РїРѕ
+// Р°РґСЂРµСЃСѓ 172.16.61.4/32.
 function euCascadePeer(confText) {
     const blocks = String(confText || '').split(/^\s*\[Peer\]\s*$/mi).slice(1);
     for (const block of blocks) {
@@ -3261,7 +3261,7 @@ function euCascadePeer(confText) {
 }
 
 // ---------------------------------------------------------------------------
-// Резервирование каскада: несколько awg1-конфигов, ручное и авто-переключение
+// Р РµР·РµСЂРІРёСЂРѕРІР°РЅРёРµ РєР°СЃРєР°РґР°: РЅРµСЃРєРѕР»СЊРєРѕ awg1-РєРѕРЅС„РёРіРѕРІ, СЂСѓС‡РЅРѕРµ Рё Р°РІС‚Рѕ-РїРµСЂРµРєР»СЋС‡РµРЅРёРµ
 // ---------------------------------------------------------------------------
 const CASCADE_BACKUPS_FILE = path.join(DATA_DIR, '.cascade_backups.json');
 const CASCADE_FAILOVER_FILE = path.join(DATA_DIR, '.cascade_failover.json');
@@ -3269,8 +3269,8 @@ const CASCADE_FAILOVER_STATE = path.join(DATA_DIR, '.cascade_failover_state.json
 const CASCADE_PRIMARY_COPY = path.join(DATA_DIR, '.cascade_primary.awg1.conf');
 const CASCADE_FAILOVER_DEFAULTS = {
     enabled: false,
-    // Проверяем только зарубежные сервисы: запросы к российским сервисам
-    // с EU-выхода светят IP туннеля и могут привести к блокировкам.
+    // РџСЂРѕРІРµСЂСЏРµРј С‚РѕР»СЊРєРѕ Р·Р°СЂСѓР±РµР¶РЅС‹Рµ СЃРµСЂРІРёСЃС‹: Р·Р°РїСЂРѕСЃС‹ Рє СЂРѕСЃСЃРёР№СЃРєРёРј СЃРµСЂРІРёСЃР°Рј
+    // СЃ EU-РІС‹С…РѕРґР° СЃРІРµС‚СЏС‚ IP С‚СѓРЅРЅРµР»СЏ Рё РјРѕРіСѓС‚ РїСЂРёРІРµСЃС‚Рё Рє Р±Р»РѕРєРёСЂРѕРІРєР°Рј.
     domains: ['youtube.com', 'telegram.org', 'github.com', 'cloudflare.com'],
     interval: 60,
     timeout: 5,
@@ -3283,7 +3283,7 @@ const RU_CHECK_DOMAIN_BLOCK = new Set([
 ]);
 function isRussianCheckDomain(domain) {
     const d = String(domain || '').toLowerCase();
-    return /\.(ru|рф)$/i.test(d) || RU_CHECK_DOMAIN_BLOCK.has(d);
+    return /\.(ru|СЂС„)$/i.test(d) || RU_CHECK_DOMAIN_BLOCK.has(d);
 }
 
 function cascadeHostList(value) {
@@ -3316,7 +3316,7 @@ function cascadeBackupsWrite(list) {
 }
 
 // ---------------------------------------------------------------------------
-// Режим балансировки каскада: несколько выходов и распределение клиентов.
+// Р РµР¶РёРј Р±Р°Р»Р°РЅСЃРёСЂРѕРІРєРё РєР°СЃРєР°РґР°: РЅРµСЃРєРѕР»СЊРєРѕ РІС‹С…РѕРґРѕРІ Рё СЂР°СЃРїСЂРµРґРµР»РµРЅРёРµ РєР»РёРµРЅС‚РѕРІ.
 // ---------------------------------------------------------------------------
 const CASCADE_BALANCE_FILE = path.join(DATA_DIR, '.cascade_balance.json');
 
@@ -3445,10 +3445,10 @@ function cascadeClientIps() {
     } catch (e) { return []; }
 }
 
-// Распределение: сохраняем выбор пользователя, пока выход жив; новых и
-// клиентов упавшего выхода отправляем на наименее загруженный выход.
-// В режиме «по ширине канала» клиенты делятся пропорционально capacity,
-// а выходы без данных о ширине не используются (туда не переносим).
+// Р Р°СЃРїСЂРµРґРµР»РµРЅРёРµ: СЃРѕС…СЂР°РЅСЏРµРј РІС‹Р±РѕСЂ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ, РїРѕРєР° РІС‹С…РѕРґ Р¶РёРІ; РЅРѕРІС‹С… Рё
+// РєР»РёРµРЅС‚РѕРІ СѓРїР°РІС€РµРіРѕ РІС‹С…РѕРґР° РѕС‚РїСЂР°РІР»СЏРµРј РЅР° РЅР°РёРјРµРЅРµРµ Р·Р°РіСЂСѓР¶РµРЅРЅС‹Р№ РІС‹С…РѕРґ.
+// Р’ СЂРµР¶РёРјРµ В«РїРѕ С€РёСЂРёРЅРµ РєР°РЅР°Р»Р°В» РєР»РёРµРЅС‚С‹ РґРµР»СЏС‚СЃСЏ РїСЂРѕРїРѕСЂС†РёРѕРЅР°Р»СЊРЅРѕ capacity,
+// Р° РІС‹С…РѕРґС‹ Р±РµР· РґР°РЅРЅС‹С… Рѕ С€РёСЂРёРЅРµ РЅРµ РёСЃРїРѕР»СЊР·СѓСЋС‚СЃСЏ (С‚СѓРґР° РЅРµ РїРµСЂРµРЅРѕСЃРёРј).
 function cascadeBalancePlanOpts(state) {
     return {
         method: state && state.method === 'bandwidth' ? 'bandwidth' : 'clients',
@@ -3523,7 +3523,7 @@ function cascadeBalanceStatus(force) {
 }
 
 // ---------------------------------------------------------------------------
-// iperf3-агент: ограниченный API для замера канала между панелями.
+// iperf3-Р°РіРµРЅС‚: РѕРіСЂР°РЅРёС‡РµРЅРЅС‹Р№ API РґР»СЏ Р·Р°РјРµСЂР° РєР°РЅР°Р»Р° РјРµР¶РґСѓ РїР°РЅРµР»СЏРјРё.
 // ---------------------------------------------------------------------------
 const IPERF_AGENT_FILE = path.join(DATA_DIR, '.iperf_agent.json');
 const IPERF_RUN_FILE = path.join(DATA_DIR, '.iperf_run.json');
@@ -3569,7 +3569,7 @@ function iperfAgentAuth(req) {
 }
 function requireIperfAgent(req, res, next) {
     const agent = iperfAgentAuth(req);
-    if (!agent) return res.status(401).json({ error: 'Неверный или просроченный ключ iperf' });
+    if (!agent) return res.status(401).json({ error: 'РќРµРІРµСЂРЅС‹Р№ РёР»Рё РїСЂРѕСЃСЂРѕС‡РµРЅРЅС‹Р№ РєР»СЋС‡ iperf' });
     req.iperfAgent = agent;
     next();
 }
@@ -3582,7 +3582,7 @@ function iperfRunRead() {
     }
     return iperfRun;
 }
-// Убираем временный UFW/iptables-разрешатель, если он создавался под этот прогон.
+// РЈР±РёСЂР°РµРј РІСЂРµРјРµРЅРЅС‹Р№ UFW/iptables-СЂР°Р·СЂРµС€Р°С‚РµР»СЊ, РµСЃР»Рё РѕРЅ СЃРѕР·РґР°РІР°Р»СЃСЏ РїРѕРґ СЌС‚РѕС‚ РїСЂРѕРіРѕРЅ.
 function iperfRemoveRule(item) {
     if (!item || !item.port) return;
     if (item.rule === 'ufw') {
@@ -3628,14 +3628,14 @@ function iperfEnsureInstalled() {
         iperfInstalled = true;
     } catch (e) {
         const tail = String(e.stdout || e.stderr || e.message || e).trim().split(/\r?\n/).slice(-3).join(' ');
-        throw new Error('iperf3 не установлен: ' + (tail || 'apt-get install iperf3 не удался'));
+        throw new Error('iperf3 РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ: ' + (tail || 'apt-get install iperf3 РЅРµ СѓРґР°Р»СЃСЏ'));
     }
 }
 function iperfVersion() {
     try { return String(sh('iperf3', ['--version'], { timeout: 10000 }) || '').trim().split(/\r?\n/)[0]; }
     catch (e) { return ''; }
 }
-// Порты, которые UFW уже разрешает на входящие: их обычно пропускает и фаервол провайдера.
+// РџРѕСЂС‚С‹, РєРѕС‚РѕСЂС‹Рµ UFW СѓР¶Рµ СЂР°Р·СЂРµС€Р°РµС‚ РЅР° РІС…РѕРґСЏС‰РёРµ: РёС… РѕР±С‹С‡РЅРѕ РїСЂРѕРїСѓСЃРєР°РµС‚ Рё С„Р°РµСЂРІРѕР» РїСЂРѕРІР°Р№РґРµСЂР°.
 function iperfUfwTcpPorts() {
     const out = String(shTry('sudo', ['ufw', 'status']) || '');
     const ports = [];
@@ -3673,8 +3673,8 @@ function iperfStartServer(port, secs, peerIp, rule, iface, bindIp) {
     return { port, rule, peerIp, iface: iface || '', ip: bindIp || '', script: scriptFile, log: logFile, pid: parseInt(String(pidOut || '').trim(), 10) || 0 };
 }
 
-// Туннельные адреса каскада: к ним можно подключиться с другой панели
-// через уже поднятый awg, без открытия новых портов наружу.
+// РўСѓРЅРЅРµР»СЊРЅС‹Рµ Р°РґСЂРµСЃР° РєР°СЃРєР°РґР°: Рє РЅРёРј РјРѕР¶РЅРѕ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ СЃ РґСЂСѓРіРѕР№ РїР°РЅРµР»Рё
+// С‡РµСЂРµР· СѓР¶Рµ РїРѕРґРЅСЏС‚С‹Р№ awg, Р±РµР· РѕС‚РєСЂС‹С‚РёСЏ РЅРѕРІС‹С… РїРѕСЂС‚РѕРІ РЅР°СЂСѓР¶Сѓ.
 function iperfTunnelAddrs() {
     const out = [];
     const role = cascadeRole();
@@ -3691,8 +3691,8 @@ function iperfTunnelAddrs() {
         } catch (e) { /* ignore */ }
     }
     if (out.length) return out;
-    // Роль/конфиг могли не определиться: берём адреса всех awg-интерфейсов,
-    // кроме клиентской подсети входа. Лишние кандидаты просто не ответят.
+    // Р РѕР»СЊ/РєРѕРЅС„РёРі РјРѕРіР»Рё РЅРµ РѕРїСЂРµРґРµР»РёС‚СЊСЃСЏ: Р±РµСЂС‘Рј Р°РґСЂРµСЃР° РІСЃРµС… awg-РёРЅС‚РµСЂС„РµР№СЃРѕРІ,
+    // РєСЂРѕРјРµ РєР»РёРµРЅС‚СЃРєРѕР№ РїРѕРґСЃРµС‚Рё РІС…РѕРґР°. Р›РёС€РЅРёРµ РєР°РЅРґРёРґР°С‚С‹ РїСЂРѕСЃС‚Рѕ РЅРµ РѕС‚РІРµС‚СЏС‚.
     try {
         const txt = String(sh('ip', ['-4', '-o', 'addr', 'show'], { timeout: 10000 }) || '');
         for (const line of txt.split(/\r?\n/)) {
@@ -3716,13 +3716,13 @@ async function iperfAgentPrepare(seconds, req, preferPort) {
     iperfEnsureInstalled();
     const agent = iperfAgentAuth(req) || null;
     const peerIp = agent && agent.peerIp;
-    if (!peerIp) throw new Error('Ключ iperf не привязан к IP');
+    if (!peerIp) throw new Error('РљР»СЋС‡ iperf РЅРµ РїСЂРёРІСЏР·Р°РЅ Рє IP');
     const secs = Math.max(5, Math.min(20, Number(seconds) || 10));
     const ufw = iperfUfwActive();
     const tempRule = ufw ? 'ufw' : 'iptables';
-    // 1) порт, который указал пользователь; 2) уже открытые в UFW и свободные;
-    // 3) стандартный 5201; 4) случайный. Для всех, кроме уже открытых,
-    // временно разрешаем вход только с IP инициатора.
+    // 1) РїРѕСЂС‚, РєРѕС‚РѕСЂС‹Р№ СѓРєР°Р·Р°Р» РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ; 2) СѓР¶Рµ РѕС‚РєСЂС‹С‚С‹Рµ РІ UFW Рё СЃРІРѕР±РѕРґРЅС‹Рµ;
+    // 3) СЃС‚Р°РЅРґР°СЂС‚РЅС‹Р№ 5201; 4) СЃР»СѓС‡Р°Р№РЅС‹Р№. Р”Р»СЏ РІСЃРµС…, РєСЂРѕРјРµ СѓР¶Рµ РѕС‚РєСЂС‹С‚С‹С…,
+    // РІСЂРµРјРµРЅРЅРѕ СЂР°Р·СЂРµС€Р°РµРј РІС…РѕРґ С‚РѕР»СЊРєРѕ СЃ IP РёРЅРёС†РёР°С‚РѕСЂР°.
     const picks = [];
     const prefer = Number(preferPort);
     if (isPort(prefer) && !iperfPortBusy(prefer)) picks.push({ port: prefer, rule: tempRule });
@@ -3741,8 +3741,8 @@ async function iperfAgentPrepare(seconds, req, preferPort) {
         picks.push({ port, rule: tempRule });
     }
     const items = picks.map(p => iperfStartServer(p.port, secs, peerIp, p.rule));
-    // Туннельные замеры: слушаем на внутреннем адресе awg — наружу ничего
-    // открывать не нужно, порт доступен только через сам каскад.
+    // РўСѓРЅРЅРµР»СЊРЅС‹Рµ Р·Р°РјРµСЂС‹: СЃР»СѓС€Р°РµРј РЅР° РІРЅСѓС‚СЂРµРЅРЅРµРј Р°РґСЂРµСЃРµ awg вЂ” РЅР°СЂСѓР¶Сѓ РЅРёС‡РµРіРѕ
+    // РѕС‚РєСЂС‹РІР°С‚СЊ РЅРµ РЅСѓР¶РЅРѕ, РїРѕСЂС‚ РґРѕСЃС‚СѓРїРµРЅ С‚РѕР»СЊРєРѕ С‡РµСЂРµР· СЃР°Рј РєР°СЃРєР°Рґ.
     for (const t of iperfTunnelAddrs().slice(0, 2)) {
         let port = 0;
         let guard2 = 0;
@@ -3762,7 +3762,7 @@ async function iperfAgentPrepare(seconds, req, preferPort) {
     for (const it of items) it.listening = !!String(shTry('ss', ['-ltnH', `sport = :${it.port}`]) || '').trim();
     if (!items.some(it => it.listening)) {
         iperfCleanup();
-        throw new Error('iperf3-сервер не запустился ни на одном порту');
+        throw new Error('iperf3-СЃРµСЂРІРµСЂ РЅРµ Р·Р°РїСѓСЃС‚РёР»СЃСЏ РЅРё РЅР° РѕРґРЅРѕРј РїРѕСЂС‚Сѓ');
     }
     iperfRun = {
         items,
@@ -3813,7 +3813,7 @@ app.post('/api/iperf/agent/prepare', requireIperfAgent, async (req, res) => {
             host: await cascadePublicHost()
         });
     } catch (e) {
-        res.status(500).json({ error: e.message || 'Не удалось запустить iperf3' });
+        res.status(500).json({ error: e.message || 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РїСѓСЃС‚РёС‚СЊ iperf3' });
     }
 });
 
@@ -3822,14 +3822,14 @@ app.post('/api/iperf/agent/cleanup', requireIperfAgent, (req, res) => {
     res.json({ success: true });
 });
 
-// Замер по HTTPS через порт самой панели: работает там, где фаервол
-// провайдера закрывает все порты кроме панельного.
+// Р—Р°РјРµСЂ РїРѕ HTTPS С‡РµСЂРµР· РїРѕСЂС‚ СЃР°РјРѕР№ РїР°РЅРµР»Рё: СЂР°Р±РѕС‚Р°РµС‚ С‚Р°Рј, РіРґРµ С„Р°РµСЂРІРѕР»
+// РїСЂРѕРІР°Р№РґРµСЂР° Р·Р°РєСЂС‹РІР°РµС‚ РІСЃРµ РїРѕСЂС‚С‹ РєСЂРѕРјРµ РїР°РЅРµР»СЊРЅРѕРіРѕ.
 const IPERF_BLOB_PATH = path.join(os.tmpdir(), 'servpanel-iperf-blob.bin');
 const IPERF_BLOB_BYTES = 24 * 1024 * 1024;
 function iperfBlobFile() {
     try {
         if (fs.statSync(IPERF_BLOB_PATH).size === IPERF_BLOB_BYTES) return IPERF_BLOB_PATH;
-    } catch (e) { /* файла ещё нет */ }
+    } catch (e) { /* С„Р°Р№Р»Р° РµС‰С‘ РЅРµС‚ */ }
     try {
         sh('sudo', ['bash', '-c', `dd if=/dev/zero of=${IPERF_BLOB_PATH} bs=1M count=24 status=none && chmod 600 ${IPERF_BLOB_PATH}`], { timeout: 60000 });
         return IPERF_BLOB_PATH;
@@ -3844,8 +3844,8 @@ function iperfBlobSize(req) {
 function iperfBlobDownload(req, res) {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Accel-Buffering', 'no');
-    // sendFile отдаёт данные из файла через ядро — это заметно быстрее,
-    // чем собирать поток в JS, и не упирается в event loop.
+    // sendFile РѕС‚РґР°С‘С‚ РґР°РЅРЅС‹Рµ РёР· С„Р°Р№Р»Р° С‡РµСЂРµР· СЏРґСЂРѕ вЂ” СЌС‚Рѕ Р·Р°РјРµС‚РЅРѕ Р±С‹СЃС‚СЂРµРµ,
+    // С‡РµРј СЃРѕР±РёСЂР°С‚СЊ РїРѕС‚РѕРє РІ JS, Рё РЅРµ СѓРїРёСЂР°РµС‚СЃСЏ РІ event loop.
     const file = iperfBlobFile();
     if (file) {
         res.sendFile(file, { headers: { 'Content-Type': 'application/octet-stream', 'X-Accel-Buffering': 'no' }, cacheControl: false }, err => {
@@ -3919,17 +3919,17 @@ function iperfClientRun(target, port, seconds, reverse) {
         let msg = '';
         try { const j = JSON.parse(out); if (j && j.error) msg = String(j.error); } catch (e2) { /* ignore */ }
         if (!msg) {
-            msg = String(e.stderr || e.message || e).trim().split(/\r?\n/).filter(Boolean).slice(-2).join(' ') || 'нет ответа';
+            msg = String(e.stderr || e.message || e).trim().split(/\r?\n/).filter(Boolean).slice(-2).join(' ') || 'РЅРµС‚ РѕС‚РІРµС‚Р°';
         }
-        throw new Error('iperf3 ' + target + ':' + port + ' — ' + msg);
+        throw new Error('iperf3 ' + target + ':' + port + ' вЂ” ' + msg);
     }
-    try { return JSON.parse(out || '{}'); } catch (e) { throw new Error('iperf3 вернул не-JSON ответ'); }
+    try { return JSON.parse(out || '{}'); } catch (e) { throw new Error('iperf3 РІРµСЂРЅСѓР» РЅРµ-JSON РѕС‚РІРµС‚'); }
 }
 
-// Замер скорости по HTTPS через уже открытый порт панели.
-// Нужен там, где фаервол провайдера не пропускает ни 5201, ни случайные порты.
-// В несколько потоков: один TLS-поток упирается в буферы nginx/Node,
-// а не в реальную ширину канала.
+// Р—Р°РјРµСЂ СЃРєРѕСЂРѕСЃС‚Рё РїРѕ HTTPS С‡РµСЂРµР· СѓР¶Рµ РѕС‚РєСЂС‹С‚С‹Р№ РїРѕСЂС‚ РїР°РЅРµР»Рё.
+// РќСѓР¶РµРЅ С‚Р°Рј, РіРґРµ С„Р°РµСЂРІРѕР» РїСЂРѕРІР°Р№РґРµСЂР° РЅРµ РїСЂРѕРїСѓСЃРєР°РµС‚ РЅРё 5201, РЅРё СЃР»СѓС‡Р°Р№РЅС‹Рµ РїРѕСЂС‚С‹.
+// Р’ РЅРµСЃРєРѕР»СЊРєРѕ РїРѕС‚РѕРєРѕРІ: РѕРґРёРЅ TLS-РїРѕС‚РѕРє СѓРїРёСЂР°РµС‚СЃСЏ РІ Р±СѓС„РµСЂС‹ nginx/Node,
+// Р° РЅРµ РІ СЂРµР°Р»СЊРЅСѓСЋ С€РёСЂРёРЅСѓ РєР°РЅР°Р»Р°.
 function iperfHttpStreams(base, token, seconds, upload) {
     const url = String(base).replace(/\/+$/, '') + '/api/iperf/agent/blob?mb=24';
     const deadline = Math.max(20, (Number(seconds) || 8) * 4);
@@ -3991,16 +3991,16 @@ async function iperfRunTest(opts) {
         base = String(state.agents[exitId].url || '');
         try { token = cascadeDecrypt(state.agents[exitId].token); } catch (e) { token = ''; }
     }
-    if (!base) throw new Error('Укажите URL панели-ответчика');
+    if (!base) throw new Error('РЈРєР°Р¶РёС‚Рµ URL РїР°РЅРµР»Рё-РѕС‚РІРµС‚С‡РёРєР°');
     if (!/^https?:\/\//i.test(base)) base = 'https://' + base;
     if (!token) {
-        if (!body.panelUser || !body.panelPass) throw new Error('Нужны логин и пароль панели-ответчика');
+        if (!body.panelUser || !body.panelPass) throw new Error('РќСѓР¶РЅС‹ Р»РѕРіРёРЅ Рё РїР°СЂРѕР»СЊ РїР°РЅРµР»Рё-РѕС‚РІРµС‚С‡РёРєР°');
         const remote = new Panel(base, String(body.panelUser), String(body.panelPass));
         const login = await remote.login();
-        if (!login.ok) throw new Error(login.error || 'Не удалось войти в панель-ответчик');
+        if (!login.ok) throw new Error(login.error || 'РќРµ СѓРґР°Р»РѕСЃСЊ РІРѕР№С‚Рё РІ РїР°РЅРµР»СЊ-РѕС‚РІРµС‚С‡РёРє');
         const created = await remote.post('/api/iperf/agent/token', { label: 'servpanel-balance', ttlHours: 720 }, 30000);
         const data = created && created.json;
-        if (!data || !data.token) throw new Error('Ответная панель не выдала ключ iperf');
+        if (!data || !data.token) throw new Error('РћС‚РІРµС‚РЅР°СЏ РїР°РЅРµР»СЊ РЅРµ РІС‹РґР°Р»Р° РєР»СЋС‡ iperf');
         token = data.token;
         if (exitId) {
             state.agents[exitId] = { url: base, token: cascadeEncrypt(token), createdAt: Date.now(), peerIp: data.peerIp || '' };
@@ -4043,14 +4043,14 @@ async function iperfRunTest(opts) {
         }
         let targetHost = target;
         if (!port && (transport === 'tunnel' || transport === 'auto')) {
-            // Порты наружу закрыты — пробуем замер через сам туннель awg.
-            // Пакет заворачиваем меткой нужного выхода: таблица маршрутов
-            // каскада уже знает, как вести трафик через awg1/awg2.
+            // РџРѕСЂС‚С‹ РЅР°СЂСѓР¶Сѓ Р·Р°РєСЂС‹С‚С‹ вЂ” РїСЂРѕР±СѓРµРј Р·Р°РјРµСЂ С‡РµСЂРµР· СЃР°Рј С‚СѓРЅРЅРµР»СЊ awg.
+            // РџР°РєРµС‚ Р·Р°РІРѕСЂР°С‡РёРІР°РµРј РјРµС‚РєРѕР№ РЅСѓР¶РЅРѕРіРѕ РІС‹С…РѕРґР°: С‚Р°Р±Р»РёС†Р° РјР°СЂС€СЂСѓС‚РѕРІ
+            // РєР°СЃРєР°РґР° СѓР¶Рµ Р·РЅР°РµС‚, РєР°Рє РІРµСЃС‚Рё С‚СЂР°С„РёРє С‡РµСЂРµР· awg1/awg2.
             const mark = cascadeExitMark(exit ? exit.index : 0);
             const exitIface = exit ? exit.iface : 'awg1';
             for (const t of (prep && Array.isArray(prep.tunnels) ? prep.tunnels : [])) {
-                // Обратный путь должен идти в тот же туннель, иначе rp_filter
-                // выбросит ответ. Добавляем маршрут в основную таблицу.
+                // РћР±СЂР°С‚РЅС‹Р№ РїСѓС‚СЊ РґРѕР»Р¶РµРЅ РёРґС‚Рё РІ С‚РѕС‚ Р¶Рµ С‚СѓРЅРЅРµР»СЊ, РёРЅР°С‡Рµ rp_filter
+                // РІС‹Р±СЂРѕСЃРёС‚ РѕС‚РІРµС‚. Р”РѕР±Р°РІР»СЏРµРј РјР°СЂС€СЂСѓС‚ РІ РѕСЃРЅРѕРІРЅСѓСЋ С‚Р°Р±Р»РёС†Сѓ.
                 let routeAdded = false;
                 try {
                     const cur = String(shTry('ip', ['route', 'get', t.ip]) || '');
@@ -4059,7 +4059,7 @@ async function iperfRunTest(opts) {
                         sh('sudo', ['ip', 'route', 'add', t.ip + '/32', 'dev', exitIface]);
                         routeAdded = true;
                     }
-                } catch (e) { /* без маршрута попробуем метку */ }
+                } catch (e) { /* Р±РµР· РјР°СЂС€СЂСѓС‚Р° РїРѕРїСЂРѕР±СѓРµРј РјРµС‚РєСѓ */ }
                 const add = ['-w', '-t', 'mangle', '-A', 'OUTPUT', '-p', 'tcp', '-d', t.ip, '--dport', String(t.port), '-j', 'MARK', '--set-mark', mark];
                 const del = ['-w', '-t', 'mangle', '-D', 'OUTPUT', '-p', 'tcp', '-d', t.ip, '--dport', String(t.port), '-j', 'MARK', '--set-mark', mark];
                 let marked = false;
@@ -4087,19 +4087,19 @@ async function iperfRunTest(opts) {
         };
         if (!port) {
             if (transport === 'tunnel' && !(prep && Array.isArray(prep.tunnels) && prep.tunnels.length)) {
-                throw new Error('Ответная панель не отдала туннельный адрес: на ней не найден конфиг каскада (awg0/awg1) или интерфейс не поднят.');
+                throw new Error('РћС‚РІРµС‚РЅР°СЏ РїР°РЅРµР»СЊ РЅРµ РѕС‚РґР°Р»Р° С‚СѓРЅРЅРµР»СЊРЅС‹Р№ Р°РґСЂРµСЃ: РЅР° РЅРµР№ РЅРµ РЅР°Р№РґРµРЅ РєРѕРЅС„РёРі РєР°СЃРєР°РґР° (awg0/awg1) РёР»Рё РёРЅС‚РµСЂС„РµР№СЃ РЅРµ РїРѕРґРЅСЏС‚.');
             }
             if (transport === 'iperf3' || transport === 'tunnel') {
-                throw new Error('Порты iperf3 недоступны с этой панели (' +
+                throw new Error('РџРѕСЂС‚С‹ iperf3 РЅРµРґРѕСЃС‚СѓРїРЅС‹ СЃ СЌС‚РѕР№ РїР°РЅРµР»Рё (' +
                     probes.map(p => (p.ip ? p.ip + ':' : '') + p.port + ': ' + p.result).join(', ') + ').');
             }
-            // Порты iperf3 закрыты: меряем через уже открытый порт самой панели.
+            // РџРѕСЂС‚С‹ iperf3 Р·Р°РєСЂС‹С‚С‹: РјРµСЂСЏРµРј С‡РµСЂРµР· СѓР¶Рµ РѕС‚РєСЂС‹С‚С‹Р№ РїРѕСЂС‚ СЃР°РјРѕР№ РїР°РЅРµР»Рё.
             via = 'https';
             const http = iperfHttpTest(base, token, seconds);
             if (!http.capacity) {
-                throw new Error('Порты iperf3 недоступны с этой панели (' +
+                throw new Error('РџРѕСЂС‚С‹ iperf3 РЅРµРґРѕСЃС‚СѓРїРЅС‹ СЃ СЌС‚РѕР№ РїР°РЅРµР»Рё (' +
                     probes.map(p => p.port + ': ' + p.result).join(', ') +
-                    '), замер по HTTPS тоже не удался. Нужен хотя бы один открытый порт.');
+                    '), Р·Р°РјРµСЂ РїРѕ HTTPS С‚РѕР¶Рµ РЅРµ СѓРґР°Р»СЃСЏ. РќСѓР¶РµРЅ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ РѕС‚РєСЂС‹С‚С‹Р№ РїРѕСЂС‚.');
             }
             saveCapacity(http.capacity);
             return {
@@ -4111,10 +4111,10 @@ async function iperfRunTest(opts) {
         const down = iperfClientRun(targetHost, port, seconds, true);
         const upMbps = Math.round(iperfBits(up, 'sum_sent') / 1e6 * 10) / 10;
         const downMbps = Math.round(iperfBits(down, 'sum_received') / 1e6 * 10) / 10;
-        if (!upMbps && !downMbps) throw new Error('iperf3 не передал данные — канал не отвечает');
+        if (!upMbps && !downMbps) throw new Error('iperf3 РЅРµ РїРµСЂРµРґР°Р» РґР°РЅРЅС‹Рµ вЂ” РєР°РЅР°Р» РЅРµ РѕС‚РІРµС‡Р°РµС‚');
         const viaTunnel = targetHost !== target;
-        // Через туннель отдача упирается в MTU/маршруты, поэтому берём
-        // скорость скачивания — она ближе к тому, что получают клиенты.
+        // Р§РµСЂРµР· С‚СѓРЅРЅРµР»СЊ РѕС‚РґР°С‡Р° СѓРїРёСЂР°РµС‚СЃСЏ РІ MTU/РјР°СЂС€СЂСѓС‚С‹, РїРѕСЌС‚РѕРјСѓ Р±РµСЂС‘Рј
+        // СЃРєРѕСЂРѕСЃС‚СЊ СЃРєР°С‡РёРІР°РЅРёСЏ вЂ” РѕРЅР° Р±Р»РёР¶Рµ Рє С‚РѕРјСѓ, С‡С‚Рѕ РїРѕР»СѓС‡Р°СЋС‚ РєР»РёРµРЅС‚С‹.
         const capacity = viaTunnel
             ? Math.round((downMbps || upMbps) * 10) / 10
             : Math.round((upMbps && downMbps ? Math.min(upMbps, downMbps) : (upMbps || downMbps)) * 10) / 10;
@@ -4133,24 +4133,24 @@ async function iperfRunTest(opts) {
 app.post('/api/diag/iperf', checkAuth, requireAdmin, async (req, res) => {
     try {
         const result = await iperfRunTest(req.body || {});
-        auditLog(req, `iperf3: ${result.target} → ${result.capacity} Мбит/с`);
+        auditLog(req, `iperf3: ${result.target} в†’ ${result.capacity} РњР±РёС‚/СЃ`);
         res.json(result);
     } catch (e) {
-        res.status(500).json({ error: e.message || 'Ошибка iperf3' });
+        res.status(500).json({ error: e.message || 'РћС€РёР±РєР° iperf3' });
     }
 });
 
-// Проверка TCP-доступности порта с этой панели (диагностика фаервола).
+// РџСЂРѕРІРµСЂРєР° TCP-РґРѕСЃС‚СѓРїРЅРѕСЃС‚Рё РїРѕСЂС‚Р° СЃ СЌС‚РѕР№ РїР°РЅРµР»Рё (РґРёР°РіРЅРѕСЃС‚РёРєР° С„Р°РµСЂРІРѕР»Р°).
 app.post('/api/diag/tcp-probe', checkAuth, requireAdmin, async (req, res) => {
     const body = req.body || {};
     const host = String(body.host || '').trim();
     const port = Number(body.port) || 0;
-    if (!host || !isPort(port)) return res.status(400).json({ error: 'Нужны host и port' });
+    if (!host || !isPort(port)) return res.status(400).json({ error: 'РќСѓР¶РЅС‹ host Рё port' });
     const result = await tcpProbe(host, port, Math.max(1000, Math.min(15000, Number(body.timeout) || 5000)));
     res.json({ success: true, host, port, result });
 });
 
-// Состояние iperf-агента на этой панели (для отладки ответной стороны).
+// РЎРѕСЃС‚РѕСЏРЅРёРµ iperf-Р°РіРµРЅС‚Р° РЅР° СЌС‚РѕР№ РїР°РЅРµР»Рё (РґР»СЏ РѕС‚Р»Р°РґРєРё РѕС‚РІРµС‚РЅРѕР№ СЃС‚РѕСЂРѕРЅС‹).
 app.get('/api/diag/iperf/agent', checkAuth, requireAdmin, (req, res) => {
     const run = iperfRunRead();
     const items = run && Array.isArray(run.items) ? run.items : [];
@@ -4174,7 +4174,7 @@ app.get('/api/diag/iperf/agent', checkAuth, requireAdmin, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// MTU и MSS каскада: замер пути, проверка клампинга и авто-исправление.
+// MTU Рё MSS РєР°СЃРєР°РґР°: Р·Р°РјРµСЂ РїСѓС‚Рё, РїСЂРѕРІРµСЂРєР° РєР»Р°РјРїРёРЅРіР° Рё Р°РІС‚Рѕ-РёСЃРїСЂР°РІР»РµРЅРёРµ.
 // ---------------------------------------------------------------------------
 const MSS_MIN = 536;
 const MSS_SCRIPT = '/usr/local/sbin/servpanel-mss.sh';
@@ -4210,7 +4210,7 @@ function mssRulesOf(iface) {
         if (!raw.startsWith('-A FORWARD') || !raw.includes('TCPMSS')) continue;
         const isOut = raw.includes('-o ' + name);
         const isIn = raw.includes('-i ' + name);
-        // Правило без -o/-i действует на весь FORWARD — оно тоже покрывает туннель.
+        // РџСЂР°РІРёР»Рѕ Р±РµР· -o/-i РґРµР№СЃС‚РІСѓРµС‚ РЅР° РІРµСЃСЊ FORWARD вЂ” РѕРЅРѕ С‚РѕР¶Рµ РїРѕРєСЂС‹РІР°РµС‚ С‚СѓРЅРЅРµР»СЊ.
         const global = !/(?:^|\s)-[oi]\s+\S+/.test(raw);
         if (!isOut && !isIn && !global) continue;
         const m = raw.match(/--set-mss\s+(\d+)/);
@@ -4230,14 +4230,14 @@ function mtuRecommend(mtu, rules) {
     const expectedMss = value > 0 ? Math.max(MSS_MIN, value - 40) : 0;
     const list = Array.isArray(rules) ? rules : [];
     if (!value) {
-        return { ok: false, level: 'error', expectedMss: 0, message: 'Интерфейс не поднят — MTU неизвестен.' };
+        return { ok: false, level: 'error', expectedMss: 0, message: 'РРЅС‚РµСЂС„РµР№СЃ РЅРµ РїРѕРґРЅСЏС‚ вЂ” MTU РЅРµРёР·РІРµСЃС‚РµРЅ.' };
     }
     if (!list.length) {
         return {
             ok: false,
             level: 'warn',
             expectedMss,
-            message: `Клампинга MSS нет. Нужно ${expectedMss} (MTU ${value} − 40); лучше автоматически: --clamp-mss-to-pmtu.`
+            message: `РљР»Р°РјРїРёРЅРіР° MSS РЅРµС‚. РќСѓР¶РЅРѕ ${expectedMss} (MTU ${value} в€’ 40); Р»СѓС‡С€Рµ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё: --clamp-mss-to-pmtu.`
         };
     }
     const over = list.filter(r => r.mss > 0 && r.mss > expectedMss);
@@ -4247,7 +4247,7 @@ function mtuRecommend(mtu, rules) {
             ok: false,
             level: 'error',
             expectedMss,
-            message: `MSS ${bad} больше допустимого ${expectedMss} при MTU ${value}: пакеты до ${bad + 40} байт будут теряться. Замените на --clamp-mss-to-pmtu или --set-mss ${expectedMss}.`
+            message: `MSS ${bad} Р±РѕР»СЊС€Рµ РґРѕРїСѓСЃС‚РёРјРѕРіРѕ ${expectedMss} РїСЂРё MTU ${value}: РїР°РєРµС‚С‹ РґРѕ ${bad + 40} Р±Р°Р№С‚ Р±СѓРґСѓС‚ С‚РµСЂСЏС‚СЊСЃСЏ. Р—Р°РјРµРЅРёС‚Рµ РЅР° --clamp-mss-to-pmtu РёР»Рё --set-mss ${expectedMss}.`
         };
     }
     const dirs = new Set();
@@ -4259,13 +4259,13 @@ function mtuRecommend(mtu, rules) {
             ok: false,
             level: 'warn',
             expectedMss,
-            message: 'Клампинг стоит только в одну сторону — нужно и -o, и -i.'
+            message: 'РљР»Р°РјРїРёРЅРі СЃС‚РѕРёС‚ С‚РѕР»СЊРєРѕ РІ РѕРґРЅСѓ СЃС‚РѕСЂРѕРЅСѓ вЂ” РЅСѓР¶РЅРѕ Рё -o, Рё -i.'
         };
     }
     if (list.some(r => r.clamp)) {
-        return { ok: true, level: 'ok', expectedMss, message: `Клампинг по PMTU, MSS ${expectedMss} — корректно.` };
+        return { ok: true, level: 'ok', expectedMss, message: `РљР»Р°РјРїРёРЅРі РїРѕ PMTU, MSS ${expectedMss} вЂ” РєРѕСЂСЂРµРєС‚РЅРѕ.` };
     }
-    return { ok: true, level: 'ok', expectedMss, message: `MSS ${expectedMss} соответствует MTU ${value}.` };
+    return { ok: true, level: 'ok', expectedMss, message: `MSS ${expectedMss} СЃРѕРѕС‚РІРµС‚СЃС‚РІСѓРµС‚ MTU ${value}.` };
 }
 
 function mtuLocalReport() {
@@ -4291,8 +4291,8 @@ function pingDfOk(host, mtu, iface) {
     return /ttl=/i.test(out);
 }
 
-// Бинарный поиск PMTU: ping с DF, payload = MTU − 28 (IP+ICMP).
-// Верхняя граница — MTU интерфейса: если путь его держит, хватает одной пробы.
+// Р‘РёРЅР°СЂРЅС‹Р№ РїРѕРёСЃРє PMTU: ping СЃ DF, payload = MTU в€’ 28 (IP+ICMP).
+// Р’РµСЂС…РЅСЏСЏ РіСЂР°РЅРёС†Р° вЂ” MTU РёРЅС‚РµСЂС„РµР№СЃР°: РµСЃР»Рё РїСѓС‚СЊ РµРіРѕ РґРµСЂР¶РёС‚, С…РІР°С‚Р°РµС‚ РѕРґРЅРѕР№ РїСЂРѕР±С‹.
 function pmtuMeasure(host, iface, maxMtu) {
     const top = Math.max(MSS_MIN + 28, Math.min(1500, Number(maxMtu) || 1500));
     if (pingDfOk(host, top, iface)) return top;
@@ -4313,7 +4313,7 @@ function pmtuMeasure(host, iface, maxMtu) {
 
 function mssApplyOne(iface, mss, mode) {
     const name = String(iface || '');
-    if (!/^[A-Za-z0-9_.-]+$/.test(name)) throw new Error('Неверный интерфейс');
+    if (!/^[A-Za-z0-9_.-]+$/.test(name)) throw new Error('РќРµРІРµСЂРЅС‹Р№ РёРЅС‚РµСЂС„РµР№СЃ');
     const out = String(shTry('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-S', 'FORWARD']) || '');
     const re = new RegExp('(?:-o|-i)\\s+' + name + '(?:\\s|$)');
     let removed = 0;
@@ -4334,9 +4334,9 @@ function mssApplyOne(iface, mss, mode) {
     return removed;
 }
 
-// Установщик AmneziaWG прописывает MSS в PostUp/PostDown. После смены MTU эти
-// строки возвращают старое значение при каждом рестарте интерфейса, поэтому
-// убираем TCPMSS из PostUp/PostDown: клампинг делает servpanel-mss.service.
+// РЈСЃС‚Р°РЅРѕРІС‰РёРє AmneziaWG РїСЂРѕРїРёСЃС‹РІР°РµС‚ MSS РІ PostUp/PostDown. РџРѕСЃР»Рµ СЃРјРµРЅС‹ MTU СЌС‚Рё
+// СЃС‚СЂРѕРєРё РІРѕР·РІСЂР°С‰Р°СЋС‚ СЃС‚Р°СЂРѕРµ Р·РЅР°С‡РµРЅРёРµ РїСЂРё РєР°Р¶РґРѕРј СЂРµСЃС‚Р°СЂС‚Рµ РёРЅС‚РµСЂС„РµР№СЃР°, РїРѕСЌС‚РѕРјСѓ
+// СѓР±РёСЂР°РµРј TCPMSS РёР· PostUp/PostDown: РєР»Р°РјРїРёРЅРі РґРµР»Р°РµС‚ servpanel-mss.service.
 function mssPatchConf(iface) {
     const name = String(iface || '');
     if (!/^[A-Za-z0-9_.-]+$/.test(name)) return false;
@@ -4361,7 +4361,7 @@ function mssPersist(list) {
     const items = Array.isArray(list) ? list.filter(it => it && it.iface) : [];
     const script = [
         '#!/bin/sh',
-        '# Servpanel: MSS clamping для каскадных туннелей',
+        '# Servpanel: MSS clamping РґР»СЏ РєР°СЃРєР°РґРЅС‹С… С‚СѓРЅРЅРµР»РµР№',
         'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
         ''
     ];
@@ -4394,14 +4394,14 @@ function mssPersist(list) {
 
 function setCascadeIfaceMtu(iface, mtu) {
     const name = String(iface || '');
-    if (!/^[A-Za-z0-9_.-]+$/.test(name)) throw new Error('Неверный интерфейс');
+    if (!/^[A-Za-z0-9_.-]+$/.test(name)) throw new Error('РќРµРІРµСЂРЅС‹Р№ РёРЅС‚РµСЂС„РµР№СЃ');
     const value = Number(mtu);
-    if (!Number.isInteger(value) || value < 576 || value > 1500) throw new Error('MTU должен быть 576…1500');
+    if (!Number.isInteger(value) || value < 576 || value > 1500) throw new Error('MTU РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ 576вЂ¦1500');
     const file = path.join(AWG_CONF_DIR, name + '.conf');
-    if (!fs.existsSync(file)) throw new Error('Конфиг ' + name + '.conf не найден');
+    if (!fs.existsSync(file)) throw new Error('РљРѕРЅС„РёРі ' + name + '.conf РЅРµ РЅР°Р№РґРµРЅ');
     const lines = readTextSafe(file).split(/\r?\n/).filter(l => !/^\s*MTU\s*=/i.test(l));
     const idx = lines.findIndex(l => /^\s*\[Interface\]\s*$/i.test(l));
-    if (idx < 0) throw new Error('В конфиге нет секции [Interface]');
+    if (idx < 0) throw new Error('Р’ РєРѕРЅС„РёРіРµ РЅРµС‚ СЃРµРєС†РёРё [Interface]');
     lines.splice(idx + 1, 0, 'MTU = ' + value);
     writeRootFile(file, lines.join('\n').trim() + '\n', '0600');
     try { sh('sudo', ['systemctl', 'restart', 'awg-quick@' + name], { timeout: 60000 }); } catch (e) { /* ignore */ }
@@ -4412,18 +4412,18 @@ app.get('/api/cascade/mtu', checkAuth, requireAdmin, (req, res) => {
     try {
         res.json({ success: true, role: cascadeRole(), items: mtuLocalReport() });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось прочитать MTU: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ MTU: ' + (e.message || e) });
     }
 });
 
 app.post('/api/cascade/mtu/test', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     const host = String(body.host || '').trim() || '1.1.1.1';
-    if (!IPV4_RE.test(host) && !/^[A-Za-z0-9.-]+$/.test(host)) return res.status(400).json({ error: 'Неверный хост' });
+    if (!IPV4_RE.test(host) && !/^[A-Za-z0-9.-]+$/.test(host)) return res.status(400).json({ error: 'РќРµРІРµСЂРЅС‹Р№ С…РѕСЃС‚' });
     try {
         const all = mtuLocalReport();
         const target = body.iface ? all.filter(i => i.iface === String(body.iface)) : all;
-        if (!target.length) return res.status(404).json({ error: 'Каскадный интерфейс не найден' });
+        if (!target.length) return res.status(404).json({ error: 'РљР°СЃРєР°РґРЅС‹Р№ РёРЅС‚РµСЂС„РµР№СЃ РЅРµ РЅР°Р№РґРµРЅ' });
         const items = target.map(item => {
             const pmtu = item.mtu ? pmtuMeasure(host, item.iface, item.mtu) : 0;
             const baseMtu = pmtu || item.mtu || 0;
@@ -4434,13 +4434,13 @@ app.post('/api/cascade/mtu/test', checkAuth, requireAdmin, (req, res) => {
                 recommendedMtu: baseMtu,
                 recommendedMss,
                 suggestion: pmtu && item.mtu && pmtu < item.mtu
-                    ? `Путь держит ${pmtu} байт, а интерфейс ${item.mtu}. Поставьте MTU ${pmtu} на клиентском туннеле и MSS ${recommendedMss} (клампинг по PMTU).`
-                    : (pmtu ? `Путь держит ${pmtu} байт. Рекомендуется MSS ${recommendedMss} (MTU − 40) и клампинг по PMTU.` : 'ICMP с DF не прошёл — проверьте доступность хоста через туннель.')
+                    ? `РџСѓС‚СЊ РґРµСЂР¶РёС‚ ${pmtu} Р±Р°Р№С‚, Р° РёРЅС‚РµСЂС„РµР№СЃ ${item.mtu}. РџРѕСЃС‚Р°РІСЊС‚Рµ MTU ${pmtu} РЅР° РєР»РёРµРЅС‚СЃРєРѕРј С‚СѓРЅРЅРµР»Рµ Рё MSS ${recommendedMss} (РєР»Р°РјРїРёРЅРі РїРѕ PMTU).`
+                    : (pmtu ? `РџСѓС‚СЊ РґРµСЂР¶РёС‚ ${pmtu} Р±Р°Р№С‚. Р РµРєРѕРјРµРЅРґСѓРµС‚СЃСЏ MSS ${recommendedMss} (MTU в€’ 40) Рё РєР»Р°РјРїРёРЅРі РїРѕ PMTU.` : 'ICMP СЃ DF РЅРµ РїСЂРѕС€С‘Р» вЂ” РїСЂРѕРІРµСЂСЊС‚Рµ РґРѕСЃС‚СѓРїРЅРѕСЃС‚СЊ С…РѕСЃС‚Р° С‡РµСЂРµР· С‚СѓРЅРЅРµР»СЊ.')
             };
         });
         res.json({ success: true, host, items });
     } catch (e) {
-        res.status(500).json({ error: 'Ошибка замера MTU: ' + (e.message || e) });
+        res.status(500).json({ error: 'РћС€РёР±РєР° Р·Р°РјРµСЂР° MTU: ' + (e.message || e) });
     }
 });
 
@@ -4449,7 +4449,7 @@ app.post('/api/cascade/mtu/apply', checkAuth, requireAdmin, (req, res) => {
     try {
         const all = mtuLocalReport();
         const target = body.iface ? all.filter(i => i.iface === String(body.iface)) : all;
-        if (!target.length) return res.status(404).json({ error: 'Каскадный интерфейс не найден' });
+        if (!target.length) return res.status(404).json({ error: 'РљР°СЃРєР°РґРЅС‹Р№ РёРЅС‚РµСЂС„РµР№СЃ РЅРµ РЅР°Р№РґРµРЅ' });
         const mode = body.mode === 'set' ? 'set' : 'clamp';
         const wantMtu = Number(body.mtu) || 0;
         const done = [];
@@ -4472,16 +4472,16 @@ app.post('/api/cascade/mtu/apply', checkAuth, requireAdmin, (req, res) => {
             items: mtuLocalReport()
         });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось применить клампинг: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРёРјРµРЅРёС‚СЊ РєР»Р°РјРїРёРЅРі: ' + (e.message || e) });
     }
 });
 
-// Отчёт о MTU/MSS на ответной панели (по ключу iperf-агента).
+// РћС‚С‡С‘С‚ Рѕ MTU/MSS РЅР° РѕС‚РІРµС‚РЅРѕР№ РїР°РЅРµР»Рё (РїРѕ РєР»СЋС‡Сѓ iperf-Р°РіРµРЅС‚Р°).
 app.get('/api/iperf/agent/mtu', requireIperfAgent, (req, res) => {
     try {
         res.json({ success: true, role: cascadeRole(), items: mtuLocalReport() });
     } catch (e) {
-        res.status(500).json({ error: e.message || 'Ошибка чтения MTU' });
+        res.status(500).json({ error: e.message || 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ MTU' });
     }
 });
 
@@ -4493,19 +4493,19 @@ async function remotePanelLogin(body) {
     const base = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw;
     const remote = new Panel(base, user, pass);
     const login = await remote.login();
-    if (!login.ok) throw new Error(login.error || 'Не удалось войти в панель-ответчик');
+    if (!login.ok) throw new Error(login.error || 'РќРµ СѓРґР°Р»РѕСЃСЊ РІРѕР№С‚Рё РІ РїР°РЅРµР»СЊ-РѕС‚РІРµС‚С‡РёРє');
     return { base, remote };
 }
 
 app.post('/api/cascade/mtu/remote', checkAuth, requireAdmin, async (req, res) => {
     const body = req.body || {};
     try {
-        // Основной путь: логин в панель-ответчик по URL/логину/паролю из блока iperf.
+        // РћСЃРЅРѕРІРЅРѕР№ РїСѓС‚СЊ: Р»РѕРіРёРЅ РІ РїР°РЅРµР»СЊ-РѕС‚РІРµС‚С‡РёРє РїРѕ URL/Р»РѕРіРёРЅСѓ/РїР°СЂРѕР»СЋ РёР· Р±Р»РѕРєР° iperf.
         const session = await remotePanelLogin(body);
         if (session) {
             const r = await session.remote.get('/api/cascade/mtu', 20000);
             if (r.status !== 200 || !r.json) {
-                return res.status(502).json({ error: 'Ответная панель вернула ' + (r.error || ('HTTP ' + r.status)) });
+                return res.status(502).json({ error: 'РћС‚РІРµС‚РЅР°СЏ РїР°РЅРµР»СЊ РІРµСЂРЅСѓР»Р° ' + (r.error || ('HTTP ' + r.status)) });
             }
             return res.json({ success: true, url: session.base, via: 'panel', remote: r.json });
         }
@@ -4513,11 +4513,11 @@ app.post('/api/cascade/mtu/remote', checkAuth, requireAdmin, async (req, res) =>
         const state = cascadeBalanceRead();
         const agent = state.agents && state.agents[exitId];
         if (!agent || !agent.url) {
-            return res.status(404).json({ error: 'Укажите URL, логин и пароль панели-ответчика (или сначала выполните тест канала, чтобы сохранить ключ iperf)' });
+            return res.status(404).json({ error: 'РЈРєР°Р¶РёС‚Рµ URL, Р»РѕРіРёРЅ Рё РїР°СЂРѕР»СЊ РїР°РЅРµР»Рё-РѕС‚РІРµС‚С‡РёРєР° (РёР»Рё СЃРЅР°С‡Р°Р»Р° РІС‹РїРѕР»РЅРёС‚Рµ С‚РµСЃС‚ РєР°РЅР°Р»Р°, С‡С‚РѕР±С‹ СЃРѕС…СЂР°РЅРёС‚СЊ РєР»СЋС‡ iperf)' });
         }
         let token = '';
         try { token = cascadeDecrypt(agent.token); } catch (e) { token = ''; }
-        if (!token) return res.status(400).json({ error: 'Не удалось расшифровать ключ ответной панели' });
+        if (!token) return res.status(400).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЂР°СЃС€РёС„СЂРѕРІР°С‚СЊ РєР»СЋС‡ РѕС‚РІРµС‚РЅРѕР№ РїР°РЅРµР»Рё' });
         const r = await fetch(String(agent.url).replace(/\/+$/, '') + '/api/iperf/agent/mtu', {
             headers: { Authorization: 'Bearer ' + token },
             signal: AbortSignal.timeout(15000)
@@ -4526,7 +4526,7 @@ app.post('/api/cascade/mtu/remote', checkAuth, requireAdmin, async (req, res) =>
         if (!r.ok) return res.status(r.status).json({ error: data.error || ('HTTP ' + r.status) });
         res.json({ success: true, exitId, url: agent.url, via: 'agent', remote: data });
     } catch (e) {
-        res.status(502).json({ error: 'Не удалось получить MTU с ответной панели: ' + (e.message || e) });
+        res.status(502).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ MTU СЃ РѕС‚РІРµС‚РЅРѕР№ РїР°РЅРµР»Рё: ' + (e.message || e) });
     }
 });
 
@@ -4534,7 +4534,7 @@ app.post('/api/cascade/mtu/remote-apply', checkAuth, requireAdmin, async (req, r
     const body = req.body || {};
     try {
         const session = await remotePanelLogin(body);
-        if (!session) return res.status(400).json({ error: 'Нужны URL, логин и пароль панели-ответчика' });
+        if (!session) return res.status(400).json({ error: 'РќСѓР¶РЅС‹ URL, Р»РѕРіРёРЅ Рё РїР°СЂРѕР»СЊ РїР°РЅРµР»Рё-РѕС‚РІРµС‚С‡РёРєР°' });
         const payload = { mode: body.mode === 'set' ? 'set' : 'clamp' };
         const mtu = Number(body.mtu) || 0;
         if (mtu) payload.mtu = mtu;
@@ -4542,33 +4542,33 @@ app.post('/api/cascade/mtu/remote-apply', checkAuth, requireAdmin, async (req, r
         if (r.status !== 200 || !r.json) {
             return res.status(502).json({ error: (r.json && r.json.error) || r.error || ('HTTP ' + r.status) });
         }
-        auditLog(req, `MTU на ответной панели ${session.base}: ${payload.mode === 'set' ? 'MSS ' + payload.mtu : 'клампинг по PMTU'}`);
+        auditLog(req, `MTU РЅР° РѕС‚РІРµС‚РЅРѕР№ РїР°РЅРµР»Рё ${session.base}: ${payload.mode === 'set' ? 'MSS ' + payload.mtu : 'РєР»Р°РјРїРёРЅРі РїРѕ PMTU'}`);
         res.json({ success: true, url: session.base, result: r.json });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось исправить на ответной панели: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РёСЃРїСЂР°РІРёС‚СЊ РЅР° РѕС‚РІРµС‚РЅРѕР№ РїР°РЅРµР»Рё: ' + (e.message || e) });
     }
 });
 
 // ---------------------------------------------------------------------------
-// MTU клиентских конфигов: общая сводка, массовая правка и правка по клиенту.
+// MTU РєР»РёРµРЅС‚СЃРєРёС… РєРѕРЅС„РёРіРѕРІ: РѕР±С‰Р°СЏ СЃРІРѕРґРєР°, РјР°СЃСЃРѕРІР°СЏ РїСЂР°РІРєР° Рё РїСЂР°РІРєР° РїРѕ РєР»РёРµРЅС‚Сѓ.
 // ---------------------------------------------------------------------------
 app.get('/api/cascade/mtu/clients', checkAuth, requireAdmin, (req, res) => {
     try {
         res.json({ success: true, ...clientMtuReport() });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось прочитать MTU клиентов: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ MTU РєР»РёРµРЅС‚РѕРІ: ' + (e.message || e) });
     }
 });
 
 app.post('/api/cascade/mtu/clients', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     const mtu = Number(body.mtu) || 0;
-    if (!mtu || mtu < 576 || mtu > 1500) return res.status(400).json({ error: 'MTU должен быть 576…1500' });
+    if (!mtu || mtu < 576 || mtu > 1500) return res.status(400).json({ error: 'MTU РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ 576вЂ¦1500' });
     const store = readClientMtuStore();
     const failed = [];
     let applied = 0;
     for (const name of clientNamesOnDisk()) {
-        // Пир каскада живёт на MTU туннеля — его не переписываем.
+        // РџРёСЂ РєР°СЃРєР°РґР° Р¶РёРІС‘С‚ РЅР° MTU С‚СѓРЅРЅРµР»СЏ вЂ” РµРіРѕ РЅРµ РїРµСЂРµРїРёСЃС‹РІР°РµРј.
         if (name === 'ru_host') continue;
         try {
             if (clientConfMtuOf(name) !== mtu) {
@@ -4582,14 +4582,14 @@ app.post('/api/cascade/mtu/clients', checkAuth, requireAdmin, (req, res) => {
     }
     store.default = mtu;
     writeClientMtuStore(store);
-    auditLog(req, `MTU клиентских конфигов: ${mtu} (обновлено ${applied} из ${clientNamesOnDisk().length})`);
+    auditLog(req, `MTU РєР»РёРµРЅС‚СЃРєРёС… РєРѕРЅС„РёРіРѕРІ: ${mtu} (РѕР±РЅРѕРІР»РµРЅРѕ ${applied} РёР· ${clientNamesOnDisk().length})`);
     res.json({ success: true, mtu, applied, failed, ...clientMtuReport() });
 });
 
 app.get('/api/clients/:name/mtu', checkAuth, (req, res) => {
     const name = String(req.params.name);
-    if (!NAME_RE.test(name)) return res.status(400).json({ error: 'Неверное имя' });
-    if (!fs.existsSync(clientConfPath(name))) return res.status(404).json({ error: 'Конфиг клиента не найден' });
+    if (!NAME_RE.test(name)) return res.status(400).json({ error: 'РќРµРІРµСЂРЅРѕРµ РёРјСЏ' });
+    if (!fs.existsSync(clientConfPath(name))) return res.status(404).json({ error: 'РљРѕРЅС„РёРі РєР»РёРµРЅС‚Р° РЅРµ РЅР°Р№РґРµРЅ' });
     const suggested = clientPathMtu();
     const mtu = clientConfMtuOf(name);
     const rec = clientMtuAdvice(mtu, suggested);
@@ -4607,22 +4607,22 @@ app.get('/api/clients/:name/mtu', checkAuth, (req, res) => {
 
 app.post('/api/clients/:name/mtu', checkAuth, requireAdmin, (req, res) => {
     const name = String(req.params.name);
-    if (!NAME_RE.test(name)) return res.status(400).json({ error: 'Неверное имя' });
+    if (!NAME_RE.test(name)) return res.status(400).json({ error: 'РќРµРІРµСЂРЅРѕРµ РёРјСЏ' });
     const body = req.body || {};
     const mtu = Number(body.mtu) || 0;
-    if (mtu && (mtu < 576 || mtu > 1500)) return res.status(400).json({ error: 'MTU должен быть 576…1500' });
+    if (mtu && (mtu < 576 || mtu > 1500)) return res.status(400).json({ error: 'MTU РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ 576вЂ¦1500' });
     try {
         setClientConfMtu(name, mtu);
         const store = readClientMtuStore();
         if (mtu) store.clients[name] = mtu;
         else delete store.clients[name];
         writeClientMtuStore(store);
-        auditLog(req, `Клиент ${name}: MTU ${mtu || 'по умолчанию'}`);
+        auditLog(req, `РљР»РёРµРЅС‚ ${name}: MTU ${mtu || 'РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ'}`);
         const suggested = clientPathMtu();
         const rec = clientMtuAdvice(mtu, suggested);
         res.json({ success: true, name, mtu, suggested, ok: rec.ok, level: rec.level, advice: rec.message });
     } catch (e) {
-        res.status(500).json({ error: e.message || 'Не удалось изменить MTU' });
+        res.status(500).json({ error: e.message || 'РќРµ СѓРґР°Р»РѕСЃСЊ РёР·РјРµРЅРёС‚СЊ MTU' });
     }
 });
 
@@ -4630,13 +4630,13 @@ app.post('/api/cascade/balance/capacity', checkAuth, requireAdmin, (req, res) =>
     const body = req.body || {};
     const id = String(body.id || '');
     const exit = cascadeExitList().find(e => e.id === id);
-    if (!exit) return res.status(404).json({ error: 'Выход не найден' });
+    if (!exit) return res.status(404).json({ error: 'Р’С‹С…РѕРґ РЅРµ РЅР°Р№РґРµРЅ' });
     const mbps = Math.max(0, Math.min(100000, Number(body.mbps) || 0));
     const state = cascadeBalanceRead();
     state.capacities[id] = mbps;
     state.capacityAt[id] = mbps ? Date.now() : 0;
     cascadeBalanceWrite(state);
-    auditLog(req, `Каскад: ширина ${exit.iface} = ${mbps} Мбит/с`);
+    auditLog(req, `РљР°СЃРєР°Рґ: С€РёСЂРёРЅР° ${exit.iface} = ${mbps} РњР±РёС‚/СЃ`);
     res.json({ success: true, id, capacity: mbps });
 });
 
@@ -4662,8 +4662,8 @@ function cascadeBalanceScript(ifaces, extraRuNets, exits, assignments, manual) {
     const list = (ifaces || []).filter(Boolean);
     const active = (exits || []).filter(e => e.healthy);
     const use = active.length ? active : (exits || []).slice(0, 1);
-    if (!list.length) throw new Error('Не выбраны клиентские интерфейсы');
-    if (!use.length) throw new Error('Нет доступных выходов');
+    if (!list.length) throw new Error('РќРµ РІС‹Р±СЂР°РЅС‹ РєР»РёРµРЅС‚СЃРєРёРµ РёРЅС‚РµСЂС„РµР№СЃС‹');
+    if (!use.length) throw new Error('РќРµС‚ РґРѕСЃС‚СѓРїРЅС‹С… РІС‹С…РѕРґРѕРІ');
     const indexOf = id => Math.max(0, use.findIndex(e => e.id === id));
     const defaultExit = use.slice().sort((a, b) =>
         (assignments ? Object.values(assignments).filter(x => x === a.id).length : 0) -
@@ -4674,7 +4674,7 @@ function cascadeBalanceScript(ifaces, extraRuNets, exits, assignments, manual) {
     const extra = (extraRuNets || []).join('\n');
     const bashArray = arr => arr.map(v => `"${String(v).replace(/"/g, '\\"')}"`).join(' ');
     return `#!/bin/bash
-# Каскад RU -> EU: несколько выходов и балансировка. Сгенерировано панелью.
+# РљР°СЃРєР°Рґ RU -> EU: РЅРµСЃРєРѕР»СЊРєРѕ РІС‹С…РѕРґРѕРІ Рё Р±Р°Р»Р°РЅСЃРёСЂРѕРІРєР°. РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅРѕ РїР°РЅРµР»СЊСЋ.
 set -euo pipefail
 
 CASC_IFACES=(${bashArray(list)})
@@ -4698,7 +4698,7 @@ if [ "\${1:-}" = "--clients-only" ]; then CLIENTS_ONLY=1; SKIP_LIST=1; fi
 mkdir -p "$AWG_DIR"
 if [ "$CLIENTS_ONLY" = "1" ]; then
     exec 8>"$AWG_DIR/awg-balance-clients.lock"
-    flock -w 10 8 || { echo "ERROR: занято, повторите"; exit 2; }
+    flock -w 10 8 || { echo "ERROR: Р·Р°РЅСЏС‚Рѕ, РїРѕРІС‚РѕСЂРёС‚Рµ"; exit 2; }
 else
     exec 9>"$AWG_DIR/awg-routing.lock"
     flock -w 300 9 || exit 1
@@ -4706,15 +4706,15 @@ fi
 trap 'rm -f "$RU_ZONE.tmp"' EXIT
 
 if [ "\${#CASC_IFACES[@]}" -eq 0 ]; then
-    echo "ERROR: не выбраны клиентские интерфейсы."
+    echo "ERROR: РЅРµ РІС‹Р±СЂР°РЅС‹ РєР»РёРµРЅС‚СЃРєРёРµ РёРЅС‚РµСЂС„РµР№СЃС‹."
     exit 1
 fi
 if [ "\${#EXIT_IFS[@]}" -eq 0 ]; then
-    echo "ERROR: нет доступных выходов."
+    echo "ERROR: РЅРµС‚ РґРѕСЃС‚СѓРїРЅС‹С… РІС‹С…РѕРґРѕРІ."
     exit 1
 fi
 
-# IPv6 в каскад не заворачивается.
+# IPv6 РІ РєР°СЃРєР°Рґ РЅРµ Р·Р°РІРѕСЂР°С‡РёРІР°РµС‚СЃСЏ.
 if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo 1)" = "0" ]; then
     if command -v ip6tables >/dev/null 2>&1; then
         ip6tables -N SERVPANEL_V6 2>/dev/null || true
@@ -4751,24 +4751,24 @@ if [ -s "$RU_ZONE" ]; then
 fi
 fi
 
-# Старый учёт обычного каскада не должен перехватывать клиентов до политики.
+# РЎС‚Р°СЂС‹Р№ СѓС‡С‘С‚ РѕР±С‹С‡РЅРѕРіРѕ РєР°СЃРєР°РґР° РЅРµ РґРѕР»Р¶РµРЅ РїРµСЂРµС…РІР°С‚С‹РІР°С‚СЊ РєР»РёРµРЅС‚РѕРІ РґРѕ РїРѕР»РёС‚РёРєРё.
 iptables -t mangle -D PREROUTING -j AWG_SPLIT 2>/dev/null || true
 iptables -t mangle -F AWG_SPLIT 2>/dev/null || true
 iptables -t mangle -X AWG_SPLIT 2>/dev/null || true
 
-# Не чистим рабочие правила, если у клиентского интерфейса ещё нет IPv4
-# (например, awg0 поднимается после старта панели).
+# РќРµ С‡РёСЃС‚РёРј СЂР°Р±РѕС‡РёРµ РїСЂР°РІРёР»Р°, РµСЃР»Рё Сѓ РєР»РёРµРЅС‚СЃРєРѕРіРѕ РёРЅС‚РµСЂС„РµР№СЃР° РµС‰С‘ РЅРµС‚ IPv4
+# (РЅР°РїСЂРёРјРµСЂ, awg0 РїРѕРґРЅРёРјР°РµС‚СЃСЏ РїРѕСЃР»Рµ СЃС‚Р°СЂС‚Р° РїР°РЅРµР»Рё).
 VALID_IFACES=0
 for CIFACE in "\${CASC_IFACES[@]}"; do
     SUBNET=$(ip -o -f inet addr show "$CIFACE" 2>/dev/null | awk '{print $4}' | head -n 1 || true)
     [ -n "$SUBNET" ] && VALID_IFACES=$((VALID_IFACES + 1))
 done
 if [ "$VALID_IFACES" -eq 0 ]; then
-    echo "ERROR: у клиентских интерфейсов нет IPv4 — маршруты не изменены."
+    echo "ERROR: Сѓ РєР»РёРµРЅС‚СЃРєРёС… РёРЅС‚РµСЂС„РµР№СЃРѕРІ РЅРµС‚ IPv4 вЂ” РјР°СЂС€СЂСѓС‚С‹ РЅРµ РёР·РјРµРЅРµРЅС‹."
     exit 1
 fi
 
-# Чистим только свои цепочки; чужие правила не трогаем.
+# Р§РёСЃС‚РёРј С‚РѕР»СЊРєРѕ СЃРІРѕРё С†РµРїРѕС‡РєРё; С‡СѓР¶РёРµ РїСЂР°РІРёР»Р° РЅРµ С‚СЂРѕРіР°РµРј.
 iptables -t mangle -D PREROUTING -j AWG_POLICY 2>/dev/null || true
 iptables -t mangle -N AWG_POLICY 2>/dev/null || true
 iptables -t mangle -F AWG_POLICY
@@ -4813,7 +4813,7 @@ for idx in "\${!EXIT_IFS[@]}"; do
         [ -n "$SUBNET" ] || continue
         iptables -w 5 -t nat -D POSTROUTING -s "$SUBNET" -o "$IFACE" -j MASQUERADE 2>/dev/null || true
         iptables -w 5 -t nat -A POSTROUTING -s "$SUBNET" -o "$IFACE" -j MASQUERADE
-        # Старые правила MSS (например, --set-mss 1240) перекрывают клампинг по PMTU.
+        # РЎС‚Р°СЂС‹Рµ РїСЂР°РІРёР»Р° MSS (РЅР°РїСЂРёРјРµСЂ, --set-mss 1240) РїРµСЂРµРєСЂС‹РІР°СЋС‚ РєР»Р°РјРїРёРЅРі РїРѕ PMTU.
         iptables -w 5 -t mangle -S FORWARD | grep -F TCPMSS | grep -F " $IFACE " | sed -n "s/^-A FORWARD /iptables -w 5 -t mangle -D FORWARD /p" | sh || true
         iptables -w 5 -t mangle -D FORWARD -o "$IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
         iptables -w 5 -t mangle -A FORWARD -o "$IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
@@ -4822,7 +4822,7 @@ for idx in "\${!EXIT_IFS[@]}"; do
 done
 fi
 
-# Учёт: RU-направления считаем отдельно, остальное — по метке выхода.
+# РЈС‡С‘С‚: RU-РЅР°РїСЂР°РІР»РµРЅРёСЏ СЃС‡РёС‚Р°РµРј РѕС‚РґРµР»СЊРЅРѕ, РѕСЃС‚Р°Р»СЊРЅРѕРµ вЂ” РїРѕ РјРµС‚РєРµ РІС‹С…РѕРґР°.
 for idx in "\${!CLIENT_IPS[@]}"; do
     IP="\${CLIENT_IPS[$idx]}"
     EXIT_IDX="\${CLIENT_EXITS[$idx]}"
@@ -4843,8 +4843,8 @@ for CIFACE in "\${CASC_IFACES[@]}"; do
         IP="\${CLIENT_IPS[$idx]}"
         EXIT_IDX="\${CLIENT_EXITS[$idx]}"
         MARK="\${EXIT_MARKS[$EXIT_IDX]}"
-        # Явный выбор клиента применяется сразу ко всем его пакетам,
-        # включая уже открытые соединения.
+        # РЇРІРЅС‹Р№ РІС‹Р±РѕСЂ РєР»РёРµРЅС‚Р° РїСЂРёРјРµРЅСЏРµС‚СЃСЏ СЃСЂР°Р·Сѓ РєРѕ РІСЃРµРј РµРіРѕ РїР°РєРµС‚Р°Рј,
+        # РІРєР»СЋС‡Р°СЏ СѓР¶Рµ РѕС‚РєСЂС‹С‚С‹Рµ СЃРѕРµРґРёРЅРµРЅРёСЏ.
         iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$IP" -j MARK --set-xmark "$MARK"
         iptables -w 5 -t mangle -A AWG_POLICY -i "$CIFACE" -s "$IP" -j CONNMARK --save-mark
     done
@@ -4860,11 +4860,11 @@ done
 iptables -w 5 -t mangle -I PREROUTING 1 -j AWG_POLICY
 
 if [ "$CLIENTS_ONLY" = "1" ]; then
-    echo "OK: выходы клиентов обновлены"
+    echo "OK: РІС‹С…РѕРґС‹ РєР»РёРµРЅС‚РѕРІ РѕР±РЅРѕРІР»РµРЅС‹"
     exit 0
 fi
 
-# Для MTProto-прокси используем первый (основной) выход.
+# Р”Р»СЏ MTProto-РїСЂРѕРєСЃРё РёСЃРїРѕР»СЊР·СѓРµРј РїРµСЂРІС‹Р№ (РѕСЃРЅРѕРІРЅРѕР№) РІС‹С…РѕРґ.
 AWG1_IF="\${EXIT_IFS[0]}"
 AWG1_ENDPOINT="\${EXIT_ENDPOINTS[0]}"
 FWMARK="\${EXIT_MARKS[0]}"
@@ -4877,7 +4877,7 @@ WAN_GW="$(printf '%s' "$EP_ROUTE" | grep -oP '(^| )via \\K\\S+' || true)"
 ${sshBuild.PROXY_CASCADE_LINES.join('\n')}
 
 sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
-echo "OK: балансировка каскада применена ($(date '+%Y-%m-%d %H:%M:%S'), выходов: \${#EXIT_IFS[@]})"
+echo "OK: Р±Р°Р»Р°РЅСЃРёСЂРѕРІРєР° РєР°СЃРєР°РґР° РїСЂРёРјРµРЅРµРЅР° ($(date '+%Y-%m-%d %H:%M:%S'), РІС‹С…РѕРґРѕРІ: \${#EXIT_IFS[@]})"
 `;
 }
 
@@ -4942,7 +4942,7 @@ function cascadeDecrypt(payload) {
     } catch (e) { return ''; }
 }
 
-// Сохраняем текущий основной awg1 перед первым переключением на резерв.
+// РЎРѕС…СЂР°РЅСЏРµРј С‚РµРєСѓС‰РёР№ РѕСЃРЅРѕРІРЅРѕР№ awg1 РїРµСЂРµРґ РїРµСЂРІС‹Рј РїРµСЂРµРєР»СЋС‡РµРЅРёРµРј РЅР° СЂРµР·РµСЂРІ.
 function ensureCascadePrimaryCopy(force = false) {
     if (!force && fs.existsSync(CASCADE_PRIMARY_COPY)) return true;
     const conf = existingCascadeConf();
@@ -4955,10 +4955,10 @@ function ensureCascadePrimaryCopy(force = false) {
 
 function cascadeFailoverStatus() {
     if (cascadeRole() !== 'ru') {
-        return { applicable: false, reason: 'Резервирование настраивается на RU-входе' };
+        return { applicable: false, reason: 'Р РµР·РµСЂРІРёСЂРѕРІР°РЅРёРµ РЅР°СЃС‚СЂР°РёРІР°РµС‚СЃСЏ РЅР° RU-РІС…РѕРґРµ' };
     }
     if (!existingCascadeConf()) {
-        return { applicable: false, reason: 'Сначала постройте каскад' };
+        return { applicable: false, reason: 'РЎРЅР°С‡Р°Р»Р° РїРѕСЃС‚СЂРѕР№С‚Рµ РєР°СЃРєР°Рґ' };
     }
     const settings = cascadeFailoverSettingsRead();
     const backups = cascadeBackupsRead();
@@ -4977,7 +4977,7 @@ function cascadeFailoverStatus() {
         active: state.active,
         primary: {
             id: 'primary',
-            name: 'Основной',
+            name: 'РћСЃРЅРѕРІРЅРѕР№',
             endpoint: primaryEndpoint || currentEndpoint || '',
             state: state.active === 'primary' ? 'active' : 'standby'
         },
@@ -5011,10 +5011,10 @@ async function waitCascadeHandshake(startedAt, seconds = 25) {
     return false;
 }
 
-// Применяет произвольный awg1-конфиг: туннель, маршруты, MTProto через EU.
+// РџСЂРёРјРµРЅСЏРµС‚ РїСЂРѕРёР·РІРѕР»СЊРЅС‹Р№ awg1-РєРѕРЅС„РёРі: С‚СѓРЅРЅРµР»СЊ, РјР°СЂС€СЂСѓС‚С‹, MTProto С‡РµСЂРµР· EU.
 async function applyCascadeTunnelContent(content) {
     const conf = existingCascadeConf();
-    if (!conf) throw new Error('Сначала постройте каскад');
+    if (!conf) throw new Error('РЎРЅР°С‡Р°Р»Р° РїРѕСЃС‚СЂРѕР№С‚Рµ РєР°СЃРєР°Рґ');
     content = prepareCascadeBackupConf(content);
     const previous = readTextSafe(conf);
     const startedAt = Math.floor(Date.now() / 1000);
@@ -5026,16 +5026,16 @@ async function applyCascadeTunnelContent(content) {
         if (!/active/.test(String(st.out || ''))) {
             const why = await sshRunner.run({ host: '127.0.0.1' },
                 'journalctl -u awg-quick@awg1 -n 80 --no-pager 2>&1 | tail -n 40', 30000);
-            throw new Error('awg1 не запустился: ' + String(why.out || '').trim().slice(-1200));
+            throw new Error('awg1 РЅРµ Р·Р°РїСѓСЃС‚РёР»СЃСЏ: ' + String(why.out || '').trim().slice(-1200));
         }
         if (fs.existsSync(ROUTING_SCRIPT)) {
             const rr = await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
             if (rr.code !== 0) {
-                throw new Error('маршруты не применились: ' + String(rr.out || '').trim().slice(-500));
+                throw new Error('РјР°СЂС€СЂСѓС‚С‹ РЅРµ РїСЂРёРјРµРЅРёР»РёСЃСЊ: ' + String(rr.out || '').trim().slice(-500));
             }
         }
         if (!await waitCascadeHandshake(startedAt, 25)) {
-            throw new Error('нет рукопожатия с выбранным сервером — проверьте Endpoint и ключи резерва');
+            throw new Error('РЅРµС‚ СЂСѓРєРѕРїРѕР¶Р°С‚РёСЏ СЃ РІС‹Р±СЂР°РЅРЅС‹Рј СЃРµСЂРІРµСЂРѕРј вЂ” РїСЂРѕРІРµСЂСЊС‚Рµ Endpoint Рё РєР»СЋС‡Рё СЂРµР·РµСЂРІР°');
         }
         const settings = cascadeFailoverSettingsRead();
         const check = await checkCascadeDomains(settings);
@@ -5053,7 +5053,7 @@ async function applyCascadeTunnelContent(content) {
                     }
                     proxyReconnected = true;
                 } else {
-                    proxyError = 'не удалось определить EU-IP через awg1';
+                    proxyError = 'РЅРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ EU-IP С‡РµСЂРµР· awg1';
                 }
             } catch (e) { proxyError = e.message || String(e); }
         }
@@ -5061,7 +5061,7 @@ async function applyCascadeTunnelContent(content) {
             success: true,
             trafficOk,
             trafficResults: check.results,
-            warning: trafficOk ? '' : 'проверка сервисов через сервер не прошла: ' +
+            warning: trafficOk ? '' : 'РїСЂРѕРІРµСЂРєР° СЃРµСЂРІРёСЃРѕРІ С‡РµСЂРµР· СЃРµСЂРІРµСЂ РЅРµ РїСЂРѕС€Р»Р°: ' +
                 check.results.map(r => r.domain + '=' + r.code).join(', '),
             proxyReconnected,
             exitIp,
@@ -5080,9 +5080,9 @@ async function applyCascadeTunnelContent(content) {
 }
 
 async function switchCascadeTarget(target, req) {
-    if (cascadeBalanceEnabled()) throw new Error('Сначала выключите балансировку выходов');
-    if (cascadeRole() !== 'ru') throw new Error('Резервирование доступно только на RU-входе');
-    if (!existingCascadeConf()) throw new Error('Сначала постройте каскад');
+    if (cascadeBalanceEnabled()) throw new Error('РЎРЅР°С‡Р°Р»Р° РІС‹РєР»СЋС‡РёС‚Рµ Р±Р°Р»Р°РЅСЃРёСЂРѕРІРєСѓ РІС‹С…РѕРґРѕРІ');
+    if (cascadeRole() !== 'ru') throw new Error('Р РµР·РµСЂРІРёСЂРѕРІР°РЅРёРµ РґРѕСЃС‚СѓРїРЅРѕ С‚РѕР»СЊРєРѕ РЅР° RU-РІС…РѕРґРµ');
+    if (!existingCascadeConf()) throw new Error('РЎРЅР°С‡Р°Р»Р° РїРѕСЃС‚СЂРѕР№С‚Рµ РєР°СЃРєР°Рґ');
     const state = cascadeFailoverStateRead();
     let id = String(target || '');
     if (!id || id === 'next') {
@@ -5096,14 +5096,14 @@ async function switchCascadeTarget(target, req) {
     let content = '';
     let label = '';
     if (id === 'primary') {
-        if (!fs.existsSync(CASCADE_PRIMARY_COPY)) throw new Error('Основной конфиг не сохранён');
+        if (!fs.existsSync(CASCADE_PRIMARY_COPY)) throw new Error('РћСЃРЅРѕРІРЅРѕР№ РєРѕРЅС„РёРі РЅРµ СЃРѕС…СЂР°РЅС‘РЅ');
         content = readTextSafe(CASCADE_PRIMARY_COPY);
-        label = 'Основной';
+        label = 'РћСЃРЅРѕРІРЅРѕР№';
     } else {
         const backup = cascadeBackupsRead().find(b => b.id === id);
-        if (!backup) throw new Error('Резервный сервер не найден');
+        if (!backup) throw new Error('Р РµР·РµСЂРІРЅС‹Р№ СЃРµСЂРІРµСЂ РЅРµ РЅР°Р№РґРµРЅ');
         content = cascadeDecrypt(backup.config_enc);
-        if (!content) throw new Error('Не удалось расшифровать конфиг резерва');
+        if (!content) throw new Error('РќРµ СѓРґР°Р»РѕСЃСЊ СЂР°СЃС€РёС„СЂРѕРІР°С‚СЊ РєРѕРЅС„РёРі СЂРµР·РµСЂРІР°');
         content = prepareCascadeBackupConf(content);
         label = backup.name;
         if (state.active === 'primary') ensureCascadePrimaryCopy(true);
@@ -5114,7 +5114,7 @@ async function switchCascadeTarget(target, req) {
     state.failures = 0;
     state.lastError = '';
     cascadeFailoverStateWrite(state);
-    if (req) auditLog(req, 'Каскад: переключение на ' + label);
+    if (req) auditLog(req, 'РљР°СЃРєР°Рґ: РїРµСЂРµРєР»СЋС‡РµРЅРёРµ РЅР° ' + label);
     return { ...applied, active: id, name: label, status: cascadeFailoverStatus() };
 }
 
@@ -5144,7 +5144,7 @@ async function tryCascadeCandidates(currentId, settings) {
         try {
             const switched = await switchCascadeTarget(id, null);
             if (switched.trafficOk !== false) return { id, tried, ok: true };
-        } catch (e) { /* пробуем следующий */ }
+        } catch (e) { /* РїСЂРѕР±СѓРµРј СЃР»РµРґСѓСЋС‰РёР№ */ }
     }
     return { id: null, tried, ok: false };
 }
@@ -5173,7 +5173,7 @@ async function cascadeFailoverTick() {
             return;
         }
         state.failures = (state.failures || 0) + 1;
-        state.lastError = 'все проверки недоступны';
+        state.lastError = 'РІСЃРµ РїСЂРѕРІРµСЂРєРё РЅРµРґРѕСЃС‚СѓРїРЅС‹';
         if (state.failures >= settings.failures) {
             const result = await tryCascadeCandidates(state.active, settings);
             if (result.ok) {
@@ -5183,7 +5183,7 @@ async function cascadeFailoverTick() {
                 state.lastError = '';
             } else {
                 state.failures = 0;
-                state.lastError = 'нет доступного сервера после перебора резервов';
+                state.lastError = 'РЅРµС‚ РґРѕСЃС‚СѓРїРЅРѕРіРѕ СЃРµСЂРІРµСЂР° РїРѕСЃР»Рµ РїРµСЂРµР±РѕСЂР° СЂРµР·РµСЂРІРѕРІ';
             }
         }
         cascadeFailoverStateWrite(state);
@@ -5215,15 +5215,15 @@ async function cascadeBalanceTick() {
         await cascadeBalanceReapply();
         cascadeBalanceSig = sig;
     } catch (e) {
-        // Оставляем прежние правила: лучше работать, чем оборвать клиентов.
+        // РћСЃС‚Р°РІР»СЏРµРј РїСЂРµР¶РЅРёРµ РїСЂР°РІРёР»Р°: Р»СѓС‡С€Рµ СЂР°Р±РѕС‚Р°С‚СЊ, С‡РµРј РѕР±РѕСЂРІР°С‚СЊ РєР»РёРµРЅС‚РѕРІ.
     } finally {
         cascadeBalanceBusy = false;
     }
 }
 setInterval(cascadeBalanceTick, 15000).unref();
 
-// Периодический замер ширины канала для режима «по ширине канала».
-// Сам замер делает iperf3 через агентские ключи, интервал задаёт пользователь.
+// РџРµСЂРёРѕРґРёС‡РµСЃРєРёР№ Р·Р°РјРµСЂ С€РёСЂРёРЅС‹ РєР°РЅР°Р»Р° РґР»СЏ СЂРµР¶РёРјР° В«РїРѕ С€РёСЂРёРЅРµ РєР°РЅР°Р»Р°В».
+// РЎР°Рј Р·Р°РјРµСЂ РґРµР»Р°РµС‚ iperf3 С‡РµСЂРµР· Р°РіРµРЅС‚СЃРєРёРµ РєР»СЋС‡Рё, РёРЅС‚РµСЂРІР°Р» Р·Р°РґР°С‘С‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ.
 let cascadeCapacityBusy = false;
 async function cascadeCapacityTick(force) {
     if (cascadeCapacityBusy || TEST_MODE || DEMO_MODE) return;
@@ -5240,7 +5240,7 @@ async function cascadeCapacityTick(force) {
             try {
                 const r = await iperfRunTest({ exitId: exit.id, seconds: 8 });
                 if (r && r.capacity > 0) tested++;
-            } catch (e) { /* один выход не ответил — остальные проверим */ }
+            } catch (e) { /* РѕРґРёРЅ РІС‹С…РѕРґ РЅРµ РѕС‚РІРµС‚РёР» вЂ” РѕСЃС‚Р°Р»СЊРЅС‹Рµ РїСЂРѕРІРµСЂРёРј */ }
         }
         const cur = cascadeBalanceRead();
         cur.capacityCheckedAt = Date.now();
@@ -5300,7 +5300,7 @@ function cascadeDetailsEu() {
     out.tunnelActive = out.handshakeAgo !== null && out.handshakeAgo < 180;
     out.endpoint = out.entryEndpoint;
     out.ifaces = ['ru_host'];
-    out.failover = { applicable: false, reason: 'Резервирование настраивается на RU-входе' };
+    out.failover = { applicable: false, reason: 'Р РµР·РµСЂРІРёСЂРѕРІР°РЅРёРµ РЅР°СЃС‚СЂР°РёРІР°РµС‚СЃСЏ РЅР° RU-РІС…РѕРґРµ' };
     return out;
 }
 
@@ -5308,7 +5308,7 @@ function cascadeDetails() {
     if (cascadeRole() === 'eu') return cascadeDetailsEu();
     const conf = existingCascadeConf();
     if (TEST_MODE) {
-        // В тестах не трогаем systemd/iptables и не шумим ошибками sudo
+        // Р’ С‚РµСЃС‚Р°С… РЅРµ С‚СЂРѕРіР°РµРј systemd/iptables Рё РЅРµ С€СѓРјРёРј РѕС€РёР±РєР°РјРё sudo
         return {
             configured: !!conf, confPath: conf || CASCADE_CONF, role: cascadeRole(),
             tunnelActive: false, timerActive: false,
@@ -5330,7 +5330,7 @@ function cascadeDetails() {
         handshakeAgo: null,
         lastRun: null
     };
-    // Туннель (awg1): рукопожатие
+    // РўСѓРЅРЅРµР»СЊ (awg1): СЂСѓРєРѕРїРѕР¶Р°С‚РёРµ
     try {
         const hs = shTry('sudo', ['awg', 'show', 'awg1', 'latest-handshakes']).trim();
         if (hs) {
@@ -5339,8 +5339,8 @@ function cascadeDetails() {
             if (ts > 0) out.handshakeAgo = Math.floor(Date.now() / 1000) - ts;
         }
     } catch (e) { /* ignore */ }
-    // Endpoint из awg1.conf: на RU дополнительно показываем, какой адрес
-    // реально используется в правилах (внутренний ли публичный).
+    // Endpoint РёР· awg1.conf: РЅР° RU РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ РїРѕРєР°Р·С‹РІР°РµРј, РєР°РєРѕР№ Р°РґСЂРµСЃ
+    // СЂРµР°Р»СЊРЅРѕ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РІ РїСЂР°РІРёР»Р°С… (РІРЅСѓС‚СЂРµРЅРЅРёР№ Р»Рё РїСѓР±Р»РёС‡РЅС‹Р№).
     try {
         if (conf) {
             const ini = parseIni(fs.readFileSync(conf, 'utf8'));
@@ -5349,7 +5349,7 @@ function cascadeDetails() {
             if (plan) { out.endpointSource = plan.source; out.effectiveEndpoint = plan.raw; }
         }
     } catch (e) { /* ignore */ }
-    // Маршрутизация: интерфейсы, ipset, ip rule, таблица
+    // РњР°СЂС€СЂСѓС‚РёР·Р°С†РёСЏ: РёРЅС‚РµСЂС„РµР№СЃС‹, ipset, ip rule, С‚Р°Р±Р»РёС†Р°
     try {
         const mangle = rootShTry('iptables', ['-t', 'mangle', '-S', 'PREROUTING']) +
             '\n' + rootShTry('iptables', ['-t', 'mangle', '-S', 'AWG_POLICY']);
@@ -5365,14 +5365,14 @@ function cascadeDetails() {
         out.balanceMode = balanceMode;
         out.ruleExists = sh('ip', ['rule', 'show']).includes('fwmark ' + (balanceMode ? '0x2001' : '0x1'));
     } catch (e) { /* ignore */ }
-    // Почему туннель не поднялся: без журнала в интерфейсе видно только
-    // «не активен», а причина (неверный Endpoint) остаётся в systemctl.
+    // РџРѕС‡РµРјСѓ С‚СѓРЅРЅРµР»СЊ РЅРµ РїРѕРґРЅСЏР»СЃСЏ: Р±РµР· Р¶СѓСЂРЅР°Р»Р° РІ РёРЅС‚РµСЂС„РµР№СЃРµ РІРёРґРЅРѕ С‚РѕР»СЊРєРѕ
+    // В«РЅРµ Р°РєС‚РёРІРµРЅВ», Р° РїСЂРёС‡РёРЅР° (РЅРµРІРµСЂРЅС‹Р№ Endpoint) РѕСЃС‚Р°С‘С‚СЃСЏ РІ systemctl.
     if (conf && !out.tunnelActive) {
         out.tunnelState = isActive('awg-quick@awg1');
         out.routeState = isActive('awg-routing.service');
         try {
             out.tunnelError = shTry('sudo', ['bash', '-c',
-                'systemctl status awg-quick@awg1 --no-pager -l 2>&1 | grep -iE "error|ошибка|fail|resolve|unreachable|endpoint" | tail -n 3'
+                'systemctl status awg-quick@awg1 --no-pager -l 2>&1 | grep -iE "error|РѕС€РёР±РєР°|fail|resolve|unreachable|endpoint" | tail -n 3'
             ]).trim().slice(0, 500);
         } catch (e) { /* ignore */ }
     }
@@ -5394,12 +5394,12 @@ app.get('/api/cascade/status', checkAuth, (req, res) => {
     try {
         const d = cascadeDetails();
         if (d.mode === 'exit') {
-            let text = 'Каскад не настроен: клиент ru_host на EU не найден';
+            let text = 'РљР°СЃРєР°Рґ РЅРµ РЅР°СЃС‚СЂРѕРµРЅ: РєР»РёРµРЅС‚ ru_host РЅР° EU РЅРµ РЅР°Р№РґРµРЅ';
             let color = '#ff4c4c';
             if (d.configured) {
-                if (d.handshakeAgo === null) { text = 'Каскад: вход RU не подключён (нет рукопожатия)'; color = '#ffa500'; }
-                else if (d.handshakeAgo < 180) { text = `Каскад: вход RU подключён (обмен ${d.handshakeAgo} сек. назад)`; color = '#4caf50'; }
-                else { text = `Каскад: вход RU потерян (${d.handshakeAgo} сек. назад)`; color = '#ff4c4c'; }
+                if (d.handshakeAgo === null) { text = 'РљР°СЃРєР°Рґ: РІС…РѕРґ RU РЅРµ РїРѕРґРєР»СЋС‡С‘РЅ (РЅРµС‚ СЂСѓРєРѕРїРѕР¶Р°С‚РёСЏ)'; color = '#ffa500'; }
+                else if (d.handshakeAgo < 180) { text = `РљР°СЃРєР°Рґ: РІС…РѕРґ RU РїРѕРґРєР»СЋС‡С‘РЅ (РѕР±РјРµРЅ ${d.handshakeAgo} СЃРµРє. РЅР°Р·Р°Рґ)`; color = '#4caf50'; }
+                else { text = `РљР°СЃРєР°Рґ: РІС…РѕРґ RU РїРѕС‚РµСЂСЏРЅ (${d.handshakeAgo} СЃРµРє. РЅР°Р·Р°Рґ)`; color = '#ff4c4c'; }
             }
             return res.json({
                 ...d,
@@ -5408,17 +5408,17 @@ app.get('/api/cascade/status', checkAuth, (req, res) => {
                 color
             });
         }
-        let text = 'Туннель EU не настроен';
+        let text = 'РўСѓРЅРЅРµР»СЊ EU РЅРµ РЅР°СЃС‚СЂРѕРµРЅ';
         let color = '#ff4c4c';
         if (d.configured) {
-            if (!d.tunnelActive) { text = 'Туннель awg1 поднят, но не активен'; color = '#ffa500'; }
-            else if (d.handshakeAgo === null) { text = 'Туннель поднят, ожидание пира EU'; color = '#ffa500'; }
-            else if (d.handshakeAgo < 150) { text = `Каскад работает (обмен ${d.handshakeAgo} сек. назад)`; color = '#4caf50'; }
-            else { text = `Туннель awg1 поднят, рукопожатие ${d.handshakeAgo} сек. назад`; color = '#ffa500'; }
+            if (!d.tunnelActive) { text = 'РўСѓРЅРЅРµР»СЊ awg1 РїРѕРґРЅСЏС‚, РЅРѕ РЅРµ Р°РєС‚РёРІРµРЅ'; color = '#ffa500'; }
+            else if (d.handshakeAgo === null) { text = 'РўСѓРЅРЅРµР»СЊ РїРѕРґРЅСЏС‚, РѕР¶РёРґР°РЅРёРµ РїРёСЂР° EU'; color = '#ffa500'; }
+            else if (d.handshakeAgo < 150) { text = `РљР°СЃРєР°Рґ СЂР°Р±РѕС‚Р°РµС‚ (РѕР±РјРµРЅ ${d.handshakeAgo} СЃРµРє. РЅР°Р·Р°Рґ)`; color = '#4caf50'; }
+            else { text = `РўСѓРЅРЅРµР»СЊ awg1 РїРѕРґРЅСЏС‚, СЂСѓРєРѕРїРѕР¶Р°С‚РёРµ ${d.handshakeAgo} СЃРµРє. РЅР°Р·Р°Рґ`; color = '#ffa500'; }
         }
         res.json({ ...d, active: d.configured && d.tunnelActive, text, color });
     } catch (e) {
-        res.json({ active: false, text: 'Ошибка проверки', color: '#ff4c4c' });
+        res.json({ active: false, text: 'РћС€РёР±РєР° РїСЂРѕРІРµСЂРєРё', color: '#ff4c4c' });
     }
 });
 
@@ -5438,18 +5438,18 @@ app.get('/api/ufw', checkAuth, (req, res) => {
             const parts = line.trim().split(/\s+/);
             if (parts.length < 6) return null;
             const procMatch = (parts[6] || '').match(/"([^"]+)"/);
-            return { proto: parts[0], addr: parts[4], proc: procMatch ? procMatch[1] : 'Система' };
+            return { proto: parts[0], addr: parts[4], proc: procMatch ? procMatch[1] : 'РЎРёСЃС‚РµРјР°' };
         }).filter(Boolean);
         res.json({ rules, ports });
-    } catch (e) { res.status(500).json({ error: 'Ошибка' }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР°' }); }
 });
 
 app.post('/api/ufw', checkAuth, (req, res) => {
     const { port, proto, iface } = req.body || {};
-    if (!isPort(port)) return res.status(400).json({ error: 'Укажите корректный порт (1-65535)' });
-    if (proto && !['tcp', 'udp', 'any'].includes(proto)) return res.status(400).json({ error: 'Неверный протокол' });
+    if (!isPort(port)) return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Р№ РїРѕСЂС‚ (1-65535)' });
+    if (proto && !['tcp', 'udp', 'any'].includes(proto)) return res.status(400).json({ error: 'РќРµРІРµСЂРЅС‹Р№ РїСЂРѕС‚РѕРєРѕР»' });
     if (iface && iface !== 'any' && !(IFACE_RE.test(iface) && existingIfaces().includes(iface))) {
-        return res.status(400).json({ error: 'Неверный интерфейс' });
+        return res.status(400).json({ error: 'РќРµРІРµСЂРЅС‹Р№ РёРЅС‚РµСЂС„РµР№СЃ' });
     }
     try {
         const args = ['ufw', 'allow'];
@@ -5458,24 +5458,24 @@ app.post('/api/ufw', checkAuth, (req, res) => {
         if (proto && proto !== 'any') args.push('proto', proto);
         sh('sudo', args);
         sh('sudo', ['ufw', 'reload']);
-        auditLog(req, `UFW: открыт порт ${port}/${proto || 'any'}`);
+        auditLog(req, `UFW: РѕС‚РєСЂС‹С‚ РїРѕСЂС‚ ${port}/${proto || 'any'}`);
         res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: 'Ошибка добавления' }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° РґРѕР±Р°РІР»РµРЅРёСЏ' }); }
 });
 
 app.delete('/api/ufw/:id', checkAuth, (req, res) => {
     const id = String(req.params.id);
-    if (!/^\d{1,5}$/.test(id)) return res.status(400).json({ error: 'Неверный номер правила' });
+    if (!/^\d{1,5}$/.test(id)) return res.status(400).json({ error: 'РќРµРІРµСЂРЅС‹Р№ РЅРѕРјРµСЂ РїСЂР°РІРёР»Р°' });
     try {
         sh('sudo', ['ufw', '--force', 'delete', id]);
-        auditLog(req, `UFW: удалено правило ${id}`);
+        auditLog(req, `UFW: СѓРґР°Р»РµРЅРѕ РїСЂР°РІРёР»Рѕ ${id}`);
         res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: 'Ошибка удаления' }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° СѓРґР°Р»РµРЅРёСЏ' }); }
 });
 
 // ---------------------------------------------------------------------------
-// iptables: базовые цепочки filter. Показываем INPUT/FORWARD/OUTPUT,
-// правила UFW (переходы в ufw-*) защищены от удаления.
+// iptables: Р±Р°Р·РѕРІС‹Рµ С†РµРїРѕС‡РєРё filter. РџРѕРєР°Р·С‹РІР°РµРј INPUT/FORWARD/OUTPUT,
+// РїСЂР°РІРёР»Р° UFW (РїРµСЂРµС…РѕРґС‹ РІ ufw-*) Р·Р°С‰РёС‰РµРЅС‹ РѕС‚ СѓРґР°Р»РµРЅРёСЏ.
 // ---------------------------------------------------------------------------
 const IPTABLES_CHAINS = ['INPUT', 'FORWARD', 'OUTPUT'];
 
@@ -5530,7 +5530,7 @@ app.get('/api/iptables', checkAuth, (req, res) => {
     try {
         res.json({ chains: IPTABLES_CHAINS, rules: readIptablesRules(), splitDebug: splitAccountingDebug });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось прочитать iptables: ' + e.message });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ iptables: ' + e.message });
     }
 });
 
@@ -5546,19 +5546,19 @@ app.post('/api/iptables/split-test', checkAuth, requireAdmin, (req, res) => {
 app.post('/api/iptables', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     const chain = String(body.chain || 'INPUT').toUpperCase();
-    if (!IPTABLES_CHAINS.includes(chain)) return res.status(400).json({ error: 'Недопустимая цепочка' });
+    if (!IPTABLES_CHAINS.includes(chain)) return res.status(400).json({ error: 'РќРµРґРѕРїСѓСЃС‚РёРјР°СЏ С†РµРїРѕС‡РєР°' });
     const proto = String(body.proto || 'tcp').toLowerCase();
-    if (!['tcp', 'udp', 'icmp', 'any'].includes(proto)) return res.status(400).json({ error: 'Недопустимый протокол' });
+    if (!['tcp', 'udp', 'icmp', 'any'].includes(proto)) return res.status(400).json({ error: 'РќРµРґРѕРїСѓСЃС‚РёРјС‹Р№ РїСЂРѕС‚РѕРєРѕР»' });
     const action = String(body.action || 'ACCEPT').toUpperCase();
-    if (!['ACCEPT', 'DROP', 'REJECT'].includes(action)) return res.status(400).json({ error: 'Недопустимое действие' });
+    if (!['ACCEPT', 'DROP', 'REJECT'].includes(action)) return res.status(400).json({ error: 'РќРµРґРѕРїСѓСЃС‚РёРјРѕРµ РґРµР№СЃС‚РІРёРµ' });
     const port = String(body.port || '').trim();
-    if (port && !isPort(port)) return res.status(400).json({ error: 'Некорректный порт (1-65535)' });
-    if (port && !['tcp', 'udp'].includes(proto)) return res.status(400).json({ error: 'Порт можно указать только для TCP/UDP' });
+    if (port && !isPort(port)) return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РїРѕСЂС‚ (1-65535)' });
+    if (port && !['tcp', 'udp'].includes(proto)) return res.status(400).json({ error: 'РџРѕСЂС‚ РјРѕР¶РЅРѕ СѓРєР°Р·Р°С‚СЊ С‚РѕР»СЊРєРѕ РґР»СЏ TCP/UDP' });
     const ipRe = /^(?:\d{1,3}\.){3}\d{1,3}(?:\/\d{1,2})?$/;
     const src = String(body.src || '').trim();
     const dst = String(body.dst || '').trim();
-    if (src && !ipRe.test(src)) return res.status(400).json({ error: 'Некорректный адрес источника' });
-    if (dst && !ipRe.test(dst)) return res.status(400).json({ error: 'Некорректный адрес назначения' });
+    if (src && !ipRe.test(src)) return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ Р°РґСЂРµСЃ РёСЃС‚РѕС‡РЅРёРєР°' });
+    if (dst && !ipRe.test(dst)) return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ Р°РґСЂРµСЃ РЅР°Р·РЅР°С‡РµРЅРёСЏ' });
     const comment = String(body.comment || '').trim().slice(0, 64).replace(/[^A-Za-z0-9 _.\-]/g, '');
     const insert = body.insert !== false;
     const args = ['iptables', insert ? '-I' : '-A', chain];
@@ -5571,32 +5571,32 @@ app.post('/api/iptables', checkAuth, requireAdmin, (req, res) => {
     args.push('-j', action);
     try {
         sh('sudo', args);
-        auditLog(req, `iptables: добавлено ${chain} ${proto} ${src || 'any'} -> ${dst || 'any'}${port ? ':' + port : ''} ${action}`);
+        auditLog(req, `iptables: РґРѕР±Р°РІР»РµРЅРѕ ${chain} ${proto} ${src || 'any'} -> ${dst || 'any'}${port ? ':' + port : ''} ${action}`);
         res.json({ success: true, spec: args.slice(1).join(' ') });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось добавить правило iptables' });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РґРѕР±Р°РІРёС‚СЊ РїСЂР°РІРёР»Рѕ iptables' });
     }
 });
 
 app.delete('/api/iptables/:id', checkAuth, requireAdmin, (req, res) => {
     const id = String(req.params.id || '');
-    if (!/^[a-f0-9]{8,40}$/.test(id)) return res.status(400).json({ error: 'Некорректный идентификатор правила' });
+    if (!/^[a-f0-9]{8,40}$/.test(id)) return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РїСЂР°РІРёР»Р°' });
     try {
         const rule = readIptablesRules().find(r => r.id === id);
-        if (!rule) return res.status(404).json({ error: 'Правило не найдено (список изменился)' });
-        if (!rule.deletable) return res.status(400).json({ error: 'Правило управляется UFW и защищено от удаления' });
+        if (!rule) return res.status(404).json({ error: 'РџСЂР°РІРёР»Рѕ РЅРµ РЅР°Р№РґРµРЅРѕ (СЃРїРёСЃРѕРє РёР·РјРµРЅРёР»СЃСЏ)' });
+        if (!rule.deletable) return res.status(400).json({ error: 'РџСЂР°РІРёР»Рѕ СѓРїСЂР°РІР»СЏРµС‚СЃСЏ UFW Рё Р·Р°С‰РёС‰РµРЅРѕ РѕС‚ СѓРґР°Р»РµРЅРёСЏ' });
         const parts = iptablesSpecTokens(rule.spec);
-        if (parts[0] !== '-A' || !IPTABLES_CHAINS.includes(parts[1])) return res.status(400).json({ error: 'Некорректное правило' });
+        if (parts[0] !== '-A' || !IPTABLES_CHAINS.includes(parts[1])) return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅРѕРµ РїСЂР°РІРёР»Рѕ' });
         sh('sudo', ['iptables', '-D', rule.chain, ...parts.slice(2)]);
-        auditLog(req, `iptables: удалено правило ${rule.chain} ${parts.slice(2).join(' ')}`);
+        auditLog(req, `iptables: СѓРґР°Р»РµРЅРѕ РїСЂР°РІРёР»Рѕ ${rule.chain} ${parts.slice(2).join(' ')}`);
         res.json({ success: true });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось удалить правило iptables' });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ РїСЂР°РІРёР»Рѕ iptables' });
     }
 });
 
 // ---------------------------------------------------------------------------
-// Сетевые инструменты: статус
+// РЎРµС‚РµРІС‹Рµ РёРЅСЃС‚СЂСѓРјРµРЅС‚С‹: СЃС‚Р°С‚СѓСЃ
 // ---------------------------------------------------------------------------
 app.get('/api/tools/status', checkAuth, (req, res) => {
     let ruCount = 0, ruActive = false, ruIfaces = [], ruAllPorts = false;
@@ -5604,14 +5604,14 @@ app.get('/api/tools/status', checkAuth, (req, res) => {
         const count = rootShTry('bash', ['-c', "ipset list ru_block 2>/dev/null | grep -c '^[0-9]' || true"]).trim();
         ruCount = parseInt(count, 10) || 0;
         const forward = rootShTry('iptables', ['-S', 'FORWARD']);
-        // Ищем ru_block в любом месте правила: в режиме «только порты» перед
-        // --match-set стоит -p tcp/udp, а не -m set сразу после -i.
+        // РС‰РµРј ru_block РІ Р»СЋР±РѕРј РјРµСЃС‚Рµ РїСЂР°РІРёР»Р°: РІ СЂРµР¶РёРјРµ В«С‚РѕР»СЊРєРѕ РїРѕСЂС‚С‹В» РїРµСЂРµРґ
+        // --match-set СЃС‚РѕРёС‚ -p tcp/udp, Р° РЅРµ -m set СЃСЂР°Р·Сѓ РїРѕСЃР»Рµ -i.
         const matches = [...forward.matchAll(/-A FORWARD .*?-i\s+(\S+).*?--match-set ru_block/g)];
         ruIfaces = [...new Set(matches.map(m => m[1]))];
-        // Правило без --dport блокирует все порты; с --dport — только выбранные.
+        // РџСЂР°РІРёР»Рѕ Р±РµР· --dport Р±Р»РѕРєРёСЂСѓРµС‚ РІСЃРµ РїРѕСЂС‚С‹; СЃ --dport вЂ” С‚РѕР»СЊРєРѕ РІС‹Р±СЂР°РЅРЅС‹Рµ.
         ruAllPorts = forward.split('\n').some(l => l.includes('ru_block') && /-i\s+\S+\s+-m set --match-set ru_block\s+dst\s+-j DROP/.test(l));
-        // Без правил в FORWARD один ipset ничего не блокирует — не показываем
-        // «активно» только из-за непустого списка.
+        // Р‘РµР· РїСЂР°РІРёР» РІ FORWARD РѕРґРёРЅ ipset РЅРёС‡РµРіРѕ РЅРµ Р±Р»РѕРєРёСЂСѓРµС‚ вЂ” РЅРµ РїРѕРєР°Р·С‹РІР°РµРј
+        // В«Р°РєС‚РёРІРЅРѕВ» С‚РѕР»СЊРєРѕ РёР·-Р·Р° РЅРµРїСѓСЃС‚РѕРіРѕ СЃРїРёСЃРєР°.
         ruActive = ruCount > 0 && ruIfaces.length > 0;
     } catch (e) { /* ignore */ }
 
@@ -5635,8 +5635,8 @@ app.get('/api/tools/status', checkAuth, (req, res) => {
         dnsActive = dnsIfaces.length > 0;
     } catch (e) { /* ignore */ }
 
-    // Каскад и GeoIP-блокировка на одном интерфейсе противоречат друг другу:
-    // каскад отправляет RU-адреса напрямую, а ru_block их дропает.
+    // РљР°СЃРєР°Рґ Рё GeoIP-Р±Р»РѕРєРёСЂРѕРІРєР° РЅР° РѕРґРЅРѕРј РёРЅС‚РµСЂС„РµР№СЃРµ РїСЂРѕС‚РёРІРѕСЂРµС‡Р°С‚ РґСЂСѓРі РґСЂСѓРіСѓ:
+    // РєР°СЃРєР°Рґ РѕС‚РїСЂР°РІР»СЏРµС‚ RU-Р°РґСЂРµСЃР° РЅР°РїСЂСЏРјСѓСЋ, Р° ru_block РёС… РґСЂРѕРїР°РµС‚.
     const conflictIfaces = ruIfaces.filter(i => cascIfaces.includes(i));
 
     res.json({
@@ -5648,13 +5648,13 @@ app.get('/api/tools/status', checkAuth, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// GeoIP-блокировка RU-трафика
+// GeoIP-Р±Р»РѕРєРёСЂРѕРІРєР° RU-С‚СЂР°С„РёРєР°
 // ---------------------------------------------------------------------------
 app.post('/api/tools/rudrop', checkAuth, (req, res) => {
     const { ifaces, schedule, enable } = req.body || {};
 
-    // Сначала всегда снимаем старые правила/ipset. Важно: удаляем и
-    // портовые правила, иначе при повторном включении они дублируются.
+    // РЎРЅР°С‡Р°Р»Р° РІСЃРµРіРґР° СЃРЅРёРјР°РµРј СЃС‚Р°СЂС‹Рµ РїСЂР°РІРёР»Р°/ipset. Р’Р°Р¶РЅРѕ: СѓРґР°Р»СЏРµРј Рё
+    // РїРѕСЂС‚РѕРІС‹Рµ РїСЂР°РІРёР»Р°, РёРЅР°С‡Рµ РїСЂРё РїРѕРІС‚РѕСЂРЅРѕРј РІРєР»СЋС‡РµРЅРёРё РѕРЅРё РґСѓР±Р»РёСЂСѓСЋС‚СЃСЏ.
     const removeRuRules = () => {
         try {
             const forward = rootShTry('iptables', ['-S', 'FORWARD']);
@@ -5671,16 +5671,16 @@ app.post('/api/tools/rudrop', checkAuth, (req, res) => {
     if (!enable) {
         try { rootSh('rm', ['-f', '/etc/cron.d/ru-drop-refresh', '/root/awg/ru-drop.sh']); } catch (e) { /* ignore */ }
         try { rootSh('ipset', ['destroy', 'ru_block']); } catch (e) { /* ignore */ }
-        auditLog(req, 'GeoIP-блокировка выключена');
+        auditLog(req, 'GeoIP-Р±Р»РѕРєРёСЂРѕРІРєР° РІС‹РєР»СЋС‡РµРЅР°');
         return res.json({ success: true });
     }
 
-    if (!validIfaces(ifaces)) return res.status(400).json({ error: 'Выберите существующие интерфейсы' });
+    if (!validIfaces(ifaces)) return res.status(400).json({ error: 'Р’С‹Р±РµСЂРёС‚Рµ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёРµ РёРЅС‚РµСЂС„РµР№СЃС‹' });
     const scheduleVal = String(schedule || 'weekly');
     const cronLine = scheduleVal === 'daily' ? '0 4 * * *' : (scheduleVal === 'weekly' ? '0 4 * * 1' : '');
     const ports = String((req.body && req.body.ports) || '').trim();
     const portsArr = ports ? [...new Set(ports.split(',').map(p => p.trim()).filter(Boolean))] : [];
-    if (!portsArr.every(p => isPort(p))) return res.status(400).json({ error: 'Неверный список портов' });
+    if (!portsArr.every(p => isPort(p))) return res.status(400).json({ error: 'РќРµРІРµСЂРЅС‹Р№ СЃРїРёСЃРѕРє РїРѕСЂС‚РѕРІ' });
     const mode = portsArr.length ? 'ports' : 'all';
     const customUrl = String((req.body && req.body.customUrl) || '').trim();
     const listMode = String((req.body && req.body.listMode) || 'opencck');
@@ -5692,11 +5692,11 @@ app.post('/api/tools/rudrop', checkAuth, (req, res) => {
         zoneUrl = RU_GEOIP_SOURCES.antifilter;
         fallbackUrls = [RU_GEOIP_SOURCES.opencck];
     } else if (listMode === 'custom') {
-        if (!customUrl) return res.status(400).json({ error: 'Укажите URL списка' });
+        if (!customUrl) return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ URL СЃРїРёСЃРєР°' });
         if (!validGeoUrl(customUrl)) {
             return res.status(400).json({
-                error: 'Неверный URL списка',
-                detail: 'Нужен https:// URL без пробелов и кавычек, длиной до 8192 символов.'
+                error: 'РќРµРІРµСЂРЅС‹Р№ URL СЃРїРёСЃРєР°',
+                detail: 'РќСѓР¶РµРЅ https:// URL Р±РµР· РїСЂРѕР±РµР»РѕРІ Рё РєР°РІС‹С‡РµРє, РґР»РёРЅРѕР№ РґРѕ 8192 СЃРёРјРІРѕР»РѕРІ.'
             });
         }
         zoneUrl = customUrl;
@@ -5708,10 +5708,10 @@ app.post('/api/tools/rudrop', checkAuth, (req, res) => {
         fallbackUrls = [];
         minValid = 1;
     } else if (listMode !== 'opencck') {
-        return res.status(400).json({ error: 'Неизвестный источник списка' });
+        return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ РёСЃС‚РѕС‡РЅРёРє СЃРїРёСЃРєР°' });
     }
 
-    // URL уже прошли проверку; подставляем в bash-массив в кавычках.
+    // URL СѓР¶Рµ РїСЂРѕС€Р»Рё РїСЂРѕРІРµСЂРєСѓ; РїРѕРґСЃС‚Р°РІР»СЏРµРј РІ bash-РјР°СЃСЃРёРІ РІ РєР°РІС‹С‡РєР°С….
     const urlsLiteral = [zoneUrl, ...fallbackUrls].filter(Boolean).map(u => `"${u}"`).join(' ');
     const cronContent =
         `@reboot root sleep 30 && /bin/bash /root/awg/ru-drop.sh >/var/log/ru-drop.log 2>&1\n` +
@@ -5726,16 +5726,16 @@ SOURCE_TYPE="${sourceType}"
 MIN_VALID="${minValid}"
 URLS=(${urlsLiteral})
 AWG_DIR="/root/awg"
-# Отдельный файл: не перетираем ru.zone, который использует каскад.
+# РћС‚РґРµР»СЊРЅС‹Р№ С„Р°Р№Р»: РЅРµ РїРµСЂРµС‚РёСЂР°РµРј ru.zone, РєРѕС‚РѕСЂС‹Р№ РёСЃРїРѕР»СЊР·СѓРµС‚ РєР°СЃРєР°Рґ.
 RU_ZONE="$AWG_DIR/ru-drop.zone"
 mkdir -p "$AWG_DIR"
 exec 9>"$AWG_DIR/ru-drop.lock"
-flock -n 9 || { echo "Уже запущен" >&2; exit 1; }
+flock -n 9 || { echo "РЈР¶Рµ Р·Р°РїСѓС‰РµРЅ" >&2; exit 1; }
 
-# На минимальных образах ipset не установлен — ставим его сами.
+# РќР° РјРёРЅРёРјР°Р»СЊРЅС‹С… РѕР±СЂР°Р·Р°С… ipset РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ вЂ” СЃС‚Р°РІРёРј РµРіРѕ СЃР°РјРё.
 ensure_ipset() {
   command -v ipset >/dev/null 2>&1 && return 0
-  echo "ipset не найден, устанавливаю..." >&2
+  echo "ipset РЅРµ РЅР°Р№РґРµРЅ, СѓСЃС‚Р°РЅР°РІР»РёРІР°СЋ..." >&2
   if command -v apt-get >/dev/null 2>&1; then
     DEBIAN_FRONTEND=noninteractive apt-get update -qq || true
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ipset || true
@@ -5750,12 +5750,12 @@ ensure_ipset() {
   fi
   command -v ipset >/dev/null 2>&1
 }
-ensure_ipset || { echo "Не удалось установить ipset. Установите вручную: apt install ipset (или dnf install ipset)" >&2; exit 3; }
+ensure_ipset || { echo "РќРµ СѓРґР°Р»РѕСЃСЊ СѓСЃС‚Р°РЅРѕРІРёС‚СЊ ipset. РЈСЃС‚Р°РЅРѕРІРёС‚Рµ РІСЂСѓС‡РЅСѓСЋ: apt install ipset (РёР»Рё dnf install ipset)" >&2; exit 3; }
 
 if [ "$SOURCE_TYPE" = "file" ]; then
-  [ -s "$RU_ZONE" ] || { echo "Файл списка не найден. Загрузите его заново." >&2; exit 2; }
+  [ -s "$RU_ZONE" ] || { echo "Р¤Р°Р№Р» СЃРїРёСЃРєР° РЅРµ РЅР°Р№РґРµРЅ. Р—Р°РіСЂСѓР·РёС‚Рµ РµРіРѕ Р·Р°РЅРѕРІРѕ." >&2; exit 2; }
   valid=$(grep -cE '^[0-9]{1,3}(\\.[0-9]{1,3}){3}(/[0-9]{1,2})?$' "$RU_ZONE" || true)
-  [ "$valid" -ge "$MIN_VALID" ] || { echo "В файле нет IPv4/CIDR." >&2; exit 2; }
+  [ "$valid" -ge "$MIN_VALID" ] || { echo "Р’ С„Р°Р№Р»Рµ РЅРµС‚ IPv4/CIDR." >&2; exit 2; }
 else
   ok=0
   last_err=""
@@ -5767,14 +5767,14 @@ else
         ok=1
         break
       fi
-      last_err="Источник $url: найдено $valid адресов, нужно минимум $MIN_VALID"
+      last_err="РСЃС‚РѕС‡РЅРёРє $url: РЅР°Р№РґРµРЅРѕ $valid Р°РґСЂРµСЃРѕРІ, РЅСѓР¶РЅРѕ РјРёРЅРёРјСѓРј $MIN_VALID"
     else
-      last_err="Не удалось скачать источник: $url"
+      last_err="РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ РёСЃС‚РѕС‡РЅРёРє: $url"
     fi
   done
   if [ "$ok" -ne 1 ]; then
     rm -f "$RU_ZONE.tmp"
-    echo "\${last_err:-Не удалось загрузить список}" >&2
+    echo "\${last_err:-РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ СЃРїРёСЃРѕРє}" >&2
     exit 1
   fi
 fi
@@ -5787,7 +5787,7 @@ done < "$RU_ZONE"
 ipset swap ru_tmp ru_block
 ipset destroy ru_tmp
 
-# Убираем все прежние правила ru_block (включая портовые), чтобы не плодить дубли.
+# РЈР±РёСЂР°РµРј РІСЃРµ РїСЂРµР¶РЅРёРµ РїСЂР°РІРёР»Р° ru_block (РІРєР»СЋС‡Р°СЏ РїРѕСЂС‚РѕРІС‹Рµ), С‡С‚РѕР±С‹ РЅРµ РїР»РѕРґРёС‚СЊ РґСѓР±Р»Рё.
 while IFS= read -r rule; do
   [ -n "$rule" ] || continue
   # shellcheck disable=SC2086
@@ -5804,7 +5804,7 @@ for AWG_IF in "\${IFACES[@]}"; do
     iptables -w 5 -I FORWARD 1 -i "$AWG_IF" -m set --match-set ru_block dst -j DROP
   fi
 done
-# Разрешаем уже установленные соединения (правило должно быть выше DROP).
+# Р Р°Р·СЂРµС€Р°РµРј СѓР¶Рµ СѓСЃС‚Р°РЅРѕРІР»РµРЅРЅС‹Рµ СЃРѕРµРґРёРЅРµРЅРёСЏ (РїСЂР°РІРёР»Рѕ РґРѕР»Р¶РЅРѕ Р±С‹С‚СЊ РІС‹С€Рµ DROP).
 for AWG_IF in "\${IFACES[@]}"; do
   iptables -w 5 -I FORWARD 1 -i "$AWG_IF" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 done
@@ -5812,16 +5812,16 @@ echo "OK"
 `;
     try {
         writeRootFile('/root/awg/ru-drop.sh', scriptContent, '0755');
-        // Cron — только автообновление. Если /etc/cron.d недоступен, сама
-        // блокировка всё равно должна включиться, поэтому не валим запрос.
+        // Cron вЂ” С‚РѕР»СЊРєРѕ Р°РІС‚РѕРѕР±РЅРѕРІР»РµРЅРёРµ. Р•СЃР»Рё /etc/cron.d РЅРµРґРѕСЃС‚СѓРїРµРЅ, СЃР°РјР°
+        // Р±Р»РѕРєРёСЂРѕРІРєР° РІСЃС‘ СЂР°РІРЅРѕ РґРѕР»Р¶РЅР° РІРєР»СЋС‡РёС‚СЊСЃСЏ, РїРѕСЌС‚РѕРјСѓ РЅРµ РІР°Р»РёРј Р·Р°РїСЂРѕСЃ.
         let cronWarning = '';
         try {
             writeRootFile('/etc/cron.d/ru-drop-refresh', cronContent, '0644');
         } catch (e) {
             cronWarning = String(e.stderr || e.message || '').trim().slice(-800) ||
-                'не удалось записать /etc/cron.d/ru-drop-refresh';
+                'РЅРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РїРёСЃР°С‚СЊ /etc/cron.d/ru-drop-refresh';
         }
-        // 5 минут: на минимальных образах первый запуск может доустанавливать ipset.
+        // 5 РјРёРЅСѓС‚: РЅР° РјРёРЅРёРјР°Р»СЊРЅС‹С… РѕР±СЂР°Р·Р°С… РїРµСЂРІС‹Р№ Р·Р°РїСѓСЃРє РјРѕР¶РµС‚ РґРѕСѓСЃС‚Р°РЅР°РІР»РёРІР°С‚СЊ ipset.
         const beforeSet = readIpsetEntries('ru_block');
         rootExecFile('/root/awg/ru-drop.sh', [], { timeout: 300000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
             if (err) {
@@ -5832,8 +5832,8 @@ echo "OK"
                     } catch (e) { /* ignore */ }
                 }
                 detail = detail.slice(-1200);
-                auditLog(req, `GeoIP-блокировка: ошибка загрузки списка ${detail}`.slice(0, 900));
-                return res.status(500).json({ error: 'Ошибка загрузки базы GeoIP', detail });
+                auditLog(req, `GeoIP-Р±Р»РѕРєРёСЂРѕРІРєР°: РѕС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё СЃРїРёСЃРєР° ${detail}`.slice(0, 900));
+                return res.status(500).json({ error: 'РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё Р±Р°Р·С‹ GeoIP', detail });
             }
             const afterSet = readIpsetEntries('ru_block');
             let zoneLines = 0;
@@ -5843,7 +5843,7 @@ echo "OK"
             } catch (e) { /* ignore */ }
             const added = [...afterSet].filter(x => !beforeSet.has(x)).length;
             const removed = [...beforeSet].filter(x => !afterSet.has(x)).length;
-            auditLog(req, `GeoIP-блокировка включена для: ${ifaces.join(', ')} (${afterSet.size} правил, +${added}/-${removed})`);
+            auditLog(req, `GeoIP-Р±Р»РѕРєРёСЂРѕРІРєР° РІРєР»СЋС‡РµРЅР° РґР»СЏ: ${ifaces.join(', ')} (${afterSet.size} РїСЂР°РІРёР», +${added}/-${removed})`);
             const payload = {
                 success: true,
                 count: afterSet.size,
@@ -5856,55 +5856,55 @@ echo "OK"
                 listMode
             };
             if (cronWarning) {
-                payload.warning = 'Блокировка включена, но автообновление не настроено: ' + cronWarning;
+                payload.warning = 'Р‘Р»РѕРєРёСЂРѕРІРєР° РІРєР»СЋС‡РµРЅР°, РЅРѕ Р°РІС‚РѕРѕР±РЅРѕРІР»РµРЅРёРµ РЅРµ РЅР°СЃС‚СЂРѕРµРЅРѕ: ' + cronWarning;
             }
             res.json(payload);
         });
     } catch (e) {
         let detail = String(e.stderr || e.stdout || e.message || '').trim().slice(-1200);
-        if (!detail) detail = 'Не удалось записать /root/awg/ru-drop.sh.';
-        auditLog(req, `GeoIP-блокировка: ошибка установки скрипта ${detail}`.slice(0, 900));
-        res.status(500).json({ error: 'Ошибка установки скрипта', detail });
+        if (!detail) detail = 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РїРёСЃР°С‚СЊ /root/awg/ru-drop.sh.';
+        auditLog(req, `GeoIP-Р±Р»РѕРєРёСЂРѕРІРєР°: РѕС€РёР±РєР° СѓСЃС‚Р°РЅРѕРІРєРё СЃРєСЂРёРїС‚Р° ${detail}`.slice(0, 900));
+        res.status(500).json({ error: 'РћС€РёР±РєР° СѓСЃС‚Р°РЅРѕРІРєРё СЃРєСЂРёРїС‚Р°', detail });
     }
 });
 
-// Загрузка своего списка IP/CIDR. Принимаем любой текстовый формат:
-// из файла извлекаются все IPv4 и подсети, остальное игнорируется.
+// Р—Р°РіСЂСѓР·РєР° СЃРІРѕРµРіРѕ СЃРїРёСЃРєР° IP/CIDR. РџСЂРёРЅРёРјР°РµРј Р»СЋР±РѕР№ С‚РµРєСЃС‚РѕРІС‹Р№ С„РѕСЂРјР°С‚:
+// РёР· С„Р°Р№Р»Р° РёР·РІР»РµРєР°СЋС‚СЃСЏ РІСЃРµ IPv4 Рё РїРѕРґСЃРµС‚Рё, РѕСЃС‚Р°Р»СЊРЅРѕРµ РёРіРЅРѕСЂРёСЂСѓРµС‚СЃСЏ.
 app.post('/api/tools/rudrop/upload', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     const name = String(body.name || 'list.txt').replace(/[\r\n]/g, ' ').slice(0, 120);
     const data = String(body.data || '');
-    if (!data) return res.status(400).json({ error: 'Файл не передан' });
-    if (data.length > 14 * 1024 * 1024) return res.status(413).json({ error: 'Файл слишком большой (максимум 10 МБ)' });
+    if (!data) return res.status(400).json({ error: 'Р¤Р°Р№Р» РЅРµ РїРµСЂРµРґР°РЅ' });
+    if (data.length > 14 * 1024 * 1024) return res.status(413).json({ error: 'Р¤Р°Р№Р» СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№ (РјР°РєСЃРёРјСѓРј 10 РњР‘)' });
 
     let text;
     try {
         text = Buffer.from(data, 'base64').toString('utf8');
     } catch (e) {
-        return res.status(400).json({ error: 'Не удалось прочитать файл' });
+        return res.status(400).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ С„Р°Р№Р»' });
     }
     const list = parseIpList(text);
-    if (!list.length) return res.status(400).json({ error: 'В файле не найдено IPv4-адресов или подсетей' });
-    if (list.length > 2000000) return res.status(413).json({ error: 'Слишком много адресов (максимум 2 000 000)' });
+    if (!list.length) return res.status(400).json({ error: 'Р’ С„Р°Р№Р»Рµ РЅРµ РЅР°Р№РґРµРЅРѕ IPv4-Р°РґСЂРµСЃРѕРІ РёР»Рё РїРѕРґСЃРµС‚РµР№' });
+    if (list.length > 2000000) return res.status(413).json({ error: 'РЎР»РёС€РєРѕРј РјРЅРѕРіРѕ Р°РґСЂРµСЃРѕРІ (РјР°РєСЃРёРјСѓРј 2 000 000)' });
 
     if (TEST_MODE || DEMO_MODE) {
         return res.json({ success: true, count: list.length, name, demo: true });
     }
     try {
         writeRootFile('/root/awg/ru-drop.zone', list.join('\n') + '\n', '0644');
-        auditLog(req, `GeoIP: загружен свой список «${name}» (${list.length} адресов)`);
+        auditLog(req, `GeoIP: Р·Р°РіСЂСѓР¶РµРЅ СЃРІРѕР№ СЃРїРёСЃРѕРє В«${name}В» (${list.length} Р°РґСЂРµСЃРѕРІ)`);
         res.json({ success: true, count: list.length, name });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось сохранить список на сервере' });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ СЃРїРёСЃРѕРє РЅР° СЃРµСЂРІРµСЂРµ' });
     }
 });
 
 // ---------------------------------------------------------------------------
-// Перехват DNS
+// РџРµСЂРµС…РІР°С‚ DNS
 // ---------------------------------------------------------------------------
-// Удаляем все DNS-правила панели на интерфейсе (DNAT/REDIRECT :53 и DROP :853).
-// Перечисляем правила через iptables -S, а не полагаемся только на oldIfaces:
-// так не остаются дубли, если предыдущее состояние не прочиталось.
+// РЈРґР°Р»СЏРµРј РІСЃРµ DNS-РїСЂР°РІРёР»Р° РїР°РЅРµР»Рё РЅР° РёРЅС‚РµСЂС„РµР№СЃРµ (DNAT/REDIRECT :53 Рё DROP :853).
+// РџРµСЂРµС‡РёСЃР»СЏРµРј РїСЂР°РІРёР»Р° С‡РµСЂРµР· iptables -S, Р° РЅРµ РїРѕР»Р°РіР°РµРјСЃСЏ С‚РѕР»СЊРєРѕ РЅР° oldIfaces:
+// С‚Р°Рє РЅРµ РѕСЃС‚Р°СЋС‚СЃСЏ РґСѓР±Р»Рё, РµСЃР»Рё РїСЂРµРґС‹РґСѓС‰РµРµ СЃРѕСЃС‚РѕСЏРЅРёРµ РЅРµ РїСЂРѕС‡РёС‚Р°Р»РѕСЃСЊ.
 function removeDnsRules(iface, target) {
     if (!IFACE_RE.test(String(iface))) return;
     try {
@@ -5917,7 +5917,7 @@ function removeDnsRules(iface, target) {
             if (args.length) { try { sh('sudo', ['iptables', '-t', 'nat', '-D', 'PREROUTING', ...args]); } catch (e) { /* ignore */ } }
         });
     } catch (e) { /* ignore */ }
-    // На случай, если iptables -S недоступен, пробуем удалить точное правило.
+    // РќР° СЃР»СѓС‡Р°Р№, РµСЃР»Рё iptables -S РЅРµРґРѕСЃС‚СѓРїРµРЅ, РїСЂРѕР±СѓРµРј СѓРґР°Р»РёС‚СЊ С‚РѕС‡РЅРѕРµ РїСЂР°РІРёР»Рѕ.
     if (isDnsTarget(target)) {
         const parts = String(target).split(':');
         const ip = parts[0], port = parts[1] || '53';
@@ -5947,24 +5947,24 @@ function removeDnsRules(iface, target) {
 app.post('/api/tools/dns', checkAuth, (req, res) => {
     const { ifaces, target, enable, oldIfaces, oldTarget } = req.body || {};
 
-    // Снятие старых правил (и на старых интерфейсах, и на выбранных — чтобы
-    // смена цели не оставляла второе правило с прежним IP).
+    // РЎРЅСЏС‚РёРµ СЃС‚Р°СЂС‹С… РїСЂР°РІРёР» (Рё РЅР° СЃС‚Р°СЂС‹С… РёРЅС‚РµСЂС„РµР№СЃР°С…, Рё РЅР° РІС‹Р±СЂР°РЅРЅС‹С… вЂ” С‡С‚РѕР±С‹
+    // СЃРјРµРЅР° С†РµР»Рё РЅРµ РѕСЃС‚Р°РІР»СЏР»Р° РІС‚РѕСЂРѕРµ РїСЂР°РІРёР»Рѕ СЃ РїСЂРµР¶РЅРёРј IP).
     if (Array.isArray(oldIfaces) && oldIfaces.length > 0) {
         oldIfaces.forEach(oldIface => removeDnsRules(oldIface, oldTarget));
     }
 
     if (enable) {
-        if (!validIfaces(ifaces)) return res.status(400).json({ error: 'Выберите существующие интерфейсы' });
-        if (!isDnsTarget(target)) return res.status(400).json({ error: 'Неверный IP DNS (ожидается IP или IP:порт)' });
+        if (!validIfaces(ifaces)) return res.status(400).json({ error: 'Р’С‹Р±РµСЂРёС‚Рµ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёРµ РёРЅС‚РµСЂС„РµР№СЃС‹' });
+        if (!isDnsTarget(target)) return res.status(400).json({ error: 'РќРµРІРµСЂРЅС‹Р№ IP DNS (РѕР¶РёРґР°РµС‚СЃСЏ IP РёР»Рё IP:РїРѕСЂС‚)' });
         const parts = String(target).split(':');
         const ip = parts[0], port = parts[1] || '53';
-        if (ip === '0.0.0.0') return res.status(400).json({ error: 'Укажите конкретный IP AdGuard, а не 0.0.0.0' });
+        if (ip === '0.0.0.0') return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ РєРѕРЅРєСЂРµС‚РЅС‹Р№ IP AdGuard, Р° РЅРµ 0.0.0.0' });
         const loopback = ip.startsWith('127.');
 
         try {
             const fwd = shTry('sudo', ['sysctl', '-n', 'net.ipv4.ip_forward']).trim();
             if (fwd !== '1') {
-                return res.status(400).json({ error: 'Включите IP-форвардинг: sysctl -w net.ipv4.ip_forward=1 (обычно его включает AWG)' });
+                return res.status(400).json({ error: 'Р’РєР»СЋС‡РёС‚Рµ IP-С„РѕСЂРІР°СЂРґРёРЅРі: sysctl -w net.ipv4.ip_forward=1 (РѕР±С‹С‡РЅРѕ РµРіРѕ РІРєР»СЋС‡Р°РµС‚ AWG)' });
             }
         } catch (e) { /* ignore */ }
 
@@ -5973,8 +5973,8 @@ app.post('/api/tools/dns', checkAuth, (req, res) => {
             for (const proto of ['udp', 'tcp']) {
                 try {
                     if (loopback) {
-                        // REDIRECT приводит пакет на локальный порт. AdGuard должен
-                        // слушать 0.0.0.0 (а не только 127.0.0.1), иначе ответа не будет.
+                        // REDIRECT РїСЂРёРІРѕРґРёС‚ РїР°РєРµС‚ РЅР° Р»РѕРєР°Р»СЊРЅС‹Р№ РїРѕСЂС‚. AdGuard РґРѕР»Р¶РµРЅ
+                        // СЃР»СѓС€Р°С‚СЊ 0.0.0.0 (Р° РЅРµ С‚РѕР»СЊРєРѕ 127.0.0.1), РёРЅР°С‡Рµ РѕС‚РІРµС‚Р° РЅРµ Р±СѓРґРµС‚.
                         sh('sudo', ['iptables', '-t', 'nat', '-I', 'PREROUTING', '1', '-i', iface, '-p', proto,
                             '--dport', '53', '-j', 'REDIRECT', '--to-ports', port]);
                     } else {
@@ -5983,7 +5983,7 @@ app.post('/api/tools/dns', checkAuth, (req, res) => {
                     }
                 } catch (e) { /* ignore */ }
             }
-            // DoT (tcp/853) и DoQ (udp/853) — иначе клиент обойдёт перехват.
+            // DoT (tcp/853) Рё DoQ (udp/853) вЂ” РёРЅР°С‡Рµ РєР»РёРµРЅС‚ РѕР±РѕР№РґС‘С‚ РїРµСЂРµС…РІР°С‚.
             for (const proto of ['tcp', 'udp']) {
                 try {
                     sh('sudo', ['iptables', '-I', 'FORWARD', '1', '-i', iface, '-p', proto,
@@ -5991,30 +5991,30 @@ app.post('/api/tools/dns', checkAuth, (req, res) => {
                 } catch (e) { /* ignore */ }
             }
         });
-        auditLog(req, `Перехват DNS включён (${ifaces.join(', ')}) -> ${loopback ? '127.0.0.1:' + port : ip + ':' + port}`);
-        res.json({ success: true, target: loopback ? `127.0.0.1:${port}` : `${ip}:${port}`, warning: loopback ? 'AdGuard должен слушать 0.0.0.0, иначе REDIRECT не сработает' : undefined });
+        auditLog(req, `РџРµСЂРµС…РІР°С‚ DNS РІРєР»СЋС‡С‘РЅ (${ifaces.join(', ')}) -> ${loopback ? '127.0.0.1:' + port : ip + ':' + port}`);
+        res.json({ success: true, target: loopback ? `127.0.0.1:${port}` : `${ip}:${port}`, warning: loopback ? 'AdGuard РґРѕР»Р¶РµРЅ СЃР»СѓС€Р°С‚СЊ 0.0.0.0, РёРЅР°С‡Рµ REDIRECT РЅРµ СЃСЂР°Р±РѕС‚Р°РµС‚' : undefined });
     } else {
-        auditLog(req, 'Перехват DNS выключен');
+        auditLog(req, 'РџРµСЂРµС…РІР°С‚ DNS РІС‹РєР»СЋС‡РµРЅ');
         res.json({ success: true });
     }
 });
 // ---------------------------------------------------------------------------
-// Каскад: генерация скрипта маршрутизации (по CASCADE.md от bivlked)
+// РљР°СЃРєР°Рґ: РіРµРЅРµСЂР°С†РёСЏ СЃРєСЂРёРїС‚Р° РјР°СЂС€СЂСѓС‚РёР·Р°С†РёРё (РїРѕ CASCADE.md РѕС‚ bivlked)
 // ---------------------------------------------------------------------------
-// Роль сервера в каскаде:
-//   RU (вход)  — есть awg0.conf со слушающим портом: сюда подключаются клиенты,
-//                туннель awg1 идёт в EU;
-//   EU (выход) — awg0 нет (или это только туннель): сюда приходит RU, а
-//                клиентские конфиги RU создаются через manage_amneziawg.sh.
+// Р РѕР»СЊ СЃРµСЂРІРµСЂР° РІ РєР°СЃРєР°РґРµ:
+//   RU (РІС…РѕРґ)  вЂ” РµСЃС‚СЊ awg0.conf СЃРѕ СЃР»СѓС€Р°СЋС‰РёРј РїРѕСЂС‚РѕРј: СЃСЋРґР° РїРѕРґРєР»СЋС‡Р°СЋС‚СЃСЏ РєР»РёРµРЅС‚С‹,
+//                С‚СѓРЅРЅРµР»СЊ awg1 РёРґС‘С‚ РІ EU;
+//   EU (РІС‹С…РѕРґ) вЂ” awg0 РЅРµС‚ (РёР»Рё СЌС‚Рѕ С‚РѕР»СЊРєРѕ С‚СѓРЅРЅРµР»СЊ): СЃСЋРґР° РїСЂРёС…РѕРґРёС‚ RU, Р°
+//                РєР»РёРµРЅС‚СЃРєРёРµ РєРѕРЅС„РёРіРё RU СЃРѕР·РґР°СЋС‚СЃСЏ С‡РµСЂРµР· manage_amneziawg.sh.
 function cascadeRoleFrom(confText) {
     const ini = parseIni(confText);
     const iface = ini.Interface || {};
     const peer = ini.Peer || {};
     const firstAddr = String(iface.Address || "").split(",")[0].trim();
     if (!/^10\.9\.9\.\d+\/\d{1,2}$/.test(firstAddr)) return "";
-    // Интерфейс сервера-входа: адрес подсети и ListenPort.
+    // РРЅС‚РµСЂС„РµР№СЃ СЃРµСЂРІРµСЂР°-РІС…РѕРґР°: Р°РґСЂРµСЃ РїРѕРґСЃРµС‚Рё Рё ListenPort.
     if (/^10\.9\.9\.\d+\/(2[4-9]|30)$/.test(firstAddr) && iface.ListenPort) return "ru";
-    // Выход: адрес сервера .1/32 (по инструкции awg1 на выходе — .1/32).
+    // Р’С‹С…РѕРґ: Р°РґСЂРµСЃ СЃРµСЂРІРµСЂР° .1/32 (РїРѕ РёРЅСЃС‚СЂСѓРєС†РёРё awg1 РЅР° РІС‹С…РѕРґРµ вЂ” .1/32).
     if (/^10\.9\.9\.1\/32$/.test(firstAddr)) return "eu";
     return "ru";
 }
@@ -6028,11 +6028,11 @@ function cascadeRoleFrom(confText) {
 
 
 
-// Роль сервера определяем по awg0.conf: у входа клиенты с 0.0.0.0/0, у выхода
-// awg0 либо нет, либо это переставленный конфиг входа.
+// Р РѕР»СЊ СЃРµСЂРІРµСЂР° РѕРїСЂРµРґРµР»СЏРµРј РїРѕ awg0.conf: Сѓ РІС…РѕРґР° РєР»РёРµРЅС‚С‹ СЃ 0.0.0.0/0, Сѓ РІС‹С…РѕРґР°
+// awg0 Р»РёР±Рѕ РЅРµС‚, Р»РёР±Рѕ СЌС‚Рѕ РїРµСЂРµСЃС‚Р°РІР»РµРЅРЅС‹Р№ РєРѕРЅС„РёРі РІС…РѕРґР°.
 function cascadeRole() {
     if (TEST_MODE) return "ru";
-    // Настоящий вход — сервер с клиентами: awg0 с ListenPort и подсетью /24.
+    // РќР°СЃС‚РѕСЏС‰РёР№ РІС…РѕРґ вЂ” СЃРµСЂРІРµСЂ СЃ РєР»РёРµРЅС‚Р°РјРё: awg0 СЃ ListenPort Рё РїРѕРґСЃРµС‚СЊСЋ /24.
     for (const name of ["awg0.conf", "amn0.conf"]) {
         const file = path.join(AWG_CONF_DIR, name);
         if (!fileExists(file)) continue;
@@ -6053,8 +6053,8 @@ function firstIpv4(value) {
     return m ? m[1] : '';
 }
 
-// Адрес второй стороны ВНУТРИ туннеля (10.9.9.x). Первый адрес из AllowedIPs
-// брать нельзя: клиенты панели записывают туда список маршрутов (1.0.0.0/8 …).
+// РђРґСЂРµСЃ РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅС‹ Р’РќРЈРўР Р С‚СѓРЅРЅРµР»СЏ (10.9.9.x). РџРµСЂРІС‹Р№ Р°РґСЂРµСЃ РёР· AllowedIPs
+// Р±СЂР°С‚СЊ РЅРµР»СЊР·СЏ: РєР»РёРµРЅС‚С‹ РїР°РЅРµР»Рё Р·Р°РїРёСЃС‹РІР°СЋС‚ С‚СѓРґР° СЃРїРёСЃРѕРє РјР°СЂС€СЂСѓС‚РѕРІ (1.0.0.0/8 вЂ¦).
 function firstTunnelIp(value) {
     const m = String(value || "").match(/\b(10\.9\.9\.\d{1,3})\b/);
     return m ? m[1] : "";
@@ -6062,13 +6062,13 @@ function firstTunnelIp(value) {
 
 
 
-// Endpoint для awg1 с учётом роли:
-//   * на RU нужен ВНУТРЕННИЙ адрес EU в туннеле (10.9.9.3) — публичный IP
-//     внутри туннеля недоступен, и awg-quick падал;
-//   * на EU нужен публичный адрес RU.
-// Адреса туннеля (10.9.9.x) из конфигов этого сервера: awg0/amn0 и
-// клиентские .conf. Нужны, чтобы отличить публичный адрес второй стороны
-// от внутреннего, который внутри туннеля недоступен.
+// Endpoint РґР»СЏ awg1 СЃ СѓС‡С‘С‚РѕРј СЂРѕР»Рё:
+//   * РЅР° RU РЅСѓР¶РµРЅ Р’РќРЈРўР Р•РќРќРР™ Р°РґСЂРµСЃ EU РІ С‚СѓРЅРЅРµР»Рµ (10.9.9.3) вЂ” РїСѓР±Р»РёС‡РЅС‹Р№ IP
+//     РІРЅСѓС‚СЂРё С‚СѓРЅРЅРµР»СЏ РЅРµРґРѕСЃС‚СѓРїРµРЅ, Рё awg-quick РїР°РґР°Р»;
+//   * РЅР° EU РЅСѓР¶РµРЅ РїСѓР±Р»РёС‡РЅС‹Р№ Р°РґСЂРµСЃ RU.
+// РђРґСЂРµСЃР° С‚СѓРЅРЅРµР»СЏ (10.9.9.x) РёР· РєРѕРЅС„РёРіРѕРІ СЌС‚РѕРіРѕ СЃРµСЂРІРµСЂР°: awg0/amn0 Рё
+// РєР»РёРµРЅС‚СЃРєРёРµ .conf. РќСѓР¶РЅС‹, С‡С‚РѕР±С‹ РѕС‚Р»РёС‡РёС‚СЊ РїСѓР±Р»РёС‡РЅС‹Р№ Р°РґСЂРµСЃ РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅС‹
+// РѕС‚ РІРЅСѓС‚СЂРµРЅРЅРµРіРѕ, РєРѕС‚РѕСЂС‹Р№ РІРЅСѓС‚СЂРё С‚СѓРЅРЅРµР»СЏ РЅРµРґРѕСЃС‚СѓРїРµРЅ.
 function localTunnelIps() {
     const ips = new Set(['10.9.9.1']);
     for (const dir of [AWG_CONF_DIR, AWG_DIR]) {
@@ -6097,15 +6097,15 @@ function cascadeEndpointPlan() {
     let ini;
     try { ini = parseIni(readTextSafe(conf)); } catch (e) { return null; }
     const peer = ini.Peer || {};
-    // Роль определяем по самому awg1.conf: он точнее роли сервера.
+    // Р РѕР»СЊ РѕРїСЂРµРґРµР»СЏРµРј РїРѕ СЃР°РјРѕРјСѓ awg1.conf: РѕРЅ С‚РѕС‡РЅРµРµ СЂРѕР»Рё СЃРµСЂРІРµСЂР°.
     const role = cascadeRoleFrom(readTextSafe(conf)) || cascadeRole();
-    // Выход: нужен адрес входа в туннеле.
+    // Р’С‹С…РѕРґ: РЅСѓР¶РµРЅ Р°РґСЂРµСЃ РІС…РѕРґР° РІ С‚СѓРЅРЅРµР»Рµ.
     if (role === "eu") {
         const peerIp = String(peer.AllowedIPs || "").split(",")[0].trim().replace(/\/\d+$/, "");
         if (!peerIp) return null;
         return { host: peerIp, port: "", raw: peerIp, source: "peer" };
     }
-    // Вход: адрес выхода — первый 10.9.9.x из AllowedIPs клиента.
+    // Р’С…РѕРґ: Р°РґСЂРµСЃ РІС‹С…РѕРґР° вЂ” РїРµСЂРІС‹Р№ 10.9.9.x РёР· AllowedIPs РєР»РёРµРЅС‚Р°.
     const inner = String(peer.AllowedIPs || "").match(/\b(10\.9\.9\.\d{1,3})\b/);
     const epMatch = String(peer.Endpoint || "").match(/^([A-Za-z0-9.\-]+):(\d{1,5})$/);
     const port = epMatch ? epMatch[2] : "";
@@ -6121,11 +6121,11 @@ function cascadeEndpoint() {
     return plan ? { host: plan.host, port: plan.port, raw: plan.raw } : null;
 }
 
-// Клиентский конфиг панели часто содержит домен в Endpoint. В маршрутах нужен
-// адрес, поэтому резолвим имя и берём внутренний 10.9.9.x, если он есть.
+// РљР»РёРµРЅС‚СЃРєРёР№ РєРѕРЅС„РёРі РїР°РЅРµР»Рё С‡Р°СЃС‚Рѕ СЃРѕРґРµСЂР¶РёС‚ РґРѕРјРµРЅ РІ Endpoint. Р’ РјР°СЂС€СЂСѓС‚Р°С… РЅСѓР¶РµРЅ
+// Р°РґСЂРµСЃ, РїРѕСЌС‚РѕРјСѓ СЂРµР·РѕР»РІРёРј РёРјСЏ Рё Р±РµСЂС‘Рј РІРЅСѓС‚СЂРµРЅРЅРёР№ 10.9.9.x, РµСЃР»Рё РѕРЅ РµСЃС‚СЊ.
 const dnsAnsCache = new Map();
-// Синхронное разрешение домена: в клиентском конфиге панели Endpoint — имя
-// хоста второй стороны. Внутренний 10.9.9.x для этого не подходит.
+// РЎРёРЅС…СЂРѕРЅРЅРѕРµ СЂР°Р·СЂРµС€РµРЅРёРµ РґРѕРјРµРЅР°: РІ РєР»РёРµРЅС‚СЃРєРѕРј РєРѕРЅС„РёРіРµ РїР°РЅРµР»Рё Endpoint вЂ” РёРјСЏ
+// С…РѕСЃС‚Р° РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅС‹. Р’РЅСѓС‚СЂРµРЅРЅРёР№ 10.9.9.x РґР»СЏ СЌС‚РѕРіРѕ РЅРµ РїРѕРґС…РѕРґРёС‚.
 function resolveHostSync(host) {
     if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return host;
     const cached = dnsAnsCache.get(host);
@@ -6167,8 +6167,8 @@ async function cascadeEndpointPlanAsync() {
     return { host: ip, port: m[2], raw: ip + ':' + m[2], source: 'tunnel' };
 }
 
-// Приводит конфиг к виду, который требует CASCADE.md: без DNS и с
-// Table = off. Таблицу выключения маршрутов проверяем в обоих регистрах.
+// РџСЂРёРІРѕРґРёС‚ РєРѕРЅС„РёРі Рє РІРёРґСѓ, РєРѕС‚РѕСЂС‹Р№ С‚СЂРµР±СѓРµС‚ CASCADE.md: Р±РµР· DNS Рё СЃ
+// Table = off. РўР°Р±Р»РёС†Сѓ РІС‹РєР»СЋС‡РµРЅРёСЏ РјР°СЂС€СЂСѓС‚РѕРІ РїСЂРѕРІРµСЂСЏРµРј РІ РѕР±РѕРёС… СЂРµРіРёСЃС‚СЂР°С….
 function ipv6Enabled() {
     if (TEST_MODE) return false;
     try {
@@ -6181,8 +6181,8 @@ function normalizeCascadeConf(text) {
     const lines = String(text || '').split(/\r?\n/)
         .filter(l => !/^\s*DNS\s*=/i.test(l))
         .filter(l => !/^\s*Table\s*=/i.test(l))
-        // awg-quick падает с "IPv6 is disabled on this device", если в Address
-        // остался IPv6-адрес, а в ядре IPv6 выключен.
+        // awg-quick РїР°РґР°РµС‚ СЃ "IPv6 is disabled on this device", РµСЃР»Рё РІ Address
+        // РѕСЃС‚Р°Р»СЃСЏ IPv6-Р°РґСЂРµСЃ, Р° РІ СЏРґСЂРµ IPv6 РІС‹РєР»СЋС‡РµРЅ.
         .map(l => {
             if (ipv6Enabled()) return l;
             const m = l.match(/^(\s*Address\s*=\s*)(.*)$/i);
@@ -6225,10 +6225,10 @@ const PROXY_CASCADE_UID_FILE = '/root/awg/proxy-cascade.uid';
 const PROXY_CASCADE_FLAG_FILE = '/root/awg/proxy-cascade.enabled';
 
 // ---------------------------------------------------------------------------
-// Подготовка каскада без участия пользователя
+// РџРѕРґРіРѕС‚РѕРІРєР° РєР°СЃРєР°РґР° Р±РµР· СѓС‡Р°СЃС‚РёСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ
 // ---------------------------------------------------------------------------
-// Роль берём по awg0.conf. Публичный адрес — из настроек панели (домен или
-// IP), иначе узнаём внешний IP у api.ipify.org.
+// Р РѕР»СЊ Р±РµСЂС‘Рј РїРѕ awg0.conf. РџСѓР±Р»РёС‡РЅС‹Р№ Р°РґСЂРµСЃ вЂ” РёР· РЅР°СЃС‚СЂРѕРµРє РїР°РЅРµР»Рё (РґРѕРјРµРЅ РёР»Рё
+// IP), РёРЅР°С‡Рµ СѓР·РЅР°С‘Рј РІРЅРµС€РЅРёР№ IP Сѓ api.ipify.org.
 async function cascadePublicHost() {
     try {
         const s = readAppSettings();
@@ -6243,11 +6243,11 @@ async function cascadePublicHost() {
     return '';
 }
 
-// Приводим конфиг каскада к рабочему виду: без DNS, с Table = off, без IPv6
-// при выключенном IPv6 и с параметрами обфускации этой стороны, если в
-// конфиге их нет (иначе рукопожатие не проходит).
-// IPv6-адрес из Address убираем, если IPv6 выключен в ядре: иначе awg-quick
-// падает с «IPv6 is disabled on this device» и туннель не поднимается.
+// РџСЂРёРІРѕРґРёРј РєРѕРЅС„РёРі РєР°СЃРєР°РґР° Рє СЂР°Р±РѕС‡РµРјСѓ РІРёРґСѓ: Р±РµР· DNS, СЃ Table = off, Р±РµР· IPv6
+// РїСЂРё РІС‹РєР»СЋС‡РµРЅРЅРѕРј IPv6 Рё СЃ РїР°СЂР°РјРµС‚СЂР°РјРё РѕР±С„СѓСЃРєР°С†РёРё СЌС‚РѕР№ СЃС‚РѕСЂРѕРЅС‹, РµСЃР»Рё РІ
+// РєРѕРЅС„РёРіРµ РёС… РЅРµС‚ (РёРЅР°С‡Рµ СЂСѓРєРѕРїРѕР¶Р°С‚РёРµ РЅРµ РїСЂРѕС…РѕРґРёС‚).
+// IPv6-Р°РґСЂРµСЃ РёР· Address СѓР±РёСЂР°РµРј, РµСЃР»Рё IPv6 РІС‹РєР»СЋС‡РµРЅ РІ СЏРґСЂРµ: РёРЅР°С‡Рµ awg-quick
+// РїР°РґР°РµС‚ СЃ В«IPv6 is disabled on this deviceВ» Рё С‚СѓРЅРЅРµР»СЊ РЅРµ РїРѕРґРЅРёРјР°РµС‚СЃСЏ.
 function stripIpv6Address(text) {
     if (ipv6Enabled()) return text;
     return String(text || '').split(/\r?\n/).map(l => {
@@ -6259,9 +6259,9 @@ function stripIpv6Address(text) {
     }).filter(Boolean).join('\n');
 }
 
-// Резервный awg1-конфиг из другой панели: убираем DNS, принудительно
-// Table = off (иначе awg-quick лезет в IPv6/маршруты и падает) и
-// вычищаем IPv6-адрес, если IPv6 на этом сервере выключен.
+// Р РµР·РµСЂРІРЅС‹Р№ awg1-РєРѕРЅС„РёРі РёР· РґСЂСѓРіРѕР№ РїР°РЅРµР»Рё: СѓР±РёСЂР°РµРј DNS, РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕ
+// Table = off (РёРЅР°С‡Рµ awg-quick Р»РµР·РµС‚ РІ IPv6/РјР°СЂС€СЂСѓС‚С‹ Рё РїР°РґР°РµС‚) Рё
+// РІС‹С‡РёС‰Р°РµРј IPv6-Р°РґСЂРµСЃ, РµСЃР»Рё IPv6 РЅР° СЌС‚РѕРј СЃРµСЂРІРµСЂРµ РІС‹РєР»СЋС‡РµРЅ.
 function prepareCascadeBackupConf(text) {
     const lines = String(text || '').split(/\r?\n/)
         .filter(l => !/^\s*DNS\s*=/i.test(l))
@@ -6296,15 +6296,15 @@ function prepareCascadeConf(text, ownIface) {
     return lines.join('\n').trim() + '\n';
 }
 
-// Создаёт на ЭТОМ сервере клиента для второй стороны и возвращает его конфиг.
-// Используется, когда панель настроена как выход (EU): входу нужен конфиг,
-// созданный именно здесь.
+// РЎРѕР·РґР°С‘С‚ РЅР° Р­РўРћРњ СЃРµСЂРІРµСЂРµ РєР»РёРµРЅС‚Р° РґР»СЏ РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅС‹ Рё РІРѕР·РІСЂР°С‰Р°РµС‚ РµРіРѕ РєРѕРЅС„РёРі.
+// РСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ, РєРѕРіРґР° РїР°РЅРµР»СЊ РЅР°СЃС‚СЂРѕРµРЅР° РєР°Рє РІС‹С…РѕРґ (EU): РІС…РѕРґСѓ РЅСѓР¶РµРЅ РєРѕРЅС„РёРі,
+// СЃРѕР·РґР°РЅРЅС‹Р№ РёРјРµРЅРЅРѕ Р·РґРµСЃСЊ.
 function createCascadePeerClient(name) {
     const safe = String(name || 'cascade-peer').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'cascade-peer';
     try {
         sh('sudo', ['bash', MANAGE, 'add', safe, '--json'], { timeout: 60000 });
     } catch (e) {
-        // Уже существует — это не ошибка, конфиг всё равно читаем ниже.
+        // РЈР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚ вЂ” СЌС‚Рѕ РЅРµ РѕС€РёР±РєР°, РєРѕРЅС„РёРі РІСЃС‘ СЂР°РІРЅРѕ С‡РёС‚Р°РµРј РЅРёР¶Рµ.
     }
     let conf = '';
     try { conf = sh('sudo', ['cat', path.join(AWG_DIR, safe + '.conf')]); } catch (e) { conf = ''; }
@@ -6312,7 +6312,7 @@ function createCascadePeerClient(name) {
     return { name: safe, conf };
 }
 
-// Конфиг клиента с другой панели (только чтение): логин, затем скачивание.
+// РљРѕРЅС„РёРі РєР»РёРµРЅС‚Р° СЃ РґСЂСѓРіРѕР№ РїР°РЅРµР»Рё (С‚РѕР»СЊРєРѕ С‡С‚РµРЅРёРµ): Р»РѕРіРёРЅ, Р·Р°С‚РµРј СЃРєР°С‡РёРІР°РЅРёРµ.
 async function fetchRemoteClientConf(url, user, pass, name) {
     const base = String(url || '').replace(/\/+$/, '');
     if (!base) return null;
@@ -6335,7 +6335,7 @@ async function fetchRemoteClientConf(url, user, pass, name) {
     return /\[Interface\]/i.test(conf) ? conf : null;
 }
 
-// Конфиг клиента с ДРУГОЙ панели: логин, затем скачивание конфига.
+// РљРѕРЅС„РёРі РєР»РёРµРЅС‚Р° СЃ Р”Р РЈР“РћР™ РїР°РЅРµР»Рё: Р»РѕРіРёРЅ, Р·Р°С‚РµРј СЃРєР°С‡РёРІР°РЅРёРµ РєРѕРЅС„РёРіР°.
 async function fetchPeerClientConf(url, user, pass, name) {
     const base = String(url || "").replace(/\/+$/, "");
     if (!base || !user) return null;
@@ -6357,8 +6357,8 @@ async function fetchPeerClientConf(url, user, pass, name) {
     return /\[Interface\]/i.test(conf) ? conf : null;
 }
 
-// Создаёт на этом сервере клиента для второй стороны (для выхода EU).
-// Возвращает клиента из awg0.conf (имя пира), его конфиг с сервера.
+// РЎРѕР·РґР°С‘С‚ РЅР° СЌС‚РѕРј СЃРµСЂРІРµСЂРµ РєР»РёРµРЅС‚Р° РґР»СЏ РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅС‹ (РґР»СЏ РІС‹С…РѕРґР° EU).
+// Р’РѕР·РІСЂР°С‰Р°РµС‚ РєР»РёРµРЅС‚Р° РёР· awg0.conf (РёРјСЏ РїРёСЂР°), РµРіРѕ РєРѕРЅС„РёРі СЃ СЃРµСЂРІРµСЂР°.
 function clientFromAwg0(name) {
     const text = readTextSafe(path.join(AWG_CONF_DIR, "awg0.conf"));
     if (!text) return null;
@@ -6393,7 +6393,7 @@ function createPeerClient(name) {
         try { conf = sh("sudo", ["cat", f]); } catch (e) { conf = ""; }
         if (/\[Interface\]/i.test(conf)) { out.conf = conf; out.file = f; return out; }
     }
-    // Файла нет, но клиент мог быть создан раньше: собираем конфиг из awg0.
+    // Р¤Р°Р№Р»Р° РЅРµС‚, РЅРѕ РєР»РёРµРЅС‚ РјРѕРі Р±С‹С‚СЊ СЃРѕР·РґР°РЅ СЂР°РЅСЊС€Рµ: СЃРѕР±РёСЂР°РµРј РєРѕРЅС„РёРі РёР· awg0.
     const peer = clientFromAwg0(safe);
     if (peer) {
         const addr = String(peer.allowedIps).split(",")[0].trim() || "10.9.9.4/32";
@@ -6419,8 +6419,8 @@ function createPeerClient(name) {
 
 async function installRouting(ifaces, extraRuNets) {
     const plan = await cascadeEndpointPlanAsync();
-    if (!plan) throw new Error("Не удалось определить адрес второго сервера в туннеле (проверьте awg1.conf)");
-    // Конфиг в рабочий вид: Table = off, без DNS, без IPv6 при выключенном IPv6.
+    if (!plan) throw new Error("РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ Р°РґСЂРµСЃ РІС‚РѕСЂРѕРіРѕ СЃРµСЂРІРµСЂР° РІ С‚СѓРЅРЅРµР»Рµ (РїСЂРѕРІРµСЂСЊС‚Рµ awg1.conf)");
+    // РљРѕРЅС„РёРі РІ СЂР°Р±РѕС‡РёР№ РІРёРґ: Table = off, Р±РµР· DNS, Р±РµР· IPv6 РїСЂРё РІС‹РєР»СЋС‡РµРЅРЅРѕРј IPv6.
     const confFile = existingCascadeConf();
     if (confFile) {
         const before = readTextSafe(confFile);
@@ -6433,33 +6433,33 @@ async function installRouting(ifaces, extraRuNets) {
     writeRootFile("/etc/systemd/system/awg-routing.timer", ROUTING_TIMER, "0644");
     sh("sudo", ["systemctl", "daemon-reload"]);
     try {
-        // 1. Сначала маршруты: скрипт добавляет маршрут до второй стороны через
-        //    WAN. Без него awg-quick не довезёт рукопожатие (внутренний адрес
-        //    уходит в туннель) и падает.
+        // 1. РЎРЅР°С‡Р°Р»Р° РјР°СЂС€СЂСѓС‚С‹: СЃРєСЂРёРїС‚ РґРѕР±Р°РІР»СЏРµС‚ РјР°СЂС€СЂСѓС‚ РґРѕ РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅС‹ С‡РµСЂРµР·
+        //    WAN. Р‘РµР· РЅРµРіРѕ awg-quick РЅРµ РґРѕРІРµР·С‘С‚ СЂСѓРєРѕРїРѕР¶Р°С‚РёРµ (РІРЅСѓС‚СЂРµРЅРЅРёР№ Р°РґСЂРµСЃ
+        //    СѓС…РѕРґРёС‚ РІ С‚СѓРЅРЅРµР»СЊ) Рё РїР°РґР°РµС‚.
         const out = sh("sudo", [ROUTING_SCRIPT], { timeout: 180000 });
-        // 2. Теперь поднимаем туннель и включаем таймер.
+        // 2. РўРµРїРµСЂСЊ РїРѕРґРЅРёРјР°РµРј С‚СѓРЅРЅРµР»СЊ Рё РІРєР»СЋС‡Р°РµРј С‚Р°Р№РјРµСЂ.
         sh("sudo", ["systemctl", "enable", "--now", "awg-quick@awg1"]);
         try { sh("sleep", ["2"]); } catch (e) { /* ignore */ }
         sh("sudo", ["systemctl", "enable", "--now", "awg-routing.timer"]);
-        try { sh("sudo", ["systemctl", "start", "awg-routing.service"]); } catch (e) { /* уже применено */ }
+        try { sh("sudo", ["systemctl", "start", "awg-routing.service"]); } catch (e) { /* СѓР¶Рµ РїСЂРёРјРµРЅРµРЅРѕ */ }
         return { script, out, endpoint: plan };
     } catch (e) {
         try { sh("sudo", ["systemctl", "stop", "awg-quick@awg1"]); } catch (err) { /* ignore */ }
-        // child_process кладёт текст скрипта в stdout/stderr, message — общий.
+        // child_process РєР»Р°РґС‘С‚ С‚РµРєСЃС‚ СЃРєСЂРёРїС‚Р° РІ stdout/stderr, message вЂ” РѕР±С‰РёР№.
         const detail = [e.stdout, e.stderr, e.message].map(x => String(x || "").trim()).filter(Boolean).join("\n").trim();
-        throw new Error((detail || "awg-routing не запустился") +
-            "\n\nТуннель awg1 остановлен, правила каскада не применены.");
+        throw new Error((detail || "awg-routing РЅРµ Р·Р°РїСѓСЃС‚РёР»СЃСЏ") +
+            "\n\nРўСѓРЅРЅРµР»СЊ awg1 РѕСЃС‚Р°РЅРѕРІР»РµРЅ, РїСЂР°РІРёР»Р° РєР°СЃРєР°РґР° РЅРµ РїСЂРёРјРµРЅРµРЅС‹.");
     }
 }
 
 
 function buildRoutingScript(ifaces, extraRuNets, endpoint) {
     const ep = endpoint || cascadeEndpoint();
-    if (!ep) throw new Error('Не удалось определить Endpoint туннеля awg1 (проверьте awg1.conf)');
+    if (!ep) throw new Error('РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ Endpoint С‚СѓРЅРЅРµР»СЏ awg1 (РїСЂРѕРІРµСЂСЊС‚Рµ awg1.conf)');
     const extra = (extraRuNets || []).join('\n');
     const list = (ifaces || []).filter(Boolean).join(' ');
     return `#!/bin/bash
-# Каскад RU -> EU. Сгенерировано панелью (схема: bivlked/amneziawg-installer/CASCADE.md)
+# РљР°СЃРєР°Рґ RU -> EU. РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅРѕ РїР°РЅРµР»СЊСЋ (СЃС…РµРјР°: bivlked/amneziawg-installer/CASCADE.md)
 set -euo pipefail
 
 CASC_IFACES=(${list})
@@ -6478,28 +6478,28 @@ exec 9>"$AWG_DIR/awg-routing.lock"
 flock -w 300 9 || exit 1
 trap 'rm -f "$RU_ZONE.tmp"' EXIT
 
-# Выход (EU): клиентских интерфейсов нет, маршруты не нужны.
+# Р’С‹С…РѕРґ (EU): РєР»РёРµРЅС‚СЃРєРёС… РёРЅС‚РµСЂС„РµР№СЃРѕРІ РЅРµС‚, РјР°СЂС€СЂСѓС‚С‹ РЅРµ РЅСѓР¶РЅС‹.
 if [ "\${#CASC_IFACES[@]}" -eq 0 ]; then
     if ! ip link show "$AWG1_IF" >/dev/null 2>&1; then
-        echo "ERROR: интерфейс $AWG1_IF не поднят (выход). Проверьте awg1.conf."
+        echo "ERROR: РёРЅС‚РµСЂС„РµР№СЃ $AWG1_IF РЅРµ РїРѕРґРЅСЏС‚ (РІС‹С…РѕРґ). РџСЂРѕРІРµСЂСЊС‚Рµ awg1.conf."
         exit 1
     fi
-    echo "OK: выход каскада, маршруты не требуются."
+    echo "OK: РІС‹С…РѕРґ РєР°СЃРєР°РґР°, РјР°СЂС€СЂСѓС‚С‹ РЅРµ С‚СЂРµР±СѓСЋС‚СЃСЏ."
     exit 0
 fi
 
-# Адрес второй стороны без порта: ip route порт не принимает.
+# РђРґСЂРµСЃ РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅС‹ Р±РµР· РїРѕСЂС‚Р°: ip route РїРѕСЂС‚ РЅРµ РїСЂРёРЅРёРјР°РµС‚.
 EP_HOST="\${AWG1_ENDPOINT%%:*}"
 EP_ROUTE="$(ip -4 route get "$EP_HOST" 2>/dev/null | head -1)"
 WAN_IF="$(printf '%s' "$EP_ROUTE" | grep -oP '(^| )dev \\K\\S+' || true)"
 WAN_GW="$(printf '%s' "$EP_ROUTE" | grep -oP '(^| )via \\K\\S+' || true)"
 if [ -z "$WAN_IF" ] || [ "$WAN_IF" = "$AWG1_IF" ]; then
-    echo "ERROR: адрес второй стороны $AWG1_ENDPOINT недоступен напрямую (через $AWG1_IF)."
+    echo "ERROR: Р°РґСЂРµСЃ РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅС‹ $AWG1_ENDPOINT РЅРµРґРѕСЃС‚СѓРїРµРЅ РЅР°РїСЂСЏРјСѓСЋ (С‡РµСЂРµР· $AWG1_IF)."
     exit 1
 fi
 
-# IPv6 в каскад не заворачивается: блокируем форвардинг с клиентских
-# интерфейсов, иначе IPv6 уйдёт напрямую через WAN (утечка).
+# IPv6 РІ РєР°СЃРєР°Рґ РЅРµ Р·Р°РІРѕСЂР°С‡РёРІР°РµС‚СЃСЏ: Р±Р»РѕРєРёСЂСѓРµРј С„РѕСЂРІР°СЂРґРёРЅРі СЃ РєР»РёРµРЅС‚СЃРєРёС…
+# РёРЅС‚РµСЂС„РµР№СЃРѕРІ, РёРЅР°С‡Рµ IPv6 СѓР№РґС‘С‚ РЅР°РїСЂСЏРјСѓСЋ С‡РµСЂРµР· WAN (СѓС‚РµС‡РєР°).
 if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo 1)" = "0" ]; then
     if command -v ip6tables >/dev/null 2>&1; then
         ip6tables -N SERVPANEL_V6 2>/dev/null || true
@@ -6508,9 +6508,9 @@ if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo 1)" = "
             [ -n "$IFACE" ] && ip6tables -A SERVPANEL_V6 -i "$IFACE" -j DROP 2>/dev/null || true
         done
         ip6tables -C FORWARD -j SERVPANEL_V6 2>/dev/null || ip6tables -I FORWARD -j SERVPANEL_V6 2>/dev/null || true
-        echo "IPv6: форвардинг с клиентских интерфейсов заблокирован."
+        echo "IPv6: С„РѕСЂРІР°СЂРґРёРЅРі СЃ РєР»РёРµРЅС‚СЃРєРёС… РёРЅС‚РµСЂС„РµР№СЃРѕРІ Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅ."
     else
-        echo "WARN: IPv6 включён, ip6tables нет — IPv6 может пойти мимо каскада."
+        echo "WARN: IPv6 РІРєР»СЋС‡С‘РЅ, ip6tables РЅРµС‚ вЂ” IPv6 РјРѕР¶РµС‚ РїРѕР№С‚Рё РјРёРјРѕ РєР°СЃРєР°РґР°."
     fi
 fi
 
@@ -6526,7 +6526,7 @@ elif fetch_ru_zone "$RU_ZONE_FALLBACK_URL"; then
     mv -f "$RU_ZONE.tmp" "$RU_ZONE"
 fi
 
-# Список российских сетей
+# РЎРїРёСЃРѕРє СЂРѕСЃСЃРёР№СЃРєРёС… СЃРµС‚РµР№
 if [ -s "$RU_ZONE" ]; then
     ipset create ru hash:net -exist
     ipset create ru_tmp hash:net -exist
@@ -6539,27 +6539,27 @@ if [ -s "$RU_ZONE" ]; then
     ipset destroy ru_tmp
 fi
 
-# Таблица 100 — для трафика, помеченного fwmark.
+# РўР°Р±Р»РёС†Р° 100 вЂ” РґР»СЏ С‚СЂР°С„РёРєР°, РїРѕРјРµС‡РµРЅРЅРѕРіРѕ fwmark.
 ip route replace default dev "$AWG1_IF" table "$TABLE_ID"
-# Kill switch: при падении awg1 помеченный трафик уходит в blackhole,
-# а не напрямую через WAN.
+# Kill switch: РїСЂРё РїР°РґРµРЅРёРё awg1 РїРѕРјРµС‡РµРЅРЅС‹Р№ С‚СЂР°С„РёРє СѓС…РѕРґРёС‚ РІ blackhole,
+# Р° РЅРµ РЅР°РїСЂСЏРјСѓСЋ С‡РµСЂРµР· WAN.
 ip route replace blackhole default table "$TABLE_ID" metric 1000
 ip rule del fwmark "$FWMARK" table "$TABLE_ID" 2>/dev/null || true
 ip rule add fwmark "$FWMARK" table "$TABLE_ID" priority "$RULE_PRIO"
 
-# Маршрут до второй стороны — всегда через WAN: иначе пакеты уйдут в туннель.
+# РњР°СЂС€СЂСѓС‚ РґРѕ РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅС‹ вЂ” РІСЃРµРіРґР° С‡РµСЂРµР· WAN: РёРЅР°С‡Рµ РїР°РєРµС‚С‹ СѓР№РґСѓС‚ РІ С‚СѓРЅРЅРµР»СЊ.
 if [ -n "$WAN_GW" ]; then
     ip route replace "$EP_HOST" via "$WAN_GW" dev "$WAN_IF" onlink 2>/dev/null || \\
         ip route replace "$EP_HOST" via "$WAN_GW" dev "$WAN_IF"
     ip route replace "$EP_HOST" via "$WAN_GW" dev "$WAN_IF" table "$TABLE_ID" 2>/dev/null || true
 fi
 
-# Правила: RU-сети — напрямую, остальное — в туннель.
+# РџСЂР°РІРёР»Р°: RU-СЃРµС‚Рё вЂ” РЅР°РїСЂСЏРјСѓСЋ, РѕСЃС‚Р°Р»СЊРЅРѕРµ вЂ” РІ С‚СѓРЅРЅРµР»СЊ.
 COUNT=0
 for IFACE in "\${CASC_IFACES[@]}"; do
     SUBNET=$(ip -o -f inet addr show "$IFACE" 2>/dev/null | awk '{print $4}' | head -n 1 || true)
     if [ -z "$SUBNET" ]; then
-        echo "WARNING: у интерфейса $IFACE нет IPv4 — пропускаем."
+        echo "WARNING: Сѓ РёРЅС‚РµСЂС„РµР№СЃР° $IFACE РЅРµС‚ IPv4 вЂ” РїСЂРѕРїСѓСЃРєР°РµРј."
         continue
     fi
     COUNT=$((COUNT + 1))
@@ -6571,15 +6571,15 @@ for IFACE in "\${CASC_IFACES[@]}"; do
     iptables -w 5 -t nat -A POSTROUTING -s "$SUBNET" -o "$AWG1_IF" -j MASQUERADE
 done
 if [ "$COUNT" -eq 0 ]; then
-    echo "ERROR: ни у одного интерфейса (\${CASC_IFACES[*]}) нет IPv4."
-    echo "Проверьте: systemctl status awg-quick@awg0"
+    echo "ERROR: РЅРё Сѓ РѕРґРЅРѕРіРѕ РёРЅС‚РµСЂС„РµР№СЃР° (\${CASC_IFACES[*]}) РЅРµС‚ IPv4."
+    echo "РџСЂРѕРІРµСЂСЊС‚Рµ: systemctl status awg-quick@awg0"
     exit 1
 fi
 
 ${sshBuild.PROXY_CASCADE_LINES.join('\n')}
 
 sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
-echo "OK: маршруты каскада применены ($(date '+%Y-%m-%d %H:%M:%S'))"
+echo "OK: РјР°СЂС€СЂСѓС‚С‹ РєР°СЃРєР°РґР° РїСЂРёРјРµРЅРµРЅС‹ ($(date '+%Y-%m-%d %H:%M:%S'))"
 `;
 }
 function cascadeScriptIfaces() {
@@ -6596,15 +6596,15 @@ function cascadeScriptExtraNets() {
 
 async function cascadeBalanceReapply(clientsOnly = false) {
     const state = cascadeBalanceRead();
-    if (state.mode !== 'balance') throw new Error('Балансировка не включена');
+    if (state.mode !== 'balance') throw new Error('Р‘Р°Р»Р°РЅСЃРёСЂРѕРІРєР° РЅРµ РІРєР»СЋС‡РµРЅР°');
     const exits = cascadeExitSnapshot(true);
-    if (!exits.length) throw new Error('Нет выходов каскада');
+    if (!exits.length) throw new Error('РќРµС‚ РІС‹С…РѕРґРѕРІ РєР°СЃРєР°РґР°');
     const plan = cascadeBalanceAssignments(exits, cascadeClientIps(), state.assignments, state.manual, cascadeBalancePlanOpts(state));
     cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments, manual: state.manual });
     const script = cascadeBalanceScript(cascadeScriptIfaces(), cascadeScriptExtraNets(), exits, plan.assignments);
     writeRootFile(ROUTING_SCRIPT, script, '0755');
-    // Для смены выхода клиента не скачиваем RU-список заново: это делает
-    // полный запуск и таймер. Иначе кнопка «Применить» висит минутами.
+    // Р”Р»СЏ СЃРјРµРЅС‹ РІС‹С…РѕРґР° РєР»РёРµРЅС‚Р° РЅРµ СЃРєР°С‡РёРІР°РµРј RU-СЃРїРёСЃРѕРє Р·Р°РЅРѕРІРѕ: СЌС‚Рѕ РґРµР»Р°РµС‚
+    // РїРѕР»РЅС‹Р№ Р·Р°РїСѓСЃРє Рё С‚Р°Р№РјРµСЂ. РРЅР°С‡Рµ РєРЅРѕРїРєР° В«РџСЂРёРјРµРЅРёС‚СЊВ» РІРёСЃРёС‚ РјРёРЅСѓС‚Р°РјРё.
     const out = sh('sudo', [ROUTING_SCRIPT, clientsOnly ? '--clients-only' : '--no-list'], { timeout: 60000 });
     const proxy = syncProxyCascadeExit(false);
     cascadeExitCache = { at: 0, exits: [] };
@@ -6649,8 +6649,8 @@ function cascadeBalanceCleanup() {
 }
 
 async function cascadeBalanceApply() {
-    if (cascadeRole() !== 'ru') throw new Error('Балансировка настраивается на RU-входе');
-    if (!existingCascadeConf()) throw new Error('Сначала постройте каскад');
+    if (cascadeRole() !== 'ru') throw new Error('Р‘Р°Р»Р°РЅСЃРёСЂРѕРІРєР° РЅР°СЃС‚СЂР°РёРІР°РµС‚СЃСЏ РЅР° RU-РІС…РѕРґРµ');
+    if (!existingCascadeConf()) throw new Error('РЎРЅР°С‡Р°Р»Р° РїРѕСЃС‚СЂРѕР№С‚Рµ РєР°СЃРєР°Рґ');
     const ifaces = cascadeScriptIfaces();
     const extra = cascadeScriptExtraNets();
     await cascadeBalancePrepareBackupExits();
@@ -6673,7 +6673,7 @@ async function cascadeBalanceApply() {
             detail += '\n' + [e2.stdout, e2.stderr, e2.message].map(x => String(x || '').trim()).filter(Boolean).join('\n');
         }
         try { writeRootFile('/root/awg/balance-error.log', detail, '0600'); } catch (err) { /* ignore */ }
-        // Не оставляем каскад без маршрутов: возвращаем обычный режим.
+        // РќРµ РѕСЃС‚Р°РІР»СЏРµРј РєР°СЃРєР°Рґ Р±РµР· РјР°СЂС€СЂСѓС‚РѕРІ: РІРѕР·РІСЂР°С‰Р°РµРј РѕР±С‹С‡РЅС‹Р№ СЂРµР¶РёРј.
         try {
             cascadeBalanceCleanup();
             await installRouting(ifaces, extra);
@@ -6688,7 +6688,7 @@ async function cascadeBalanceApply() {
             cascadeBalanceCleanup();
             await installRouting(ifaces, extra);
         } catch (e3) { /* ignore */ }
-        throw new Error('Скрипт балансировки не добавил правила AWG_POLICY — каскад возвращён в обычный режим');
+        throw new Error('РЎРєСЂРёРїС‚ Р±Р°Р»Р°РЅСЃРёСЂРѕРІРєРё РЅРµ РґРѕР±Р°РІРёР» РїСЂР°РІРёР»Р° AWG_POLICY вЂ” РєР°СЃРєР°Рґ РІРѕР·РІСЂР°С‰С‘РЅ РІ РѕР±С‹С‡РЅС‹Р№ СЂРµР¶РёРј');
     }
     const proxy = syncProxyCascadeExit(true);
     cascadeBalanceWrite({ mode: 'balance', assignments: plan.assignments, manual: state.manual });
@@ -6696,7 +6696,7 @@ async function cascadeBalanceApply() {
     cascadeBalanceSig = exits.filter(e => e.healthy).map(e => e.id).join(',') + '|' + JSON.stringify(plan.assignments) +
         '|' + (state.method || 'clients') + '|' + JSON.stringify(state.capacities || {});
     sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
-    try { sh('sudo', ['systemctl', 'start', 'awg-routing.service']); } catch (e) { /* уже применено */ }
+    try { sh('sudo', ['systemctl', 'start', 'awg-routing.service']); } catch (e) { /* СѓР¶Рµ РїСЂРёРјРµРЅРµРЅРѕ */ }
     cascadeExitCache = { at: 0, exits: [] };
     const status = cascadeBalanceStatus(true);
     status.proxy = proxy;
@@ -6720,11 +6720,11 @@ async function cascadeBalanceDisable() {
 
 function cascadeBalanceSwitchClient(ip, exitId) {
     const state = cascadeBalanceRead();
-    if (state.mode !== 'balance') throw new Error('Балансировка выходов выключена — сначала включите её в «Каскаде»');
-    if (!IPV4_RE.test(String(ip || ''))) throw new Error('Некорректный IP клиента');
+    if (state.mode !== 'balance') throw new Error('Р‘Р°Р»Р°РЅСЃРёСЂРѕРІРєР° РІС‹С…РѕРґРѕРІ РІС‹РєР»СЋС‡РµРЅР° вЂ” СЃРЅР°С‡Р°Р»Р° РІРєР»СЋС‡РёС‚Рµ РµС‘ РІ В«РљР°СЃРєР°РґРµВ»');
+    if (!IPV4_RE.test(String(ip || ''))) throw new Error('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ IP РєР»РёРµРЅС‚Р°');
     const exits = cascadeExitList();
     if (exitId && exitId !== 'balance' && !exits.some(e => e.id === exitId)) {
-        throw new Error('Неизвестный выход');
+        throw new Error('РќРµРёР·РІРµСЃС‚РЅС‹Р№ РІС‹С…РѕРґ');
     }
     if (exitId === 'balance' || !exitId) delete state.manual[ip];
     else state.manual[ip] = exitId;
@@ -6760,46 +6760,46 @@ function teardownRouting() {
     try { sh('sudo', ['ipset', 'destroy', 'ru']); } catch (e) { /* ignore */ }
 }
 
-// Настройка каскада из клиентского конфига EU-сервера (вставка в панель)
+// РќР°СЃС‚СЂРѕР№РєР° РєР°СЃРєР°РґР° РёР· РєР»РёРµРЅС‚СЃРєРѕРіРѕ РєРѕРЅС„РёРіР° EU-СЃРµСЂРІРµСЂР° (РІСЃС‚Р°РІРєР° РІ РїР°РЅРµР»СЊ)
 app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
     const body = req.body || {};
     const config = String(body.config || '').trim();
     const ifaces = body.ifaces;
     const extraRuNets = body.extraRuNets;
-    // Роль из запроса всегда важнее догадки по конфигам.
+    // Р РѕР»СЊ РёР· Р·Р°РїСЂРѕСЃР° РІСЃРµРіРґР° РІР°Р¶РЅРµРµ РґРѕРіР°РґРєРё РїРѕ РєРѕРЅС„РёРіР°Рј.
     const requested = String(body.role || '');
     const role = ['ru', 'eu'].includes(requested) ? requested : cascadeRole();
     const isExit = role === 'eu';
     let text = config;
 
-    // Вход: клиентский конфиг с выхода (или можно забрать его с его панели).
+    // Р’С…РѕРґ: РєР»РёРµРЅС‚СЃРєРёР№ РєРѕРЅС„РёРі СЃ РІС‹С…РѕРґР° (РёР»Рё РјРѕР¶РЅРѕ Р·Р°Р±СЂР°С‚СЊ РµРіРѕ СЃ РµРіРѕ РїР°РЅРµР»Рё).
     if (!text && !isExit) {
         const peerHost = String(body.peerHost || '').trim();
         const peerUser = String(body.peerUser || '').trim();
         const peerName = String(body.peerClient || 'ru_host').trim();
         if (!peerHost || !peerUser) {
-            return res.status(400).json({ error: 'Вставьте конфиг клиента со второй стороны либо укажите адрес панели EU и логин' });
+            return res.status(400).json({ error: 'Р’СЃС‚Р°РІСЊС‚Рµ РєРѕРЅС„РёРі РєР»РёРµРЅС‚Р° СЃРѕ РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅС‹ Р»РёР±Рѕ СѓРєР°Р¶РёС‚Рµ Р°РґСЂРµСЃ РїР°РЅРµР»Рё EU Рё Р»РѕРіРёРЅ' });
         }
         const scheme = /^https?:\/\//i.test(peerHost) ? '' : 'https://';
         const remote = await fetchPeerClientConf(scheme + peerHost, peerUser, String(body.peerPass || ''), peerName);
-        if (!remote) return res.status(502).json({ error: 'Не удалось забрать конфиг ' + peerName + ' с ' + peerHost });
+        if (!remote) return res.status(502).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°Р±СЂР°С‚СЊ РєРѕРЅС„РёРі ' + peerName + ' СЃ ' + peerHost });
         text = remote;
     }
 
-    if (!isExit && !text) return res.status(400).json({ error: 'Нет конфига входа для настройки каскада' });
-    if (text.length > 64 * 1024) return res.status(400).json({ error: 'Конфиг слишком большой' });
+    if (!isExit && !text) return res.status(400).json({ error: 'РќРµС‚ РєРѕРЅС„РёРіР° РІС…РѕРґР° РґР»СЏ РЅР°СЃС‚СЂРѕР№РєРё РєР°СЃРєР°РґР°' });
+    if (text.length > 64 * 1024) return res.status(400).json({ error: 'РљРѕРЅС„РёРі СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№' });
 
     const ini = parseIni(text);
-    // На выходе конфига может не быть: там нужен только адрес входа, а ключ
-    // и адрес берутся из собственного awg0 и из клиентского конфига.
+    // РќР° РІС‹С…РѕРґРµ РєРѕРЅС„РёРіР° РјРѕР¶РµС‚ РЅРµ Р±С‹С‚СЊ: С‚Р°Рј РЅСѓР¶РµРЅ С‚РѕР»СЊРєРѕ Р°РґСЂРµСЃ РІС…РѕРґР°, Р° РєР»СЋС‡
+    // Рё Р°РґСЂРµСЃ Р±РµСЂСѓС‚СЃСЏ РёР· СЃРѕР±СЃС‚РІРµРЅРЅРѕРіРѕ awg0 Рё РёР· РєР»РёРµРЅС‚СЃРєРѕРіРѕ РєРѕРЅС„РёРіР°.
     if (!isExit && (!ini.Peer || !ini.Peer.PublicKey)) {
-        return res.status(400).json({ error: 'В конфиге нет [Peer] с PublicKey' });
+        return res.status(400).json({ error: 'Р’ РєРѕРЅС„РёРіРµ РЅРµС‚ [Peer] СЃ PublicKey' });
     }
     if (!isExit && text && (!ini.Interface || !ini.Interface.PrivateKey)) {
-        return res.status(400).json({ error: 'В конфиге входа нет [Interface] с PrivateKey' });
+        return res.status(400).json({ error: 'Р’ РєРѕРЅС„РёРіРµ РІС…РѕРґР° РЅРµС‚ [Interface] СЃ PrivateKey' });
     }
 
-    // На входе нужен клиентский интерфейс (awg0), на выходе — нет.
+    // РќР° РІС…РѕРґРµ РЅСѓР¶РµРЅ РєР»РёРµРЅС‚СЃРєРёР№ РёРЅС‚РµСЂС„РµР№СЃ (awg0), РЅР° РІС‹С…РѕРґРµ вЂ” РЅРµС‚.
     let useIfaces = Array.isArray(ifaces) ? ifaces.filter(Boolean) : [];
     if (!isExit && !validIfaces(useIfaces)) {
         const available = DEMO_MODE ? ['awg0'] : existingIfaces();
@@ -6807,25 +6807,25 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
         useIfaces = guess ? [guess] : [];
     }
     if (!isExit && !validIfaces(useIfaces)) {
-        return res.status(400).json({ error: 'Нет клиентского интерфейса awg0: сначала установите AmneziaWG на этом сервере' });
+        return res.status(400).json({ error: 'РќРµС‚ РєР»РёРµРЅС‚СЃРєРѕРіРѕ РёРЅС‚РµСЂС„РµР№СЃР° awg0: СЃРЅР°С‡Р°Р»Р° СѓСЃС‚Р°РЅРѕРІРёС‚Рµ AmneziaWG РЅР° СЌС‚РѕРј СЃРµСЂРІРµСЂРµ' });
     }
     const extra = parseCidrList(extraRuNets);
-    if (extra === null) return res.status(400).json({ error: 'Некорректная подсеть в «дополнительных сетях РФ»' });
+    if (extra === null) return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅР°СЏ РїРѕРґСЃРµС‚СЊ РІ В«РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹С… СЃРµС‚СЏС… Р Р¤В»' });
 
     try {
         let cleanConf;
         if (isExit) {
-            // Выход: свой конфиг из локального awg0 + адрес входа из конфига.
+            // Р’С‹С…РѕРґ: СЃРІРѕР№ РєРѕРЅС„РёРі РёР· Р»РѕРєР°Р»СЊРЅРѕРіРѕ awg0 + Р°РґСЂРµСЃ РІС…РѕРґР° РёР· РєРѕРЅС„РёРіР°.
             const own = parseIni(readTextSafe(path.join(AWG_CONF_DIR, 'awg0.conf'))).Interface || {};
-            if (!own.PrivateKey) return res.status(400).json({ error: 'На этом сервере нет awg0.conf — установите AmneziaWG' });
+            if (!own.PrivateKey) return res.status(400).json({ error: 'РќР° СЌС‚РѕРј СЃРµСЂРІРµСЂРµ РЅРµС‚ awg0.conf вЂ” СѓСЃС‚Р°РЅРѕРІРёС‚Рµ AmneziaWG' });
             const givenIface = ini.Interface || {};
             const entryIp = (String(givenIface.Address || '').match(/10\.9\.9\.(\d{1,3})/) || [])[1] || '';
-            // Awg0 выхода слушает 10.9.9.1/24; адрес входа — 10.9.9.4.
+            // Awg0 РІС‹С…РѕРґР° СЃР»СѓС€Р°РµС‚ 10.9.9.1/24; Р°РґСЂРµСЃ РІС…РѕРґР° вЂ” 10.9.9.4.
             const ownAddr = String(own.Address || '10.9.9.1/24').split(',')[0].trim().replace(/\/\d+$/, '');
             const epMatch = String((ini.Peer || {}).Endpoint || '').match(/^([^:]+):(\d{1,5})$/);
             const entryKey = (ini.Peer && ini.Peer.PublicKey) || '';
-            if (!entryIp) return res.status(400).json({ error: 'В конфиге входа нет адреса 10.9.9.x' });
-            if (!entryKey) return res.status(400).json({ error: 'В конфиге входа нет PublicKey' });
+            if (!entryIp) return res.status(400).json({ error: 'Р’ РєРѕРЅС„РёРіРµ РІС…РѕРґР° РЅРµС‚ Р°РґСЂРµСЃР° 10.9.9.x' });
+            if (!entryKey) return res.status(400).json({ error: 'Р’ РєРѕРЅС„РёРіРµ РІС…РѕРґР° РЅРµС‚ PublicKey' });
             cleanConf = [
                 '[Interface]',
                 'PrivateKey = ' + own.PrivateKey,
@@ -6842,8 +6842,8 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
             cleanConf = stripIpv6Address(prepareCascadeConf(cleanConf, 'awg0'));
         } else {
             cleanConf = stripIpv6Address(prepareCascadeConf(text, 'awg0'));
-            // Адрес пира (выхода) должен быть в AllowedIPs. Если там 0.0.0.0/0,
-            // значит конфиг пришёл не с той стороны — берём адрес из Address.
+            // РђРґСЂРµСЃ РїРёСЂР° (РІС‹С…РѕРґР°) РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РІ AllowedIPs. Р•СЃР»Рё С‚Р°Рј 0.0.0.0/0,
+            // Р·РЅР°С‡РёС‚ РєРѕРЅС„РёРі РїСЂРёС€С‘Р» РЅРµ СЃ С‚РѕР№ СЃС‚РѕСЂРѕРЅС‹ вЂ” Р±РµСЂС‘Рј Р°РґСЂРµСЃ РёР· Address.
             const eIni = parseIni(cleanConf);
             const ePeer = eIni.Peer || {};
             const eIface = eIni.Interface || {};
@@ -6866,17 +6866,17 @@ app.post('/api/cascade/setup', checkAuth, requireAdmin, async (req, res) => {
         let r;
         if (isExit) {
             try { sh('sudo', ['systemctl', 'disable', '--now', 'awg-routing.timer', 'awg-routing.service']); } catch (e) { /* ignore */ }
-            r = { endpoint: cascadeEndpointPlan(), out: 'маршруты на выходе не требуются' };
+            r = { endpoint: cascadeEndpointPlan(), out: 'РјР°СЂС€СЂСѓС‚С‹ РЅР° РІС‹С…РѕРґРµ РЅРµ С‚СЂРµР±СѓСЋС‚СЃСЏ' };
         } else {
             r = await installRouting(useIfaces, extra);
         }
         const ep = r.endpoint || { raw: '-', source: '' };
-        auditLog(req, 'Каскад настроен (' + role.toUpperCase() + '): awg1 -> ' + ep.raw);
+        auditLog(req, 'РљР°СЃРєР°Рґ РЅР°СЃС‚СЂРѕРµРЅ (' + role.toUpperCase() + '): awg1 -> ' + ep.raw);
         res.json({ success: true, role, endpoint: ep.raw, endpointSource: ep.source, output: r.out, details: cascadeDetails() });
     } catch (e) {
-        res.status(500).json({ error: 'Ошибка настройки каскада: ' + (e.message || 'неизвестно') });
+        res.status(500).json({ error: 'РћС€РёР±РєР° РЅР°СЃС‚СЂРѕР№РєРё РєР°СЃРєР°РґР°: ' + (e.message || 'РЅРµРёР·РІРµСЃС‚РЅРѕ') });
     }
-});// Диагностика каскада: что именно ломается — по шагам.
+});// Р”РёР°РіРЅРѕСЃС‚РёРєР° РєР°СЃРєР°РґР°: С‡С‚Рѕ РёРјРµРЅРЅРѕ Р»РѕРјР°РµС‚СЃСЏ вЂ” РїРѕ С€Р°РіР°Рј.
 app.get('/api/cascade/diag', checkAuth, requireAdmin, async (req, res) => {
     const run = (cmd, args) => {
         try { return { ok: true, out: String(sh('sudo', [cmd, ...(args || [])], { timeout: 120000 }) || '') }; }
@@ -6893,7 +6893,7 @@ app.get('/api/cascade/diag', checkAuth, requireAdmin, async (req, res) => {
     };
     for (const dir of [AWG_DIR, AWG_CONF_DIR, '/root']) {
         try { result.files[dir] = fs.readdirSync(dir).filter(n => /\.conf$/.test(n)).slice(0, 40); }
-        catch (e) { result.files[dir] = 'нет каталога'; }
+        catch (e) { result.files[dir] = 'РЅРµС‚ РєР°С‚Р°Р»РѕРіР°'; }
     }
     try { result.awg0 = readTextSafe(path.join(AWG_CONF_DIR, 'awg0.conf')).slice(0, 400); } catch (e) { result.awg0 = ''; }
     if (conf) {
@@ -6905,8 +6905,8 @@ app.get('/api/cascade/diag', checkAuth, requireAdmin, async (req, res) => {
         result.tunnel = run('systemctl', ['is-active', 'awg-quick@awg1']).out;
         result.routing = fs.existsSync(ROUTING_SCRIPT)
             ? run(ROUTING_SCRIPT)
-            : { ok: false, out: 'скрипта маршрутов нет' };
-        // Трассировка: видно строку, на которой скрипт остановился.
+            : { ok: false, out: 'СЃРєСЂРёРїС‚Р° РјР°СЂС€СЂСѓС‚РѕРІ РЅРµС‚' };
+        // РўСЂР°СЃСЃРёСЂРѕРІРєР°: РІРёРґРЅРѕ СЃС‚СЂРѕРєСѓ, РЅР° РєРѕС‚РѕСЂРѕР№ СЃРєСЂРёРїС‚ РѕСЃС‚Р°РЅРѕРІРёР»СЃСЏ.
         if (!result.routing.ok && fs.existsSync(ROUTING_SCRIPT)) {
             result.trace = run('bash', ['-x', ROUTING_SCRIPT]);
         }
@@ -6917,7 +6917,7 @@ app.get('/api/cascade/diag', checkAuth, requireAdmin, async (req, res) => {
 
 app.post('/api/cascade/refresh', checkAuth, (req, res) => {
     try {
-        if (!fs.existsSync(ROUTING_SCRIPT)) return res.status(400).json({ error: 'Каскад ещё не настроен' });
+        if (!fs.existsSync(ROUTING_SCRIPT)) return res.status(400).json({ error: 'РљР°СЃРєР°Рґ РµС‰С‘ РЅРµ РЅР°СЃС‚СЂРѕРµРЅ' });
         const before = readIpsetEntries('ru');
         const out = sh('sudo', [ROUTING_SCRIPT], { timeout: 120000 });
         const after = readIpsetEntries('ru');
@@ -6928,7 +6928,7 @@ app.post('/api/cascade/refresh', checkAuth, (req, res) => {
         } catch (e) { /* ignore */ }
         const added = [...after].filter(x => !before.has(x)).length;
         const removed = [...before].filter(x => !after.has(x)).length;
-        auditLog(req, `Обновление списков каскада: ${after.size} правил (+${added}/-${removed})`);
+        auditLog(req, `РћР±РЅРѕРІР»РµРЅРёРµ СЃРїРёСЃРєРѕРІ РєР°СЃРєР°РґР°: ${after.size} РїСЂР°РІРёР» (+${added}/-${removed})`);
         res.json({
             success: true,
             output: out,
@@ -6939,24 +6939,24 @@ app.post('/api/cascade/refresh', checkAuth, (req, res) => {
             zoneLines
         });
     } catch (e) {
-        res.status(500).json({ error: 'Ошибка обновления: ' + (e.stdout || e.message) });
+        res.status(500).json({ error: 'РћС€РёР±РєР° РѕР±РЅРѕРІР»РµРЅРёСЏ: ' + (e.stdout || e.message) });
     }
 });
 
-// Починка каскада: ставит Table = off, пересобирает awg1 и маршруты.
-// Нужна, если каскад настраивали вручную или старой версией панели.
+// РџРѕС‡РёРЅРєР° РєР°СЃРєР°РґР°: СЃС‚Р°РІРёС‚ Table = off, РїРµСЂРµСЃРѕР±РёСЂР°РµС‚ awg1 Рё РјР°СЂС€СЂСѓС‚С‹.
+// РќСѓР¶РЅР°, РµСЃР»Рё РєР°СЃРєР°Рґ РЅР°СЃС‚СЂР°РёРІР°Р»Рё РІСЂСѓС‡РЅСѓСЋ РёР»Рё СЃС‚Р°СЂРѕР№ РІРµСЂСЃРёРµР№ РїР°РЅРµР»Рё.
 app.post('/api/cascade/repair', checkAuth, requireAdmin, async (req, res) => {
     const conf = existingCascadeConf();
-    if (!conf) return res.status(400).json({ error: 'Туннель не настроен: сначала нажмите «Настроить каскад»' });
+    if (!conf) return res.status(400).json({ error: 'РўСѓРЅРЅРµР»СЊ РЅРµ РЅР°СЃС‚СЂРѕРµРЅ: СЃРЅР°С‡Р°Р»Р° РЅР°Р¶РјРёС‚Рµ В«РќР°СЃС‚СЂРѕРёС‚СЊ РєР°СЃРєР°РґВ»' });
     const role = cascadeRole();
     try {
-        // 1. Чистим конфиг: Table = off, без DNS и IPv6, параметры обфускации.
+        // 1. Р§РёСЃС‚РёРј РєРѕРЅС„РёРі: Table = off, Р±РµР· DNS Рё IPv6, РїР°СЂР°РјРµС‚СЂС‹ РѕР±С„СѓСЃРєР°С†РёРё.
         const before = readTextSafe(conf);
         const after = stripIpv6Address(prepareCascadeConf(before, 'awg0'));
         if (after !== before) writeRootFile(conf, after, '0600');
 
-        // 2. Выход (EU), а в конфиге лежит чужой вход — пересобираем правильный
-        //    конфиг EU: свой адрес /24, пир — адрес входа, публичный Endpoint.
+        // 2. Р’С‹С…РѕРґ (EU), Р° РІ РєРѕРЅС„РёРіРµ Р»РµР¶РёС‚ С‡СѓР¶РѕР№ РІС…РѕРґ вЂ” РїРµСЂРµСЃРѕР±РёСЂР°РµРј РїСЂР°РІРёР»СЊРЅС‹Р№
+        //    РєРѕРЅС„РёРі EU: СЃРІРѕР№ Р°РґСЂРµСЃ /24, РїРёСЂ вЂ” Р°РґСЂРµСЃ РІС…РѕРґР°, РїСѓР±Р»РёС‡РЅС‹Р№ Endpoint.
         if (role === 'eu' && cascadeRoleFrom(after) === 'ru') {
             const own = parseIni(readTextSafe(path.join(AWG_CONF_DIR, 'awg0.conf'))).Interface || {};
             const peerIni = parseIni(after).Peer || {};
@@ -6964,7 +6964,7 @@ app.post('/api/cascade/repair', checkAuth, requireAdmin, async (req, res) => {
             const peerIp = (String((parseIni(after).Interface || {}).Address || '').match(/10\.9\.9\.(\d{1,3})/) || [])[1];
             const pub = await cascadePublicHost();
             if (!pub || !own.ListenPort || !peerIp || !addr) {
-                return res.status(400).json({ error: 'Не удалось собрать конфиг выхода: нет awg0.conf, адреса входа или публичного адреса сервера' });
+                return res.status(400).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР±СЂР°С‚СЊ РєРѕРЅС„РёРі РІС‹С…РѕРґР°: РЅРµС‚ awg0.conf, Р°РґСЂРµСЃР° РІС…РѕРґР° РёР»Рё РїСѓР±Р»РёС‡РЅРѕРіРѕ Р°РґСЂРµСЃР° СЃРµСЂРІРµСЂР°' });
             }
             const euConf = [
                 '[Interface]',
@@ -6982,12 +6982,12 @@ app.post('/api/cascade/repair', checkAuth, requireAdmin, async (req, res) => {
             writeRootFile(conf, euConf, '0600');
         }
 
-        // 3. Пересобираем туннель и маршруты.
+        // 3. РџРµСЂРµСЃРѕР±РёСЂР°РµРј С‚СѓРЅРЅРµР»СЊ Рё РјР°СЂС€СЂСѓС‚С‹.
         const plan = cascadeEndpointPlan();
         if (!plan) {
             return res.status(400).json({ error: role === 'ru'
-                ? 'В awg1.conf нет адреса выхода. Нажмите «Настроить каскад» — панель заберёт конфиг с другой стороны.'
-                : 'В awg1.conf нет публичного адреса входа.' });
+                ? 'Р’ awg1.conf РЅРµС‚ Р°РґСЂРµСЃР° РІС‹С…РѕРґР°. РќР°Р¶РјРёС‚Рµ В«РќР°СЃС‚СЂРѕРёС‚СЊ РєР°СЃРєР°РґВ» вЂ” РїР°РЅРµР»СЊ Р·Р°Р±РµСЂС‘С‚ РєРѕРЅС„РёРі СЃ РґСЂСѓРіРѕР№ СЃС‚РѕСЂРѕРЅС‹.'
+                : 'Р’ awg1.conf РЅРµС‚ РїСѓР±Р»РёС‡РЅРѕРіРѕ Р°РґСЂРµСЃР° РІС…РѕРґР°.' });
         }
         sh('sudo', ['systemctl', 'restart', 'awg-quick@awg1']);
         try { sh('sleep', ['2']); } catch (e) { /* ignore */ }
@@ -6998,19 +6998,19 @@ app.post('/api/cascade/repair', checkAuth, requireAdmin, async (req, res) => {
         } catch (e) { /* ignore */ }
         if (!ifaces.length) ifaces = ['awg0'];
         const r = await installRouting(ifaces, []);
-        auditLog(req, 'Каскад пересобран (' + plan.source + '): awg1 -> ' + plan.raw);
+        auditLog(req, 'РљР°СЃРєР°Рґ РїРµСЂРµСЃРѕР±СЂР°РЅ (' + plan.source + '): awg1 -> ' + plan.raw);
         res.json({ success: true, role, endpoint: plan.raw, endpointSource: plan.source, ifaces, output: r.out, details: cascadeDetails() });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось пересобрать каскад: ' + (e.message || 'неизвестно') });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµСЃРѕР±СЂР°С‚СЊ РєР°СЃРєР°Рґ: ' + (e.message || 'РЅРµРёР·РІРµСЃС‚РЅРѕ') });
     }
-});// Конфиг транзитного туннеля (awg1.conf) — чтение/запись
-// Состояние второй панели для мастера: версия, AWG, адрес.
+});// РљРѕРЅС„РёРі С‚СЂР°РЅР·РёС‚РЅРѕРіРѕ С‚СѓРЅРЅРµР»СЏ (awg1.conf) вЂ” С‡С‚РµРЅРёРµ/Р·Р°РїРёСЃСЊ
+// РЎРѕСЃС‚РѕСЏРЅРёРµ РІС‚РѕСЂРѕР№ РїР°РЅРµР»Рё РґР»СЏ РјР°СЃС‚РµСЂР°: РІРµСЂСЃРёСЏ, AWG, Р°РґСЂРµСЃ.
 app.post('/api/cascade/peer-info', checkAuth, requireAdmin, async (req, res) => {
     const { host, user, pass } = req.body || {};
-    if (!host || !user || !pass) return res.status(400).json({ error: 'Нужны адрес, логин и пароль второй панели' });
+    if (!host || !user || !pass) return res.status(400).json({ error: 'РќСѓР¶РЅС‹ Р°РґСЂРµСЃ, Р»РѕРіРёРЅ Рё РїР°СЂРѕР»СЊ РІС‚РѕСЂРѕР№ РїР°РЅРµР»Рё' });
     const remote = new Panel(String(host), String(user), String(pass));
     const l = await remote.login();
-    if (!l.ok) return res.status(502).json({ error: 'Не удалось войти во вторую панель: ' + l.error });
+    if (!l.ok) return res.status(502).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РІРѕР№С‚Рё РІРѕ РІС‚РѕСЂСѓСЋ РїР°РЅРµР»СЊ: ' + l.error });
     const ifaces = await remote.get('/api/interfaces');
     const ready = await remote.get('/api/cascade/ready');
     const st = await remote.get('/api/cascade/status');
@@ -7027,19 +7027,19 @@ app.post('/api/cascade/peer-info', checkAuth, requireAdmin, async (req, res) => 
     });
 });
 
-// Автоматическая сборка каскада с двух сторон (панель все сделает сама).
-// Полное удаление каскада на этой стороне: службы, правила, скрипты, клиент.
-// Удаление каскада на ОБЕИХ сторонах из панели: правила, скрипты, туннель.
+// РђРІС‚РѕРјР°С‚РёС‡РµСЃРєР°СЏ СЃР±РѕСЂРєР° РєР°СЃРєР°РґР° СЃ РґРІСѓС… СЃС‚РѕСЂРѕРЅ (РїР°РЅРµР»СЊ РІСЃРµ СЃРґРµР»Р°РµС‚ СЃР°РјР°).
+// РџРѕР»РЅРѕРµ СѓРґР°Р»РµРЅРёРµ РєР°СЃРєР°РґР° РЅР° СЌС‚РѕР№ СЃС‚РѕСЂРѕРЅРµ: СЃР»СѓР¶Р±С‹, РїСЂР°РІРёР»Р°, СЃРєСЂРёРїС‚С‹, РєР»РёРµРЅС‚.
+// РЈРґР°Р»РµРЅРёРµ РєР°СЃРєР°РґР° РЅР° РћР‘Р•РРҐ СЃС‚РѕСЂРѕРЅР°С… РёР· РїР°РЅРµР»Рё: РїСЂР°РІРёР»Р°, СЃРєСЂРёРїС‚С‹, С‚СѓРЅРЅРµР»СЊ.
 app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
     const data = req.body || {};
     const peerClient = String(data.peerClient || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '') || 'ru_host';
     const steps = [];
     const log = (title, text) => steps.push({ title, text });
-    // 1. Своя сторона: службы, правила, туннель, клиент.
+    // 1. РЎРІРѕСЏ СЃС‚РѕСЂРѕРЅР°: СЃР»СѓР¶Р±С‹, РїСЂР°РІРёР»Р°, С‚СѓРЅРЅРµР»СЊ, РєР»РёРµРЅС‚.
     const local = await localPost('/api/cascade/teardown', { peerClient, removeTunnel: true, removeClient: true });
-    log('Этот сервер', (local && local.removed ? local.removed.join('; ') : (local && local.error) || 'готово'));
+    log('Р­С‚РѕС‚ СЃРµСЂРІРµСЂ', (local && local.removed ? local.removed.join('; ') : (local && local.error) || 'РіРѕС‚РѕРІРѕ'));
 
-    // 2. Вторая сторона по SSH: те же действия + удаление клиента ru_host.
+    // 2. Р’С‚РѕСЂР°СЏ СЃС‚РѕСЂРѕРЅР° РїРѕ SSH: С‚Рµ Р¶Рµ РґРµР№СЃС‚РІРёСЏ + СѓРґР°Р»РµРЅРёРµ РєР»РёРµРЅС‚Р° ru_host.
     const host = String(data.peerHost || '').replace(/^https?:\/\//i, '').replace(/[:/].*$/, '').trim();
     const pass = String(data.peerPass || '');
     if (host && pass) {
@@ -7059,28 +7059,28 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
             'echo cleaned'
         ].join('; ');
         const r = await sshRunner.run(remote, cmd, 120000);
-        log('Вторая сторона ' + host, r.code === 0 ? 'каскад и клиент ' + peerClient + ' удалены' : String(r.out).trim().slice(0, 300));
+        log('Р’С‚РѕСЂР°СЏ СЃС‚РѕСЂРѕРЅР° ' + host, r.code === 0 ? 'РєР°СЃРєР°Рґ Рё РєР»РёРµРЅС‚ ' + peerClient + ' СѓРґР°Р»РµРЅС‹' : String(r.out).trim().slice(0, 300));
     } else {
-        log('Вторая сторона', 'не указана — почистите её так же из своей панели');
+        log('Р’С‚РѕСЂР°СЏ СЃС‚РѕСЂРѕРЅР°', 'РЅРµ СѓРєР°Р·Р°РЅР° вЂ” РїРѕС‡РёСЃС‚РёС‚Рµ РµС‘ С‚Р°Рє Р¶Рµ РёР· СЃРІРѕРµР№ РїР°РЅРµР»Рё');
     }
-    auditLog(req, 'Каскад удалён' + (host ? ' (и на ' + host + ')' : ''));
+    auditLog(req, 'РљР°СЃРєР°Рґ СѓРґР°Р»С‘РЅ' + (host ? ' (Рё РЅР° ' + host + ')' : ''));
     res.json({ success: true, steps });
-});// Клиент для второй стороны каскада: создаётся на этой панели (выход EU).
+});// РљР»РёРµРЅС‚ РґР»СЏ РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅС‹ РєР°СЃРєР°РґР°: СЃРѕР·РґР°С‘С‚СЃСЏ РЅР° СЌС‚РѕР№ РїР°РЅРµР»Рё (РІС‹С…РѕРґ EU).
 app.post('/api/cascade/peer', checkAuth, requireAdmin, async (req, res) => {
     const name = String((req.body && req.body.name) || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'ru_host';
     if (DEMO_MODE) return res.json({ success: true, name, conf: '' });
     try {
         const own = parseIni(readTextSafe(path.join(AWG_CONF_DIR, 'awg0.conf'))).Interface || {};
         if (!own.ListenPort || !own.PrivateKey) {
-            return res.status(400).json({ error: 'На этом сервере нет awg0.conf — сначала установите AmneziaWG' });
+            return res.status(400).json({ error: 'РќР° СЌС‚РѕРј СЃРµСЂРІРµСЂРµ РЅРµС‚ awg0.conf вЂ” СЃРЅР°С‡Р°Р»Р° СѓСЃС‚Р°РЅРѕРІРёС‚Рµ AmneziaWG' });
         }
         const peer = createPeerClient(name);
         if (!peer.conf) {
             return res.status(500).json({
-                error: 'Клиент ' + name + ' создан, но файл не найден. ' + (peer.error ? 'Менеджер ответил: ' + peer.error : 'Проверьте /root/awg.')
+                error: 'РљР»РёРµРЅС‚ ' + name + ' СЃРѕР·РґР°РЅ, РЅРѕ С„Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ. ' + (peer.error ? 'РњРµРЅРµРґР¶РµСЂ РѕС‚РІРµС‚РёР»: ' + peer.error : 'РџСЂРѕРІРµСЂСЊС‚Рµ /root/awg.')
             });
         }
-        // Endpoint в конфиге клиента — публичный адрес этого сервера.
+        // Endpoint РІ РєРѕРЅС„РёРіРµ РєР»РёРµРЅС‚Р° вЂ” РїСѓР±Р»РёС‡РЅС‹Р№ Р°РґСЂРµСЃ СЌС‚РѕРіРѕ СЃРµСЂРІРµСЂР°.
         const epMatch = String((parseIni(peer.conf).Peer || {}).Endpoint || '').match(/^([^:]+):/);
         const hostPart = epMatch ? epMatch[1] : '';
         if (!hostPart || hostPart === '127.0.0.1' || hostPart === '10.9.9.1') {
@@ -7091,20 +7091,20 @@ app.post('/api/cascade/peer', checkAuth, requireAdmin, async (req, res) => {
                 peer.conf = fixed;
             }
         }
-        auditLog(req, 'Создан клиент каскада ' + peer.name);
+        auditLog(req, 'РЎРѕР·РґР°РЅ РєР»РёРµРЅС‚ РєР°СЃРєР°РґР° ' + peer.name);
         res.json({ success: true, name: peer.name, conf: peer.conf });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось создать клиента: ' + (e.stderr || e.message) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РєР»РёРµРЅС‚Р°: ' + (e.stderr || e.message) });
     }
 });
 
-// Каскад по SSH: панель накатывает EU, создаёт ru_host и поднимает вход.
-// Проверка SSH до второй стороны до запуска сборки: понятная причина.
+// РљР°СЃРєР°Рґ РїРѕ SSH: РїР°РЅРµР»СЊ РЅР°РєР°С‚С‹РІР°РµС‚ EU, СЃРѕР·РґР°С‘С‚ ru_host Рё РїРѕРґРЅРёРјР°РµС‚ РІС…РѕРґ.
+// РџСЂРѕРІРµСЂРєР° SSH РґРѕ РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅС‹ РґРѕ Р·Р°РїСѓСЃРєР° СЃР±РѕСЂРєРё: РїРѕРЅСЏС‚РЅР°СЏ РїСЂРёС‡РёРЅР°.
 app.post('/api/cascade/ssh-check', checkAuth, requireAdmin, async (req, res) => {
     const data = req.body || {};
     const host = String(data.peerHost || '').replace(/^https?:\/\//i, '').replace(/[:/].*$/, '').trim();
     const pass = String(data.peerPass || '');
-    if (!host || !pass) return res.status(400).json({ error: 'Нужны IP и пароль root второй стороны' });
+    if (!host || !pass) return res.status(400).json({ error: 'РќСѓР¶РЅС‹ IP Рё РїР°СЂРѕР»СЊ root РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅС‹' });
     const conn = { host, port: Number(data.peerPort) || 22, user: String(data.peerUser || 'root'), pass };
     const r = await sshRunner.run(conn, 'hostname; command -v awg >/dev/null && echo awg=yes || echo awg=no; test -f /etc/amnezia/amneziawg/awg0.conf && echo awg0=yes || echo awg0=no', 30000);
     const out = String(r.out || '');
@@ -7113,15 +7113,15 @@ app.post('/api/cascade/ssh-check', checkAuth, requireAdmin, async (req, res) => 
     res.json({
         ok: r.code === 0 && !denied && !timeout,
         host,
-        reason: denied ? 'неверный пароль root' : timeout ? 'SSH недоступен с этого сервера' : r.code === 0 ? '' : out.trim().slice(0, 200),
+        reason: denied ? 'РЅРµРІРµСЂРЅС‹Р№ РїР°СЂРѕР»СЊ root' : timeout ? 'SSH РЅРµРґРѕСЃС‚СѓРїРµРЅ СЃ СЌС‚РѕРіРѕ СЃРµСЂРІРµСЂР°' : r.code === 0 ? '' : out.trim().slice(0, 200),
         output: out.trim().slice(0, 400),
         hasAwg: out.includes('awg=yes'),
         hasAwg0: out.includes('awg0=yes')
     });
 });
 
-// Сборка каскада идёт минутами (установка AWG перезагружает сервер), поэтому
-// HTTP-запрос только запускает её, а прогресс забирается отдельным запросом.
+// РЎР±РѕСЂРєР° РєР°СЃРєР°РґР° РёРґС‘С‚ РјРёРЅСѓС‚Р°РјРё (СѓСЃС‚Р°РЅРѕРІРєР° AWG РїРµСЂРµР·Р°РіСЂСѓР¶Р°РµС‚ СЃРµСЂРІРµСЂ), РїРѕСЌС‚РѕРјСѓ
+// HTTP-Р·Р°РїСЂРѕСЃ С‚РѕР»СЊРєРѕ Р·Р°РїСѓСЃРєР°РµС‚ РµС‘, Р° РїСЂРѕРіСЂРµСЃСЃ Р·Р°Р±РёСЂР°РµС‚СЃСЏ РѕС‚РґРµР»СЊРЅС‹Рј Р·Р°РїСЂРѕСЃРѕРј.
 let cascadeBuildJob = null;
 
 function cascadeJobSnapshot() {
@@ -7158,12 +7158,12 @@ function cascadeJobSnapshot() {
     };
 }
 
-// Параметры обфускации для каскада: из Архитектора, свои или из профиля.
-// Для выбранной версии AWG оставляем только те ключи, которые она понимает.
+// РџР°СЂР°РјРµС‚СЂС‹ РѕР±С„СѓСЃРєР°С†РёРё РґР»СЏ РєР°СЃРєР°РґР°: РёР· РђСЂС…РёС‚РµРєС‚РѕСЂР°, СЃРІРѕРё РёР»Рё РёР· РїСЂРѕС„РёР»СЏ.
+// Р”Р»СЏ РІС‹Р±СЂР°РЅРЅРѕР№ РІРµСЂСЃРёРё AWG РѕСЃС‚Р°РІР»СЏРµРј С‚РѕР»СЊРєРѕ С‚Рµ РєР»СЋС‡Рё, РєРѕС‚РѕСЂС‹Рµ РѕРЅР° РїРѕРЅРёРјР°РµС‚.
 function cascadeObfParams(data, version) {
     let params = null;
     const sni = String((data && data.obfSni) || '').trim();
-    if (sni && !HOST_RE.test(sni)) throw new Error('некорректный SNI');
+    if (sni && !HOST_RE.test(sni)) throw new Error('РЅРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ SNI');
     if (data.obfMode === 'architect') {
         const g = awgArchitect.generate({
             version,
@@ -7194,8 +7194,8 @@ function cascadeObfParams(data, version) {
     return Object.keys(out).length ? out : null;
 }
 
-// Состояние сборки переживает перезапуск панели (в том числе перезагрузку RU):
-// параметры и шаги лежат в файле 0600, на старте сборка продолжается.
+// РЎРѕСЃС‚РѕСЏРЅРёРµ СЃР±РѕСЂРєРё РїРµСЂРµР¶РёРІР°РµС‚ РїРµСЂРµР·Р°РїСѓСЃРє РїР°РЅРµР»Рё (РІ С‚РѕРј С‡РёСЃР»Рµ РїРµСЂРµР·Р°РіСЂСѓР·РєСѓ RU):
+// РїР°СЂР°РјРµС‚СЂС‹ Рё С€Р°РіРё Р»РµР¶Р°С‚ РІ С„Р°Р№Р»Рµ 0600, РЅР° СЃС‚Р°СЂС‚Рµ СЃР±РѕСЂРєР° РїСЂРѕРґРѕР»Р¶Р°РµС‚СЃСЏ.
 const CASCADE_JOB_FILE = path.join(DATA_DIR, '.cascade_job.json');
 
 function saveCascadeJob(job) {
@@ -7212,7 +7212,7 @@ function saveCascadeJob(job) {
             params: job.params || null,
             opts: job.opts || null
         }, 0o600);
-    } catch (e) { /* не мешаем самой сборке */ }
+    } catch (e) { /* РЅРµ РјРµС€Р°РµРј СЃР°РјРѕР№ СЃР±РѕСЂРєРµ */ }
 }
 
 function loadCascadeJob() {
@@ -7221,7 +7221,7 @@ function loadCascadeJob() {
 }
 
 function clearCascadeJob() {
-    try { fs.unlinkSync(CASCADE_JOB_FILE); } catch (e) { /* файла нет */ }
+    try { fs.unlinkSync(CASCADE_JOB_FILE); } catch (e) { /* С„Р°Р№Р»Р° РЅРµС‚ */ }
 }
 
 function finishCascadeJob(job, result, error) {
@@ -7229,8 +7229,8 @@ function finishCascadeJob(job, result, error) {
     job.finishedAt = new Date().toISOString();
     if (error) job.error = error;
     else job.result = result;
-    // Оставляем последнюю сборку для чек-листа после перезагрузки панели,
-    // но без пароля и параметров подключения.
+    // РћСЃС‚Р°РІР»СЏРµРј РїРѕСЃР»РµРґРЅСЋСЋ СЃР±РѕСЂРєСѓ РґР»СЏ С‡РµРє-Р»РёСЃС‚Р° РїРѕСЃР»Рµ РїРµСЂРµР·Р°РіСЂСѓР·РєРё РїР°РЅРµР»Рё,
+    // РЅРѕ Р±РµР· РїР°СЂРѕР»СЏ Рё РїР°СЂР°РјРµС‚СЂРѕРІ РїРѕРґРєР»СЋС‡РµРЅРёСЏ.
     saveCascadeJob({ ...job, params: null, opts: null });
 }
 
@@ -7249,7 +7249,7 @@ function resumeCascadeJob() {
         params: saved.params,
         opts: saved.opts
     };
-    job.steps.push({ title: 'Панель', text: 'Продолжаю сборку после перезагрузки панели', at: new Date().toISOString() });
+    job.steps.push({ title: 'РџР°РЅРµР»СЊ', text: 'РџСЂРѕРґРѕР»Р¶Р°СЋ СЃР±РѕСЂРєСѓ РїРѕСЃР»Рµ РїРµСЂРµР·Р°РіСЂСѓР·РєРё РїР°РЅРµР»Рё', at: new Date().toISOString() });
     cascadeBuildJob = job;
     saveCascadeJob(job);
     runCascadeBuild(job, saved.params, saved.opts)
@@ -7266,19 +7266,19 @@ async function runCascadeBuild(job, remote, opts) {
     const { version, role } = opts;
     const euSubnet = opts.euSubnet || '172.16.61.0/24';
 
-    // 1. Вторая сторона: SSH и внешний IP.
-    log('SSH', 'Подключаюсь к ' + remote.host + '...');
+    // 1. Р’С‚РѕСЂР°СЏ СЃС‚РѕСЂРѕРЅР°: SSH Рё РІРЅРµС€РЅРёР№ IP.
+    log('SSH', 'РџРѕРґРєР»СЋС‡Р°СЋСЃСЊ Рє ' + remote.host + '...');
     const ping = await sshRunner.run(remote, 'hostname; ip -4 route get 1.1.1.1 2>/dev/null | grep -oP "src \\K\\S+" | head -1', 40000);
     if (ping.code !== 0) {
         const online = await sshRunner.waitOnline(remote, 5 * 60 * 1000);
-        if (!online) throw new Error('SSH до ' + remote.host + ' не работает: ' + String(ping.out || '').trim().slice(0, 300));
+        if (!online) throw new Error('SSH РґРѕ ' + remote.host + ' РЅРµ СЂР°Р±РѕС‚Р°РµС‚: ' + String(ping.out || '').trim().slice(0, 300));
     }
     const euHost = (String(ping.out).match(/^\s*(\d{1,3}(?:\.\d{1,3}){3})\s*$/m) || [])[1] || remote.host;
-    log('SSH', 'Вторая сторона доступна: ' + euHost);
+    log('SSH', 'Р’С‚РѕСЂР°СЏ СЃС‚РѕСЂРѕРЅР° РґРѕСЃС‚СѓРїРЅР°: ' + euHost);
 
-    // 1b. Снимаем cron @reboot прошлой установки: иначе EU перезагружается
-    // по кругу, и SSH пропадает посреди следующих шагов. Но если установщик
-    // реально работает прямо сейчас — не убиваем его, а дожидаемся.
+    // 1b. РЎРЅРёРјР°РµРј cron @reboot РїСЂРѕС€Р»РѕР№ СѓСЃС‚Р°РЅРѕРІРєРё: РёРЅР°С‡Рµ EU РїРµСЂРµР·Р°РіСЂСѓР¶Р°РµС‚СЃСЏ
+    // РїРѕ РєСЂСѓРіСѓ, Рё SSH РїСЂРѕРїР°РґР°РµС‚ РїРѕСЃСЂРµРґРё СЃР»РµРґСѓСЋС‰РёС… С€Р°РіРѕРІ. РќРѕ РµСЃР»Рё СѓСЃС‚Р°РЅРѕРІС‰РёРє
+    // СЂРµР°Р»СЊРЅРѕ СЂР°Р±РѕС‚Р°РµС‚ РїСЂСЏРјРѕ СЃРµР№С‡Р°СЃ вЂ” РЅРµ СѓР±РёРІР°РµРј РµРіРѕ, Р° РґРѕР¶РёРґР°РµРјСЃСЏ.
     let resumeRunning = false;
     for (let i = 0; i < 3; i++) {
         const st = await sshBuild.stopResume(remote, (m) => log('EU', m));
@@ -7288,13 +7288,13 @@ async function runCascadeBuild(job, remote, opts) {
         if (!back) break;
     }
 
-    // 2. AmneziaWG на второй стороне.
+    // 2. AmneziaWG РЅР° РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅРµ.
     let info = await sshBuild.awgInfo(remote);
     if (!info.installed) {
         const waited = await sshBuild.waitForAwg(remote, (resumeRunning ? 50 : 5) * 60 * 1000, (m) => log('EU', m));
         if (waited) {
             info = waited;
-            log('EU', 'AmneziaWG уже установлен — продолжаю после перезагрузки');
+            log('EU', 'AmneziaWG СѓР¶Рµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ вЂ” РїСЂРѕРґРѕР»Р¶Р°СЋ РїРѕСЃР»Рµ РїРµСЂРµР·Р°РіСЂСѓР·РєРё');
         } else {
             info = await sshBuild.installAwg(remote, {
                 version,
@@ -7305,34 +7305,34 @@ async function runCascadeBuild(job, remote, opts) {
             });
         }
     } else {
-        log('EU', 'AmneziaWG уже установлен, UDP-порт ' + (info.listenPort || '—'));
+        log('EU', 'AmneziaWG СѓР¶Рµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ, UDP-РїРѕСЂС‚ ' + (info.listenPort || 'вЂ”'));
         await sshBuild.openUdp(remote, info.listenPort);
-        // Снимаем возможное автопродолжение прошлой установки: иначе после
-        // перезагрузки EU установщик снова попытается переустановить AWG.
+        // РЎРЅРёРјР°РµРј РІРѕР·РјРѕР¶РЅРѕРµ Р°РІС‚РѕРїСЂРѕРґРѕР»Р¶РµРЅРёРµ РїСЂРѕС€Р»РѕР№ СѓСЃС‚Р°РЅРѕРІРєРё: РёРЅР°С‡Рµ РїРѕСЃР»Рµ
+        // РїРµСЂРµР·Р°РіСЂСѓР·РєРё EU СѓСЃС‚Р°РЅРѕРІС‰РёРє СЃРЅРѕРІР° РїРѕРїС‹С‚Р°РµС‚СЃСЏ РїРµСЂРµСѓСЃС‚Р°РЅРѕРІРёС‚СЊ AWG.
         await sshRunner.run(remote,
             'rm -f /etc/cron.d/awg_resume /root/awg_installer_wrapper.sh /root/awg_install_params.env /root/awg/.resume_count',
             30000);
     }
-    if (!info.installed) throw new Error('На ' + remote.host + ' не установился AmneziaWG');
-    log('EU', 'AmneziaWG готов: ' + (info.address || '') + ', порт ' + (info.listenPort || '—'));
+    if (!info.installed) throw new Error('РќР° ' + remote.host + ' РЅРµ СѓСЃС‚Р°РЅРѕРІРёР»СЃСЏ AmneziaWG');
+    log('EU', 'AmneziaWG РіРѕС‚РѕРІ: ' + (info.address || '') + ', РїРѕСЂС‚ ' + (info.listenPort || 'вЂ”'));
 
-    // 2b. Обфускация на второй стороне — до создания ru_host, чтобы клиент
-    // получил те же H/S/HeaderProtectionKey, что и сервер.
+    // 2b. РћР±С„СѓСЃРєР°С†РёСЏ РЅР° РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅРµ вЂ” РґРѕ СЃРѕР·РґР°РЅРёСЏ ru_host, С‡С‚РѕР±С‹ РєР»РёРµРЅС‚
+    // РїРѕР»СѓС‡РёР» С‚Рµ Р¶Рµ H/S/HeaderProtectionKey, С‡С‚Рѕ Рё СЃРµСЂРІРµСЂ.
     if (opts.obf && Object.keys(opts.obf).length) {
-        log('EU', 'Применяю параметры обфускации...');
+        log('EU', 'РџСЂРёРјРµРЅСЏСЋ РїР°СЂР°РјРµС‚СЂС‹ РѕР±С„СѓСЃРєР°С†РёРё...');
         await sshBuild.applyObf(remote, opts.obf, (m) => log('EU', m));
     }
 
-    // 3. Клиент ru_host на второй стороне.
+    // 3. РљР»РёРµРЅС‚ ru_host РЅР° РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅРµ.
     const ruHost = await sshBuild.createRuHost(remote, (m) => log('EU', m));
     const innerMatch = String(ruHost.conf).match(/^\s*Address\s*=\s*([0-9.]+)/m);
     const peerInner = (String(ruHost.conf).match(/^\s*AllowedIPs\s*=\s*([0-9.]+)/m) || [])[1] || '';
-    log('EU', 'Клиент ru_host: ' + (innerMatch ? innerMatch[1] : 'адрес неизвестен'));
+    log('EU', 'РљР»РёРµРЅС‚ ru_host: ' + (innerMatch ? innerMatch[1] : 'Р°РґСЂРµСЃ РЅРµРёР·РІРµСЃС‚РµРЅ'));
 
-    // 4. AmneziaWG на этом сервере (вход).
+    // 4. AmneziaWG РЅР° СЌС‚РѕРј СЃРµСЂРІРµСЂРµ (РІС…РѕРґ).
     let local = await sshBuild.awgInfo({ host: '127.0.0.1' });
-    // Этап установки из журнала — чтобы в логе были не только «идёт», но и
-    // понятные шаги: пакеты, настройка, ключи, завершение.
+    // Р­С‚Р°Рї СѓСЃС‚Р°РЅРѕРІРєРё РёР· Р¶СѓСЂРЅР°Р»Р° вЂ” С‡С‚РѕР±С‹ РІ Р»РѕРіРµ Р±С‹Р»Рё РЅРµ С‚РѕР»СЊРєРѕ В«РёРґС‘С‚В», РЅРѕ Рё
+    // РїРѕРЅСЏС‚РЅС‹Рµ С€Р°РіРё: РїР°РєРµС‚С‹, РЅР°СЃС‚СЂРѕР№РєР°, РєР»СЋС‡Рё, Р·Р°РІРµСЂС€РµРЅРёРµ.
     const ruStage = () => {
         try {
             const li = installProgress(sshBuild.INSTALL_LOG);
@@ -7344,21 +7344,21 @@ async function runCascadeBuild(job, remote, opts) {
         let lastRuStage = '';
         const waited = await sshBuild.waitForAwg({ host: '127.0.0.1' }, 5 * 60 * 1000, (m) => {
             const st = ruStage();
-            const extra = st.step ? ' · этап: ' + st.step + ' (' + st.progress + '%)' : '';
+            const extra = st.step ? ' В· СЌС‚Р°Рї: ' + st.step + ' (' + st.progress + '%)' : '';
             log('RU', m + extra);
             if (st.step) lastRuStage = st.step;
         });
         if (waited) {
             local = waited;
-            log('RU', 'AmneziaWG уже установлен — продолжаю после перезагрузки');
+            log('RU', 'AmneziaWG СѓР¶Рµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ вЂ” РїСЂРѕРґРѕР»Р¶Р°СЋ РїРѕСЃР»Рµ РїРµСЂРµР·Р°РіСЂСѓР·РєРё');
         } else {
-            log('RU', 'AmneziaWG на входе не установлен — ставлю (UDP-порт ' + (opts.port || 3977) + ')');
+            log('RU', 'AmneziaWG РЅР° РІС…РѕРґРµ РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ вЂ” СЃС‚Р°РІР»СЋ (UDP-РїРѕСЂС‚ ' + (opts.port || 3977) + ')');
             const started = await localPost('/api/install/module', {
                 module: 'awg', version, route: 'all', ipv6: 'disallow', port: String(opts.port || 3977), awgMode: 'single',
                 subnet: '172.16.17.0/24', keepPackages: opts.keepPackages !== false
             });
             if (!started || started.error) {
-                throw new Error('Установка AWG на входе не запустилась: ' + ((started && started.error) || 'ошибка'));
+                throw new Error('РЈСЃС‚Р°РЅРѕРІРєР° AWG РЅР° РІС…РѕРґРµ РЅРµ Р·Р°РїСѓСЃС‚РёР»Р°СЃСЊ: ' + ((started && started.error) || 'РѕС€РёР±РєР°'));
             }
             for (let i = 0; i < 180; i++) {
                 await new Promise(r => setTimeout(r, 5000));
@@ -7367,44 +7367,44 @@ async function runCascadeBuild(job, remote, opts) {
                 const st = ruStage();
                 if (st.step && st.step !== lastRuStage) {
                     lastRuStage = st.step;
-                    log('RU', 'Этап: ' + st.step + ' · ' + st.progress + '%');
+                    log('RU', 'Р­С‚Р°Рї: ' + st.step + ' В· ' + st.progress + '%');
                 } else if (i > 0 && i % 24 === 0) {
-                    log('RU', 'Установка AmneziaWG на входе продолжается' +
+                    log('RU', 'РЈСЃС‚Р°РЅРѕРІРєР° AmneziaWG РЅР° РІС…РѕРґРµ РїСЂРѕРґРѕР»Р¶Р°РµС‚СЃСЏ' +
                         (st.progress ? ' (' + st.progress + '%)' : '') + '...');
                 }
             }
-            if (!local.installed) throw new Error('AmneziaWG на входе не установился за 15 минут');
+            if (!local.installed) throw new Error('AmneziaWG РЅР° РІС…РѕРґРµ РЅРµ СѓСЃС‚Р°РЅРѕРІРёР»СЃСЏ Р·Р° 15 РјРёРЅСѓС‚');
         }
     }
     await sshBuild.openUdp({ host: '127.0.0.1' }, local.listenPort);
-    log('RU', 'AmneziaWG готов: ' + (local.address || '') + ', порт ' + (local.listenPort || '—'));
+    log('RU', 'AmneziaWG РіРѕС‚РѕРІ: ' + (local.address || '') + ', РїРѕСЂС‚ ' + (local.listenPort || 'вЂ”'));
 
-    // 4b. Обфускация на входе. Клиенты входа получат новые параметры,
-    // поэтому перегенерируем их конфиги (manage regen внутри applyObf).
+    // 4b. РћР±С„СѓСЃРєР°С†РёСЏ РЅР° РІС…РѕРґРµ. РљР»РёРµРЅС‚С‹ РІС…РѕРґР° РїРѕР»СѓС‡Р°С‚ РЅРѕРІС‹Рµ РїР°СЂР°РјРµС‚СЂС‹,
+    // РїРѕСЌС‚РѕРјСѓ РїРµСЂРµРіРµРЅРµСЂРёСЂСѓРµРј РёС… РєРѕРЅС„РёРіРё (manage regen РІРЅСѓС‚СЂРё applyObf).
     if (opts.obf && Object.keys(opts.obf).length) {
-        log('RU', 'Применяю параметры обфускации...');
+        log('RU', 'РџСЂРёРјРµРЅСЏСЋ РїР°СЂР°РјРµС‚СЂС‹ РѕР±С„СѓСЃРєР°С†РёРё...');
         await sshBuild.applyObf({ host: '127.0.0.1' }, opts.obf, (m) => log('RU', m));
     }
 
-    // 5. Конфиг туннеля: ru_host без DNS, Table = off.
+    // 5. РљРѕРЅС„РёРі С‚СѓРЅРЅРµР»СЏ: ru_host Р±РµР· DNS, Table = off.
     const conf = sshBuild.cascadeConfig(ruHost.conf);
     writeRootFile(sshBuild.AWG_CONF, conf, '0600');
     writeRootFile(CASCADE_MARKER, String(Date.now()), '0600');
     log('RU', 'awg1.conf: ' + ((conf.match(/^Address\s*=.*$/m) || [])[0] || '').trim() +
         ' / ' + ((conf.match(/^Endpoint\s*=.*$/m) || [])[0] || '').trim());
 
-    // 6. Поднимаем туннель ДО маршрутизации: скрипт маршрутов обращается
-    // к интерфейсу awg1, и без него падает с «Cannot find device awg1».
+    // 6. РџРѕРґРЅРёРјР°РµРј С‚СѓРЅРЅРµР»СЊ Р”Рћ РјР°СЂС€СЂСѓС‚РёР·Р°С†РёРё: СЃРєСЂРёРїС‚ РјР°СЂС€СЂСѓС‚РѕРІ РѕР±СЂР°С‰Р°РµС‚СЃСЏ
+    // Рє РёРЅС‚РµСЂС„РµР№СЃСѓ awg1, Рё Р±РµР· РЅРµРіРѕ РїР°РґР°РµС‚ СЃ В«Cannot find device awg1В».
     sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
     try { sh('sleep', ['3']); } catch (e) { /* ignore */ }
     const up = await sshRunner.run({ host: '127.0.0.1' }, 'systemctl is-active awg-quick@awg1', 20000);
     if (!/active/.test(String(up.out || ''))) {
         const why = await sshRunner.run({ host: '127.0.0.1' }, 'systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 8', 30000);
-        throw new Error('awg-quick@awg1 не запустился: ' + String(why.out || '').trim().slice(0, 500));
+        throw new Error('awg-quick@awg1 РЅРµ Р·Р°РїСѓСЃС‚РёР»СЃСЏ: ' + String(why.out || '').trim().slice(0, 500));
     }
-    log('RU', 'туннель awg1 поднят');
+    log('RU', 'С‚СѓРЅРЅРµР»СЊ awg1 РїРѕРґРЅСЏС‚');
 
-    // 7. Маршруты и фильтрация.
+    // 7. РњР°СЂС€СЂСѓС‚С‹ Рё С„РёР»СЊС‚СЂР°С†РёСЏ.
     const subnet = sshBuild.clientSubnet(local.address) || '10.9.9.0/24';
     const ifaces = Array.isArray(opts.ifaces) && opts.ifaces.length ? opts.ifaces : ['awg0'];
     const extraRuNets = Array.isArray(opts.extraRuNets) ? opts.extraRuNets : [];
@@ -7415,13 +7415,13 @@ async function runCascadeBuild(job, remote, opts) {
     sh('sudo', ['systemctl', 'daemon-reload']);
     const routeRun = await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
     if (routeRun.code !== 0) {
-        throw new Error('Маршруты не применились: ' + String(routeRun.out || '').trim().slice(0, 500));
+        throw new Error('РњР°СЂС€СЂСѓС‚С‹ РЅРµ РїСЂРёРјРµРЅРёР»РёСЃСЊ: ' + String(routeRun.out || '').trim().slice(0, 500));
     }
-    log('RU', 'маршруты и фильтрация применены (клиентская подсеть ' + subnet + ')');
+    log('RU', 'РјР°СЂС€СЂСѓС‚С‹ Рё С„РёР»СЊС‚СЂР°С†РёСЏ РїСЂРёРјРµРЅРµРЅС‹ (РєР»РёРµРЅС‚СЃРєР°СЏ РїРѕРґСЃРµС‚СЊ ' + subnet + ')');
     sh('sudo', ['systemctl', 'enable', 'awg-routing']);
     sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
 
-    // 8. Рукопожатие на обеих сторонах и трафик.
+    // 8. Р СѓРєРѕРїРѕР¶Р°С‚РёРµ РЅР° РѕР±РµРёС… СЃС‚РѕСЂРѕРЅР°С… Рё С‚СЂР°С„РёРє.
     let euHs = null;
     let ruHs = null;
     for (let i = 0; i < 20; i++) {
@@ -7433,15 +7433,15 @@ async function runCascadeBuild(job, remote, opts) {
         euHs = tsEu ? now - tsEu : null;
         ruHs = tsRu ? now - tsRu : null;
         if (euHs !== null && ruHs !== null) break;
-        if (i === 5) log('Проверка', 'жду рукопожатие (до 100 секунд)...');
+        if (i === 5) log('РџСЂРѕРІРµСЂРєР°', 'Р¶РґСѓ СЂСѓРєРѕРїРѕР¶Р°С‚РёРµ (РґРѕ 100 СЃРµРєСѓРЅРґ)...');
         await new Promise(r => setTimeout(r, 5000));
     }
-    log('Проверка', 'EU: ' + (euHs === null ? 'нет рукопожатия' : euHs + ' сек. назад') +
-        ', RU: ' + (ruHs === null ? 'нет рукопожатия' : ruHs + ' сек. назад'));
+    log('РџСЂРѕРІРµСЂРєР°', 'EU: ' + (euHs === null ? 'РЅРµС‚ СЂСѓРєРѕРїРѕР¶Р°С‚РёСЏ' : euHs + ' СЃРµРє. РЅР°Р·Р°Рґ') +
+        ', RU: ' + (ruHs === null ? 'РЅРµС‚ СЂСѓРєРѕРїРѕР¶Р°С‚РёСЏ' : ruHs + ' СЃРµРє. РЅР°Р·Р°Рґ'));
 
     if (euHs === null || ruHs === null) {
-        throw new Error('Туннель поднят, но рукопожатия нет. Проверьте, что UDP ' +
-            (info.listenPort || '3977') + ' открыт на ' + remote.host + ' (UFW и firewall провайдера).');
+        throw new Error('РўСѓРЅРЅРµР»СЊ РїРѕРґРЅСЏС‚, РЅРѕ СЂСѓРєРѕРїРѕР¶Р°С‚РёСЏ РЅРµС‚. РџСЂРѕРІРµСЂСЊС‚Рµ, С‡С‚Рѕ UDP ' +
+            (info.listenPort || '3977') + ' РѕС‚РєСЂС‹С‚ РЅР° ' + remote.host + ' (UFW Рё firewall РїСЂРѕРІР°Р№РґРµСЂР°).');
     }
 
     const before = Number(sh('sudo', ['bash', '-c', "awg show awg1 transfer 2>/dev/null | awk '{s+=$2+$3} END {print s+0}'"]).trim()) || 0;
@@ -7451,7 +7451,7 @@ async function runCascadeBuild(job, remote, opts) {
     await new Promise(r => setTimeout(r, 4000));
     const after = Number(sh('sudo', ['bash', '-c', "awg show awg1 transfer 2>/dev/null | awk '{s+=$2+$3} END {print s+0}'"]).trim()) || 0;
     const traffic = after > before ? after - before : after;
-    log('Трафик', 'через awg1 прошло ' + traffic + ' байт');
+    log('РўСЂР°С„РёРє', 'С‡РµСЂРµР· awg1 РїСЂРѕС€Р»Рѕ ' + traffic + ' Р±Р°Р№С‚');
 
     return {
         success: true,
@@ -7477,21 +7477,21 @@ app.post('/api/cascade/ssh-install', checkAuth, requireAdmin, (req, res) => {
     const awgPortNum = Number(data.port);
     const awgPortOk = Number.isInteger(awgPortNum) && awgPortNum >= 1 && awgPortNum <= 65535;
     if (data.port != null && String(data.port).trim() !== '' && !awgPortOk) {
-        return res.status(400).json({ error: 'Некорректный UDP-порт AWG: нужен 1–65535' });
+        return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ UDP-РїРѕСЂС‚ AWG: РЅСѓР¶РµРЅ 1вЂ“65535' });
     }
     const awgPort = awgPortOk ? awgPortNum : 3977;
-    if (!host || !pass) return res.status(400).json({ error: 'Нужны IP второй стороны и пароль root' });
-    if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) return res.status(400).json({ error: 'Вторая сторона задаётся по IP' });
+    if (!host || !pass) return res.status(400).json({ error: 'РќСѓР¶РЅС‹ IP РІС‚РѕСЂРѕР№ СЃС‚РѕСЂРѕРЅС‹ Рё РїР°СЂРѕР»СЊ root' });
+    if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) return res.status(400).json({ error: 'Р’С‚РѕСЂР°СЏ СЃС‚РѕСЂРѕРЅР° Р·Р°РґР°С‘С‚СЃСЏ РїРѕ IP' });
 
     if (cascadeBuildJob && cascadeBuildJob.running) {
-        return res.status(409).json({ error: 'Сборка каскада уже идёт', steps: cascadeBuildJob.steps.slice(-50) });
+        return res.status(409).json({ error: 'РЎР±РѕСЂРєР° РєР°СЃРєР°РґР° СѓР¶Рµ РёРґС‘С‚', steps: cascadeBuildJob.steps.slice(-50) });
     }
 
     let obf = null;
     try {
         obf = cascadeObfParams(data, version);
     } catch (e) {
-        return res.status(400).json({ error: 'Обфускация: ' + e.message });
+        return res.status(400).json({ error: 'РћР±С„СѓСЃРєР°С†РёСЏ: ' + e.message });
     }
     const ifaces = Array.isArray(data.ifaces)
         ? [...new Set(data.ifaces.filter(i => typeof i === 'string' && IFACE_RE.test(i) && !CASCADE_IFACE_RE.test(i)))].slice(0, 16)
@@ -7520,7 +7520,7 @@ app.post('/api/cascade/ssh-install', checkAuth, requireAdmin, (req, res) => {
     };
     const job = cascadeBuildJob;
     saveCascadeJob(job);
-    auditLog(req, 'Запущена сборка каскада по SSH: ' + host);
+    auditLog(req, 'Р—Р°РїСѓС‰РµРЅР° СЃР±РѕСЂРєР° РєР°СЃРєР°РґР° РїРѕ SSH: ' + host);
 
     runCascadeBuild(job, buildParams, buildOpts)
         .then((result) => finishCascadeJob(job, result, ''))
@@ -7533,8 +7533,8 @@ app.get('/api/cascade/ssh-progress', checkAuth, requireAdmin, (req, res) => {
     res.json(cascadeJobSnapshot());
 });
 
-// Интерфейсы, трафик которых уходит в каскад. Список читается из скрипта
-// маршрутизации, поэтому его можно менять после установки без пересборки.
+// РРЅС‚РµСЂС„РµР№СЃС‹, С‚СЂР°С„РёРє РєРѕС‚РѕСЂС‹С… СѓС…РѕРґРёС‚ РІ РєР°СЃРєР°Рґ. РЎРїРёСЃРѕРє С‡РёС‚Р°РµС‚СЃСЏ РёР· СЃРєСЂРёРїС‚Р°
+// РјР°СЂС€СЂСѓС‚РёР·Р°С†РёРё, РїРѕСЌС‚РѕРјСѓ РµРіРѕ РјРѕР¶РЅРѕ РјРµРЅСЏС‚СЊ РїРѕСЃР»Рµ СѓСЃС‚Р°РЅРѕРІРєРё Р±РµР· РїРµСЂРµСЃР±РѕСЂРєРё.
 app.get('/api/cascade/interfaces', checkAuth, requireAdmin, (req, res) => {
     const script = readTextSafe(ROUTING_SCRIPT);
     if (!script) {
@@ -7542,7 +7542,7 @@ app.get('/api/cascade/interfaces', checkAuth, requireAdmin, (req, res) => {
             selected: [],
             available: [],
             applicable: false,
-            reason: 'Маршрутизация настраивается на входе (RU). На этом сервере скрипта маршрутов нет.'
+            reason: 'РњР°СЂС€СЂСѓС‚РёР·Р°С†РёСЏ РЅР°СЃС‚СЂР°РёРІР°РµС‚СЃСЏ РЅР° РІС…РѕРґРµ (RU). РќР° СЌС‚РѕРј СЃРµСЂРІРµСЂРµ СЃРєСЂРёРїС‚Р° РјР°СЂС€СЂСѓС‚РѕРІ РЅРµС‚.'
         });
     }
     const m = script.match(/^CLIENT_IFACES="([^"]*)"/m) || script.match(/^CASC_IFACES=\(([^)]*)\)/m);
@@ -7558,7 +7558,7 @@ app.get('/api/cascade/interfaces', checkAuth, requireAdmin, (req, res) => {
 function ensureProxyCascadeBlock(script) {
     if (!script) return script;
     const block = sshBuild.PROXY_CASCADE_LINES.join('\n');
-    const startMarker = '# --- MTProto-прокси через каскад (Servpanel) ---';
+    const startMarker = '# --- MTProto-РїСЂРѕРєСЃРё С‡РµСЂРµР· РєР°СЃРєР°Рґ (Servpanel) ---';
     const endMarker = 'if [ -n "${WAN_GW:-}" ]; then';
     const existing = script.indexOf(startMarker);
     if (existing >= 0) {
@@ -7572,8 +7572,8 @@ function ensureProxyCascadeBlock(script) {
     return script.slice(0, idx) + block + '\n\n' + script.slice(idx);
 }
 
-// Старые установки содержали цикл ipset add по одной сети — на 8–9 тысяч
-// сетей это десятки секунд. Заменяем его на один ipset restore.
+// РЎС‚Р°СЂС‹Рµ СѓСЃС‚Р°РЅРѕРІРєРё СЃРѕРґРµСЂР¶Р°Р»Рё С†РёРєР» ipset add РїРѕ РѕРґРЅРѕР№ СЃРµС‚Рё вЂ” РЅР° 8вЂ“9 С‚С‹СЃСЏС‡
+// СЃРµС‚РµР№ СЌС‚Рѕ РґРµСЃСЏС‚РєРё СЃРµРєСѓРЅРґ. Р—Р°РјРµРЅСЏРµРј РµРіРѕ РЅР° РѕРґРёРЅ ipset restore.
 function optimizeRoutingIpSet(script) {
     if (!script) return script;
     const oldBlock = [
@@ -7584,7 +7584,7 @@ function optimizeRoutingIpSet(script) {
         'extra_bad=0',
         'set -f',
         'for net in $EXTRA_RU_NETS; do',
-        '    ipset add ru_tmp "$net" -exist || { echo "WARN: EXTRA_RU_NETS: не добавил $net" >&2; extra_bad=$((extra_bad+1)); }',
+        '    ipset add ru_tmp "$net" -exist || { echo "WARN: EXTRA_RU_NETS: РЅРµ РґРѕР±Р°РІРёР» $net" >&2; extra_bad=$((extra_bad+1)); }',
         'done',
         'set +f',
         'ipset swap ru_tmp ru',
@@ -7605,7 +7605,7 @@ function optimizeRoutingIpSet(script) {
         'ipset destroy ru_tmp'
     ].join('\n');
     let out = script.includes(oldBlock) ? script.replace(oldBlock, newBlock) : script;
-    // Скрипт мог уже быть обновлён предыдущей версией без extra_bad.
+    // РЎРєСЂРёРїС‚ РјРѕРі СѓР¶Рµ Р±С‹С‚СЊ РѕР±РЅРѕРІР»С‘РЅ РїСЂРµРґС‹РґСѓС‰РµР№ РІРµСЂСЃРёРµР№ Р±РµР· extra_bad.
     if (!/^extra_bad=0$/m.test(out) && out.includes('ipset flush ru_tmp')) {
         out = out.replace('ipset flush ru_tmp', 'ipset flush ru_tmp\nextra_bad=0');
     }
@@ -7633,15 +7633,15 @@ function proxyCascadeUsers() {
             const uid = parts[0];
             const comm = parts[1] || '';
             if (!/^\d+$/.test(uid) || uid === '0') continue;
-            // Только сам прокси, не его API/меню/обёртки.
+            // РўРѕР»СЊРєРѕ СЃР°Рј РїСЂРѕРєСЃРё, РЅРµ РµРіРѕ API/РјРµРЅСЋ/РѕР±С‘СЂС‚РєРё.
             if (!/^(telemt|mtproxyl|kvguardd)(?:\.sh)?$/i.test(comm)) continue;
             let user = '';
             try { user = String(sh('id', ['-nu', uid], { timeout: 5000 }) || '').trim(); } catch (e) { /* ignore */ }
             if (user && user !== 'root') users.add(user);
         }
     } catch (e) { /* ignore */ }
-    // Если прокси ещё не запущен, но пользователь уже создан установщиком,
-    // оставляем возможность включить каскад заранее.
+    // Р•СЃР»Рё РїСЂРѕРєСЃРё РµС‰С‘ РЅРµ Р·Р°РїСѓС‰РµРЅ, РЅРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ СѓР¶Рµ СЃРѕР·РґР°РЅ СѓСЃС‚Р°РЅРѕРІС‰РёРєРѕРј,
+    // РѕСЃС‚Р°РІР»СЏРµРј РІРѕР·РјРѕР¶РЅРѕСЃС‚СЊ РІРєР»СЋС‡РёС‚СЊ РєР°СЃРєР°Рґ Р·Р°СЂР°РЅРµРµ.
     if (!users.size) {
         for (const u of ['telemt', 'mtproxyl', 'kvguardd']) {
             try {
@@ -7684,12 +7684,12 @@ function cascadeProxyExit() {
 function syncProxyCascadeExit(force) {
     if (!fs.existsSync(PROXY_CASCADE_FLAG_FILE)) return { changed: false, skipped: true };
     const exit = cascadeProxyExit();
-    if (!exit) return { changed: false, error: 'нет живого выхода для MTProto' };
+    if (!exit) return { changed: false, error: 'РЅРµС‚ Р¶РёРІРѕРіРѕ РІС‹С…РѕРґР° РґР»СЏ MTProto' };
     const stateFile = '/root/awg/proxy-cascade.exit';
     const prev = readTextSafe(stateFile).trim();
     if (!force && prev === exit.iface) return { changed: false, iface: exit.iface };
     const ip = proxyCascadeExitIp(exit.iface);
-    if (!ip) return { changed: false, iface: exit.iface, error: 'не удалось определить IP через ' + exit.iface };
+    if (!ip) return { changed: false, iface: exit.iface, error: 'РЅРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ IP С‡РµСЂРµР· ' + exit.iface };
     applyProxyCascadeNatIp(ip);
     for (const unit of ['telemt', 'kvguardd', 'mtproxyl']) {
         try { sh('systemctl', ['restart', unit]); } catch (e) { /* ignore */ }
@@ -7730,8 +7730,8 @@ function writeTelemtConfig(cfg, text) {
     }
 }
 
-// При включении каскада ME-хендшейк Telemt должен считать ключи от EU-IP,
-// а не от RU-IP. Сохраняем прежнее значение, чтобы вернуть его при выключении.
+// РџСЂРё РІРєР»СЋС‡РµРЅРёРё РєР°СЃРєР°РґР° ME-С…РµРЅРґС€РµР№Рє Telemt РґРѕР»Р¶РµРЅ СЃС‡РёС‚Р°С‚СЊ РєР»СЋС‡Рё РѕС‚ EU-IP,
+// Р° РЅРµ РѕС‚ RU-IP. РЎРѕС…СЂР°РЅСЏРµРј РїСЂРµР¶РЅРµРµ Р·РЅР°С‡РµРЅРёРµ, С‡С‚РѕР±С‹ РІРµСЂРЅСѓС‚СЊ РµРіРѕ РїСЂРё РІС‹РєР»СЋС‡РµРЅРёРё.
 function applyProxyCascadeNatIp(ip) {
     const paths = (typeof proxyUsers.configPaths === 'function' ? proxyUsers.configPaths() : [])
         .filter(Boolean);
@@ -7801,56 +7801,56 @@ app.get('/api/cascade/proxy', checkAuth, (req, res) => {
 app.post('/api/cascade/proxy/sync', checkAuth, requireAdmin, (req, res) => {
     try {
         const result = syncProxyCascadeExit(true);
-        auditLog(req, `Каскад: синхронизация прокси через ${result.iface || '—'}`);
+        auditLog(req, `РљР°СЃРєР°Рґ: СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ РїСЂРѕРєСЃРё С‡РµСЂРµР· ${result.iface || 'вЂ”'}`);
         res.json({ success: true, ...result });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось синхронизировать прокси: ' + (e.message || String(e)) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРёРЅС…СЂРѕРЅРёР·РёСЂРѕРІР°С‚СЊ РїСЂРѕРєСЃРё: ' + (e.message || String(e)) });
     }
 });
 
 app.post('/api/cascade/proxy', checkAuth, requireAdmin, async (req, res) => {
     const enabled = !!(req.body && req.body.enabled);
     if (!fs.existsSync(ROUTING_SCRIPT)) {
-        return res.status(404).json({ error: 'Сначала постройте каскад' });
+        return res.status(404).json({ error: 'РЎРЅР°С‡Р°Р»Р° РїРѕСЃС‚СЂРѕР№С‚Рµ РєР°СЃРєР°Рґ' });
     }
     const users = proxyCascadeUsers();
     const uids = users.map(u => String(shTry('id', ['-u', u]) || '').trim()).filter(Boolean);
     if (enabled && !users.length) {
-        return res.status(400).json({ error: 'Telemt/MTProxyL не найден — сначала установите MTProto-прокси' });
+        return res.status(400).json({ error: 'Telemt/MTProxyL РЅРµ РЅР°Р№РґРµРЅ вЂ” СЃРЅР°С‡Р°Р»Р° СѓСЃС‚Р°РЅРѕРІРёС‚Рµ MTProto-РїСЂРѕРєСЃРё' });
     }
     const exitIp = enabled ? proxyCascadeExitIp() : '';
     if (enabled && !exitIp) {
-        return res.status(400).json({ error: 'Не удалось определить EU-IP через awg1. Проверьте каскад и маршрут awg1.' });
+        return res.status(400).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ EU-IP С‡РµСЂРµР· awg1. РџСЂРѕРІРµСЂСЊС‚Рµ РєР°СЃРєР°Рґ Рё РјР°СЂС€СЂСѓС‚ awg1.' });
     }
     try {
         if (enabled) {
             writeRootFile(PROXY_CASCADE_UID_FILE, users.join(' ') + '\n', '0600');
             writeRootFile(PROXY_CASCADE_FLAG_FILE, '1\n', '0600');
         } else {
-            try { fs.unlinkSync(PROXY_CASCADE_FLAG_FILE); } catch (e) { /* уже нет */ }
+            try { fs.unlinkSync(PROXY_CASCADE_FLAG_FILE); } catch (e) { /* СѓР¶Рµ РЅРµС‚ */ }
             if (users.length) writeRootFile(PROXY_CASCADE_UID_FILE, users.join(' ') + '\n', '0600');
         }
         const script = optimizeRoutingIpSet(ensureProxyCascadeBlock(readTextSafe(ROUTING_SCRIPT)));
-        if (!script) return res.status(404).json({ error: 'Скрипт маршрутизации не найден' });
+        if (!script) return res.status(404).json({ error: 'РЎРєСЂРёРїС‚ РјР°СЂС€СЂСѓС‚РёР·Р°С†РёРё РЅРµ РЅР°Р№РґРµРЅ' });
         writeRootFile(ROUTING_SCRIPT, script, '0755');
         const r = await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
         if (r.code !== 0) {
-            return res.status(500).json({ error: 'Скрипт маршрутизации вернул ошибку', output: String(r.out || '').slice(-1600) });
+            return res.status(500).json({ error: 'РЎРєСЂРёРїС‚ РјР°СЂС€СЂСѓС‚РёР·Р°С†РёРё РІРµСЂРЅСѓР» РѕС€РёР±РєСѓ', output: String(r.out || '').slice(-1600) });
         }
         if (enabled) applyProxyCascadeNatIp(exitIp);
         else restoreProxyCascadeNatIp();
-        // MTProxyL-Telemt может работать как kvguardd, а не как telemt.
-        // Без перезапуска реального юнита старые upstream-сокеты остаются
-        // в обход новых правил каскада.
+        // MTProxyL-Telemt РјРѕР¶РµС‚ СЂР°Р±РѕС‚Р°С‚СЊ РєР°Рє kvguardd, Р° РЅРµ РєР°Рє telemt.
+        // Р‘РµР· РїРµСЂРµР·Р°РїСѓСЃРєР° СЂРµР°Р»СЊРЅРѕРіРѕ СЋРЅРёС‚Р° СЃС‚Р°СЂС‹Рµ upstream-СЃРѕРєРµС‚С‹ РѕСЃС‚Р°СЋС‚СЃСЏ
+        // РІ РѕР±С…РѕРґ РЅРѕРІС‹С… РїСЂР°РІРёР» РєР°СЃРєР°РґР°.
         for (const unit of ['telemt', 'kvguardd', 'mtproxyl']) {
-            try { sh('systemctl', ['restart', unit]); } catch (e) { /* юнита может не быть */ }
+            try { sh('systemctl', ['restart', unit]); } catch (e) { /* СЋРЅРёС‚Р° РјРѕР¶РµС‚ РЅРµ Р±С‹С‚СЊ */ }
         }
         auditLog(req, enabled
-            ? `Каскад: MTProto-прокси (${users.join(', ')}) пущен через EU`
-            : 'Каскад: MTProto-прокси возвращён напрямую');
+            ? `РљР°СЃРєР°Рґ: MTProto-РїСЂРѕРєСЃРё (${users.join(', ')}) РїСѓС‰РµРЅ С‡РµСЂРµР· EU`
+            : 'РљР°СЃРєР°Рґ: MTProto-РїСЂРѕРєСЃРё РІРѕР·РІСЂР°С‰С‘РЅ РЅР°РїСЂСЏРјСѓСЋ');
         res.json({ success: true, enabled, users, uids, exitIp, output: String(r.out || '').slice(-1600) });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось переключить прокси: ' + e.message });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРєР»СЋС‡РёС‚СЊ РїСЂРѕРєСЃРё: ' + e.message });
     }
 });
 
@@ -7890,17 +7890,17 @@ app.post('/api/cascade/interfaces', checkAuth, requireAdmin, async (req, res) =>
     const list = Array.isArray(req.body && req.body.interfaces) ? req.body.interfaces : [];
     const ifaces = [...new Set(list
         .filter(i => typeof i === 'string' && IFACE_RE.test(i) && !CASCADE_IFACE_RE.test(i)))];
-    if (!ifaces.length) return res.status(400).json({ error: 'Выберите хотя бы один интерфейс' });
+    if (!ifaces.length) return res.status(400).json({ error: 'Р’С‹Р±РµСЂРёС‚Рµ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ РёРЅС‚РµСЂС„РµР№СЃ' });
     const script = readTextSafe(ROUTING_SCRIPT);
-    if (!script) return res.status(404).json({ error: 'Сначала постройте каскад' });
+    if (!script) return res.status(404).json({ error: 'РЎРЅР°С‡Р°Р»Р° РїРѕСЃС‚СЂРѕР№С‚Рµ РєР°СЃРєР°Рґ' });
     let next;
     if (/^CLIENT_IFACES=/m.test(script)) {
         next = script.replace(/^CLIENT_IFACES="[^"]*"/m, `CLIENT_IFACES="${ifaces.join(' ')}"`);
     } else if (/^CASC_IFACES=\(/m.test(script)) {
         next = script.replace(/^CASC_IFACES=\([^)]*\)/m, `CASC_IFACES=(${ifaces.join(' ')})`);
     } else {
-        // Скрипты старых сборок могли не содержать CLIENT_IFACES.
-        // Добавляем переменную, чтобы выбор интерфейсов не терялся.
+        // РЎРєСЂРёРїС‚С‹ СЃС‚Р°СЂС‹С… СЃР±РѕСЂРѕРє РјРѕРіР»Рё РЅРµ СЃРѕРґРµСЂР¶Р°С‚СЊ CLIENT_IFACES.
+        // Р”РѕР±Р°РІР»СЏРµРј РїРµСЂРµРјРµРЅРЅСѓСЋ, С‡С‚РѕР±С‹ РІС‹Р±РѕСЂ РёРЅС‚РµСЂС„РµР№СЃРѕРІ РЅРµ С‚РµСЂСЏР»СЃСЏ.
         const line = `CLIENT_IFACES="${ifaces.join(' ')}"`;
         next = /^AWG1_IF=/m.test(script)
             ? script.replace(/^(AWG1_IF=.*)$/m, `$1\n${line}`)
@@ -7910,12 +7910,12 @@ app.post('/api/cascade/interfaces', checkAuth, requireAdmin, async (req, res) =>
         writeRootFile(ROUTING_SCRIPT, next, '0755');
         const r = await sshRunner.run({ host: '127.0.0.1' }, 'bash ' + ROUTING_SCRIPT, 180000);
         if (r.code !== 0) {
-            return res.status(500).json({ error: 'Скрипт маршрутизации вернул ошибку', output: String(r.out || '').slice(-1200) });
+            return res.status(500).json({ error: 'РЎРєСЂРёРїС‚ РјР°СЂС€СЂСѓС‚РёР·Р°С†РёРё РІРµСЂРЅСѓР» РѕС€РёР±РєСѓ', output: String(r.out || '').slice(-1200) });
         }
-        auditLog(req, 'Каскад: интерфейсы маршрутизации ' + ifaces.join(', '));
+        auditLog(req, 'РљР°СЃРєР°Рґ: РёРЅС‚РµСЂС„РµР№СЃС‹ РјР°СЂС€СЂСѓС‚РёР·Р°С†РёРё ' + ifaces.join(', '));
         res.json({ success: true, interfaces: ifaces, output: String(r.out || '').slice(-1200) });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось применить интерфейсы: ' + e.message });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРёРјРµРЅРёС‚СЊ РёРЅС‚РµСЂС„РµР№СЃС‹: ' + e.message });
     }
 });
 
@@ -7929,7 +7929,7 @@ function routingTimerSeconds() {
 
 app.get('/api/cascade/schedule', checkAuth, requireAdmin, (req, res) => {
     if (!fs.existsSync(ROUTING_SCRIPT)) {
-        return res.json({ applicable: false, reason: 'Маршрутизация настраивается на входе (RU).' });
+        return res.json({ applicable: false, reason: 'РњР°СЂС€СЂСѓС‚РёР·Р°С†РёСЏ РЅР°СЃС‚СЂР°РёРІР°РµС‚СЃСЏ РЅР° РІС…РѕРґРµ (RU).' });
     }
     let active = false;
     try { active = String(shTry('systemctl', ['is-active', 'awg-routing.timer']) || '').trim() === 'active'; } catch (e) { /* ignore */ }
@@ -7938,28 +7938,28 @@ app.get('/api/cascade/schedule', checkAuth, requireAdmin, (req, res) => {
 
 app.post('/api/cascade/schedule', checkAuth, requireAdmin, (req, res) => {
     if (!fs.existsSync(ROUTING_SCRIPT)) {
-        return res.status(400).json({ error: 'Маршрутизация настраивается на входе (RU).' });
+        return res.status(400).json({ error: 'РњР°СЂС€СЂСѓС‚РёР·Р°С†РёСЏ РЅР°СЃС‚СЂР°РёРІР°РµС‚СЃСЏ РЅР° РІС…РѕРґРµ (RU).' });
     }
     const intervals = { '5m': 300, '1h': 3600, '6h': 21600, '24h': 86400, off: 0 };
     const key = String((req.body && req.body.interval) || '5m');
     if (!Object.prototype.hasOwnProperty.call(intervals, key)) {
-        return res.status(400).json({ error: 'Недопустимый интервал' });
+        return res.status(400).json({ error: 'РќРµРґРѕРїСѓСЃС‚РёРјС‹Р№ РёРЅС‚РµСЂРІР°Р»' });
     }
     const seconds = intervals[key];
     try {
         if (!seconds) {
             sh('sudo', ['systemctl', 'disable', '--now', 'awg-routing.timer']);
-            auditLog(req, 'Автообновление списков каскада выключено');
+            auditLog(req, 'РђРІС‚РѕРѕР±РЅРѕРІР»РµРЅРёРµ СЃРїРёСЃРєРѕРІ РєР°СЃРєР°РґР° РІС‹РєР»СЋС‡РµРЅРѕ');
             return res.json({ success: true, active: false, seconds: 0 });
         }
         const unit = `[Unit]\nDescription=Refresh AmneziaWG cascade routing\n\n[Timer]\nOnBootSec=30s\nOnUnitActiveSec=${seconds}s\n\n[Install]\nWantedBy=timers.target\n`;
         writeRootFile('/etc/systemd/system/awg-routing.timer', unit, '0644');
         sh('sudo', ['systemctl', 'daemon-reload']);
         sh('sudo', ['systemctl', 'enable', '--now', 'awg-routing.timer']);
-        auditLog(req, `Автообновление списков каскада: ${key}`);
+        auditLog(req, `РђРІС‚РѕРѕР±РЅРѕРІР»РµРЅРёРµ СЃРїРёСЃРєРѕРІ РєР°СЃРєР°РґР°: ${key}`);
         res.json({ success: true, active: true, seconds });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось изменить расписание: ' + e.message });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РёР·РјРµРЅРёС‚СЊ СЂР°СЃРїРёСЃР°РЅРёРµ: ' + e.message });
     }
 });
 
@@ -7970,15 +7970,15 @@ app.post('/api/cascade/teardown', checkAuth, requireAdmin, async (req, res) => {
     cascadeBalanceWrite({ mode: 'classic', assignments: {} });
     try { removeSplitAccounting(); } catch (e) { /* ignore */ }
     for (const unit of ['awg-routing.timer', 'awg-routing.service', 'awg-quick@awg1']) {
-        try { sh('sudo', ['systemctl', 'stop', unit]); } catch (e) { /* не запущена */ }
+        try { sh('sudo', ['systemctl', 'stop', unit]); } catch (e) { /* РЅРµ Р·Р°РїСѓС‰РµРЅР° */ }
         try { sh('sudo', ['systemctl', 'disable', unit]); } catch (e) { /* ignore */ }
     }
-    removed.push('остановлены awg-routing и awg1');
+    removed.push('РѕСЃС‚Р°РЅРѕРІР»РµРЅС‹ awg-routing Рё awg1');
     const safe = (args) => { try { sh('sudo', args); return true; } catch (e) { return false; } };
     safe(['ip', 'rule', 'del', 'fwmark', '0x1', 'table', '100']);
     safe(['ip', 'rule', 'del', 'fwmark', '0x0', 'table', 'main', 'priority', '90']);
     safe(['ip', 'route', 'flush', 'table', '100']);
-    // IPv6 kill switch: убираем цепочку и jump, если она создавалась.
+    // IPv6 kill switch: СѓР±РёСЂР°РµРј С†РµРїРѕС‡РєСѓ Рё jump, РµСЃР»Рё РѕРЅР° СЃРѕР·РґР°РІР°Р»Р°СЃСЊ.
     safe(['ip6tables', '-D', 'FORWARD', '-j', 'SERVPANEL_V6']);
     safe(['ip6tables', '-F', 'SERVPANEL_V6']);
     safe(['ip6tables', '-X', 'SERVPANEL_V6']);
@@ -7996,100 +7996,100 @@ app.post('/api/cascade/teardown', checkAuth, requireAdmin, async (req, res) => {
     };
     strip('mangle', 'PREROUTING', r => /--set-xmark 0x1|--set-mark 0x1|match-set ru dst/.test(r));
     strip('nat', 'POSTROUTING', r => /-o awg1 .*MASQUERADE/.test(r));
-    removed.push('удалены правила fwmark, ipset и iptables');
+    removed.push('СѓРґР°Р»РµРЅС‹ РїСЂР°РІРёР»Р° fwmark, ipset Рё iptables');
     for (const f of [ROUTING_SCRIPT, '/etc/systemd/system/awg-routing.service', '/etc/systemd/system/awg-routing.timer', CASCADE_MARKER]) {
-        try { fs.unlinkSync(f); } catch (e) { /* нет файла */ }
+        try { fs.unlinkSync(f); } catch (e) { /* РЅРµС‚ С„Р°Р№Р»Р° */ }
     }
-    removed.push('удалены скрипт маршрутов и юниты');
+    removed.push('СѓРґР°Р»РµРЅС‹ СЃРєСЂРёРїС‚ РјР°СЂС€СЂСѓС‚РѕРІ Рё СЋРЅРёС‚С‹');
     try { sh('sudo', ['systemctl', 'daemon-reload']); } catch (e) { /* ignore */ }
     if (body.removeClient !== false) {
         const name = String(body.peerClient || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '');
         if (name) {
-            // Сначала убираем пира из awg0.conf через штатный менеджер,
-            // иначе в конфиге остаётся [Peer] и ключи в текстовом виде.
+            // РЎРЅР°С‡Р°Р»Р° СѓР±РёСЂР°РµРј РїРёСЂР° РёР· awg0.conf С‡РµСЂРµР· С€С‚Р°С‚РЅС‹Р№ РјРµРЅРµРґР¶РµСЂ,
+            // РёРЅР°С‡Рµ РІ РєРѕРЅС„РёРіРµ РѕСЃС‚Р°С‘С‚СЃСЏ [Peer] Рё РєР»СЋС‡Рё РІ С‚РµРєСЃС‚РѕРІРѕРј РІРёРґРµ.
             try {
                 rootSh('bash', [MANAGE, 'remove', name, '--yes', '--json'], { timeout: 60000 });
-                removed.push('пир ' + name + ' удалён из awg0.conf');
-            } catch (e) { /* менеджера может не быть */ }
+                removed.push('РїРёСЂ ' + name + ' СѓРґР°Р»С‘РЅ РёР· awg0.conf');
+            } catch (e) { /* РјРµРЅРµРґР¶РµСЂР° РјРѕР¶РµС‚ РЅРµ Р±С‹С‚СЊ */ }
             for (const ext of ['.conf', '.png', '.vpnuri', '.vpnuri.png', '.ovpn']) {
                 try { sh('sudo', ['rm', '-f', path.join(AWG_DIR, name + ext)]); } catch (e) { /* ignore */ }
             }
-            removed.push('удалён клиент ' + name);
+            removed.push('СѓРґР°Р»С‘РЅ РєР»РёРµРЅС‚ ' + name);
         }
     }
     if (body.removeTunnel !== false) {
         const conf = existingCascadeConf();
-        if (conf) { try { sh('sudo', ['rm', '-f', conf]); removed.push('удалён awg1.conf'); } catch (e) { /* ignore */ } }
-        try { sh('sudo', ['ip', 'link', 'delete', 'awg1']); } catch (e) { /* уже нет */ }
+        if (conf) { try { sh('sudo', ['rm', '-f', conf]); removed.push('СѓРґР°Р»С‘РЅ awg1.conf'); } catch (e) { /* ignore */ } }
+        try { sh('sudo', ['ip', 'link', 'delete', 'awg1']); } catch (e) { /* СѓР¶Рµ РЅРµС‚ */ }
     }
     try { fs.unlinkSync(path.join(AWG_DIR, 'ru.zone')); } catch (e) { /* ignore */ }
-    auditLog(req, 'Каскад удалён: ' + removed.join('; '));
+    auditLog(req, 'РљР°СЃРєР°Рґ СѓРґР°Р»С‘РЅ: ' + removed.join('; '));
     res.json({ success: true, removed });
 });
 
 app.post('/api/cascade/auto', checkAuth, requireAdmin, async (req, res) => {
     const data = req.body || {};
-    // Роль берём ИЗ МАСТЕРА, а не угадываем по конфигам: серверы часто
-    // остаются с чужими конфигами после переноса.
+    // Р РѕР»СЊ Р±РµСЂС‘Рј РР— РњРђРЎРўР•Р Рђ, Р° РЅРµ СѓРіР°РґС‹РІР°РµРј РїРѕ РєРѕРЅС„РёРіР°Рј: СЃРµСЂРІРµСЂС‹ С‡Р°СЃС‚Рѕ
+    // РѕСЃС‚Р°СЋС‚СЃСЏ СЃ С‡СѓР¶РёРјРё РєРѕРЅС„РёРіР°РјРё РїРѕСЃР»Рµ РїРµСЂРµРЅРѕСЃР°.
     const role = data.role === 'eu' ? 'eu' : 'ru';
     const version = ['3.1', '2.0', '1.5'].includes(String(data.version)) ? String(data.version) : '2.0';
     const host = String(data.peerHost || '').trim();
     const user = String(data.peerUser || '').trim();
     const pass = String(data.peerPass || '');
     const peerClient = String(data.peerClient || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || 'ru_host';
-    if (!host || !user) return res.status(400).json({ error: 'Укажите адрес и логин второй панели' });
+    if (!host || !user) return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ Р°РґСЂРµСЃ Рё Р»РѕРіРёРЅ РІС‚РѕСЂРѕР№ РїР°РЅРµР»Рё' });
     const steps = [];
     const log = (title, text) => steps.push({ title, text, at: new Date().toISOString() });
     try {
         const remote = new Panel(host, user, pass);
         const login = await remote.login();
-        if (!login.ok) throw new Error('Не удалось войти во вторую панель: ' + login.error);
-        log('Проверка второй панели', 'вход выполнен');
+        if (!login.ok) throw new Error('РќРµ СѓРґР°Р»РѕСЃСЊ РІРѕР№С‚Рё РІРѕ РІС‚РѕСЂСѓСЋ РїР°РЅРµР»СЊ: ' + login.error);
+        log('РџСЂРѕРІРµСЂРєР° РІС‚РѕСЂРѕР№ РїР°РЅРµР»Рё', 'РІС…РѕРґ РІС‹РїРѕР»РЅРµРЅ');
         await ensureAwg(remote, role === 'ru' ? 'eu' : 'ru', version, log);
 
-        // Клиент каскада создаём на ВЫХОДЕ и переносим на вход.
+        // РљР»РёРµРЅС‚ РєР°СЃРєР°РґР° СЃРѕР·РґР°С‘Рј РЅР° Р’Р«РҐРћР”Р• Рё РїРµСЂРµРЅРѕСЃРёРј РЅР° РІС…РѕРґ.
         let conf = '';
         if (role === 'ru') {
             const created = await remote.post('/api/cascade/peer', { name: peerClient });
             if (created.status !== 200 || !created.json || !created.json.conf) {
-                throw new Error('Вторая панель не создала клиента ' + peerClient + ': ' + ((created.json && created.json.error) || 'HTTP ' + created.status));
+                throw new Error('Р’С‚РѕСЂР°СЏ РїР°РЅРµР»СЊ РЅРµ СЃРѕР·РґР°Р»Р° РєР»РёРµРЅС‚Р° ' + peerClient + ': ' + ((created.json && created.json.error) || 'HTTP ' + created.status));
             }
             conf = created.json.conf;
-            log('Клиент для каскада', 'создан на выходе: ' + peerClient);
+            log('РљР»РёРµРЅС‚ РґР»СЏ РєР°СЃРєР°РґР°', 'СЃРѕР·РґР°РЅ РЅР° РІС‹С…РѕРґРµ: ' + peerClient);
         } else {
             const created = createPeerClient(peerClient);
-            if (!created) throw new Error('Не удалось создать клиента ' + peerClient + ' на этом сервере');
+            if (!created) throw new Error('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РєР»РёРµРЅС‚Р° ' + peerClient + ' РЅР° СЌС‚РѕРј СЃРµСЂРІРµСЂРµ');
             conf = created.conf;
-            log('Клиент для каскада', 'создан здесь: ' + peerClient);
+            log('РљР»РёРµРЅС‚ РґР»СЏ РєР°СЃРєР°РґР°', 'СЃРѕР·РґР°РЅ Р·РґРµСЃСЊ: ' + peerClient);
         }
 
-        // 1. Настраиваем ВЫХОД: туннель без маршрутов (клиентских сетей там нет).
+        // 1. РќР°СЃС‚СЂР°РёРІР°РµРј Р’Р«РҐРћР”: С‚СѓРЅРЅРµР»СЊ Р±РµР· РјР°СЂС€СЂСѓС‚РѕРІ (РєР»РёРµРЅС‚СЃРєРёС… СЃРµС‚РµР№ С‚Р°Рј РЅРµС‚).
         if (role === 'ru') {
             const exitSetup = await remote.post('/api/cascade/setup', { config: conf, ifaces: [], peerClient, role: 'eu' }, 300000);
             if (exitSetup.status !== 200) {
-                throw new Error('Выход не настроился: ' + ((exitSetup.json && exitSetup.json.error) || 'HTTP ' + exitSetup.status));
+                throw new Error('Р’С‹С…РѕРґ РЅРµ РЅР°СЃС‚СЂРѕРёР»СЃСЏ: ' + ((exitSetup.json && exitSetup.json.error) || 'HTTP ' + exitSetup.status));
             }
-            log('Выход', 'туннель поднят');
+            log('Р’С‹С…РѕРґ', 'С‚СѓРЅРЅРµР»СЊ РїРѕРґРЅСЏС‚');
         } else {
             const exitSetup = await localPost('/api/cascade/setup', { config: conf, ifaces: [], peerClient, role: 'eu' });
-            if (!exitSetup || exitSetup.error) throw new Error('Выход не настроился: ' + ((exitSetup && exitSetup.error) || 'ошибка'));
-            log('Выход', 'туннель поднят здесь');
+            if (!exitSetup || exitSetup.error) throw new Error('Р’С‹С…РѕРґ РЅРµ РЅР°СЃС‚СЂРѕРёР»СЃСЏ: ' + ((exitSetup && exitSetup.error) || 'РѕС€РёР±РєР°'));
+            log('Р’С‹С…РѕРґ', 'С‚СѓРЅРЅРµР»СЊ РїРѕРґРЅСЏС‚ Р·РґРµСЃСЊ');
         }
 
-        // 2. Вход: конфиг выхода + маршруты к нему.
+        // 2. Р’С…РѕРґ: РєРѕРЅС„РёРі РІС‹С…РѕРґР° + РјР°СЂС€СЂСѓС‚С‹ Рє РЅРµРјСѓ.
         const entryBody = { config: conf, ifaces: data.ifaces, extraRuNets: data.extraRuNets, peerClient, role: 'ru' };
         const entrySetup = role === 'ru'
             ? await localPost('/api/cascade/setup', entryBody)
             : await remote.post('/api/cascade/setup', entryBody, 300000);
         if (role === 'ru') {
-            if (!entrySetup || entrySetup.error) throw new Error('Вход не настроился: ' + ((entrySetup && entrySetup.error) || 'ошибка'));
-            log('Вход', 'туннель и маршруты подняты здесь');
+            if (!entrySetup || entrySetup.error) throw new Error('Р’С…РѕРґ РЅРµ РЅР°СЃС‚СЂРѕРёР»СЃСЏ: ' + ((entrySetup && entrySetup.error) || 'РѕС€РёР±РєР°'));
+            log('Р’С…РѕРґ', 'С‚СѓРЅРЅРµР»СЊ Рё РјР°СЂС€СЂСѓС‚С‹ РїРѕРґРЅСЏС‚С‹ Р·РґРµСЃСЊ');
         } else {
-            if (entrySetup.status !== 200) throw new Error('Вход не настроился: ' + ((entrySetup.json && entrySetup.json.error) || 'HTTP ' + entrySetup.status));
-            log('Вход', 'туннель и маршруты подняты на второй панели');
+            if (entrySetup.status !== 200) throw new Error('Р’С…РѕРґ РЅРµ РЅР°СЃС‚СЂРѕРёР»СЃСЏ: ' + ((entrySetup.json && entrySetup.json.error) || 'HTTP ' + entrySetup.status));
+            log('Р’С…РѕРґ', 'С‚СѓРЅРЅРµР»СЊ Рё РјР°СЂС€СЂСѓС‚С‹ РїРѕРґРЅСЏС‚С‹ РЅР° РІС‚РѕСЂРѕР№ РїР°РЅРµР»Рё');
         }
 
-        // 3. Ждём рукопожатие.
+        // 3. Р–РґС‘Рј СЂСѓРєРѕРїРѕР¶Р°С‚РёРµ.
         let handshake = null;
         for (let i = 0; i < 12; i++) {
             await new Promise(r => setTimeout(r, 2500));
@@ -8097,12 +8097,12 @@ app.post('/api/cascade/auto', checkAuth, requireAdmin, async (req, res) => {
             handshake = st.handshakeAgo;
             if (st.handshakeAgo !== null) break;
         }
-        auditLog(req, 'Каскад собран автоматически (' + role.toUpperCase() + '): ' + host);
+        auditLog(req, 'РљР°СЃРєР°Рґ СЃРѕР±СЂР°РЅ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё (' + role.toUpperCase() + '): ' + host);
         res.json({ success: true, role, steps, handshakeAgo: handshake, details: cascadeDetails() });
     } catch (e) {
-        res.status(500).json({ error: e.message || 'неизвестная ошибка', steps });
+        res.status(500).json({ error: e.message || 'РЅРµРёР·РІРµСЃС‚РЅР°СЏ РѕС€РёР±РєР°', steps });
     }
-});// Готовность каскада: роль, публичный адрес и что уже настроено.
+});// Р“РѕС‚РѕРІРЅРѕСЃС‚СЊ РєР°СЃРєР°РґР°: СЂРѕР»СЊ, РїСѓР±Р»РёС‡РЅС‹Р№ Р°РґСЂРµСЃ Рё С‡С‚Рѕ СѓР¶Рµ РЅР°СЃС‚СЂРѕРµРЅРѕ.
 app.get('/api/cascade/ready', checkAuth, async (req, res) => {
     try {
         const own = parseIni(readTextSafe(path.join(AWG_CONF_DIR, 'awg0.conf'))).Interface || {};
@@ -8120,23 +8120,23 @@ app.get('/api/cascade/ready', checkAuth, async (req, res) => {
 
 app.get('/api/cascade/config', checkAuth, (req, res) => {
     const conf = existingCascadeConf();
-    if (!conf) return res.status(404).json({ error: 'Конфиг туннеля не найден' });
+    if (!conf) return res.status(404).json({ error: 'РљРѕРЅС„РёРі С‚СѓРЅРЅРµР»СЏ РЅРµ РЅР°Р№РґРµРЅ' });
     try {
         res.json({ content: fs.readFileSync(conf, 'utf8'), file: conf });
-    } catch (e) { res.status(500).json({ error: 'Ошибка чтения' }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ' }); }
 });
 
-// Сохранение awg1.conf: перезапускаем туннель, пересобираем маршруты и,
-// если MTProto уже пущен через EU, переподключаем прокси к новому туннелю.
+// РЎРѕС…СЂР°РЅРµРЅРёРµ awg1.conf: РїРµСЂРµР·Р°РїСѓСЃРєР°РµРј С‚СѓРЅРЅРµР»СЊ, РїРµСЂРµСЃРѕР±РёСЂР°РµРј РјР°СЂС€СЂСѓС‚С‹ Рё,
+// РµСЃР»Рё MTProto СѓР¶Рµ РїСѓС‰РµРЅ С‡РµСЂРµР· EU, РїРµСЂРµРїРѕРґРєР»СЋС‡Р°РµРј РїСЂРѕРєСЃРё Рє РЅРѕРІРѕРјСѓ С‚СѓРЅРЅРµР»СЋ.
 app.post('/api/cascade/config', checkAuth, requireAdmin, async (req, res) => {
     const content = String((req.body && req.body.content) || '');
-    if (!content.trim()) return res.status(400).json({ error: 'Пустой конфиг' });
-    if (content.length > 256 * 1024) return res.status(400).json({ error: 'Конфиг слишком большой' });
-    if (!/^\s*\[Interface\]/im.test(content)) return res.status(400).json({ error: 'В конфиге нет секции [Interface]' });
-    if (!/^\s*\[Peer\]/im.test(content)) return res.status(400).json({ error: 'В конфиге нет секции [Peer]' });
+    if (!content.trim()) return res.status(400).json({ error: 'РџСѓСЃС‚РѕР№ РєРѕРЅС„РёРі' });
+    if (content.length > 256 * 1024) return res.status(400).json({ error: 'РљРѕРЅС„РёРі СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№' });
+    if (!/^\s*\[Interface\]/im.test(content)) return res.status(400).json({ error: 'Р’ РєРѕРЅС„РёРіРµ РЅРµС‚ СЃРµРєС†РёРё [Interface]' });
+    if (!/^\s*\[Peer\]/im.test(content)) return res.status(400).json({ error: 'Р’ РєРѕРЅС„РёРіРµ РЅРµС‚ СЃРµРєС†РёРё [Peer]' });
 
     const conf = existingCascadeConf();
-    if (!conf) return res.status(400).json({ error: 'Каскад не настроен — сначала постройте каскад' });
+    if (!conf) return res.status(400).json({ error: 'РљР°СЃРєР°Рґ РЅРµ РЅР°СЃС‚СЂРѕРµРЅ вЂ” СЃРЅР°С‡Р°Р»Р° РїРѕСЃС‚СЂРѕР№С‚Рµ РєР°СЃРєР°Рґ' });
     const backup = readTextSafe(conf);
     const restore = () => {
         try {
@@ -8155,12 +8155,12 @@ app.post('/api/cascade/config', checkAuth, requireAdmin, async (req, res) => {
                 'systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 12', 30000);
             restore();
             return res.status(500).json({
-                error: 'awg1 не запустился, возвращён прежний конфиг',
+                error: 'awg1 РЅРµ Р·Р°РїСѓСЃС‚РёР»СЃСЏ, РІРѕР·РІСЂР°С‰С‘РЅ РїСЂРµР¶РЅРёР№ РєРѕРЅС„РёРі',
                 output: String(why.out || '').trim().slice(0, 1200)
             });
         }
 
-        // Маршруты могли ссылаться на старый Endpoint — пересобираем.
+        // РњР°СЂС€СЂСѓС‚С‹ РјРѕРіР»Рё СЃСЃС‹Р»Р°С‚СЊСЃСЏ РЅР° СЃС‚Р°СЂС‹Р№ Endpoint вЂ” РїРµСЂРµСЃРѕР±РёСЂР°РµРј.
         let routed = false;
         let routeError = '';
         if (fs.existsSync(ROUTING_SCRIPT)) {
@@ -8169,8 +8169,8 @@ app.post('/api/cascade/config', checkAuth, requireAdmin, async (req, res) => {
             if (!routed) routeError = String(rr.out || '').slice(-800);
         }
 
-        // MTProto через EU: обновляем NAT-IP и перезапускаем прокси,
-        // чтобы он переподключился уже через новый awg1.
+        // MTProto С‡РµСЂРµР· EU: РѕР±РЅРѕРІР»СЏРµРј NAT-IP Рё РїРµСЂРµР·Р°РїСѓСЃРєР°РµРј РїСЂРѕРєСЃРё,
+        // С‡С‚РѕР±С‹ РѕРЅ РїРµСЂРµРїРѕРґРєР»СЋС‡РёР»СЃСЏ СѓР¶Рµ С‡РµСЂРµР· РЅРѕРІС‹Р№ awg1.
         let proxyReconnected = false;
         let exitIp = '';
         let proxyError = '';
@@ -8180,18 +8180,18 @@ app.post('/api/cascade/config', checkAuth, requireAdmin, async (req, res) => {
                 if (exitIp) {
                     applyProxyCascadeNatIp(exitIp);
                     for (const unit of ['telemt', 'kvguardd', 'mtproxyl']) {
-                        try { sh('systemctl', ['restart', unit]); } catch (e) { /* юнита может не быть */ }
+                        try { sh('systemctl', ['restart', unit]); } catch (e) { /* СЋРЅРёС‚Р° РјРѕР¶РµС‚ РЅРµ Р±С‹С‚СЊ */ }
                     }
                     proxyReconnected = true;
                 } else {
-                    proxyError = 'не удалось определить EU-IP через новый awg1';
+                    proxyError = 'РЅРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ EU-IP С‡РµСЂРµР· РЅРѕРІС‹Р№ awg1';
                 }
             } catch (e) {
                 proxyError = e.message || String(e);
             }
         }
 
-        auditLog(req, 'Изменён awg1.conf, туннель перезапущен' + (proxyReconnected ? ', MTProto переподключён через EU' : ''));
+        auditLog(req, 'РР·РјРµРЅС‘РЅ awg1.conf, С‚СѓРЅРЅРµР»СЊ РїРµСЂРµР·Р°РїСѓС‰РµРЅ' + (proxyReconnected ? ', MTProto РїРµСЂРµРїРѕРґРєР»СЋС‡С‘РЅ С‡РµСЂРµР· EU' : ''));
         res.json({
             success: true,
             routed,
@@ -8202,29 +8202,29 @@ app.post('/api/cascade/config', checkAuth, requireAdmin, async (req, res) => {
         });
     } catch (e) {
         restore();
-        res.status(500).json({ error: 'Не удалось сохранить awg1.conf: ' + (e.message || String(e)) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ awg1.conf: ' + (e.message || String(e)) });
     }
 });
 
-// --- Резервные серверы и настройки автопереключения ------------------------
+// --- Р РµР·РµСЂРІРЅС‹Рµ СЃРµСЂРІРµСЂС‹ Рё РЅР°СЃС‚СЂРѕР№РєРё Р°РІС‚РѕРїРµСЂРµРєР»СЋС‡РµРЅРёСЏ ------------------------
 app.post('/api/cascade/backups', checkAuth, requireAdmin, async (req, res) => {
     const body = req.body || {};
-    if (cascadeRole() !== 'ru') return res.status(400).json({ error: 'Резервирование настраивается на RU-входе' });
-    if (!existingCascadeConf()) return res.status(400).json({ error: 'Сначала постройте каскад' });
+    if (cascadeRole() !== 'ru') return res.status(400).json({ error: 'Р РµР·РµСЂРІРёСЂРѕРІР°РЅРёРµ РЅР°СЃС‚СЂР°РёРІР°РµС‚СЃСЏ РЅР° RU-РІС…РѕРґРµ' });
+    if (!existingCascadeConf()) return res.status(400).json({ error: 'РЎРЅР°С‡Р°Р»Р° РїРѕСЃС‚СЂРѕР№С‚Рµ РєР°СЃРєР°Рґ' });
     const name = String(body.name || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 40);
     const rawConfig = String(body.config || '');
-    if (!name) return res.status(400).json({ error: 'Укажите название резерва' });
-    if (!rawConfig || rawConfig.length > 256 * 1024) return res.status(400).json({ error: 'Пустой или слишком большой конфиг' });
+    if (!name) return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ РЅР°Р·РІР°РЅРёРµ СЂРµР·РµСЂРІР°' });
+    if (!rawConfig || rawConfig.length > 256 * 1024) return res.status(400).json({ error: 'РџСѓСЃС‚РѕР№ РёР»Рё СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№ РєРѕРЅС„РёРі' });
     if (!/^\s*\[Interface\]/im.test(rawConfig) || !/^\s*\[Peer\]/im.test(rawConfig)) {
-        return res.status(400).json({ error: 'Конфиг должен содержать [Interface] и [Peer]' });
+        return res.status(400).json({ error: 'РљРѕРЅС„РёРі РґРѕР»Р¶РµРЅ СЃРѕРґРµСЂР¶Р°С‚СЊ [Interface] Рё [Peer]' });
     }
     const config = prepareCascadeBackupConf(rawConfig);
     const endpoint = cascadeEndpointFromText(config);
     if (!/^[A-Za-z0-9.\-\[\]:]+:\d{1,5}$/.test(endpoint)) {
-        return res.status(400).json({ error: 'В конфиге нет корректного Endpoint' });
+        return res.status(400).json({ error: 'Р’ РєРѕРЅС„РёРіРµ РЅРµС‚ РєРѕСЂСЂРµРєС‚РЅРѕРіРѕ Endpoint' });
     }
     const list = cascadeBackupsRead();
-    if (list.length >= 8) return res.status(400).json({ error: 'Максимум 8 резервных серверов' });
+    if (list.length >= 8) return res.status(400).json({ error: 'РњР°РєСЃРёРјСѓРј 8 СЂРµР·РµСЂРІРЅС‹С… СЃРµСЂРІРµСЂРѕРІ' });
     const id = crypto.randomBytes(4).toString('hex');
     list.push({
         id,
@@ -8238,36 +8238,36 @@ app.post('/api/cascade/backups', checkAuth, requireAdmin, async (req, res) => {
     let balance = null;
     if (cascadeBalanceEnabled()) {
         try { balance = await cascadeBalanceApply(); }
-        catch (e) { return res.status(500).json({ error: 'Резерв сохранён, но выход не поднялся: ' + e.message }); }
+        catch (e) { return res.status(500).json({ error: 'Р РµР·РµСЂРІ СЃРѕС…СЂР°РЅС‘РЅ, РЅРѕ РІС‹С…РѕРґ РЅРµ РїРѕРґРЅСЏР»СЃСЏ: ' + e.message }); }
     }
-    auditLog(req, 'Каскад: добавлен резервный сервер ' + name + ' (' + endpoint + ')');
+    auditLog(req, 'РљР°СЃРєР°Рґ: РґРѕР±Р°РІР»РµРЅ СЂРµР·РµСЂРІРЅС‹Р№ СЃРµСЂРІРµСЂ ' + name + ' (' + endpoint + ')');
     res.json({ success: true, id, status: cascadeFailoverStatus(), balance });
 });
 
 app.delete('/api/cascade/backups/:id', checkAuth, requireAdmin, async (req, res) => {
     const id = String(req.params.id || '');
     const state = cascadeFailoverStateRead();
-    if (state.active === id) return res.status(400).json({ error: 'Сначала вернитесь на основной сервер' });
+    if (state.active === id) return res.status(400).json({ error: 'РЎРЅР°С‡Р°Р»Р° РІРµСЂРЅРёС‚РµСЃСЊ РЅР° РѕСЃРЅРѕРІРЅРѕР№ СЃРµСЂРІРµСЂ' });
     const list = cascadeBackupsRead();
     const index = list.findIndex(b => b.id === id);
     const next = list.filter(b => b.id !== id);
-    if (next.length === list.length) return res.status(404).json({ error: 'Резерв не найден' });
+    if (next.length === list.length) return res.status(404).json({ error: 'Р РµР·РµСЂРІ РЅРµ РЅР°Р№РґРµРЅ' });
     cascadeBackupsWrite(next);
     if (cascadeBalanceEnabled() && index >= 0) {
         const iface = 'awg' + (index + 2);
         try { sh('sudo', ['systemctl', 'stop', 'awg-quick@' + iface]); } catch (e) { /* ignore */ }
         try { sh('sudo', ['systemctl', 'disable', 'awg-quick@' + iface]); } catch (e) { /* ignore */ }
         try { await cascadeBalanceApply(); }
-        catch (e) { return res.status(500).json({ error: 'Резерв удалён, но маршруты не пересобрались: ' + e.message }); }
+        catch (e) { return res.status(500).json({ error: 'Р РµР·РµСЂРІ СѓРґР°Р»С‘РЅ, РЅРѕ РјР°СЂС€СЂСѓС‚С‹ РЅРµ РїРµСЂРµСЃРѕР±СЂР°Р»РёСЃСЊ: ' + e.message }); }
     }
-    auditLog(req, 'Каскад: удалён резервный сервер ' + id);
+    auditLog(req, 'РљР°СЃРєР°Рґ: СѓРґР°Р»С‘РЅ СЂРµР·РµСЂРІРЅС‹Р№ СЃРµСЂРІРµСЂ ' + id);
     res.json({ success: true, status: cascadeFailoverStatus() });
 });
 
 app.post('/api/cascade/failover/settings', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     const domains = cascadeHostList(body.domains);
-    if (!domains.length) return res.status(400).json({ error: 'Укажите хотя бы один зарубежный домен для проверки' });
+    if (!domains.length) return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ Р·Р°СЂСѓР±РµР¶РЅС‹Р№ РґРѕРјРµРЅ РґР»СЏ РїСЂРѕРІРµСЂРєРё' });
     const settings = cascadeFailoverSettingsWrite({
         enabled: !!body.enabled,
         domains,
@@ -8275,19 +8275,19 @@ app.post('/api/cascade/failover/settings', checkAuth, requireAdmin, (req, res) =
         timeout: body.timeout,
         failures: body.failures
     });
-    auditLog(req, 'Каскад: резервирование ' + (settings.enabled ? 'включено' : 'выключено') +
-        ' · ' + domains.join(', ') + ' · каждые ' + settings.interval + ' с');
+    auditLog(req, 'РљР°СЃРєР°Рґ: СЂРµР·РµСЂРІРёСЂРѕРІР°РЅРёРµ ' + (settings.enabled ? 'РІРєР»СЋС‡РµРЅРѕ' : 'РІС‹РєР»СЋС‡РµРЅРѕ') +
+        ' В· ' + domains.join(', ') + ' В· РєР°Р¶РґС‹Рµ ' + settings.interval + ' СЃ');
     res.json({ success: true, settings, status: cascadeFailoverStatus() });
 });
 
 app.post('/api/cascade/failover/switch', checkAuth, requireAdmin, async (req, res) => {
     try {
         const target = String((req.body && req.body.target) || '');
-        if (!target) return res.status(400).json({ error: 'Не указан резерв' });
+        if (!target) return res.status(400).json({ error: 'РќРµ СѓРєР°Р·Р°РЅ СЂРµР·РµСЂРІ' });
         const result = await switchCascadeTarget(target, req);
         res.json(result);
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось переключить каскад: ' + (e.message || String(e)) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРєР»СЋС‡РёС‚СЊ РєР°СЃРєР°Рґ: ' + (e.message || String(e)) });
     }
 });
 
@@ -8298,17 +8298,17 @@ app.post('/api/cascade/failover/check', checkAuth, requireAdmin, async (req, res
         const state = cascadeFailoverStateRead();
         state.lastCheck = Date.now();
         state.failures = check.ok ? 0 : (state.failures || 0) + 1;
-        state.lastError = check.ok ? '' : 'все проверки недоступны';
+        state.lastError = check.ok ? '' : 'РІСЃРµ РїСЂРѕРІРµСЂРєРё РЅРµРґРѕСЃС‚СѓРїРЅС‹';
         cascadeFailoverStateWrite(state);
         res.json({ ...check, settings, state });
     } catch (e) {
-        res.status(500).json({ error: 'Ошибка проверки: ' + (e.message || String(e)) });
+        res.status(500).json({ error: 'РћС€РёР±РєР° РїСЂРѕРІРµСЂРєРё: ' + (e.message || String(e)) });
     }
 });
 
 app.get('/api/cascade/balance', checkAuth, (req, res) => {
     try { res.json({ success: true, ...cascadeBalanceStatus(false) }); }
-    catch (e) { res.status(500).json({ error: e.message || 'Ошибка чтения балансировки' }); }
+    catch (e) { res.status(500).json({ error: e.message || 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ Р±Р°Р»Р°РЅСЃРёСЂРѕРІРєРё' }); }
 });
 
 app.get('/api/cascade/balance/diag', checkAuth, requireAdmin, (req, res) => {
@@ -8336,20 +8336,20 @@ app.get('/api/cascade/script', checkAuth, requireAdmin, (req, res) => {
             content: readTextSafe(ROUTING_SCRIPT).slice(0, 256 * 1024),
             error: readTextSafe('/root/awg/balance-error.log').slice(-8000)
         });
-    } catch (e) { res.status(500).json({ error: e.message || 'Ошибка чтения скрипта' }); }
+    } catch (e) { res.status(500).json({ error: e.message || 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ СЃРєСЂРёРїС‚Р°' }); }
 });
 
 app.post('/api/cascade/balance/mode', checkAuth, requireAdmin, async (req, res) => {
     const mode = String((req.body && req.body.mode) || '') === 'balance' ? 'balance' : 'classic';
     try {
         const result = mode === 'balance' ? await cascadeBalanceApply() : await cascadeBalanceDisable();
-        auditLog(req, 'Каскад: режим ' + (mode === 'balance' ? 'балансировка выходов' : 'обычный'));
+        auditLog(req, 'РљР°СЃРєР°Рґ: СЂРµР¶РёРј ' + (mode === 'balance' ? 'Р±Р°Р»Р°РЅСЃРёСЂРѕРІРєР° РІС‹С…РѕРґРѕРІ' : 'РѕР±С‹С‡РЅС‹Р№'));
         if (mode === 'balance' && result && result.method === 'bandwidth') {
             setTimeout(() => { cascadeCapacityTick(true).catch(() => {}); }, 3000).unref();
         }
         res.json({ success: true, mode, ...result });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось изменить режим: ' + (e.message || String(e)) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РёР·РјРµРЅРёС‚СЊ СЂРµР¶РёРј: ' + (e.message || String(e)) });
     }
 });
 
@@ -8361,7 +8361,7 @@ app.post('/api/cascade/balance/settings', checkAuth, requireAdmin, (req, res) =>
     state.intervalHours = Math.max(1, Math.min(168, Number(body.intervalHours) || 24));
     if (state.method !== prevMethod) state.capacityCheckedAt = 0;
     cascadeBalanceWrite(state);
-    auditLog(req, `Каскад: метод ${state.method}, интервал ${state.intervalHours} ч`);
+    auditLog(req, `РљР°СЃРєР°Рґ: РјРµС‚РѕРґ ${state.method}, РёРЅС‚РµСЂРІР°Р» ${state.intervalHours} С‡`);
     if (state.method === 'bandwidth' && state.mode === 'balance') {
         setTimeout(() => { cascadeCapacityTick(true).catch(() => {}); }, 3000).unref();
     }
@@ -8372,49 +8372,49 @@ app.post('/api/cascade/balance/client', checkAuth, requireAdmin, async (req, res
     const body = req.body || {};
     try {
         const result = await cascadeBalanceSwitchClient(body.ip, body.exitId);
-        auditLog(req, 'Каскад: клиент ' + body.ip + ' → ' + (body.exitId || 'balance'));
+        auditLog(req, 'РљР°СЃРєР°Рґ: РєР»РёРµРЅС‚ ' + body.ip + ' в†’ ' + (body.exitId || 'balance'));
         res.json({ success: true, ...result });
     } catch (e) {
-        res.status(400).json({ error: e.message || 'Не удалось изменить выход клиента' });
+        res.status(400).json({ error: e.message || 'РќРµ СѓРґР°Р»РѕСЃСЊ РёР·РјРµРЅРёС‚СЊ РІС‹С…РѕРґ РєР»РёРµРЅС‚Р°' });
     }
 });
 
-// Совместимость со старым вызовом из вкладки «Защита и Cron»
+// РЎРѕРІРјРµСЃС‚РёРјРѕСЃС‚СЊ СЃРѕ СЃС‚Р°СЂС‹Рј РІС‹Р·РѕРІРѕРј РёР· РІРєР»Р°РґРєРё В«Р—Р°С‰РёС‚Р° Рё CronВ»
 app.post('/api/tools/cascade', checkAuth, async (req, res) => {
     const { ifaces, enable } = req.body || {};
     if (enable) {
         if (!existingCascadeConf()) {
-            return res.status(400).json({ error: 'Каскад не настроен. Сначала укажите конфиг EU-сервера на вкладке «Каскад».' });
+            return res.status(400).json({ error: 'РљР°СЃРєР°Рґ РЅРµ РЅР°СЃС‚СЂРѕРµРЅ. РЎРЅР°С‡Р°Р»Р° СѓРєР°Р¶РёС‚Рµ РєРѕРЅС„РёРі EU-СЃРµСЂРІРµСЂР° РЅР° РІРєР»Р°РґРєРµ В«РљР°СЃРєР°РґВ».' });
         }
-        if (!validIfaces(ifaces)) return res.json({ error: 'Выберите существующие интерфейсы' });
+        if (!validIfaces(ifaces)) return res.json({ error: 'Р’С‹Р±РµСЂРёС‚Рµ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёРµ РёРЅС‚РµСЂС„РµР№СЃС‹' });
         try {
             const extra = parseCidrList('') || [];
             await installRouting(ifaces, extra);
-            auditLog(req, `Маршруты каскада применены: ${ifaces.join(', ')}`);
+            auditLog(req, `РњР°СЂС€СЂСѓС‚С‹ РєР°СЃРєР°РґР° РїСЂРёРјРµРЅРµРЅС‹: ${ifaces.join(', ')}`);
             res.json({ success: true });
-        } catch (e) { res.json({ error: 'Ошибка настройки каскада: ' + e.message }); }
+        } catch (e) { res.json({ error: 'РћС€РёР±РєР° РЅР°СЃС‚СЂРѕР№РєРё РєР°СЃРєР°РґР°: ' + e.message }); }
     } else {
         try { sh('sudo', ['systemctl', 'stop', 'awg-routing.timer', 'awg-routing.service']); } catch (e) { /* ignore */ }
-        auditLog(req, 'Маршруты каскада остановлены');
+        auditLog(req, 'РњР°СЂС€СЂСѓС‚С‹ РєР°СЃРєР°РґР° РѕСЃС‚Р°РЅРѕРІР»РµРЅС‹');
         res.json({ success: true });
     }
 });
 
 // ---------------------------------------------------------------------------
-// Службы
+// РЎР»СѓР¶Р±С‹
 // ---------------------------------------------------------------------------
 function serviceList() {
     const base = [
-        { name: 'AdGuardHome', desc: 'DNS-фильтр AdGuard' },
-        { name: 'nginx', desc: 'Веб-сервер / панель' },
-        { name: 'sshd', desc: 'SSH-доступ' },
-        { name: 'cron', desc: 'Планировщик задач' },
-        { name: 'awg-routing.timer', desc: 'Обновление маршрутов каскада' }
+        { name: 'AdGuardHome', desc: 'DNS-С„РёР»СЊС‚СЂ AdGuard' },
+        { name: 'nginx', desc: 'Р’РµР±-СЃРµСЂРІРµСЂ / РїР°РЅРµР»СЊ' },
+        { name: 'sshd', desc: 'SSH-РґРѕСЃС‚СѓРї' },
+        { name: 'cron', desc: 'РџР»Р°РЅРёСЂРѕРІС‰РёРє Р·Р°РґР°С‡' },
+        { name: 'awg-routing.timer', desc: 'РћР±РЅРѕРІР»РµРЅРёРµ РјР°СЂС€СЂСѓС‚РѕРІ РєР°СЃРєР°РґР°' }
     ];
-    // Показываем WARP/Xray только если они действительно установлены.
+    // РџРѕРєР°Р·С‹РІР°РµРј WARP/Xray С‚РѕР»СЊРєРѕ РµСЃР»Рё РѕРЅРё РґРµР№СЃС‚РІРёС‚РµР»СЊРЅРѕ СѓСЃС‚Р°РЅРѕРІР»РµРЅС‹.
     if (fs.existsSync('/usr/local/etc/xray/config.json') || fs.existsSync('/usr/local/bin/xray') ||
         fs.existsSync('/etc/systemd/system/xray.service') || fs.existsSync('/lib/systemd/system/xray.service')) {
-        base.push({ name: 'xray', desc: 'Xray — WARP для AdGuard' });
+        base.push({ name: 'xray', desc: 'Xray вЂ” WARP РґР»СЏ AdGuard' });
     }
     if (fs.existsSync('/usr/bin/warp-cli') || fs.existsSync('/usr/local/bin/warp-cli') ||
         fs.existsSync('/lib/systemd/system/warp-svc.service') || fs.existsSync('/etc/systemd/system/warp-svc.service')) {
@@ -8424,7 +8424,7 @@ function serviceList() {
     try { cascadeIfaces = cascadeExitList().map(e => e.iface); } catch (e) { /* ignore */ }
     for (const iface of [...new Set(['awg0', 'amn0', ...cascadeIfaces])]) {
         if (fs.existsSync(path.join(AWG_CONF_DIR, iface + '.conf'))) {
-            base.push({ name: `awg-quick@${iface}`, desc: `AmneziaWG туннель ${iface}` });
+            base.push({ name: `awg-quick@${iface}`, desc: `AmneziaWG С‚СѓРЅРЅРµР»СЊ ${iface}` });
         }
     }
     return base.map(s => {
@@ -8441,23 +8441,23 @@ function serviceList() {
 
 app.get('/api/services', checkAuth, (req, res) => {
     try { res.json(serviceList()); }
-    catch (e) { res.status(500).json({ error: 'Ошибка чтения служб' }); }
+    catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ СЃР»СѓР¶Р±' }); }
 });
 
 app.post('/api/services/restart', checkAuth, (req, res) => {
     const name = String((req.body && req.body.name) || '');
     const allowed = serviceList().map(s => s.name);
     if (!SERVICE_RE.test(name) || !allowed.includes(name)) {
-        return res.status(400).json({ error: 'Неверное имя службы' });
+        return res.status(400).json({ error: 'РќРµРІРµСЂРЅРѕРµ РёРјСЏ СЃР»СѓР¶Р±С‹' });
     }
     try {
         sh('sudo', ['systemctl', 'restart', name]);
-        auditLog(req, `Перезапуск службы ${name}`);
+        auditLog(req, `РџРµСЂРµР·Р°РїСѓСЃРє СЃР»СѓР¶Р±С‹ ${name}`);
         res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: 'Ошибка перезапуска' }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° РїРµСЂРµР·Р°РїСѓСЃРєР°' }); }
 });
 // ---------------------------------------------------------------------------
-// AdGuard Home: прокси к API (Basic-auth). Наружу отдаём только нужные вызовы.
+// AdGuard Home: РїСЂРѕРєСЃРё Рє API (Basic-auth). РќР°СЂСѓР¶Сѓ РѕС‚РґР°С‘Рј С‚РѕР»СЊРєРѕ РЅСѓР¶РЅС‹Рµ РІС‹Р·РѕРІС‹.
 // ---------------------------------------------------------------------------
 const AG_ACTIONS = {
     status: { m: 'GET', p: '/control/status' },
@@ -8504,9 +8504,9 @@ function normalizeAgUrl(u) {
 app.post('/api/adguard/proxy', checkAuth, async (req, res) => {
     const body = req.body || {};
     const base = normalizeAgUrl(body.url);
-    if (!base) return res.status(400).json({ error: 'Некорректный URL AdGuard' });
+    if (!base) return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ URL AdGuard' });
     const action = Object.prototype.hasOwnProperty.call(AG_ACTIONS, body.action) ? AG_ACTIONS[body.action] : null;
-    if (!action) return res.status(400).json({ error: 'Неизвестное действие' });
+    if (!action) return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅРѕРµ РґРµР№СЃС‚РІРёРµ' });
 
     let target = base + action.p;
     if (action.q) {
@@ -8540,15 +8540,15 @@ app.post('/api/adguard/proxy', checkAuth, async (req, res) => {
         }
         return res.json({ ok: true, httpStatus: response.status, data });
     } catch (e) {
-        return res.status(200).json({ ok: false, error: 'Не удалось подключиться к AdGuard: ' + e.message });
+        return res.status(200).json({ ok: false, error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ Рє AdGuard: ' + e.message });
     }
 });
 
-// Совместимость со старым вызовом (вкладка «Службы»)
+// РЎРѕРІРјРµСЃС‚РёРјРѕСЃС‚СЊ СЃРѕ СЃС‚Р°СЂС‹Рј РІС‹Р·РѕРІРѕРј (РІРєР»Р°РґРєР° В«РЎР»СѓР¶Р±С‹В»)
 app.post('/api/adguard/stats', checkAuth, async (req, res) => {
     const { url, user, pass } = req.body || {};
     const base = normalizeAgUrl(url);
-    if (!base) return res.status(400).json({ error: 'Укажите URL API' });
+    if (!base) return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ URL API' });
     const headers = { 'Accept': 'application/json' };
     if (user && pass) headers['Authorization'] = 'Basic ' + Buffer.from(String(user) + ':' + String(pass)).toString('base64');
     try {
@@ -8556,15 +8556,15 @@ app.post('/api/adguard/stats', checkAuth, async (req, res) => {
         if (!response.ok) throw new Error('HTTP ' + response.status);
         res.json(await response.json());
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось подключиться к AdGuard: ' + e.message });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ Рє AdGuard: ' + e.message });
     }
 });
 
-// Автопоиск AdGuard Home. Сначала пробуем порты из его конфига (http.bind_port
-// / http.address и tls.port), затем типовые. /control/status отвечает 200 без
-// пароля и 401 с паролем — оба ответа означают, что это AdGuard. Старый поиск
-// стучался только в /control/stats, который всегда требует авторизацию, и
-// поэтому «не находил» уже установленный AdGuard.
+// РђРІС‚РѕРїРѕРёСЃРє AdGuard Home. РЎРЅР°С‡Р°Р»Р° РїСЂРѕР±СѓРµРј РїРѕСЂС‚С‹ РёР· РµРіРѕ РєРѕРЅС„РёРіР° (http.bind_port
+// / http.address Рё tls.port), Р·Р°С‚РµРј С‚РёРїРѕРІС‹Рµ. /control/status РѕС‚РІРµС‡Р°РµС‚ 200 Р±РµР·
+// РїР°СЂРѕР»СЏ Рё 401 СЃ РїР°СЂРѕР»РµРј вЂ” РѕР±Р° РѕС‚РІРµС‚Р° РѕР·РЅР°С‡Р°СЋС‚, С‡С‚Рѕ СЌС‚Рѕ AdGuard. РЎС‚Р°СЂС‹Р№ РїРѕРёСЃРє
+// СЃС‚СѓС‡Р°Р»СЃСЏ С‚РѕР»СЊРєРѕ РІ /control/stats, РєРѕС‚РѕСЂС‹Р№ РІСЃРµРіРґР° С‚СЂРµР±СѓРµС‚ Р°РІС‚РѕСЂРёР·Р°С†РёСЋ, Рё
+// РїРѕСЌС‚РѕРјСѓ В«РЅРµ РЅР°С…РѕРґРёР»В» СѓР¶Рµ СѓСЃС‚Р°РЅРѕРІР»РµРЅРЅС‹Р№ AdGuard.
 app.get('/api/adguard/autodetect', checkAuth, async (req, res) => {
     const info = adguardInfo();
     const fromConfig = [];
@@ -8595,7 +8595,7 @@ app.get('/api/adguard/autodetect', checkAuth, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// WARP + Xray для AdGuard (опционально)
+// WARP + Xray РґР»СЏ AdGuard (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ)
 // ---------------------------------------------------------------------------
 app.get('/api/warp/status', checkAuth, (req, res) => {
     const cfg = warpConfig();
@@ -8617,13 +8617,13 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
             selectedServices: selected,
             services: warpCatalog().map(s => ({ ...s, selected: routes[s.id] === 'warp', route: routes[s.id] })),
             checks: [
-                { id: 'warp', title: 'WARP установлен', ok: false, detail: 'демо-режим' },
-                { id: 'connected', title: 'WARP подключён', ok: false, detail: 'демо-режим' },
-                { id: 'xray', title: 'Xray активен', ok: false, detail: 'демо-режим' },
-                { id: 'routing', title: 'Маршрутизация Xray', ok: false, detail: 'демо-режим' },
-                { id: 'port', title: 'Порт 443', ok: false, detail: 'демо-режим' },
-                { id: 'socks', title: 'SOCKS5 WARP', ok: false, detail: 'демо-режим' },
-                { id: 'services', title: 'Сервисы выбраны', ok: selectedDomains.length > 0, detail: `${selected.length} сервисов` }
+                { id: 'warp', title: 'WARP СѓСЃС‚Р°РЅРѕРІР»РµРЅ', ok: false, detail: 'РґРµРјРѕ-СЂРµР¶РёРј' },
+                { id: 'connected', title: 'WARP РїРѕРґРєР»СЋС‡С‘РЅ', ok: false, detail: 'РґРµРјРѕ-СЂРµР¶РёРј' },
+                { id: 'xray', title: 'Xray Р°РєС‚РёРІРµРЅ', ok: false, detail: 'РґРµРјРѕ-СЂРµР¶РёРј' },
+                { id: 'routing', title: 'РњР°СЂС€СЂСѓС‚РёР·Р°С†РёСЏ Xray', ok: false, detail: 'РґРµРјРѕ-СЂРµР¶РёРј' },
+                { id: 'port', title: 'РџРѕСЂС‚ 443', ok: false, detail: 'РґРµРјРѕ-СЂРµР¶РёРј' },
+                { id: 'socks', title: 'SOCKS5 WARP', ok: false, detail: 'РґРµРјРѕ-СЂРµР¶РёРј' },
+                { id: 'services', title: 'РЎРµСЂРІРёСЃС‹ РІС‹Р±СЂР°РЅС‹', ok: selectedDomains.length > 0, detail: `${selected.length} СЃРµСЂРІРёСЃРѕРІ` }
             ],
             adguard,
             testMode: true
@@ -8651,8 +8651,8 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
         ? (hasWarpOut && !hasRouting)
         : (hasWarpOut && hasRouting && hasDirectRoute && defaultDirect);
     const routingDetail = cfg.mode === 'v1'
-        ? 'весь трафик через WARP (первая инструкция)'
-        : 'Google и остальное direct, AI через WARP (вторая инструкция)';
+        ? 'РІРµСЃСЊ С‚СЂР°С„РёРє С‡РµСЂРµР· WARP (РїРµСЂРІР°СЏ РёРЅСЃС‚СЂСѓРєС†РёСЏ)'
+        : 'Google Рё РѕСЃС‚Р°Р»СЊРЅРѕРµ direct, AI С‡РµСЂРµР· WARP (РІС‚РѕСЂР°СЏ РёРЅСЃС‚СЂСѓРєС†РёСЏ)';
     const portListening = xrayActive && new RegExp(`:${cfg.listenPort}\\b`).test(shTry('ss', ['-ltn'], { timeout: 8000 }));
     let socksOk = false;
     if (warpActive && connected) {
@@ -8660,14 +8660,14 @@ app.get('/api/warp/status', checkAuth, (req, res) => {
         socksOk = IPV4_RE.test(out);
     }
     const checks = [
-        { id: 'warp', title: 'WARP установлен', ok: !!(cfg.installed || warpActive), detail: cfg.installed ? 'пакет установлен' : warpActive ? 'служба запущена' : 'не установлен' },
-        { id: 'connected', title: 'WARP подключён', ok: connected, detail: connected ? 'Connected' : 'нет соединения' },
-        { id: 'xray', title: 'Xray активен', ok: xrayActive, detail: xrayActive ? 'active' : 'inactive' },
-        { id: 'xray-procs', title: 'Процессы Xray', ok: xrayProcesses <= 1, detail: xrayProcesses + ' ' + (xrayProcesses === 1 ? 'процесс' : 'процессов') + (xrayProcesses > 1 ? ' — есть дубли' : '') },
-        { id: 'routing', title: 'Маршрутизация Xray', ok: routingOk, detail: routingOk ? routingDetail : 'конфиг не совпадает с выбранным вариантом' },
-        { id: 'port', title: `Порт ${cfg.listenPort}`, ok: !!portListening, detail: portListening ? `слушает Xray` : 'не слушается' },
-        { id: 'socks', title: 'SOCKS5 WARP', ok: socksOk, detail: socksOk ? `127.0.0.1:${cfg.socksPort} отвечает` : 'проверка не прошла' },
-        { id: 'services', title: 'Сервисы выбраны', ok: selectedDomains.length > 0, detail: `${selected.length} сервисов` }
+        { id: 'warp', title: 'WARP СѓСЃС‚Р°РЅРѕРІР»РµРЅ', ok: !!(cfg.installed || warpActive), detail: cfg.installed ? 'РїР°РєРµС‚ СѓСЃС‚Р°РЅРѕРІР»РµРЅ' : warpActive ? 'СЃР»СѓР¶Р±Р° Р·Р°РїСѓС‰РµРЅР°' : 'РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ' },
+        { id: 'connected', title: 'WARP РїРѕРґРєР»СЋС‡С‘РЅ', ok: connected, detail: connected ? 'Connected' : 'РЅРµС‚ СЃРѕРµРґРёРЅРµРЅРёСЏ' },
+        { id: 'xray', title: 'Xray Р°РєС‚РёРІРµРЅ', ok: xrayActive, detail: xrayActive ? 'active' : 'inactive' },
+        { id: 'xray-procs', title: 'РџСЂРѕС†РµСЃСЃС‹ Xray', ok: xrayProcesses <= 1, detail: xrayProcesses + ' ' + (xrayProcesses === 1 ? 'РїСЂРѕС†РµСЃСЃ' : 'РїСЂРѕС†РµСЃСЃРѕРІ') + (xrayProcesses > 1 ? ' вЂ” РµСЃС‚СЊ РґСѓР±Р»Рё' : '') },
+        { id: 'routing', title: 'РњР°СЂС€СЂСѓС‚РёР·Р°С†РёСЏ Xray', ok: routingOk, detail: routingOk ? routingDetail : 'РєРѕРЅС„РёРі РЅРµ СЃРѕРІРїР°РґР°РµС‚ СЃ РІС‹Р±СЂР°РЅРЅС‹Рј РІР°СЂРёР°РЅС‚РѕРј' },
+        { id: 'port', title: `РџРѕСЂС‚ ${cfg.listenPort}`, ok: !!portListening, detail: portListening ? `СЃР»СѓС€Р°РµС‚ Xray` : 'РЅРµ СЃР»СѓС€Р°РµС‚СЃСЏ' },
+        { id: 'socks', title: 'SOCKS5 WARP', ok: socksOk, detail: socksOk ? `127.0.0.1:${cfg.socksPort} РѕС‚РІРµС‡Р°РµС‚` : 'РїСЂРѕРІРµСЂРєР° РЅРµ РїСЂРѕС€Р»Р°' },
+        { id: 'services', title: 'РЎРµСЂРІРёСЃС‹ РІС‹Р±СЂР°РЅС‹', ok: selectedDomains.length > 0, detail: `${selected.length} СЃРµСЂРІРёСЃРѕРІ` }
     ];
 
     res.json({
@@ -8740,9 +8740,9 @@ app.get('/api/warp/test', checkAuth, requireAdmin, (req, res) => {
 app.get('/api/warp/config', checkAuth, requireAdmin, (req, res) => {
     const file = '/usr/local/etc/xray/config.json';
     const text = readTextSafe(file);
-    if (!text) return res.status(404).json({ error: 'Конфиг Xray не найден' });
+    if (!text) return res.status(404).json({ error: 'РљРѕРЅС„РёРі Xray РЅРµ РЅР°Р№РґРµРЅ' });
     let cfg;
-    try { cfg = JSON.parse(text); } catch (e) { return res.status(500).json({ error: 'Конфиг Xray повреждён' }); }
+    try { cfg = JSON.parse(text); } catch (e) { return res.status(500).json({ error: 'РљРѕРЅС„РёРі Xray РїРѕРІСЂРµР¶РґС‘РЅ' }); }
     const mask = (value, key = '') => {
         if (Array.isArray(value)) return value.map(v => mask(v, key));
         if (value && typeof value === 'object') {
@@ -8773,7 +8773,7 @@ app.post('/api/warp/services', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     const ids = Array.isArray(body.services) ? body.services : [];
     const selected = writeWarpServiceIds(ids);
-    auditLog(req, `WARP: выбраны сервисы ${selected.join(', ') || '—'}`);
+    auditLog(req, `WARP: РІС‹Р±СЂР°РЅС‹ СЃРµСЂРІРёСЃС‹ ${selected.join(', ') || 'вЂ”'}`);
     res.json({ success: true, selected, domains: warpSelectedDomains() });
 });
 
@@ -8789,7 +8789,7 @@ app.get('/api/warp/routes', checkAuth, (req, res) => {
 app.post('/api/warp/routes', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     const routes = writeWarpRoutes(body.routes || {});
-    auditLog(req, 'WARP: маршруты сервисов обновлены');
+    auditLog(req, 'WARP: РјР°СЂС€СЂСѓС‚С‹ СЃРµСЂРІРёСЃРѕРІ РѕР±РЅРѕРІР»РµРЅС‹');
     res.json({
         success: true,
         routes,
@@ -8801,23 +8801,23 @@ app.post('/api/warp/routes', checkAuth, requireAdmin, (req, res) => {
 app.post('/api/warp/custom', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     const label = String(body.label || '').trim().slice(0, 80);
-    if (!label) return res.status(400).json({ error: 'Укажите название сервиса' });
+    if (!label) return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ РЅР°Р·РІР°РЅРёРµ СЃРµСЂРІРёСЃР°' });
     const domains = normalizeWarpDomains(String(body.domains || '').split(/[\s,;]+/));
-    if (!domains.length) return res.status(400).json({ error: 'Укажите хотя бы один домен' });
-    if (domains.length > 200) return res.status(400).json({ error: 'Слишком много доменов (максимум 200)' });
+    if (!domains.length) return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ РґРѕРјРµРЅ' });
+    if (domains.length > 200) return res.status(400).json({ error: 'РЎР»РёС€РєРѕРј РјРЅРѕРіРѕ РґРѕРјРµРЅРѕРІ (РјР°РєСЃРёРјСѓРј 200)' });
     let raw = {};
     try { raw = JSON.parse(fs.readFileSync(WARP_ROUTES_FILE, 'utf8').replace(/^\uFEFF/, '')); } catch (e) { raw = {}; }
     const custom = Array.isArray(raw.custom) ? raw.custom : [];
     let id = String(body.id || '').trim();
     if (id && !id.startsWith('custom-')) {
         const base = WARP_SERVICE_CATALOG.find(s => s.id === id);
-        if (!base) return res.status(404).json({ error: 'Сервис не найден' });
+        if (!base) return res.status(404).json({ error: 'РЎРµСЂРІРёСЃ РЅРµ РЅР°Р№РґРµРЅ' });
         const overrides = warpOverrides();
         overrides[id] = { label, domains };
         const routes = warpRoutes();
         if (!routes[id]) routes[id] = 'direct';
         writeJson(WARP_ROUTES_FILE, { routes, custom: warpCustomCatalog().map(c => ({ id: c.id, label: c.label, domains: c.domains })), overrides, updatedAt: new Date().toISOString() }, 0o600);
-        auditLog(req, `WARP: изменён сервис ${label} (${domains.length} доменов)`);
+        auditLog(req, `WARP: РёР·РјРµРЅС‘РЅ СЃРµСЂРІРёСЃ ${label} (${domains.length} РґРѕРјРµРЅРѕРІ)`);
         return res.json({ success: true, id, label, domains, overridden: true });
     }
     if (!id) {
@@ -8826,38 +8826,38 @@ app.post('/api/warp/custom', checkAuth, requireAdmin, (req, res) => {
         let n = 2;
         while (custom.some(c => c.id === id)) id = base + '-' + n++;
     }
-    if (!/^custom-[a-z0-9-]{1,60}$/.test(id)) return res.status(400).json({ error: 'Некорректный идентификатор сервиса' });
+    if (!/^custom-[a-z0-9-]{1,60}$/.test(id)) return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ СЃРµСЂРІРёСЃР°' });
     const found = custom.find(c => c.id === id);
     if (found) { found.label = label; found.domains = domains; }
     else custom.push({ id, label, domains });
     const routes = warpRoutes();
     if (!routes[id]) routes[id] = 'direct';
     writeJson(WARP_ROUTES_FILE, { routes, custom, overrides: warpOverrides(), updatedAt: new Date().toISOString() }, 0o600);
-    auditLog(req, `WARP: свой сервис ${label} (${domains.length} доменов)`);
+    auditLog(req, `WARP: СЃРІРѕР№ СЃРµСЂРІРёСЃ ${label} (${domains.length} РґРѕРјРµРЅРѕРІ)`);
     res.json({ success: true, id, label, domains });
 });
 
 app.delete('/api/warp/custom/:id', checkAuth, requireAdmin, (req, res) => {
     const id = String(req.params.id || '');
-    if (!/^custom-[a-z0-9-]{1,60}$/.test(id)) return res.status(400).json({ error: 'Некорректный идентификатор сервиса' });
+    if (!/^custom-[a-z0-9-]{1,60}$/.test(id)) return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ СЃРµСЂРІРёСЃР°' });
     let raw = {};
     try { raw = JSON.parse(fs.readFileSync(WARP_ROUTES_FILE, 'utf8').replace(/^\uFEFF/, '')); } catch (e) { raw = {}; }
     const custom = (Array.isArray(raw.custom) ? raw.custom : []).filter(c => c.id !== id);
     const routes = warpRoutes();
     delete routes[id];
     writeJson(WARP_ROUTES_FILE, { routes, custom, overrides: warpOverrides(), updatedAt: new Date().toISOString() }, 0o600);
-    auditLog(req, `WARP: удалён свой сервис ${id}`);
+    auditLog(req, `WARP: СѓРґР°Р»С‘РЅ СЃРІРѕР№ СЃРµСЂРІРёСЃ ${id}`);
     res.json({ success: true });
 });
 
 app.delete('/api/warp/override/:id', checkAuth, requireAdmin, (req, res) => {
     const id = String(req.params.id || '');
-    if (!WARP_SERVICE_CATALOG.some(s => s.id === id)) return res.status(404).json({ error: 'Сервис не найден' });
+    if (!WARP_SERVICE_CATALOG.some(s => s.id === id)) return res.status(404).json({ error: 'РЎРµСЂРІРёСЃ РЅРµ РЅР°Р№РґРµРЅ' });
     const overrides = warpOverrides();
     delete overrides[id];
     const routes = warpRoutes();
     writeJson(WARP_ROUTES_FILE, { routes, custom: warpCustomCatalog().map(c => ({ id: c.id, label: c.label, domains: c.domains })), overrides, updatedAt: new Date().toISOString() }, 0o600);
-    auditLog(req, `WARP: сброшен сервис ${id}`);
+    auditLog(req, `WARP: СЃР±СЂРѕС€РµРЅ СЃРµСЂРІРёСЃ ${id}`);
     res.json({ success: true });
 });
 
@@ -8867,7 +8867,7 @@ app.get('/api/warp/instructions', checkAuth, (req, res) => {
     const routes = warpRoutes();
     const selectedDomains = warpSelectedDomains();
     const allDomains = warpDomainList();
-    const publicIp = rustdeskPublicIp() || 'IP_СЕРВЕРА';
+    const publicIp = rustdeskPublicIp() || 'IP_РЎР•Р Р’Р•Р Рђ';
     const rule = d => `||${d}^$dnsrewrite=NOERROR;A;${publicIp}`;
     const selectedRules = selectedDomains.map(rule).join('\n');
     const allRules = allDomains.map(rule).join('\n');
@@ -8885,7 +8885,7 @@ app.get('/api/warp/instructions', checkAuth, (req, res) => {
     const serviceNames = warpCatalog()
         .filter(s => selected.includes(s.id))
         .map(s => s.label)
-        .join(', ') || 'не выбраны';
+        .join(', ') || 'РЅРµ РІС‹Р±СЂР°РЅС‹';
     const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const listenLine = cfg.listenIp && cfg.listenIp !== '0.0.0.0'
         ? `      "listen": "${cfg.listenIp}",\n`
@@ -8989,7 +8989,7 @@ ${listenLine}      "port": ${cfg.listenPort},
 
     res.type('html').send(`<!DOCTYPE html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WARP + Xray + AdGuard — инструкции</title>
+<title>WARP + Xray + AdGuard вЂ” РёРЅСЃС‚СЂСѓРєС†РёРё</title>
 <style>
 body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0d1117;color:#c9d1d9;margin:0;padding:20px;line-height:1.55}
 .card{max-width:860px;margin:0 auto;background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px}
@@ -9002,27 +9002,27 @@ table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12px}td,th{bord
 details{margin:10px 0;border:1px solid #30363d;border-radius:8px;padding:10px}summary{cursor:pointer;color:#e6edf3;font-size:13px}
 </style></head><body><div class="card">
 <h1>WARP + Xray + AdGuard</h1>
-<p class="muted">Две инструкции: базовая (вариант 1) и с разделением Google/AI (вариант 2). Панель настраивает WARP и Xray, а правила AdGuard вы копируете вручную.</p>
+<p class="muted">Р”РІРµ РёРЅСЃС‚СЂСѓРєС†РёРё: Р±Р°Р·РѕРІР°СЏ (РІР°СЂРёР°РЅС‚ 1) Рё СЃ СЂР°Р·РґРµР»РµРЅРёРµРј Google/AI (РІР°СЂРёР°РЅС‚ 2). РџР°РЅРµР»СЊ РЅР°СЃС‚СЂР°РёРІР°РµС‚ WARP Рё Xray, Р° РїСЂР°РІРёР»Р° AdGuard РІС‹ РєРѕРїРёСЂСѓРµС‚Рµ РІСЂСѓС‡РЅСѓСЋ.</p>
 
-<h2>Зачем это нужно</h2>
-<p>Провайдер блокирует часть зарубежных сервисов. На VPS поднимается Xray, который принимает TLS на порту ${esc(cfg.listenPort)} и по SNI понимает, куда идёт запрос. WARP работает как локальный SOCKS5-прокси <code>127.0.0.1:${esc(cfg.socksPort)}</code>. AdGuard подменяет A-записи выбранных сервисов на публичный IP сервера, поэтому клиенты с DoH AdGuard попадают в Xray.</p>
+<h2>Р—Р°С‡РµРј СЌС‚Рѕ РЅСѓР¶РЅРѕ</h2>
+<p>РџСЂРѕРІР°Р№РґРµСЂ Р±Р»РѕРєРёСЂСѓРµС‚ С‡Р°СЃС‚СЊ Р·Р°СЂСѓР±РµР¶РЅС‹С… СЃРµСЂРІРёСЃРѕРІ. РќР° VPS РїРѕРґРЅРёРјР°РµС‚СЃСЏ Xray, РєРѕС‚РѕСЂС‹Р№ РїСЂРёРЅРёРјР°РµС‚ TLS РЅР° РїРѕСЂС‚Сѓ ${esc(cfg.listenPort)} Рё РїРѕ SNI РїРѕРЅРёРјР°РµС‚, РєСѓРґР° РёРґС‘С‚ Р·Р°РїСЂРѕСЃ. WARP СЂР°Р±РѕС‚Р°РµС‚ РєР°Рє Р»РѕРєР°Р»СЊРЅС‹Р№ SOCKS5-РїСЂРѕРєСЃРё <code>127.0.0.1:${esc(cfg.socksPort)}</code>. AdGuard РїРѕРґРјРµРЅСЏРµС‚ A-Р·Р°РїРёСЃРё РІС‹Р±СЂР°РЅРЅС‹С… СЃРµСЂРІРёСЃРѕРІ РЅР° РїСѓР±Р»РёС‡РЅС‹Р№ IP СЃРµСЂРІРµСЂР°, РїРѕСЌС‚РѕРјСѓ РєР»РёРµРЅС‚С‹ СЃ DoH AdGuard РїРѕРїР°РґР°СЋС‚ РІ Xray.</p>
 
-<div class="warn"><b>Правила AdGuard панель не записывает.</b> Скопируйте готовый список из раздела «Правила AdGuard» ниже в AdGuard Home → Filters → Custom filtering rules. Так вы контролируете, какие сервисы подменяются, и не зависите от пароля AdGuard.</div>
+<div class="warn"><b>РџСЂР°РІРёР»Р° AdGuard РїР°РЅРµР»СЊ РЅРµ Р·Р°РїРёСЃС‹РІР°РµС‚.</b> РЎРєРѕРїРёСЂСѓР№С‚Рµ РіРѕС‚РѕРІС‹Р№ СЃРїРёСЃРѕРє РёР· СЂР°Р·РґРµР»Р° В«РџСЂР°РІРёР»Р° AdGuardВ» РЅРёР¶Рµ РІ AdGuard Home в†’ Filters в†’ Custom filtering rules. РўР°Рє РІС‹ РєРѕРЅС‚СЂРѕР»РёСЂСѓРµС‚Рµ, РєР°РєРёРµ СЃРµСЂРІРёСЃС‹ РїРѕРґРјРµРЅСЏСЋС‚СЃСЏ, Рё РЅРµ Р·Р°РІРёСЃРёС‚Рµ РѕС‚ РїР°СЂРѕР»СЏ AdGuard.</div>
 
-<h2>Как это работает</h2>
-<pre>Клиент (DoH AdGuard)
-   │  A-запись выбранного сервиса = ${esc(publicIp)}
-   ▼
+<h2>РљР°Рє СЌС‚Рѕ СЂР°Р±РѕС‚Р°РµС‚</h2>
+<pre>РљР»РёРµРЅС‚ (DoH AdGuard)
+   в”‚  A-Р·Р°РїРёСЃСЊ РІС‹Р±СЂР°РЅРЅРѕРіРѕ СЃРµСЂРІРёСЃР° = ${esc(publicIp)}
+   в–ј
 VPS :${esc(cfg.listenPort)}  Xray dokodemo-door + sniffing TLS (SNI)
-   ├── вариант 1: весь трафик → WARP
-   └── вариант 2: Google → direct (IP VPS), AI → WARP
-                         │
-                         ▼
+   в”њв”Ђв”Ђ РІР°СЂРёР°РЅС‚ 1: РІРµСЃСЊ С‚СЂР°С„РёРє в†’ WARP
+   в””в”Ђв”Ђ РІР°СЂРёР°РЅС‚ 2: Google в†’ direct (IP VPS), AI в†’ WARP
+                         в”‚
+                         в–ј
               Cloudflare WARP SOCKS5 127.0.0.1:${esc(cfg.socksPort)}</pre>
 
-<h2>Вариант 1 — первая инструкция: всё через WARP</h2>
-<p>Подходит, когда нужно просто разблокировать зарубежные сервисы. WARP и Xray ставятся с нуля, Xray отправляет весь трафик в WARP. Google тоже идёт через WARP.</p>
-<h3>1. Установка WARP</h3>
+<h2>Р’Р°СЂРёР°РЅС‚ 1 вЂ” РїРµСЂРІР°СЏ РёРЅСЃС‚СЂСѓРєС†РёСЏ: РІСЃС‘ С‡РµСЂРµР· WARP</h2>
+<p>РџРѕРґС…РѕРґРёС‚, РєРѕРіРґР° РЅСѓР¶РЅРѕ РїСЂРѕСЃС‚Рѕ СЂР°Р·Р±Р»РѕРєРёСЂРѕРІР°С‚СЊ Р·Р°СЂСѓР±РµР¶РЅС‹Рµ СЃРµСЂРІРёСЃС‹. WARP Рё Xray СЃС‚Р°РІСЏС‚СЃСЏ СЃ РЅСѓР»СЏ, Xray РѕС‚РїСЂР°РІР»СЏРµС‚ РІРµСЃСЊ С‚СЂР°С„РёРє РІ WARP. Google С‚РѕР¶Рµ РёРґС‘С‚ С‡РµСЂРµР· WARP.</p>
+<h3>1. РЈСЃС‚Р°РЅРѕРІРєР° WARP</h3>
 <pre>curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
 echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" > /etc/apt/sources.list.d/cloudflare-client.list
 apt update && apt install -y cloudflare-warp
@@ -9032,88 +9032,88 @@ warp-cli mode proxy
 warp-cli proxy port ${esc(cfg.socksPort)}
 warp-cli connect
 curl -x socks5h://127.0.0.1:${esc(cfg.socksPort)} https://ipinfo.io/json</pre>
-<p>В ответе <code>ipinfo.io</code> должен быть IP Cloudflare (например, <code>104.28.x.x</code>), а не IP сервера.</p>
-<h3>2. Установка Xray</h3>
+<p>Р’ РѕС‚РІРµС‚Рµ <code>ipinfo.io</code> РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ IP Cloudflare (РЅР°РїСЂРёРјРµСЂ, <code>104.28.x.x</code>), Р° РЅРµ IP СЃРµСЂРІРµСЂР°.</p>
+<h3>2. РЈСЃС‚Р°РЅРѕРІРєР° Xray</h3>
 <pre>bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install</pre>
-<h3>3. Конфиг Xray</h3>
+<h3>3. РљРѕРЅС„РёРі Xray</h3>
 <pre>nano /usr/local/etc/xray/config.json</pre>
 <pre>${esc(v1Config)}</pre>
-<p>В этом конфиге нет <code>routing</code>: первый outbound — <code>warp</code>, поэтому весь трафик идёт через Cloudflare WARP.</p>
-<h3>4. Запуск и проверка</h3>
+<p>Р’ СЌС‚РѕРј РєРѕРЅС„РёРіРµ РЅРµС‚ <code>routing</code>: РїРµСЂРІС‹Р№ outbound вЂ” <code>warp</code>, РїРѕСЌС‚РѕРјСѓ РІРµСЃСЊ С‚СЂР°С„РёРє РёРґС‘С‚ С‡РµСЂРµР· Cloudflare WARP.</p>
+<h3>4. Р—Р°РїСѓСЃРє Рё РїСЂРѕРІРµСЂРєР°</h3>
 <pre>systemctl restart xray
 systemctl status xray --no-pager
 curl -s https://ipinfo.io/json
 curl -s "https://www.google.com/search?q=test&amp;hl=en" | grep -o '&lt;html lang="[^"]*"'</pre>
 
-<h2>Вариант 2 — вторая инструкция: Google напрямую, AI через WARP</h2>
-<p>Подходит, если Google/Gemini должны видеть французский IP VPS, а AI-сервисы — выходить через Cloudflare WARP. WARP и Xray можно не переустанавливать: панель обновит конфиг Xray.</p>
-<h3>1. Проверка WARP</h3>
+<h2>Р’Р°СЂРёР°РЅС‚ 2 вЂ” РІС‚РѕСЂР°СЏ РёРЅСЃС‚СЂСѓРєС†РёСЏ: Google РЅР°РїСЂСЏРјСѓСЋ, AI С‡РµСЂРµР· WARP</h2>
+<p>РџРѕРґС…РѕРґРёС‚, РµСЃР»Рё Google/Gemini РґРѕР»Р¶РЅС‹ РІРёРґРµС‚СЊ С„СЂР°РЅС†СѓР·СЃРєРёР№ IP VPS, Р° AI-СЃРµСЂРІРёСЃС‹ вЂ” РІС‹С…РѕРґРёС‚СЊ С‡РµСЂРµР· Cloudflare WARP. WARP Рё Xray РјРѕР¶РЅРѕ РЅРµ РїРµСЂРµСѓСЃС‚Р°РЅР°РІР»РёРІР°С‚СЊ: РїР°РЅРµР»СЊ РѕР±РЅРѕРІРёС‚ РєРѕРЅС„РёРі Xray.</p>
+<h3>1. РџСЂРѕРІРµСЂРєР° WARP</h3>
 <pre>warp-cli status
 warp-cli settings | grep -i mode
 curl -s -x socks5h://127.0.0.1:${esc(cfg.socksPort)} https://ipinfo.io/json</pre>
-<p>Ожидаемо: <code>Connected</code>, режим <code>proxy</code>, IP Cloudflare.</p>
-<h3>2. Конфиг Xray</h3>
+<p>РћР¶РёРґР°РµРјРѕ: <code>Connected</code>, СЂРµР¶РёРј <code>proxy</code>, IP Cloudflare.</p>
+<h3>2. РљРѕРЅС„РёРі Xray</h3>
 <pre>cp /usr/local/etc/xray/config.json /usr/local/etc/xray/config.json.bak.$(date +%Y%m%d-%H%M%S)
 nano /usr/local/etc/xray/config.json</pre>
 <pre>${esc(v2Config)}</pre>
-<p>Правила: Google/Gemini → <code>direct</code>, AI-сервисы → <code>warp</code>, всё остальное → <code>direct</code>.</p>
-<h3>3. Запуск и проверка</h3>
+<p>РџСЂР°РІРёР»Р°: Google/Gemini в†’ <code>direct</code>, AI-СЃРµСЂРІРёСЃС‹ в†’ <code>warp</code>, РІСЃС‘ РѕСЃС‚Р°Р»СЊРЅРѕРµ в†’ <code>direct</code>.</p>
+<h3>3. Р—Р°РїСѓСЃРє Рё РїСЂРѕРІРµСЂРєР°</h3>
 <pre>/usr/local/bin/xray -test -config /usr/local/etc/xray/config.json
 systemctl restart xray
 systemctl status xray --no-pager
 curl -s "https://www.google.com/search?q=test&amp;hl=en" | grep -o '&lt;html lang="[^"]*"'</pre>
-<p>Ожидаемо: <code>lang="en-FR"</code>. Если <code>en-RU</code> — Google идёт не через <code>direct</code>, проверьте <code>routing.rules</code>.</p>
+<p>РћР¶РёРґР°РµРјРѕ: <code>lang="en-FR"</code>. Р•СЃР»Рё <code>en-RU</code> вЂ” Google РёРґС‘С‚ РЅРµ С‡РµСЂРµР· <code>direct</code>, РїСЂРѕРІРµСЂСЊС‚Рµ <code>routing.rules</code>.</p>
 
-<h2>Правила AdGuard</h2>
-<p>Откройте AdGuard Home → <b>Filters</b> → <b>Custom filtering rules</b> и вставьте правила. Панель их не записывает: так вы можете проверить список и не хранить пароль AdGuard.</p>
-<p class="warn">Если WARP/Xray установлен на другом сервере (например, EU), замените IP в правилах на публичный IP того сервера. Ниже указан IP текущего сервера — это правильно только при локальной установке.</p>
-<p><b>Выбранные сервисы:</b> ${esc(serviceNames)}. Правил: <b>${selectedDomains.length}</b>. Публичный IP для подмены: <code>${esc(publicIp)}</code>.</p>
+<h2>РџСЂР°РІРёР»Р° AdGuard</h2>
+<p>РћС‚РєСЂРѕР№С‚Рµ AdGuard Home в†’ <b>Filters</b> в†’ <b>Custom filtering rules</b> Рё РІСЃС‚Р°РІСЊС‚Рµ РїСЂР°РІРёР»Р°. РџР°РЅРµР»СЊ РёС… РЅРµ Р·Р°РїРёСЃС‹РІР°РµС‚: С‚Р°Рє РІС‹ РјРѕР¶РµС‚Рµ РїСЂРѕРІРµСЂРёС‚СЊ СЃРїРёСЃРѕРє Рё РЅРµ С…СЂР°РЅРёС‚СЊ РїР°СЂРѕР»СЊ AdGuard.</p>
+<p class="warn">Р•СЃР»Рё WARP/Xray СѓСЃС‚Р°РЅРѕРІР»РµРЅ РЅР° РґСЂСѓРіРѕРј СЃРµСЂРІРµСЂРµ (РЅР°РїСЂРёРјРµСЂ, EU), Р·Р°РјРµРЅРёС‚Рµ IP РІ РїСЂР°РІРёР»Р°С… РЅР° РїСѓР±Р»РёС‡РЅС‹Р№ IP С‚РѕРіРѕ СЃРµСЂРІРµСЂР°. РќРёР¶Рµ СѓРєР°Р·Р°РЅ IP С‚РµРєСѓС‰РµРіРѕ СЃРµСЂРІРµСЂР° вЂ” СЌС‚Рѕ РїСЂР°РІРёР»СЊРЅРѕ С‚РѕР»СЊРєРѕ РїСЂРё Р»РѕРєР°Р»СЊРЅРѕР№ СѓСЃС‚Р°РЅРѕРІРєРµ.</p>
+<p><b>Р’С‹Р±СЂР°РЅРЅС‹Рµ СЃРµСЂРІРёСЃС‹:</b> ${esc(serviceNames)}. РџСЂР°РІРёР»: <b>${selectedDomains.length}</b>. РџСѓР±Р»РёС‡РЅС‹Р№ IP РґР»СЏ РїРѕРґРјРµРЅС‹: <code>${esc(publicIp)}</code>.</p>
 <pre>${esc(selectedRules)}</pre>
-<p class="muted">Если IP сервера изменился, замените его в правилах. После изменения правил очистите кэш AdGuard и DNS на клиенте: <code>ipconfig /flushdns</code>.</p>
+<p class="muted">Р•СЃР»Рё IP СЃРµСЂРІРµСЂР° РёР·РјРµРЅРёР»СЃСЏ, Р·Р°РјРµРЅРёС‚Рµ РµРіРѕ РІ РїСЂР°РІРёР»Р°С…. РџРѕСЃР»Рµ РёР·РјРµРЅРµРЅРёСЏ РїСЂР°РІРёР» РѕС‡РёСЃС‚РёС‚Рµ РєСЌС€ AdGuard Рё DNS РЅР° РєР»РёРµРЅС‚Рµ: <code>ipconfig /flushdns</code>.</p>
 <details>
-<summary>Полный список из первой инструкции (${allDomains.length} правил)</summary>
+<summary>РџРѕР»РЅС‹Р№ СЃРїРёСЃРѕРє РёР· РїРµСЂРІРѕР№ РёРЅСЃС‚СЂСѓРєС†РёРё (${allDomains.length} РїСЂР°РІРёР»)</summary>
 <pre>${esc(allRules)}</pre>
 </details>
-<p class="muted">Для Android-клиентов и браузеров с IPv6 можно добавить правила <code>$dnstype=AAAA</code> и <code>$dnstype=HTTPS</code>, чтобы они не уходили на IPv6/SVCB. Это не обязательно, если у клиента нет IPv6.</p>
+<p class="muted">Р”Р»СЏ Android-РєР»РёРµРЅС‚РѕРІ Рё Р±СЂР°СѓР·РµСЂРѕРІ СЃ IPv6 РјРѕР¶РЅРѕ РґРѕР±Р°РІРёС‚СЊ РїСЂР°РІРёР»Р° <code>$dnstype=AAAA</code> Рё <code>$dnstype=HTTPS</code>, С‡С‚РѕР±С‹ РѕРЅРё РЅРµ СѓС…РѕРґРёР»Рё РЅР° IPv6/SVCB. Р­С‚Рѕ РЅРµ РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ, РµСЃР»Рё Сѓ РєР»РёРµРЅС‚Р° РЅРµС‚ IPv6.</p>
 
-<h2>Проверка на клиенте (Windows)</h2>
+<h2>РџСЂРѕРІРµСЂРєР° РЅР° РєР»РёРµРЅС‚Рµ (Windows)</h2>
 <pre>Resolve-DnsName www.google.com -Type A | ft Name,IPAddress
 Resolve-DnsName gemini.gstatic.com -Type A | ft Name,TTL,IPAddress
 curl.exe -s https://ipinfo.io/json
 curl.exe -s "https://www.google.com/search?q=test&amp;hl=en"</pre>
-<table><tr><th>Проверка</th><th>Что должно быть</th></tr>
-<tr><td>WARP установлен</td><td><code>warp-cli --version</code> отвечает</td></tr>
-<tr><td>WARP подключён</td><td><code>warp-cli status</code> → Connected</td></tr>
-<tr><td>Xray активен</td><td><code>systemctl is-active xray</code> → active</td></tr>
-<tr><td>Порт ${esc(cfg.listenPort)}</td><td><code>ss -lntp | grep :${esc(cfg.listenPort)}</code> показывает xray</td></tr>
+<table><tr><th>РџСЂРѕРІРµСЂРєР°</th><th>Р§С‚Рѕ РґРѕР»Р¶РЅРѕ Р±С‹С‚СЊ</th></tr>
+<tr><td>WARP СѓСЃС‚Р°РЅРѕРІР»РµРЅ</td><td><code>warp-cli --version</code> РѕС‚РІРµС‡Р°РµС‚</td></tr>
+<tr><td>WARP РїРѕРґРєР»СЋС‡С‘РЅ</td><td><code>warp-cli status</code> в†’ Connected</td></tr>
+<tr><td>Xray Р°РєС‚РёРІРµРЅ</td><td><code>systemctl is-active xray</code> в†’ active</td></tr>
+<tr><td>РџРѕСЂС‚ ${esc(cfg.listenPort)}</td><td><code>ss -lntp | grep :${esc(cfg.listenPort)}</code> РїРѕРєР°Р·С‹РІР°РµС‚ xray</td></tr>
 <tr><td>SOCKS5</td><td><code>curl -x socks5h://127.0.0.1:${esc(cfg.socksPort)} https://ipinfo.io/json</code></td></tr>
-<tr><td>Маршрутизация</td><td>вариант 1 — без routing; вариант 2 — Google и остальное direct, AI warp</td></tr>
-<tr><td>AdGuard</td><td>правила из этого раздела вставлены в Custom filtering rules</td></tr>
-<tr><td>Клиент</td><td><code>Resolve-DnsName chatgpt.com</code> → ${esc(publicIp)}</td></tr></table>
+<tr><td>РњР°СЂС€СЂСѓС‚РёР·Р°С†РёСЏ</td><td>РІР°СЂРёР°РЅС‚ 1 вЂ” Р±РµР· routing; РІР°СЂРёР°РЅС‚ 2 вЂ” Google Рё РѕСЃС‚Р°Р»СЊРЅРѕРµ direct, AI warp</td></tr>
+<tr><td>AdGuard</td><td>РїСЂР°РІРёР»Р° РёР· СЌС‚РѕРіРѕ СЂР°Р·РґРµР»Р° РІСЃС‚Р°РІР»РµРЅС‹ РІ Custom filtering rules</td></tr>
+<tr><td>РљР»РёРµРЅС‚</td><td><code>Resolve-DnsName chatgpt.com</code> в†’ ${esc(publicIp)}</td></tr></table>
 
-<h2>Откат</h2>
-<pre># вернуть предыдущий конфиг Xray
+<h2>РћС‚РєР°С‚</h2>
+<pre># РІРµСЂРЅСѓС‚СЊ РїСЂРµРґС‹РґСѓС‰РёР№ РєРѕРЅС„РёРі Xray
 CFG=/usr/local/etc/xray/config.json
 cp "$(ls -t "$CFG".bak.* | head -1)" "$CFG"
 /usr/local/bin/xray -test -config "$CFG"
 systemctl restart xray
 
-# удалить правила AdGuard из Custom filtering rules
+# СѓРґР°Р»РёС‚СЊ РїСЂР°РІРёР»Р° AdGuard РёР· Custom filtering rules
 
-# остановить WARP (если больше не нужен)
+# РѕСЃС‚Р°РЅРѕРІРёС‚СЊ WARP (РµСЃР»Рё Р±РѕР»СЊС€Рµ РЅРµ РЅСѓР¶РµРЅ)
 warp-cli disconnect
 systemctl disable --now warp-svc
 apt purge -y cloudflare-warp</pre>
 
-<h2>Важно</h2>
+<h2>Р’Р°Р¶РЅРѕ</h2>
 <ul>
-<li>Порт ${esc(cfg.listenPort)} должен быть свободен. Если на нём уже работает MTProto/nginx, Xray не запустится.</li>
-<li>Клиенты должны использовать AdGuard Home как DoH/DoT DNS, иначе подмена A-записей не сработает.</li>
-<li>TTL у AdGuard около часа; после изменений очистите кэш AdGuard и DNS на клиенте.</li>
-<li>Если WARP уже используется как системный VPN, не ставьте его повторно — используйте вариант 2 и не переводите WARP в proxy-режим повторно.</li>
-<li>Панель не перезаписывает чужой <code>config.json</code> Xray без подтверждения.</li>
+<li>РџРѕСЂС‚ ${esc(cfg.listenPort)} РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ СЃРІРѕР±РѕРґРµРЅ. Р•СЃР»Рё РЅР° РЅС‘Рј СѓР¶Рµ СЂР°Р±РѕС‚Р°РµС‚ MTProto/nginx, Xray РЅРµ Р·Р°РїСѓСЃС‚РёС‚СЃСЏ.</li>
+<li>РљР»РёРµРЅС‚С‹ РґРѕР»Р¶РЅС‹ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ AdGuard Home РєР°Рє DoH/DoT DNS, РёРЅР°С‡Рµ РїРѕРґРјРµРЅР° A-Р·Р°РїРёСЃРµР№ РЅРµ СЃСЂР°Р±РѕС‚Р°РµС‚.</li>
+<li>TTL Сѓ AdGuard РѕРєРѕР»Рѕ С‡Р°СЃР°; РїРѕСЃР»Рµ РёР·РјРµРЅРµРЅРёР№ РѕС‡РёСЃС‚РёС‚Рµ РєСЌС€ AdGuard Рё DNS РЅР° РєР»РёРµРЅС‚Рµ.</li>
+<li>Р•СЃР»Рё WARP СѓР¶Рµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РєР°Рє СЃРёСЃС‚РµРјРЅС‹Р№ VPN, РЅРµ СЃС‚Р°РІСЊС‚Рµ РµРіРѕ РїРѕРІС‚РѕСЂРЅРѕ вЂ” РёСЃРїРѕР»СЊР·СѓР№С‚Рµ РІР°СЂРёР°РЅС‚ 2 Рё РЅРµ РїРµСЂРµРІРѕРґРёС‚Рµ WARP РІ proxy-СЂРµР¶РёРј РїРѕРІС‚РѕСЂРЅРѕ.</li>
+<li>РџР°РЅРµР»СЊ РЅРµ РїРµСЂРµР·Р°РїРёСЃС‹РІР°РµС‚ С‡СѓР¶РѕР№ <code>config.json</code> Xray Р±РµР· РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ.</li>
 </ul>
-<p class="muted">Команды выполняются от root. Текущий режим панели: <b>${cfg.mode === 'v1' ? 'вариант 1 (всё через WARP)' : 'вариант 2 (Google direct)'}</b>.</p>
+<p class="muted">РљРѕРјР°РЅРґС‹ РІС‹РїРѕР»РЅСЏСЋС‚СЃСЏ РѕС‚ root. РўРµРєСѓС‰РёР№ СЂРµР¶РёРј РїР°РЅРµР»Рё: <b>${cfg.mode === 'v1' ? 'РІР°СЂРёР°РЅС‚ 1 (РІСЃС‘ С‡РµСЂРµР· WARP)' : 'РІР°СЂРёР°РЅС‚ 2 (Google direct)'}</b>.</p>
 </div></body></html>`);
 });
 
@@ -9122,8 +9122,8 @@ app.post('/api/warp/power', checkAuth, requireAdmin, (req, res) => {
     if (TEST_MODE || DEMO_MODE) return res.json({ success: true, enabled: enable, demo: true });
     try {
         if (enable) {
-            // Убираем осиротевшие процессы xray от прошлых запусков:
-            // иначе они копятся и каждый ест память/CPU.
+            // РЈР±РёСЂР°РµРј РѕСЃРёСЂРѕС‚РµРІС€РёРµ РїСЂРѕС†РµСЃСЃС‹ xray РѕС‚ РїСЂРѕС€Р»С‹С… Р·Р°РїСѓСЃРєРѕРІ:
+            // РёРЅР°С‡Рµ РѕРЅРё РєРѕРїСЏС‚СЃСЏ Рё РєР°Р¶РґС‹Р№ РµСЃС‚ РїР°РјСЏС‚СЊ/CPU.
             try { sh('sudo', ['systemctl', 'stop', 'xray'], { timeout: 20000 }); } catch (e) { /* ignore */ }
             try { sh('sudo', ['bash', '-c', "pkill -f '[x]ray run -config' || true"], { timeout: 10000 }); } catch (e) { /* ignore */ }
             try { sh('sleep', ['1']); } catch (e) { /* ignore */ }
@@ -9133,10 +9133,10 @@ app.post('/api/warp/power', checkAuth, requireAdmin, (req, res) => {
             try { sh('sudo', ['warp-cli', '--accept-tos', 'disconnect'], { timeout: 30000 }); } catch (e) { /* ignore */ }
             sh('sudo', ['systemctl', 'disable', '--now', 'xray'], { timeout: 30000 });
         }
-        auditLog(req, enable ? 'WARP/Xray включены' : 'WARP/Xray выключены');
+        auditLog(req, enable ? 'WARP/Xray РІРєР»СЋС‡РµРЅС‹' : 'WARP/Xray РІС‹РєР»СЋС‡РµРЅС‹');
         res.json({ success: true, enabled: enable });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось переключить WARP/Xray: ' + (e.stderr || e.message || 'ошибка') });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРєР»СЋС‡РёС‚СЊ WARP/Xray: ' + (e.stderr || e.message || 'РѕС€РёР±РєР°') });
     }
 });
 
@@ -9153,7 +9153,7 @@ app.post('/api/warp/test', checkAuth, requireAdmin, (req, res) => {
         'https://api.ipify.org?format=json'
     ], { timeout: 25000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) {
-            return res.json({ ok: false, error: String(stderr || err.message || 'WARP не ответил').slice(0, 1000) });
+            return res.json({ ok: false, error: String(stderr || err.message || 'WARP РЅРµ РѕС‚РІРµС‚РёР»').slice(0, 1000) });
         }
         try {
             const data = JSON.parse(stdout);
@@ -9165,26 +9165,26 @@ app.post('/api/warp/test', checkAuth, requireAdmin, (req, res) => {
                 city: data.city || ''
             });
         } catch (e) {
-            res.json({ ok: false, error: 'WARP вернул не JSON', raw: String(stdout).slice(0, 1000) });
+            res.json({ ok: false, error: 'WARP РІРµСЂРЅСѓР» РЅРµ JSON', raw: String(stdout).slice(0, 1000) });
         }
     });
 });
 
-// Записывает правила dnsrewrite в пользовательские правила AdGuard.
-// Старый блок панели удаляется по маркерам, остальные правила не затрагиваются.
+// Р—Р°РїРёСЃС‹РІР°РµС‚ РїСЂР°РІРёР»Р° dnsrewrite РІ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊСЃРєРёРµ РїСЂР°РІРёР»Р° AdGuard.
+// РЎС‚Р°СЂС‹Р№ Р±Р»РѕРє РїР°РЅРµР»Рё СѓРґР°Р»СЏРµС‚СЃСЏ РїРѕ РјР°СЂРєРµСЂР°Рј, РѕСЃС‚Р°Р»СЊРЅС‹Рµ РїСЂР°РІРёР»Р° РЅРµ Р·Р°С‚СЂР°РіРёРІР°СЋС‚СЃСЏ.
 app.post('/api/warp/adguard', checkAuth, requireAdmin, async (req, res) => {
     const body = req.body || {};
     const base = normalizeAgUrl(body.url);
-    if (!base) return res.status(400).json({ error: 'Укажите корректный URL AdGuard API' });
+    if (!base) return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Р№ URL AdGuard API' });
 
-    // Обычный режим: Xray на этом же сервере (127.0.0.1). IP туннеля нужен,
-    // только когда AdGuard стоит на другом сервере или Xray слушает awg0.
+    // РћР±С‹С‡РЅС‹Р№ СЂРµР¶РёРј: Xray РЅР° СЌС‚РѕРј Р¶Рµ СЃРµСЂРІРµСЂРµ (127.0.0.1). IP С‚СѓРЅРЅРµР»СЏ РЅСѓР¶РµРЅ,
+    // С‚РѕР»СЊРєРѕ РєРѕРіРґР° AdGuard СЃС‚РѕРёС‚ РЅР° РґСЂСѓРіРѕРј СЃРµСЂРІРµСЂРµ РёР»Рё Xray СЃР»СѓС€Р°РµС‚ awg0.
     const cfg = warpConfig();
     let rewriteIp = String(body.rewriteIp || '').trim();
     if (!rewriteIp || rewriteIp === '0.0.0.0') rewriteIp = String(cfg.listenIp || '127.0.0.1').trim();
     if (rewriteIp === '0.0.0.0') rewriteIp = '127.0.0.1';
     if (!IPV4_RE.test(rewriteIp)) {
-        return res.status(400).json({ error: 'Укажите корректный IP для dnsrewrite (обычно 127.0.0.1)' });
+        return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Р№ IP РґР»СЏ dnsrewrite (РѕР±С‹С‡РЅРѕ 127.0.0.1)' });
     }
 
     let domains;
@@ -9197,7 +9197,7 @@ app.post('/api/warp/adguard', checkAuth, requireAdmin, async (req, res) => {
     domains = [...new Set(domains
         .map(d => String(d).trim().toLowerCase())
         .filter(d => d && !d.startsWith('#') && HOST_RE.test(d)))];
-    if (!domains.length) return res.status(400).json({ error: 'Список доменов пуст' });
+    if (!domains.length) return res.status(400).json({ error: 'РЎРїРёСЃРѕРє РґРѕРјРµРЅРѕРІ РїСѓСЃС‚' });
     if (TEST_MODE || DEMO_MODE) {
         return res.json({
             success: true, demo: true, count: domains.length,
@@ -9213,14 +9213,14 @@ app.post('/api/warp/adguard', checkAuth, requireAdmin, async (req, res) => {
     const BEGIN = '# BEGIN SERVEPANEL WARP';
     const END = '# END SERVEPANEL WARP';
     try {
-        // AdGuard Home почти всегда отдаёт HTTPS с самоподписанным сертификатом,
-        // поэтому обычный fetch падает с «fetch failed». Ходим через fetchInsecure.
+        // AdGuard Home РїРѕС‡С‚Рё РІСЃРµРіРґР° РѕС‚РґР°С‘С‚ HTTPS СЃ СЃР°РјРѕРїРѕРґРїРёСЃР°РЅРЅС‹Рј СЃРµСЂС‚РёС„РёРєР°С‚РѕРј,
+        // РїРѕСЌС‚РѕРјСѓ РѕР±С‹С‡РЅС‹Р№ fetch РїР°РґР°РµС‚ СЃ В«fetch failedВ». РҐРѕРґРёРј С‡РµСЂРµР· fetchInsecure.
         const cur = await fetchInsecure(base + '/control/filtering/status', { headers }, 10000);
         if (cur.status === 401) {
-            throw new Error('AdGuard требует логин и пароль (HTTP 401). Укажите их в разделе «Службы и DNS» → AdGuard.');
+            throw new Error('AdGuard С‚СЂРµР±СѓРµС‚ Р»РѕРіРёРЅ Рё РїР°СЂРѕР»СЊ (HTTP 401). РЈРєР°Р¶РёС‚Рµ РёС… РІ СЂР°Р·РґРµР»Рµ В«РЎР»СѓР¶Р±С‹ Рё DNSВ» в†’ AdGuard.');
         }
         if (cur.status === 404) {
-            throw new Error('по адресу ' + base + ' нет API AdGuard (HTTP 404). Проверьте порт и URL.');
+            throw new Error('РїРѕ Р°РґСЂРµСЃСѓ ' + base + ' РЅРµС‚ API AdGuard (HTTP 404). РџСЂРѕРІРµСЂСЊС‚Рµ РїРѕСЂС‚ Рё URL.');
         }
         if (!cur.ok) throw new Error('AdGuard HTTP ' + cur.status);
         const data = await cur.json();
@@ -9260,17 +9260,17 @@ app.post('/api/warp/adguard', checkAuth, requireAdmin, async (req, res) => {
                 writeRootFile(WARP_STATE_FILE, JSON.stringify({
                     syncedAt, count: domains.length, rewriteIp, totalRules: next.length
                 }, null, 2), '0600');
-            } catch (e) { /* статус не критичен */ }
+            } catch (e) { /* СЃС‚Р°С‚СѓСЃ РЅРµ РєСЂРёС‚РёС‡РµРЅ */ }
         }
-        auditLog(req, `WARP: правила AdGuard обновлены (${domains.length} правил -> ${rewriteIp})`);
+        auditLog(req, `WARP: РїСЂР°РІРёР»Р° AdGuard РѕР±РЅРѕРІР»РµРЅС‹ (${domains.length} РїСЂР°РІРёР» -> ${rewriteIp})`);
         res.json({ success: true, count: domains.length, totalRules: next.length, rewriteIp, syncedAt });
     } catch (e) {
-        res.status(502).json({ error: 'Не удалось обновить AdGuard: ' + e.message });
+        res.status(502).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ AdGuard: ' + e.message });
     }
 });
 
 // ---------------------------------------------------------------------------
-// Клиенты: создание
+// РљР»РёРµРЅС‚С‹: СЃРѕР·РґР°РЅРёРµ
 // ---------------------------------------------------------------------------
 function domainInfo() {
     try {
@@ -9280,8 +9280,8 @@ function domainInfo() {
         }
         const nginx = shTry('cat', ['/etc/nginx/sites-available/awg-admin']);
         const m = nginx.match(/server_name\s+([^;]+);/);
-        // server_name может содержать несколько имён («домен www.домен») —
-        // берём первое, иначе проверка HOST_RE не проходит из-за пробела.
+        // server_name РјРѕР¶РµС‚ СЃРѕРґРµСЂР¶Р°С‚СЊ РЅРµСЃРєРѕР»СЊРєРѕ РёРјС‘РЅ (В«РґРѕРјРµРЅ www.РґРѕРјРµРЅВ») вЂ”
+        // Р±РµСЂС‘Рј РїРµСЂРІРѕРµ, РёРЅР°С‡Рµ РїСЂРѕРІРµСЂРєР° HOST_RE РЅРµ РїСЂРѕС…РѕРґРёС‚ РёР·-Р·Р° РїСЂРѕР±РµР»Р°.
         const first = m && m[1] ? m[1].trim().split(/\s+/).find(n => n && n !== '_') : '';
         if (first && HOST_RE.test(first)) return { domain: first, source: 'panel' };
     } catch (e) { /* ignore */ }
@@ -9300,7 +9300,7 @@ function replaceEndpointWithDomain(confPath, domain) {
     } catch (e) { /* ignore */ }
 }
 
-// Домен для endpoint клиента: из настроек AmneziaWG или из «Домен и SSL».
+// Р”РѕРјРµРЅ РґР»СЏ endpoint РєР»РёРµРЅС‚Р°: РёР· РЅР°СЃС‚СЂРѕРµРє AmneziaWG РёР»Рё РёР· В«Р”РѕРјРµРЅ Рё SSLВ».
 app.get('/api/clients/domain', checkAuth, (req, res) => {
     try { res.json(domainInfo()); }
     catch (e) { res.json({ domain: '', source: '' }); }
@@ -9308,17 +9308,17 @@ app.get('/api/clients/domain', checkAuth, (req, res) => {
 
 app.post('/api/create', checkAuth, (req, res) => {
     const { name, expires, endpointType, domain } = req.body || {};
-    if (!name || !NAME_RE.test(name)) return res.status(400).json({ error: 'Недопустимое имя' });
+    if (!name || !NAME_RE.test(name)) return res.status(400).json({ error: 'РќРµРґРѕРїСѓСЃС‚РёРјРѕРµ РёРјСЏ' });
     const epType = endpointType === 'domain' ? 'domain' : endpointType === 'ip' ? 'ip' : '';
     const epDomain = String(domain || '').trim();
     if (epType === 'domain' && !HOST_RE.test(epDomain)) {
-        return res.status(400).json({ error: 'Укажите корректный домен для endpoint' });
+        return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Р№ РґРѕРјРµРЅ РґР»СЏ endpoint' });
     }
     if (DEMO_MODE) {
-        if (demoClients.some(c => c.name === name)) return res.status(409).json({ error: 'Клиент с таким именем уже есть' });
+        if (demoClients.some(c => c.name === name)) return res.status(409).json({ error: 'РљР»РёРµРЅС‚ СЃ С‚Р°РєРёРј РёРјРµРЅРµРј СѓР¶Рµ РµСЃС‚СЊ' });
         const ip = '10.8.1.' + (10 + demoClients.length);
-        demoClients.push({ name, ip, status: 'Активен', status_code: 'active', rx: 0, tx: 0, last_handshake: Math.floor(Date.now() / 1000) });
-        auditLog(req, `[DEMO] Создан клиент ${name}`);
+        demoClients.push({ name, ip, status: 'РђРєС‚РёРІРµРЅ', status_code: 'active', rx: 0, tx: 0, last_handshake: Math.floor(Date.now() / 1000) });
+        auditLog(req, `[DEMO] РЎРѕР·РґР°РЅ РєР»РёРµРЅС‚ ${name}`);
         return res.attachment(`${serverFileBase()}_${name}.conf`).type('text/plain').send(demoClientConf(name, ip));
     }
     const args = ['add', name];
@@ -9326,16 +9326,16 @@ app.post('/api/create', checkAuth, (req, res) => {
     execFile('sudo', ['bash', MANAGE, ...args, '--json'], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => {
         try {
             const response = JSON.parse(String(stdout || ''));
-            if (!response.ok) return res.status(500).json({ error: response.error || 'Ошибка создания' });
+            if (!response.ok) return res.status(500).json({ error: response.error || 'РћС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ' });
             const r = (response.results || [])[0];
-            if (!r || !r.conf) return res.status(500).json({ error: 'Скрипт не вернул путь к конфигу' });
+            if (!r || !r.conf) return res.status(500).json({ error: 'РЎРєСЂРёРїС‚ РЅРµ РІРµСЂРЅСѓР» РїСѓС‚СЊ Рє РєРѕРЅС„РёРіСѓ' });
             if (epType === 'domain') replaceEndpointWithDomain(r.conf, epDomain);
             else if (!epType) replaceEndpointWithDomain(r.conf);
             syncClient31Params(name);
             applyStoredClientMtu(name);
-            auditLog(req, `Создан клиент ${name}`);
+            auditLog(req, `РЎРѕР·РґР°РЅ РєР»РёРµРЅС‚ ${name}`);
             res.download(r.conf, `${serverFileBase()}_${name}.conf`);
-        } catch (e) { res.status(500).json({ error: 'Ошибка обработки' }); }
+        } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° РѕР±СЂР°Р±РѕС‚РєРё' }); }
     });
 });
 
@@ -9343,12 +9343,12 @@ app.post('/api/create-bulk', checkAuth, (req, res) => {
     const { prefix, count, expires, endpointType, domain } = req.body || {};
     const n = parseInt(count, 10);
     if (!prefix || !NAME_RE.test(prefix) || !Number.isInteger(n) || n < 1 || n > 100) {
-        return res.status(400).json({ error: 'Недопустимые параметры' });
+        return res.status(400).json({ error: 'РќРµРґРѕРїСѓСЃС‚РёРјС‹Рµ РїР°СЂР°РјРµС‚СЂС‹' });
     }
     const epType = endpointType === 'domain' ? 'domain' : endpointType === 'ip' ? 'ip' : '';
     const epDomain = String(domain || '').trim();
     if (epType === 'domain' && !HOST_RE.test(epDomain)) {
-        return res.status(400).json({ error: 'Укажите корректный домен для endpoint' });
+        return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Р№ РґРѕРјРµРЅ РґР»СЏ endpoint' });
     }
     const generated = [];
     for (let i = 1; i <= n; i++) {
@@ -9366,14 +9366,14 @@ app.post('/api/create-bulk', checkAuth, (req, res) => {
                 applyStoredClientMtu(clientName);
                 generated.push({ name: clientName, content: sh('sudo', ['cat', r.conf]) });
             }
-        } catch (e) { /* пропускаем неудачные */ }
+        } catch (e) { /* РїСЂРѕРїСѓСЃРєР°РµРј РЅРµСѓРґР°С‡РЅС‹Рµ */ }
     }
-    auditLog(req, `Массовое создание клиентов: ${prefix}-1..${n}`);
+    auditLog(req, `РњР°СЃСЃРѕРІРѕРµ СЃРѕР·РґР°РЅРёРµ РєР»РёРµРЅС‚РѕРІ: ${prefix}-1..${n}`);
     res.json({ success: true, configs: generated });
 });
 
 // ---------------------------------------------------------------------------
-// Клиенты: список (list + stats), ключ vpn://, переименование, удаление
+// РљР»РёРµРЅС‚С‹: СЃРїРёСЃРѕРє (list + stats), РєР»СЋС‡ vpn://, РїРµСЂРµРёРјРµРЅРѕРІР°РЅРёРµ, СѓРґР°Р»РµРЅРёРµ
 // ---------------------------------------------------------------------------
 app.get('/api/clients', checkAuth, (req, res) => {
     if (DEMO_MODE) {
@@ -9427,7 +9427,7 @@ app.get('/api/clients', checkAuth, (req, res) => {
             };
         });
         res.json(attachClientSpeeds(attachClientSplit(withLimits)));
-    } catch (e) { res.status(500).json({ error: 'Ошибка чтения клиентов' }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ РєР»РёРµРЅС‚РѕРІ' }); }
 });
 
 app.get('/api/clients/:name/key', checkAuth, async (req, res) => {
@@ -9449,38 +9449,38 @@ app.get('/api/clients/:name/key', checkAuth, async (req, res) => {
         try { syncClient31Params(name); } catch (e) { /* ignore */ }
         try { if (fs.existsSync(confPath)) conf = sh('sudo', ['cat', confPath]); } catch (e) { conf = ''; }
         if (conf) {
-            // Endpoint уже записан в конфиг при создании клиента (IP или домен).
-            // Не переписываем его здесь, иначе выбор «Endpoint: IP» теряется.
+            // Endpoint СѓР¶Рµ Р·Р°РїРёСЃР°РЅ РІ РєРѕРЅС„РёРі РїСЂРё СЃРѕР·РґР°РЅРёРё РєР»РёРµРЅС‚Р° (IP РёР»Рё РґРѕРјРµРЅ).
+            // РќРµ РїРµСЂРµРїРёСЃС‹РІР°РµРј РµРіРѕ Р·РґРµСЃСЊ, РёРЅР°С‡Рµ РІС‹Р±РѕСЂ В«Endpoint: IPВ» С‚РµСЂСЏРµС‚СЃСЏ.
             uri = buildVpnUriFromConf(name, conf);
         }
         if (!uri && fs.existsSync(uriPath)) uri = sh('sudo', ['cat', uriPath]).trim();
-        if (!uri) return res.status(404).json({ error: 'Не удалось получить ключ (нет .conf/.vpnuri)' });
+        if (!uri) return res.status(404).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ РєР»СЋС‡ (РЅРµС‚ .conf/.vpnuri)' });
         const qr = await qrDataUrl(uri);
-        auditLog(req, `Просмотр ключа клиента ${name}`);
+        auditLog(req, `РџСЂРѕСЃРјРѕС‚СЂ РєР»СЋС‡Р° РєР»РёРµРЅС‚Р° ${name}`);
         res.json({ name, uri, qr, conf });
-    } catch (e) { res.status(500).json({ error: 'Ошибка чтения ключа' }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ РєР»СЋС‡Р°' }); }
 });
 
 function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-// Один файл на клиента: инструкция + QR + vpn:// + .conf.
-// Открывается локально (в т.ч. на телефоне) без доступа к панели.
+// РћРґРёРЅ С„Р°Р№Р» РЅР° РєР»РёРµРЅС‚Р°: РёРЅСЃС‚СЂСѓРєС†РёСЏ + QR + vpn:// + .conf.
+// РћС‚РєСЂС‹РІР°РµС‚СЃСЏ Р»РѕРєР°Р»СЊРЅРѕ (РІ С‚.С‡. РЅР° С‚РµР»РµС„РѕРЅРµ) Р±РµР· РґРѕСЃС‚СѓРїР° Рє РїР°РЅРµР»Рё.
 app.get('/api/clients/:name/export', checkAuth, requireAdmin, async (req, res) => {
     const name = String(req.params.name);
-    if (!NAME_RE.test(name)) return res.status(400).json({ error: 'Неверное имя' });
+    if (!NAME_RE.test(name)) return res.status(400).json({ error: 'РќРµРІРµСЂРЅРѕРµ РёРјСЏ' });
     const confPath = path.join(AWG_DIR, name + '.conf');
     const uriPath = path.join(AWG_DIR, name + '.vpnuri');
     const pngPath = path.join(AWG_DIR, name + '.vpnuri.png');
     try {
         let conf = '';
         try { if (fs.existsSync(confPath)) conf = sh('sudo', ['cat', confPath]); } catch (e) { conf = ''; }
-        if (!conf) return res.status(404).json({ error: 'Конфиг клиента не найден' });
+        if (!conf) return res.status(404).json({ error: 'РљРѕРЅС„РёРі РєР»РёРµРЅС‚Р° РЅРµ РЅР°Р№РґРµРЅ' });
 
         let uri = '';
-        // Сначала собираем ключ из актуального .conf: в нём Endpoint выбран
-        // при создании (IP или домен). Старый .vpnuri мог сохранить домен.
+        // РЎРЅР°С‡Р°Р»Р° СЃРѕР±РёСЂР°РµРј РєР»СЋС‡ РёР· Р°РєС‚СѓР°Р»СЊРЅРѕРіРѕ .conf: РІ РЅС‘Рј Endpoint РІС‹Р±СЂР°РЅ
+        // РїСЂРё СЃРѕР·РґР°РЅРёРё (IP РёР»Рё РґРѕРјРµРЅ). РЎС‚Р°СЂС‹Р№ .vpnuri РјРѕРі СЃРѕС…СЂР°РЅРёС‚СЊ РґРѕРјРµРЅ.
         try { uri = buildVpnUriFromConf(name, conf); } catch (e) { uri = ''; }
         if (!uri) {
             try { if (fs.existsSync(uriPath)) uri = sh('sudo', ['cat', uriPath]).trim(); } catch (e) { uri = ''; }
@@ -9495,7 +9495,7 @@ app.get('/api/clients/:name/export', checkAuth, requireAdmin, async (req, res) =
         if (String(req.query.format || '') === 'txt') {
             res.setHeader('Content-Disposition', `attachment; filename="${serverFileBase()}_${name}.txt"`);
             return res.type('text/plain').send(
-                `Клиент: ${name}\n\nСсылка для AmneziaVPN:\n${uri}\n\nКонфигурация:\n${conf}\n`
+                `РљР»РёРµРЅС‚: ${name}\n\nРЎСЃС‹Р»РєР° РґР»СЏ AmneziaVPN:\n${uri}\n\nРљРѕРЅС„РёРіСѓСЂР°С†РёСЏ:\n${conf}\n`
             );
         }
 
@@ -9504,7 +9504,7 @@ app.get('/api/clients/:name/export', checkAuth, requireAdmin, async (req, res) =
         const safeConf = escapeHtml(conf);
         const html = `<!DOCTYPE html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Подключение ${safeName}</title>
+<title>РџРѕРґРєР»СЋС‡РµРЅРёРµ ${safeName}</title>
 <style>
  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0d1117;color:#c9d1d9;margin:0;padding:20px;}
  .card{max-width:640px;margin:0 auto;background:#161b22;border:1px solid #30363d;border-radius:12px;padding:22px;}
@@ -9515,22 +9515,22 @@ app.get('/api/clients/:name/export', checkAuth, requireAdmin, async (req, res) =
  pre{white-space:pre-wrap;word-break:break-all;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px;font-size:11px;}
  .warn{background:rgba(255,127,80,.08);border:1px solid #ff7b72;border-radius:8px;padding:10px;font-size:12px;color:#ffb3ad;margin-top:14px;}
 </style></head><body><div class="card">
-<h1>Подключение: ${safeName}</h1>
-<p class="muted">Файл содержит всё, что нужно для настройки. Ключи действительны, пока клиент не удалён на сервере.</p>
-${qr ? `<img src="${qr}" alt="QR-код подключения">` : '<p class="muted">QR-код недоступен — используйте ссылку ниже.</p>'}
-<p class="muted"><b>Способ 1.</b> AmneziaVPN → «+» → «Импорт из ссылки» (или сканируйте QR).</p>
+<h1>РџРѕРґРєР»СЋС‡РµРЅРёРµ: ${safeName}</h1>
+<p class="muted">Р¤Р°Р№Р» СЃРѕРґРµСЂР¶РёС‚ РІСЃС‘, С‡С‚Рѕ РЅСѓР¶РЅРѕ РґР»СЏ РЅР°СЃС‚СЂРѕР№РєРё. РљР»СЋС‡Рё РґРµР№СЃС‚РІРёС‚РµР»СЊРЅС‹, РїРѕРєР° РєР»РёРµРЅС‚ РЅРµ СѓРґР°Р»С‘РЅ РЅР° СЃРµСЂРІРµСЂРµ.</p>
+${qr ? `<img src="${qr}" alt="QR-РєРѕРґ РїРѕРґРєР»СЋС‡РµРЅРёСЏ">` : '<p class="muted">QR-РєРѕРґ РЅРµРґРѕСЃС‚СѓРїРµРЅ вЂ” РёСЃРїРѕР»СЊР·СѓР№С‚Рµ СЃСЃС‹Р»РєСѓ РЅРёР¶Рµ.</p>'}
+<p class="muted"><b>РЎРїРѕСЃРѕР± 1.</b> AmneziaVPN в†’ В«+В» в†’ В«РРјРїРѕСЂС‚ РёР· СЃСЃС‹Р»РєРёВ» (РёР»Рё СЃРєР°РЅРёСЂСѓР№С‚Рµ QR).</p>
 <textarea id="uri" readonly rows="4">${safeUri}</textarea>
-<button onclick="navigator.clipboard.writeText(document.getElementById('uri').value)">Скопировать vpn://</button>
-<button onclick="navigator.clipboard.writeText(document.getElementById('conf').value)">Скопировать .conf</button>
-<p class="muted" style="margin-top:18px;"><b>Способ 2.</b> Импорт файла конфигурации:</p>
+<button onclick="navigator.clipboard.writeText(document.getElementById('uri').value)">РЎРєРѕРїРёСЂРѕРІР°С‚СЊ vpn://</button>
+<button onclick="navigator.clipboard.writeText(document.getElementById('conf').value)">РЎРєРѕРїРёСЂРѕРІР°С‚СЊ .conf</button>
+<p class="muted" style="margin-top:18px;"><b>РЎРїРѕСЃРѕР± 2.</b> РРјРїРѕСЂС‚ С„Р°Р№Р»Р° РєРѕРЅС„РёРіСѓСЂР°С†РёРё:</p>
 <textarea id="conf" readonly rows="10">${safeConf}</textarea>
-<div class="warn">Не передавайте этот файл посторонним: он даёт доступ к вашему VPN. При утечке удалите клиента в панели и создайте нового.</div>
+<div class="warn">РќРµ РїРµСЂРµРґР°РІР°Р№С‚Рµ СЌС‚РѕС‚ С„Р°Р№Р» РїРѕСЃС‚РѕСЂРѕРЅРЅРёРј: РѕРЅ РґР°С‘С‚ РґРѕСЃС‚СѓРї Рє РІР°С€РµРјСѓ VPN. РџСЂРё СѓС‚РµС‡РєРµ СѓРґР°Р»РёС‚Рµ РєР»РёРµРЅС‚Р° РІ РїР°РЅРµР»Рё Рё СЃРѕР·РґР°Р№С‚Рµ РЅРѕРІРѕРіРѕ.</div>
 </div></body></html>`;
         res.setHeader('Content-Disposition', `attachment; filename="${serverFileBase()}_${name}.html"`);
         res.type('text/html').send(html);
-        auditLog(req, `Экспорт клиента ${name} в один файл`);
+        auditLog(req, `Р­РєСЃРїРѕСЂС‚ РєР»РёРµРЅС‚Р° ${name} РІ РѕРґРёРЅ С„Р°Р№Р»`);
     } catch (e) {
-        res.status(500).json({ error: 'Ошибка экспорта клиента' });
+        res.status(500).json({ error: 'РћС€РёР±РєР° СЌРєСЃРїРѕСЂС‚Р° РєР»РёРµРЅС‚Р°' });
     }
 });
 
@@ -9542,22 +9542,22 @@ function runRename(oldName, newName) {
 app.post('/api/clients/:name/rename', checkAuth, (req, res) => {
     const oldName = String(req.params.name);
     const newName = String((req.body && req.body.newName) || '').trim();
-    if (!NAME_RE.test(oldName) || !NAME_RE.test(newName)) return res.status(400).json({ error: 'Недопустимое имя (A-Z, a-z, 0-9, _-, до 63 символов)' });
+    if (!NAME_RE.test(oldName) || !NAME_RE.test(newName)) return res.status(400).json({ error: 'РќРµРґРѕРїСѓСЃС‚РёРјРѕРµ РёРјСЏ (A-Z, a-z, 0-9, _-, РґРѕ 63 СЃРёРјРІРѕР»РѕРІ)' });
     if (oldName === newName) return res.json({ success: true });
     try {
         writeRootFile(RENAME_SCRIPT, RENAME_BASH, '0755');
     } catch (e) {
-        return res.status(500).json({ error: 'Не удалось подготовить скрипт переименования' });
+        return res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРіРѕС‚РѕРІРёС‚СЊ СЃРєСЂРёРїС‚ РїРµСЂРµРёРјРµРЅРѕРІР°РЅРёСЏ' });
     }
     try {
         const r = runRename(oldName, newName);
         if (!r.ok) {
             const map = {
-                name_exists: 'Клиент с таким именем уже существует',
-                file_exists: 'Файл с таким именем уже существует',
-                not_found: 'Клиент не найден'
+                name_exists: 'РљР»РёРµРЅС‚ СЃ С‚Р°РєРёРј РёРјРµРЅРµРј СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚',
+                file_exists: 'Р¤Р°Р№Р» СЃ С‚Р°РєРёРј РёРјРµРЅРµРј СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚',
+                not_found: 'РљР»РёРµРЅС‚ РЅРµ РЅР°Р№РґРµРЅ'
             };
-            return res.status(409).json({ error: map[r.error] || ('Не удалось переименовать: ' + r.error) });
+            return res.status(409).json({ error: map[r.error] || ('РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРёРјРµРЅРѕРІР°С‚СЊ: ' + r.error) });
         }
         if (historyData[oldName]) { historyData[newName] = historyData[oldName]; delete historyData[oldName]; }
         if (lastHistoryStats[oldName]) { lastHistoryStats[newName] = lastHistoryStats[oldName]; delete lastHistoryStats[oldName]; }
@@ -9570,41 +9570,41 @@ app.post('/api/clients/:name/rename', checkAuth, (req, res) => {
             }
         } catch (e) { /* ignore */ }
         try { applyStoredClientMtu(newName); } catch (e) { /* ignore */ }
-        auditLog(req, `Клиент ${oldName} переименован в ${newName}`);
+        auditLog(req, `РљР»РёРµРЅС‚ ${oldName} РїРµСЂРµРёРјРµРЅРѕРІР°РЅ РІ ${newName}`);
         res.json({ success: true, name: newName });
     } catch (e) {
-        res.status(500).json({ error: 'Ошибка переименования: ' + (e.stdout || e.message) });
+        res.status(500).json({ error: 'РћС€РёР±РєР° РїРµСЂРµРёРјРµРЅРѕРІР°РЅРёСЏ: ' + (e.stdout || e.message) });
     }
 });
 
 app.post('/api/clients/rename-bulk', checkAuth, (req, res) => {
     const search = String((req.body && req.body.search) || '');
     const replace = String((req.body && req.body.replace) || '');
-    if (!search || search.length > 63) return res.status(400).json({ error: 'Укажите что искать в именах' });
-    if (replace.length > 32 || /[^A-Za-z0-9_-]/.test(replace)) return res.status(400).json({ error: 'Недопустимые символы в замене' });
+    if (!search || search.length > 63) return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ С‡С‚Рѕ РёСЃРєР°С‚СЊ РІ РёРјРµРЅР°С…' });
+    if (replace.length > 32 || /[^A-Za-z0-9_-]/.test(replace)) return res.status(400).json({ error: 'РќРµРґРѕРїСѓСЃС‚РёРјС‹Рµ СЃРёРјРІРѕР»С‹ РІ Р·Р°РјРµРЅРµ' });
     try {
         writeRootFile(RENAME_SCRIPT, RENAME_BASH, '0755');
-    } catch (e) { return res.status(500).json({ error: 'Не удалось подготовить скрипт' }); }
+    } catch (e) { return res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРіРѕС‚РѕРІРёС‚СЊ СЃРєСЂРёРїС‚' }); }
 
     let names = [];
     try {
         names = JSON.parse(sh('sudo', ['bash', MANAGE, 'list', '--json'], { maxBuffer: 16 * 1024 * 1024 })).map(c => c.name);
-    } catch (e) { return res.status(500).json({ error: 'Не удалось получить список клиентов' }); }
+    } catch (e) { return res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕР»СѓС‡РёС‚СЊ СЃРїРёСЃРѕРє РєР»РёРµРЅС‚РѕРІ' }); }
 
     const renamed = [], skipped = [];
     for (const oldName of names) {
         if (!oldName.toLowerCase().includes(search.toLowerCase())) continue;
         let newName = oldName.split(new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')).join(replace);
         newName = newName.replace(/^[-_]+|[-_]+$/g, '');
-        if (!NAME_RE.test(newName)) { skipped.push({ name: oldName, reason: 'итоговое имя некорректно' }); continue; }
-        if (newName === oldName) { skipped.push({ name: oldName, reason: 'имя не изменилось' }); continue; }
+        if (!NAME_RE.test(newName)) { skipped.push({ name: oldName, reason: 'РёС‚РѕРіРѕРІРѕРµ РёРјСЏ РЅРµРєРѕСЂСЂРµРєС‚РЅРѕ' }); continue; }
+        if (newName === oldName) { skipped.push({ name: oldName, reason: 'РёРјСЏ РЅРµ РёР·РјРµРЅРёР»РѕСЃСЊ' }); continue; }
         try {
             const r = runRename(oldName, newName);
             if (r.ok) { renamed.push({ from: oldName, to: newName }); }
             else skipped.push({ name: oldName, reason: r.error });
-        } catch (e) { skipped.push({ name: oldName, reason: 'ошибка' }); }
+        } catch (e) { skipped.push({ name: oldName, reason: 'РѕС€РёР±РєР°' }); }
     }
-    auditLog(req, `Массовое переименование «${search}» -> «${replace}»: ${renamed.length} шт.`);
+    auditLog(req, `РњР°СЃСЃРѕРІРѕРµ РїРµСЂРµРёРјРµРЅРѕРІР°РЅРёРµ В«${search}В» -> В«${replace}В»: ${renamed.length} С€С‚.`);
     res.json({ success: true, renamed, skipped });
 });
 
@@ -9613,20 +9613,20 @@ app.get('/api/download/:name', checkAuth, (req, res) => {
     if (!NAME_RE.test(name)) return res.status(400).send('Invalid name');
     if (DEMO_MODE) {
         const c = demoClients.find(x => x.name === name);
-        if (!c) return res.status(404).send('Конфиг не найден');
+        if (!c) return res.status(404).send('РљРѕРЅС„РёРі РЅРµ РЅР°Р№РґРµРЅ');
         return res.attachment(`${serverFileBase()}_${name}.conf`).type('text/plain').send(demoClientConf(name, c.ip));
     }
     const filePath = path.join(AWG_DIR, `${name}.conf`);
     if (fs.existsSync(filePath)) {
         try { syncClient31Params(name); } catch (e) { /* ignore */ }
-        // Отдаём конфиг как есть: Endpoint (IP или домен) выбран при создании.
+        // РћС‚РґР°С‘Рј РєРѕРЅС„РёРі РєР°Рє РµСЃС‚СЊ: Endpoint (IP РёР»Рё РґРѕРјРµРЅ) РІС‹Р±СЂР°РЅ РїСЂРё СЃРѕР·РґР°РЅРёРё.
         const content = fs.readFileSync(filePath, 'utf8');
         res.attachment(`${serverFileBase()}_${name}.conf`).type('text/plain').send(content);
-    } else res.status(404).send('Конфиг не найден');
+    } else res.status(404).send('РљРѕРЅС„РёРі РЅРµ РЅР°Р№РґРµРЅ');
 });
 
 // ---------------------------------------------------------------------------
-// ZIP без внешних зависимостей (store): несколько .conf одним архивом.
+// ZIP Р±РµР· РІРЅРµС€РЅРёС… Р·Р°РІРёСЃРёРјРѕСЃС‚РµР№ (store): РЅРµСЃРєРѕР»СЊРєРѕ .conf РѕРґРЅРёРј Р°СЂС…РёРІРѕРј.
 // ---------------------------------------------------------------------------
 const ZIP_CRC_TABLE = (() => {
     const table = new Uint32Array(256);
@@ -9658,8 +9658,8 @@ function buildZipStore(entries) {
         const local = Buffer.alloc(30);
         local.writeUInt32LE(0x04034b50, 0);
         local.writeUInt16LE(20, 4);
-        local.writeUInt16LE(0x0800, 6); // UTF-8 имена
-        local.writeUInt16LE(0, 8);      // без сжатия
+        local.writeUInt16LE(0x0800, 6); // UTF-8 РёРјРµРЅР°
+        local.writeUInt16LE(0, 8);      // Р±РµР· СЃР¶Р°С‚РёСЏ
         local.writeUInt16LE(dosTime, 10);
         local.writeUInt16LE(dosDate, 12);
         local.writeUInt32LE(crc, 14);
@@ -9703,11 +9703,11 @@ function buildZipStore(entries) {
     return Buffer.concat([...localParts, centralBuf, end]);
 }
 
-// Скачать несколько готовых клиентских конфигов одним ZIP.
+// РЎРєР°С‡Р°С‚СЊ РЅРµСЃРєРѕР»СЊРєРѕ РіРѕС‚РѕРІС‹С… РєР»РёРµРЅС‚СЃРєРёС… РєРѕРЅС„РёРіРѕРІ РѕРґРЅРёРј ZIP.
 app.post('/api/download-bulk', checkAuth, (req, res) => {
     const names = Array.isArray(req.body && req.body.names) ? req.body.names : [];
     if (!names.length || names.length > 200) {
-        return res.status(400).json({ error: 'Передайте от 1 до 200 имён клиентов' });
+        return res.status(400).json({ error: 'РџРµСЂРµРґР°Р№С‚Рµ РѕС‚ 1 РґРѕ 200 РёРјС‘РЅ РєР»РёРµРЅС‚РѕРІ' });
     }
     const base = serverFileBase();
     const entries = [];
@@ -9719,9 +9719,9 @@ app.post('/api/download-bulk', checkAuth, (req, res) => {
         try { syncClient31Params(name); } catch (e) { /* ignore */ }
         try {
             entries.push({ name: `${base}_${name}.conf`, data: fs.readFileSync(filePath) });
-        } catch (e) { /* пропускаем недоступный файл */ }
+        } catch (e) { /* РїСЂРѕРїСѓСЃРєР°РµРј РЅРµРґРѕСЃС‚СѓРїРЅС‹Р№ С„Р°Р№Р» */ }
     }
-    if (!entries.length) return res.status(404).json({ error: 'Конфиги не найдены' });
+    if (!entries.length) return res.status(404).json({ error: 'РљРѕРЅС„РёРіРё РЅРµ РЅР°Р№РґРµРЅС‹' });
     const stamp = new Date().toISOString().slice(0, 10);
     res.attachment(`${base}_configs_${stamp}.zip`).type('application/zip').send(buildZipStore(entries));
 });
@@ -9749,13 +9749,13 @@ app.delete('/api/delete/:name', checkAuth, (req, res) => {
     execFile('sudo', ['bash', MANAGE, 'remove', name, '--yes', '--json'], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => {
         try {
             const response = JSON.parse(String(stdout || ''));
-            if (!response.ok) return res.status(500).json({ error: response.error || 'Ошибка удаления' });
+            if (!response.ok) return res.status(500).json({ error: response.error || 'РћС€РёР±РєР° СѓРґР°Р»РµРЅРёСЏ' });
             delete historyData[name]; delete lastHistoryStats[name];
-            auditLog(req, 'Удален клиент ' + name);
+            auditLog(req, 'РЈРґР°Р»РµРЅ РєР»РёРµРЅС‚ ' + name);
             res.json({ success: true });
         } catch (e) {
-            // Скрипт мог вернуть не-JSON (старая версия) — считаем успехом, если нет ошибки
-            if (error) return res.status(500).json({ error: 'Ошибка при удалении' });
+            // РЎРєСЂРёРїС‚ РјРѕРі РІРµСЂРЅСѓС‚СЊ РЅРµ-JSON (СЃС‚Р°СЂР°СЏ РІРµСЂСЃРёСЏ) вЂ” СЃС‡РёС‚Р°РµРј СѓСЃРїРµС…РѕРј, РµСЃР»Рё РЅРµС‚ РѕС€РёР±РєРё
+            if (error) return res.status(500).json({ error: 'РћС€РёР±РєР° РїСЂРё СѓРґР°Р»РµРЅРёРё' });
             delete historyData[name]; delete lastHistoryStats[name];
             res.json({ success: true });
         }
@@ -9773,11 +9773,11 @@ function writeClientLimits(limits) {
     try { writeJson(CLIENT_LIMITS_FILE, limits || {}, 0o600); } catch (e) { /* ignore */ }
 }
 
-// Точечная изоляция клиентов AWG. В файле хранится IP -> true/false:
-// true  — клиент изолирован от других клиентов;
-// false — клиенту разрешено общаться с другими клиентами (даже если
-//         глобальная изоляция включена при установке);
-// нет записи — поведение по умолчанию (как настроено на сервере).
+// РўРѕС‡РµС‡РЅР°СЏ РёР·РѕР»СЏС†РёСЏ РєР»РёРµРЅС‚РѕРІ AWG. Р’ С„Р°Р№Р»Рµ С…СЂР°РЅРёС‚СЃСЏ IP -> true/false:
+// true  вЂ” РєР»РёРµРЅС‚ РёР·РѕР»РёСЂРѕРІР°РЅ РѕС‚ РґСЂСѓРіРёС… РєР»РёРµРЅС‚РѕРІ;
+// false вЂ” РєР»РёРµРЅС‚Сѓ СЂР°Р·СЂРµС€РµРЅРѕ РѕР±С‰Р°С‚СЊСЃСЏ СЃ РґСЂСѓРіРёРјРё РєР»РёРµРЅС‚Р°РјРё (РґР°Р¶Рµ РµСЃР»Рё
+//         РіР»РѕР±Р°Р»СЊРЅР°СЏ РёР·РѕР»СЏС†РёСЏ РІРєР»СЋС‡РµРЅР° РїСЂРё СѓСЃС‚Р°РЅРѕРІРєРµ);
+// РЅРµС‚ Р·Р°РїРёСЃРё вЂ” РїРѕРІРµРґРµРЅРёРµ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ (РєР°Рє РЅР°СЃС‚СЂРѕРµРЅРѕ РЅР° СЃРµСЂРІРµСЂРµ).
 const ISOLATION_CHAIN = 'SERVPANEL_ISOLATION';
 const ISOLATION_COMMENT = 'servpanel-isol';
 let isolationSyncing = false;
@@ -9816,16 +9816,16 @@ function clientIsolationPeers(ip) {
     return value.peers.filter(p => IPV4_RE.test(String(p)));
 }
 
-// Перестраивает цепочку SERVPANEL_ISOLATION и вставляет её перед глобальным
-// правилом изоляции (или перед общим ACCEPT для awg0). Так точечные
-// исключения не обходят квоты и GeoIP: те правила остаются выше.
+// РџРµСЂРµСЃС‚СЂР°РёРІР°РµС‚ С†РµРїРѕС‡РєСѓ SERVPANEL_ISOLATION Рё РІСЃС‚Р°РІР»СЏРµС‚ РµС‘ РїРµСЂРµРґ РіР»РѕР±Р°Р»СЊРЅС‹Рј
+// РїСЂР°РІРёР»РѕРј РёР·РѕР»СЏС†РёРё (РёР»Рё РїРµСЂРµРґ РѕР±С‰РёРј ACCEPT РґР»СЏ awg0). РўР°Рє С‚РѕС‡РµС‡РЅС‹Рµ
+// РёСЃРєР»СЋС‡РµРЅРёСЏ РЅРµ РѕР±С…РѕРґСЏС‚ РєРІРѕС‚С‹ Рё GeoIP: С‚Рµ РїСЂР°РІРёР»Р° РѕСЃС‚Р°СЋС‚СЃСЏ РІС‹С€Рµ.
 function syncClientIsolation() {
     if (DEMO_MODE || TEST_MODE || isolationSyncing) return;
     isolationSyncing = true;
     try {
         const iface = clientIsolationIface();
         if (!iface) {
-            isolationLastError = 'Интерфейс AWG не найден';
+            isolationLastError = 'РРЅС‚РµСЂС„РµР№СЃ AWG РЅРµ РЅР°Р№РґРµРЅ';
             return;
         }
         const map = readClientIsolation();
@@ -9842,7 +9842,7 @@ function syncClientIsolation() {
             }
         }
 
-        // Ищем глобальное правило изоляции и общий ACCEPT для интерфейса.
+        // РС‰РµРј РіР»РѕР±Р°Р»СЊРЅРѕРµ РїСЂР°РІРёР»Рѕ РёР·РѕР»СЏС†РёРё Рё РѕР±С‰РёР№ ACCEPT РґР»СЏ РёРЅС‚РµСЂС„РµР№СЃР°.
         const rules = String(rootShTry('iptables', ['-w', '-S', 'FORWARD']) || '')
             .split('\n')
             .map(s => s.trim())
@@ -9862,12 +9862,12 @@ function syncClientIsolation() {
         if (!iptRun(['-w', '-n', '-L', ISOLATION_CHAIN])) {
             iptRun(['-w', '-N', ISOLATION_CHAIN]);
         }
-        // Убираем старый jump, чтобы переставить его по актуальному месту.
+        // РЈР±РёСЂР°РµРј СЃС‚Р°СЂС‹Р№ jump, С‡С‚РѕР±С‹ РїРµСЂРµСЃС‚Р°РІРёС‚СЊ РµРіРѕ РїРѕ Р°РєС‚СѓР°Р»СЊРЅРѕРјСѓ РјРµСЃС‚Сѓ.
         for (let i = 0; i < 10; i++) {
             if (!iptRun(['-w', '-D', 'FORWARD', '-j', ISOLATION_CHAIN])) break;
         }
         if (!iptRun(['-w', '-F', ISOLATION_CHAIN])) {
-            isolationLastError = 'Нет доступа к iptables';
+            isolationLastError = 'РќРµС‚ РґРѕСЃС‚СѓРїР° Рє iptables';
             return;
         }
 
@@ -9876,9 +9876,9 @@ function syncClientIsolation() {
             ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-s', ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'DROP']) && ok;
             ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-d', ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'DROP']) && ok;
         }
-        // «Открытый+»: сначала закрываем клиента от всех, затем точечно
-        // разрешаем только выбранные пары. Полностью изолированные клиенты
-        // остаются закрытыми — их DROP стоит выше.
+        // В«РћС‚РєСЂС‹С‚С‹Р№+В»: СЃРЅР°С‡Р°Р»Р° Р·Р°РєСЂС‹РІР°РµРј РєР»РёРµРЅС‚Р° РѕС‚ РІСЃРµС…, Р·Р°С‚РµРј С‚РѕС‡РµС‡РЅРѕ
+        // СЂР°Р·СЂРµС€Р°РµРј С‚РѕР»СЊРєРѕ РІС‹Р±СЂР°РЅРЅС‹Рµ РїР°СЂС‹. РџРѕР»РЅРѕСЃС‚СЊСЋ РёР·РѕР»РёСЂРѕРІР°РЅРЅС‹Рµ РєР»РёРµРЅС‚С‹
+        // РѕСЃС‚Р°СЋС‚СЃСЏ Р·Р°РєСЂС‹С‚С‹РјРё вЂ” РёС… DROP СЃС‚РѕРёС‚ РІС‹С€Рµ.
         for (const item of openPlus) {
             ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-s', item.ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'DROP']) && ok;
             ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-d', item.ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'DROP']) && ok;
@@ -9894,14 +9894,14 @@ function syncClientIsolation() {
             ok = iptRun(['-w', '-A', ISOLATION_CHAIN, '-i', iface, '-o', iface, '-d', ip, '-m', 'comment', '--comment', ISOLATION_COMMENT, '-j', 'ACCEPT']) && ok;
         }
 
-        // Ставим jump перед глобальной изоляцией (или перед общим ACCEPT awg0).
-        // Правила квот и GeoIP остаются выше и не обходятся.
+        // РЎС‚Р°РІРёРј jump РїРµСЂРµРґ РіР»РѕР±Р°Р»СЊРЅРѕР№ РёР·РѕР»СЏС†РёРµР№ (РёР»Рё РїРµСЂРµРґ РѕР±С‰РёРј ACCEPT awg0).
+        // РџСЂР°РІРёР»Р° РєРІРѕС‚ Рё GeoIP РѕСЃС‚Р°СЋС‚СЃСЏ РІС‹С€Рµ Рё РЅРµ РѕР±С…РѕРґСЏС‚СЃСЏ.
         let line = globalDropLine || generalAcceptLine;
         if (!line && (isolated.length || openPlus.length)) line = 1;
         if (line) ok = iptRun(['-w', '-I', 'FORWARD', String(line), '-j', ISOLATION_CHAIN]) && ok;
-        isolationLastError = ok ? '' : 'Не удалось применить правила iptables';
+        isolationLastError = ok ? '' : 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРёРјРµРЅРёС‚СЊ РїСЂР°РІРёР»Р° iptables';
     } catch (e) {
-        isolationLastError = e.message || 'Ошибка iptables';
+        isolationLastError = e.message || 'РћС€РёР±РєР° iptables';
     } finally {
         isolationSyncing = false;
     }
@@ -9911,9 +9911,9 @@ function totalClientBytes(c) {
     return (Number(c && c.rx) || 0) + (Number(c && c.tx) || 0);
 }
 
-// Текущая скорость клиента по дельтам счётчиков между запросами.
-// Один общий кэш для /api/stats и /api/clients, чтобы частые запросы
-// не сбрасывали окно измерения.
+// РўРµРєСѓС‰Р°СЏ СЃРєРѕСЂРѕСЃС‚СЊ РєР»РёРµРЅС‚Р° РїРѕ РґРµР»СЊС‚Р°Рј СЃС‡С‘С‚С‡РёРєРѕРІ РјРµР¶РґСѓ Р·Р°РїСЂРѕСЃР°РјРё.
+// РћРґРёРЅ РѕР±С‰РёР№ РєСЌС€ РґР»СЏ /api/stats Рё /api/clients, С‡С‚РѕР±С‹ С‡Р°СЃС‚С‹Рµ Р·Р°РїСЂРѕСЃС‹
+// РЅРµ СЃР±СЂР°СЃС‹РІР°Р»Рё РѕРєРЅРѕ РёР·РјРµСЂРµРЅРёСЏ.
 const clientSpeedState = new Map();
 function attachClientSpeeds(clients) {
     const list = Array.isArray(clients) ? clients : [];
@@ -9973,12 +9973,12 @@ function findClientByName(name) {
 }
 
 // ---------------------------------------------------------------------------
-// MTU клиентских конфигов.
+// MTU РєР»РёРµРЅС‚СЃРєРёС… РєРѕРЅС„РёРіРѕРІ.
 //
-// Клиентский туннель должен иметь MTU не больше узкого места пути (обычно это
-// внутренний туннель каскада, 1200). Если поставить больше, пакеты такого
-// размера не влезают в туннель выхода и теряются: TCP частично прикрывает
-// клампинг MSS, а QUIC/UDP — нет.
+// РљР»РёРµРЅС‚СЃРєРёР№ С‚СѓРЅРЅРµР»СЊ РґРѕР»Р¶РµРЅ РёРјРµС‚СЊ MTU РЅРµ Р±РѕР»СЊС€Рµ СѓР·РєРѕРіРѕ РјРµСЃС‚Р° РїСѓС‚Рё (РѕР±С‹С‡РЅРѕ СЌС‚Рѕ
+// РІРЅСѓС‚СЂРµРЅРЅРёР№ С‚СѓРЅРЅРµР»СЊ РєР°СЃРєР°РґР°, 1200). Р•СЃР»Рё РїРѕСЃС‚Р°РІРёС‚СЊ Р±РѕР»СЊС€Рµ, РїР°РєРµС‚С‹ С‚Р°РєРѕРіРѕ
+// СЂР°Р·РјРµСЂР° РЅРµ РІР»РµР·Р°СЋС‚ РІ С‚СѓРЅРЅРµР»СЊ РІС‹С…РѕРґР° Рё С‚РµСЂСЏСЋС‚СЃСЏ: TCP С‡Р°СЃС‚РёС‡РЅРѕ РїСЂРёРєСЂС‹РІР°РµС‚
+// РєР»Р°РјРїРёРЅРі MSS, Р° QUIC/UDP вЂ” РЅРµС‚.
 // ---------------------------------------------------------------------------
 function readClientMtuStore() {
     try {
@@ -10027,15 +10027,15 @@ function clientConfMtuOf(name) {
     return m ? Number(m[1]) : 0;
 }
 
-// 0 — убрать строку MTU (вернуть значение установщика).
+// 0 вЂ” СѓР±СЂР°С‚СЊ СЃС‚СЂРѕРєСѓ MTU (РІРµСЂРЅСѓС‚СЊ Р·РЅР°С‡РµРЅРёРµ СѓСЃС‚Р°РЅРѕРІС‰РёРєР°).
 function setClientConfMtu(name, mtu) {
     const file = clientConfPath(name);
-    if (!file) throw new Error('Неверное имя клиента');
-    if (!fs.existsSync(file)) throw new Error('Конфиг клиента не найден');
+    if (!file) throw new Error('РќРµРІРµСЂРЅРѕРµ РёРјСЏ РєР»РёРµРЅС‚Р°');
+    if (!fs.existsSync(file)) throw new Error('РљРѕРЅС„РёРі РєР»РёРµРЅС‚Р° РЅРµ РЅР°Р№РґРµРЅ');
     const value = Number(mtu) || 0;
-    if (value && (value < 576 || value > 1500)) throw new Error('MTU должен быть 576…1500');
+    if (value && (value < 576 || value > 1500)) throw new Error('MTU РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ 576вЂ¦1500');
     const lines = readTextSafe(file).split(/\r?\n/);
-    if (!lines.some(l => /^\s*\[Interface\]\s*$/i.test(l))) throw new Error('В конфиге нет секции [Interface]');
+    if (!lines.some(l => /^\s*\[Interface\]\s*$/i.test(l))) throw new Error('Р’ РєРѕРЅС„РёРіРµ РЅРµС‚ СЃРµРєС†РёРё [Interface]');
     const out = lines.filter(l => !/^\s*MTU\s*=/i.test(l));
     if (value) {
         const idx = out.findIndex(l => /^\s*\[Interface\]\s*$/i.test(l));
@@ -10045,8 +10045,8 @@ function setClientConfMtu(name, mtu) {
     return value;
 }
 
-// MTU, который стоит ставить клиентским конфигам: минимум по интерфейсам
-// каскада (именно туда уходит трафик клиентов), иначе MTU клиентского.
+// MTU, РєРѕС‚РѕСЂС‹Р№ СЃС‚РѕРёС‚ СЃС‚Р°РІРёС‚СЊ РєР»РёРµРЅС‚СЃРєРёРј РєРѕРЅС„РёРіР°Рј: РјРёРЅРёРјСѓРј РїРѕ РёРЅС‚РµСЂС„РµР№СЃР°Рј
+// РєР°СЃРєР°РґР° (РёРјРµРЅРЅРѕ С‚СѓРґР° СѓС…РѕРґРёС‚ С‚СЂР°С„РёРє РєР»РёРµРЅС‚РѕРІ), РёРЅР°С‡Рµ MTU РєР»РёРµРЅС‚СЃРєРѕРіРѕ.
 function clientPathMtu() {
     let items = [];
     try { items = mtuLocalReport(); } catch (e) { items = []; }
@@ -10059,10 +10059,10 @@ function clientPathMtu() {
 function clientMtuAdvice(mtu, suggested) {
     const cur = Number(mtu) || 0;
     const need = Number(suggested) || 0;
-    if (!need) return { ok: true, level: 'ok', message: 'MTU пути неизвестен — оставьте значение установщика.' };
-    if (!cur) return { ok: false, level: 'warn', message: `В конфиге нет MTU. Рекомендуется ${need} (по узкому месту пути).` };
-    if (cur > need) return { ok: false, level: 'error', message: `MTU ${cur} больше пути ${need}: пакеты ${need + 1}…${cur} байт будут теряться. Поставьте ${need}.` };
-    return { ok: true, level: 'ok', message: `MTU ${cur} не больше пути ${need} — корректно.` };
+    if (!need) return { ok: true, level: 'ok', message: 'MTU РїСѓС‚Рё РЅРµРёР·РІРµСЃС‚РµРЅ вЂ” РѕСЃС‚Р°РІСЊС‚Рµ Р·РЅР°С‡РµРЅРёРµ СѓСЃС‚Р°РЅРѕРІС‰РёРєР°.' };
+    if (!cur) return { ok: false, level: 'warn', message: `Р’ РєРѕРЅС„РёРіРµ РЅРµС‚ MTU. Р РµРєРѕРјРµРЅРґСѓРµС‚СЃСЏ ${need} (РїРѕ СѓР·РєРѕРјСѓ РјРµСЃС‚Сѓ РїСѓС‚Рё).` };
+    if (cur > need) return { ok: false, level: 'error', message: `MTU ${cur} Р±РѕР»СЊС€Рµ РїСѓС‚Рё ${need}: РїР°РєРµС‚С‹ ${need + 1}вЂ¦${cur} Р±Р°Р№С‚ Р±СѓРґСѓС‚ С‚РµСЂСЏС‚СЊСЃСЏ. РџРѕСЃС‚Р°РІСЊС‚Рµ ${need}.` };
+    return { ok: true, level: 'ok', message: `MTU ${cur} РЅРµ Р±РѕР»СЊС€Рµ РїСѓС‚Рё ${need} вЂ” РєРѕСЂСЂРµРєС‚РЅРѕ.` };
 }
 
 function clientNamesOnDisk() {
@@ -10084,7 +10084,7 @@ function clientMtuReport() {
         return {
             name,
             mtu,
-            // Пир каскада (ru_host) — не клиентский профиль: у него MTU туннеля.
+            // РџРёСЂ РєР°СЃРєР°РґР° (ru_host) вЂ” РЅРµ РєР»РёРµРЅС‚СЃРєРёР№ РїСЂРѕС„РёР»СЊ: Сѓ РЅРµРіРѕ MTU С‚СѓРЅРЅРµР»СЏ.
             peer: name === 'ru_host',
             remembered: Number(store.clients[name]) || 0,
             ok: rec.ok,
@@ -10103,8 +10103,8 @@ function clientMtuReport() {
     };
 }
 
-// Возвращает сохранённый MTU в конфиги после regen/rename установщика.
-// Пир каскада (ru_host) не трогаем: у него свой MTU, равный MTU туннеля.
+// Р’РѕР·РІСЂР°С‰Р°РµС‚ СЃРѕС…СЂР°РЅС‘РЅРЅС‹Р№ MTU РІ РєРѕРЅС„РёРіРё РїРѕСЃР»Рµ regen/rename СѓСЃС‚Р°РЅРѕРІС‰РёРєР°.
+// РџРёСЂ РєР°СЃРєР°РґР° (ru_host) РЅРµ С‚СЂРѕРіР°РµРј: Сѓ РЅРµРіРѕ СЃРІРѕР№ MTU, СЂР°РІРЅС‹Р№ MTU С‚СѓРЅРЅРµР»СЏ.
 function applyStoredClientMtu(onlyName) {
     if (DEMO_MODE || TEST_MODE || process.platform === 'win32') return { applied: 0, simulated: true };
     const store = readClientMtuStore();
@@ -10120,7 +10120,7 @@ function applyStoredClientMtu(onlyName) {
                 setClientConfMtu(name, want);
                 applied++;
             }
-        } catch (e) { /* пропускаем клиента */ }
+        } catch (e) { /* РїСЂРѕРїСѓСЃРєР°РµРј РєР»РёРµРЅС‚Р° */ }
     }
     return { applied };
 }
@@ -10170,7 +10170,7 @@ function applyClientRate(ip, rate) {
             maxBuffer: 8 * 1024 * 1024,
             timeout: 30000
         }, (error, stdout, stderr) => {
-            if (error) return reject(new Error(String(stderr || stdout || error.message || 'Ошибка TC').trim().slice(0, 200)));
+            if (error) return reject(new Error(String(stderr || stdout || error.message || 'РћС€РёР±РєР° TC').trim().slice(0, 200)));
             resolve(String(stdout || '').trim());
         });
     });
@@ -10254,7 +10254,7 @@ if (!TEST_MODE) {
 
 app.get('/api/clients/:name/limits', checkAuth, (req, res) => {
     const c = findClientByName(String(req.params.name || ''));
-    if (!c || !c.ip) return res.status(404).json({ error: 'Клиент не найден' });
+    if (!c || !c.ip) return res.status(404).json({ error: 'РљР»РёРµРЅС‚ РЅРµ РЅР°Р№РґРµРЅ' });
     const l = readClientLimits()[c.ip] || {};
     const total = totalClientBytes(c);
     const baseline = Number(l.baseline) || 0;
@@ -10272,7 +10272,7 @@ app.get('/api/clients/:name/limits', checkAuth, (req, res) => {
 
 app.post('/api/clients/:name/limits', checkAuth, requireAdmin, async (req, res) => {
     const c = findClientByName(String(req.params.name || ''));
-    if (!c || !c.ip) return res.status(404).json({ error: 'Клиент не найден' });
+    if (!c || !c.ip) return res.status(404).json({ error: 'РљР»РёРµРЅС‚ РЅРµ РЅР°Р№РґРµРЅ' });
     const body = req.body || {};
     const rate = Math.max(0, Math.min(100000, Math.round(Number(body.rate) || 0)));
     const quota = Math.max(0, Math.round(Number(body.quota_bytes) || 0));
@@ -10293,21 +10293,21 @@ app.post('/api/clients/:name/limits', checkAuth, requireAdmin, async (req, res) 
     writeClientLimits(limits);
     let warning = '';
     try { await applyClientRate(ip, rate); }
-    catch (e) { if (rate > 0) warning = 'Скорость: ' + e.message; }
+    catch (e) { if (rate > 0) warning = 'РЎРєРѕСЂРѕСЃС‚СЊ: ' + e.message; }
     const used = Math.max(0, total - next.baseline);
     const over = quota > 0 && used >= quota;
     const blockOk = setQuotaBlock(ip, over);
-    if (over && !blockOk) warning = (warning ? warning + ' ' : '') + 'Не удалось применить блокировку по трафику.';
+    if (over && !blockOk) warning = (warning ? warning + ' ' : '') + 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРёРјРµРЅРёС‚СЊ Р±Р»РѕРєРёСЂРѕРІРєСѓ РїРѕ С‚СЂР°С„РёРєСѓ.';
     next.blocked = over && blockOk;
     writeClientLimits(limits);
-    auditLog(req, `Клиент ${c.name}: скорость ${rate} Мбит/с, лимит трафика ${quota ? Math.round(quota / (1024 ** 3)) + ' ГБ' : 'нет'}`);
+    auditLog(req, `РљР»РёРµРЅС‚ ${c.name}: СЃРєРѕСЂРѕСЃС‚СЊ ${rate} РњР±РёС‚/СЃ, Р»РёРјРёС‚ С‚СЂР°С„РёРєР° ${quota ? Math.round(quota / (1024 ** 3)) + ' Р“Р‘' : 'РЅРµС‚'}`);
     res.json({ success: true, name: c.name, ip, rate, quota_bytes: quota, baseline: next.baseline, used_bytes: used, blocked: next.blocked, warning });
 });
 
-// Точечная изоляция клиента от других клиентов AWG.
+// РўРѕС‡РµС‡РЅР°СЏ РёР·РѕР»СЏС†РёСЏ РєР»РёРµРЅС‚Р° РѕС‚ РґСЂСѓРіРёС… РєР»РёРµРЅС‚РѕРІ AWG.
 app.get('/api/clients/:name/isolation', checkAuth, (req, res) => {
     const c = findClientByName(String(req.params.name || ''));
-    if (!c || !c.ip) return res.status(404).json({ error: 'Клиент не найден' });
+    if (!c || !c.ip) return res.status(404).json({ error: 'РљР»РёРµРЅС‚ РЅРµ РЅР°Р№РґРµРЅ' });
     res.json({
         name: c.name,
         ip: c.ip,
@@ -10321,7 +10321,7 @@ app.get('/api/clients/:name/isolation', checkAuth, (req, res) => {
 
 app.post('/api/clients/:name/isolation', checkAuth, requireAdmin, (req, res) => {
     const c = findClientByName(String(req.params.name || ''));
-    if (!c || !c.ip) return res.status(404).json({ error: 'Клиент не найден' });
+    if (!c || !c.ip) return res.status(404).json({ error: 'РљР»РёРµРЅС‚ РЅРµ РЅР°Р№РґРµРЅ' });
     const body = req.body || {};
     let mode = String(body.mode || '').trim();
     if (!mode) {
@@ -10332,13 +10332,13 @@ app.post('/api/clients/:name/isolation', checkAuth, requireAdmin, (req, res) => 
     }
     if (mode === 'shared') mode = 'open';
     if (!['default', 'isolated', 'open', 'open-plus'].includes(mode)) {
-        return res.status(400).json({ error: 'mode: default, isolated, open или open-plus' });
+        return res.status(400).json({ error: 'mode: default, isolated, open РёР»Рё open-plus' });
     }
     let peers = [];
     if (mode === 'open-plus') {
         const raw = Array.isArray(body.peers) ? body.peers : [];
         peers = [...new Set(raw.map(p => String(p || '').trim()).filter(p => IPV4_RE.test(p) && p !== c.ip))].slice(0, 256);
-        if (!peers.length) return res.status(400).json({ error: 'Для «Открытый+» выберите хотя бы одного клиента' });
+        if (!peers.length) return res.status(400).json({ error: 'Р”Р»СЏ В«РћС‚РєСЂС‹С‚С‹Р№+В» РІС‹Р±РµСЂРёС‚Рµ С…РѕС‚СЏ Р±С‹ РѕРґРЅРѕРіРѕ РєР»РёРµРЅС‚Р°' });
     }
 
     const map = readClientIsolation();
@@ -10348,8 +10348,8 @@ app.post('/api/clients/:name/isolation', checkAuth, requireAdmin, (req, res) => 
     else map[c.ip] = { mode: 'open-plus', peers };
     writeClientIsolation(map);
     syncClientIsolation();
-    const label = mode === 'isolated' ? 'включена' : mode === 'open' ? 'открыт для всех' : mode === 'open-plus' ? 'открыт для выбранных' : 'по умолчанию';
-    auditLog(req, `Клиент ${c.name}: изоляция ${label}`);
+    const label = mode === 'isolated' ? 'РІРєР»СЋС‡РµРЅР°' : mode === 'open' ? 'РѕС‚РєСЂС‹С‚ РґР»СЏ РІСЃРµС…' : mode === 'open-plus' ? 'РѕС‚РєСЂС‹С‚ РґР»СЏ РІС‹Р±СЂР°РЅРЅС‹С…' : 'РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ';
+    auditLog(req, `РљР»РёРµРЅС‚ ${c.name}: РёР·РѕР»СЏС†РёСЏ ${label}`);
     res.json({ success: true, name: c.name, ip: c.ip, mode, peers, isolated: mode === 'isolated', warning: isolationLastError || '' });
 });
 
@@ -10357,16 +10357,16 @@ app.post('/api/limit', checkAuth, (req, res) => {
     const { ip, rate } = req.body || {};
     const r = parseInt(rate, 10);
     if (!IPV4_RE.test(String(ip || '')) || !Number.isInteger(r) || r < 0 || r > 100000) {
-        return res.status(400).json({ error: 'Некорректный IP или скорость' });
+        return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ IP РёР»Рё СЃРєРѕСЂРѕСЃС‚СЊ' });
     }
     execFile('sudo', ['bash', '/root/awg-limit.sh', String(ip), String(r)], { maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
-        if (error) return res.status(500).json({ error: 'Ошибка TC скрипта' });
-        auditLog(req, `Лимит ${r} Мбит/с для ${ip}`);
+        if (error) return res.status(500).json({ error: 'РћС€РёР±РєР° TC СЃРєСЂРёРїС‚Р°' });
+        auditLog(req, `Р›РёРјРёС‚ ${r} РњР±РёС‚/СЃ РґР»СЏ ${ip}`);
         res.json({ success: true, message: String(stdout || '') });
     });
 });
 // ---------------------------------------------------------------------------
-// Статистика клиентов (для таблицы на дашборде)
+// РЎС‚Р°С‚РёСЃС‚РёРєР° РєР»РёРµРЅС‚РѕРІ (РґР»СЏ С‚Р°Р±Р»РёС†С‹ РЅР° РґР°С€Р±РѕСЂРґРµ)
 // ---------------------------------------------------------------------------
 app.get('/api/stats', checkAuth, (req, res) => {
     if (DEMO_MODE) {
@@ -10377,14 +10377,14 @@ app.get('/api/stats', checkAuth, (req, res) => {
         try {
             const s = String(stdout || '');
             const i = s.indexOf('[');
-            if (i === -1) return res.status(500).json({ error: 'Скрипт не вернул JSON' });
+            if (i === -1) return res.status(500).json({ error: 'РЎРєСЂРёРїС‚ РЅРµ РІРµСЂРЅСѓР» JSON' });
             let data = JSON.parse(s.substring(i));
             data = data.map(client => {
                 let sc = client.status_code;
                 if (!sc) {
                     const st = String(client.status || '').toLowerCase();
-                    if (st.includes('активен') && !st.includes('неактивен') && !st.includes('не активен')) sc = 'active';
-                    else if (st.includes('недавно')) sc = 'recent';
+                    if (st.includes('Р°РєС‚РёРІРµРЅ') && !st.includes('РЅРµР°РєС‚РёРІРµРЅ') && !st.includes('РЅРµ Р°РєС‚РёРІРµРЅ')) sc = 'active';
+                    else if (st.includes('РЅРµРґР°РІРЅРѕ')) sc = 'recent';
                     else sc = 'inactive';
                 }
                 return { ...client, status_code: sc };
@@ -10397,19 +10397,19 @@ app.get('/api/stats', checkAuth, (req, res) => {
                 return { ...c, isolation_mode: isoMode, isolation_peers: isoPeers };
             });
             res.json(attachClientSpeeds(withIsolation));
-        } catch (e) { res.status(500).json({ error: 'Ошибка парсинга' }); }
+        } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° РїР°СЂСЃРёРЅРіР°' }); }
     });
 });
 
 // ---------------------------------------------------------------------------
-// Обфускация AmneziaWG: чтение/применение/экспорт (интеграция с Архитектором)
+// РћР±С„СѓСЃРєР°С†РёСЏ AmneziaWG: С‡С‚РµРЅРёРµ/РїСЂРёРјРµРЅРµРЅРёРµ/СЌРєСЃРїРѕСЂС‚ (РёРЅС‚РµРіСЂР°С†РёСЏ СЃ РђСЂС…РёС‚РµРєС‚РѕСЂРѕРј)
 // ---------------------------------------------------------------------------
 const OBF_INT_RANGES = {
     Jc: [0, 128], Jmin: [0, 1280], Jmax: [0, 1280],
     S1: [0, 1280], S2: [0, 1280], S3: [0, 1280], S4: [0, 32]
 };
-// Поля, которые в AWG 2.0+ могут быть диапазоном "min-max" (каждый пакет
-// получает случайное значение из диапазона). Именно так их отдаёт Архитектор.
+// РџРѕР»СЏ, РєРѕС‚РѕСЂС‹Рµ РІ AWG 2.0+ РјРѕРіСѓС‚ Р±С‹С‚СЊ РґРёР°РїР°Р·РѕРЅРѕРј "min-max" (РєР°Р¶РґС‹Р№ РїР°РєРµС‚
+// РїРѕР»СѓС‡Р°РµС‚ СЃР»СѓС‡Р°Р№РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ РёР· РґРёР°РїР°Р·РѕРЅР°). РРјРµРЅРЅРѕ С‚Р°Рє РёС… РѕС‚РґР°С‘С‚ РђСЂС…РёС‚РµРєС‚РѕСЂ.
 const OBF_RANGE_LIMITS = {
     H1: [0, 4294967295], H2: [0, 4294967295], H3: [0, 4294967295], H4: [0, 4294967295],
     ContentPaddingAddition: [0, 65535],
@@ -10423,8 +10423,8 @@ const OBF_ALL_KEYS = [
     ...Object.keys(OBF_INT_RANGES), ...Object.keys(OBF_RANGE_LIMITS),
     ...OBF_I_KEYS, ...OBF_STR_KEYS
 ];
-// Общие параметры обязаны совпадать на сервере и у клиентов. Остальные —
-// клиентские/локальные: их можно менять, не ломая туннель.
+// РћР±С‰РёРµ РїР°СЂР°РјРµС‚СЂС‹ РѕР±СЏР·Р°РЅС‹ СЃРѕРІРїР°РґР°С‚СЊ РЅР° СЃРµСЂРІРµСЂРµ Рё Сѓ РєР»РёРµРЅС‚РѕРІ. РћСЃС‚Р°Р»СЊРЅС‹Рµ вЂ”
+// РєР»РёРµРЅС‚СЃРєРёРµ/Р»РѕРєР°Р»СЊРЅС‹Рµ: РёС… РјРѕР¶РЅРѕ РјРµРЅСЏС‚СЊ, РЅРµ Р»РѕРјР°СЏ С‚СѓРЅРЅРµР»СЊ.
 const OBF_SHARED_KEYS = ['H1', 'H2', 'H3', 'H4', 'S1', 'S2', 'S3', 'S4', 'HeaderProtectionKey', 'RandomTrailers'];
 const OBF_VALUE_RE = /^[A-Za-z0-9+/=_.:<>\- ]{0,8192}$/;
 
@@ -10486,15 +10486,15 @@ function extractObfFromAny(text) {
             }
         };
         put(body);
-        // Amnezia хранит полный набор в last_config (строкой JSON).
+        // Amnezia С…СЂР°РЅРёС‚ РїРѕР»РЅС‹Р№ РЅР°Р±РѕСЂ РІ last_config (СЃС‚СЂРѕРєРѕР№ JSON).
         let lc = body && body.last_config;
         if (typeof lc === 'string') { try { lc = JSON.parse(lc); } catch (e) { lc = null; } }
         put(lc);
-        // Архитектор кладёт полный текст конфига в awg.config.
+        // РђСЂС…РёС‚РµРєС‚РѕСЂ РєР»Р°РґС‘С‚ РїРѕР»РЅС‹Р№ С‚РµРєСЃС‚ РєРѕРЅС„РёРіР° РІ awg.config.
         if (body && typeof body.config === 'string') put(readObfFromConf(body.config));
         if (Object.keys(out).length) return out;
     }
-    // Обычный .conf (в том числе вывод Архитектора).
+    // РћР±С‹С‡РЅС‹Р№ .conf (РІ С‚РѕРј С‡РёСЃР»Рµ РІС‹РІРѕРґ РђСЂС…РёС‚РµРєС‚РѕСЂР°).
     return readObfFromConf(raw);
 }
 
@@ -10506,8 +10506,8 @@ function splitObfBatch(text) {
 
 function parseObfInput(text) {
     const raw = String(text || '').replace(/^\uFEFF/, '').trim();
-    if (!raw) throw new Error('Пустой ввод: вставьте .conf, JSON или vpn:// из Архитектора');
-    if (raw.length > 256 * 1024) throw new Error('Слишком большой текст (максимум 256 КБ)');
+    if (!raw) throw new Error('РџСѓСЃС‚РѕР№ РІРІРѕРґ: РІСЃС‚Р°РІСЊС‚Рµ .conf, JSON РёР»Рё vpn:// РёР· РђСЂС…РёС‚РµРєС‚РѕСЂР°');
+    if (raw.length > 256 * 1024) throw new Error('РЎР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№ С‚РµРєСЃС‚ (РјР°РєСЃРёРјСѓРј 256 РљР‘)');
     const parts = /^vpn:\/\//i.test(raw) ? [raw] : splitObfBatch(raw);
     const first = parts[0];
     let format = 'conf';
@@ -10521,21 +10521,21 @@ function parseObfInput(text) {
 
     const params = extractObfFromAny(first);
     if (!Object.keys(params).length) {
-        throw new Error('В тексте не найдены параметры обфускации (Jc/Jmin/Jmax, H1-H4, S1-S4, I1-I5, HeaderProtectionKey)');
+        throw new Error('Р’ С‚РµРєСЃС‚Рµ РЅРµ РЅР°Р№РґРµРЅС‹ РїР°СЂР°РјРµС‚СЂС‹ РѕР±С„СѓСЃРєР°С†РёРё (Jc/Jmin/Jmax, H1-H4, S1-S4, I1-I5, HeaderProtectionKey)');
     }
     const version = detectObfVersion(params);
     const warnings = [];
     if (parts.length > 1) {
-        warnings.push(`Найдено конфигураций: ${parts.length}. Использована первая — остальные являются альтернативами для других устройств.`);
+        warnings.push(`РќР°Р№РґРµРЅРѕ РєРѕРЅС„РёРіСѓСЂР°С†РёР№: ${parts.length}. РСЃРїРѕР»СЊР·РѕРІР°РЅР° РїРµСЂРІР°СЏ вЂ” РѕСЃС‚Р°Р»СЊРЅС‹Рµ СЏРІР»СЏСЋС‚СЃСЏ Р°Р»СЊС‚РµСЂРЅР°С‚РёРІР°РјРё РґР»СЏ РґСЂСѓРіРёС… СѓСЃС‚СЂРѕР№СЃС‚РІ.`);
     }
     if ((version === '3.0' || version === '3.1') && !params.HeaderProtectionKey) {
-        warnings.push('В конфиге нет HeaderProtectionKey. Для AWG 3.x это означает, что заголовки не шифруются: включите опцию в Архитекторе или в приложении Amnezia VPN.');
+        warnings.push('Р’ РєРѕРЅС„РёРіРµ РЅРµС‚ HeaderProtectionKey. Р”Р»СЏ AWG 3.x СЌС‚Рѕ РѕР·РЅР°С‡Р°РµС‚, С‡С‚Рѕ Р·Р°РіРѕР»РѕРІРєРё РЅРµ С€РёС„СЂСѓСЋС‚СЃСЏ: РІРєР»СЋС‡РёС‚Рµ РѕРїС†РёСЋ РІ РђСЂС…РёС‚РµРєС‚РѕСЂРµ РёР»Рё РІ РїСЂРёР»РѕР¶РµРЅРёРё Amnezia VPN.');
     }
     if (OBF_I_KEYS.every(k => !params[k])) {
-        warnings.push('Нет цепочки I1–I5 (CPS-мимикрия). Это один из самых заметных признаков для DPI — по возможности используйте профиль Архитектора с имитацией QUIC/TLS.');
+        warnings.push('РќРµС‚ С†РµРїРѕС‡РєРё I1вЂ“I5 (CPS-РјРёРјРёРєСЂРёСЏ). Р­С‚Рѕ РѕРґРёРЅ РёР· СЃР°РјС‹С… Р·Р°РјРµС‚РЅС‹С… РїСЂРёР·РЅР°РєРѕРІ РґР»СЏ DPI вЂ” РїРѕ РІРѕР·РјРѕР¶РЅРѕСЃС‚Рё РёСЃРїРѕР»СЊР·СѓР№С‚Рµ РїСЂРѕС„РёР»СЊ РђСЂС…РёС‚РµРєС‚РѕСЂР° СЃ РёРјРёС‚Р°С†РёРµР№ QUIC/TLS.');
     }
     if (params.H1 && parseObfRange(params.H1) && parseObfRange(params.H1).single) {
-        warnings.push('H1–H4 заданы одним числом. Начиная с AWG 2.0 лучше использовать диапазоны — тогда заголовок меняется от пакета к пакету.');
+        warnings.push('H1вЂ“H4 Р·Р°РґР°РЅС‹ РѕРґРЅРёРј С‡РёСЃР»РѕРј. РќР°С‡РёРЅР°СЏ СЃ AWG 2.0 Р»СѓС‡С€Рµ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РґРёР°РїР°Р·РѕРЅС‹ вЂ” С‚РѕРіРґР° Р·Р°РіРѕР»РѕРІРѕРє РјРµРЅСЏРµС‚СЃСЏ РѕС‚ РїР°РєРµС‚Р° Рє РїР°РєРµС‚Сѓ.');
     }
     return { params, format, version, alternatives: parts.length, warnings, bytes: raw.length };
 }
@@ -10546,33 +10546,33 @@ function validateObf(params) {
     for (const [k, vRaw] of Object.entries(params || {})) {
         if (!OBF_ALL_KEYS.includes(k)) continue;
         const v = String(vRaw == null ? '' : vRaw).trim();
-        if (!OBF_VALUE_RE.test(v)) throw new Error(`Недопустимое значение параметра ${k}`);
+        if (!OBF_VALUE_RE.test(v)) throw new Error(`РќРµРґРѕРїСѓСЃС‚РёРјРѕРµ Р·РЅР°С‡РµРЅРёРµ РїР°СЂР°РјРµС‚СЂР° ${k}`);
 
         if (OBF_INT_RANGES[k]) {
-            if (!/^\d{1,10}$/.test(v)) throw new Error(`${k} должен быть целым числом`);
+            if (!/^\d{1,10}$/.test(v)) throw new Error(`${k} РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ С†РµР»С‹Рј С‡РёСЃР»РѕРј`);
             const n = Number(v);
             const [min, max] = OBF_INT_RANGES[k];
-            if (!Number.isInteger(n) || n < min || n > max) throw new Error(`${k} должен быть числом ${min}..${max}`);
+            if (!Number.isInteger(n) || n < min || n > max) throw new Error(`${k} РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ С‡РёСЃР»РѕРј ${min}..${max}`);
             clean[k] = String(n);
         } else if (OBF_RANGE_LIMITS[k]) {
             const r = parseObfRange(v);
-            if (!r) throw new Error(`${k}: ожидается число или диапазон вида 100-200`);
+            if (!r) throw new Error(`${k}: РѕР¶РёРґР°РµС‚СЃСЏ С‡РёСЃР»Рѕ РёР»Рё РґРёР°РїР°Р·РѕРЅ РІРёРґР° 100-200`);
             const [min, max] = OBF_RANGE_LIMITS[k];
-            if (r.min < min || r.max > max) throw new Error(`${k} должен быть в пределах ${min}..${max}`);
-            if (r.max < r.min) throw new Error(`${k}: начало диапазона больше конца`);
+            if (r.min < min || r.max > max) throw new Error(`${k} РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РІ РїСЂРµРґРµР»Р°С… ${min}..${max}`);
+            if (r.max < r.min) throw new Error(`${k}: РЅР°С‡Р°Р»Рѕ РґРёР°РїР°Р·РѕРЅР° Р±РѕР»СЊС€Рµ РєРѕРЅС†Р°`);
             clean[k] = r.single ? String(r.min) : `${r.min}-${r.max}`;
         } else if (OBF_I_KEYS.includes(k)) {
-            clean[k] = v; // пустая строка = удалить цепочку
+            clean[k] = v; // РїСѓСЃС‚Р°СЏ СЃС‚СЂРѕРєР° = СѓРґР°Р»РёС‚СЊ С†РµРїРѕС‡РєСѓ
         } else if (k === 'HeaderProtectionKey') {
             if (v) {
-                if (!/^[A-Za-z0-9+/=_-]{40,48}$/.test(v)) throw new Error('HeaderProtectionKey должен быть base64 на 32 байта');
+                if (!/^[A-Za-z0-9+/=_-]{40,48}$/.test(v)) throw new Error('HeaderProtectionKey РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ base64 РЅР° 32 Р±Р°Р№С‚Р°');
                 const buf = Buffer.from(v, 'base64');
-                if (buf.length !== 32) throw new Error('HeaderProtectionKey должен быть base64 на 32 байта');
+                if (buf.length !== 32) throw new Error('HeaderProtectionKey РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ base64 РЅР° 32 Р±Р°Р№С‚Р°');
             }
             clean[k] = v;
         } else if (OBF_FLAG_KEYS.includes(k)) {
             if (!['', '0', '1', 'true', 'false'].includes(v.toLowerCase())) {
-                throw new Error(`${k} должен быть 0 или 1`);
+                throw new Error(`${k} РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ 0 РёР»Рё 1`);
             }
             const low = v.toLowerCase();
             clean[k] = low === 'true' ? '1' : low === 'false' ? '0' : low;
@@ -10582,15 +10582,15 @@ function validateObf(params) {
 
     if (clean.Jmin !== undefined && clean.Jmax !== undefined &&
         Number(clean.Jmin) > Number(clean.Jmax)) {
-        throw new Error('Jmin не может быть больше Jmax');
+        throw new Error('Jmin РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ Р±РѕР»СЊС€Рµ Jmax');
     }
 
     const iTotal = OBF_I_KEYS.reduce((sum, k) => sum + (clean[k] ? clean[k].length : 0), 0);
     if (iTotal > 3200) {
-        throw new Error(`Суммарная длина I1–I5 — ${iTotal} символов. Ядро Linux принимает не больше 3200: сократите цепочку.`);
+        throw new Error(`РЎСѓРјРјР°СЂРЅР°СЏ РґР»РёРЅР° I1вЂ“I5 вЂ” ${iTotal} СЃРёРјРІРѕР»РѕРІ. РЇРґСЂРѕ Linux РїСЂРёРЅРёРјР°РµС‚ РЅРµ Р±РѕР»СЊС€Рµ 3200: СЃРѕРєСЂР°С‚РёС‚Рµ С†РµРїРѕС‡РєСѓ.`);
     }
 
-    // Пересекающиеся диапазоны H делают тип пакета неоднозначным.
+    // РџРµСЂРµСЃРµРєР°СЋС‰РёРµСЃСЏ РґРёР°РїР°Р·РѕРЅС‹ H РґРµР»Р°СЋС‚ С‚РёРї РїР°РєРµС‚Р° РЅРµРѕРґРЅРѕР·РЅР°С‡РЅС‹Рј.
     const hRanges = ['H1', 'H2', 'H3', 'H4']
         .filter(k => provided.has(k) && clean[k])
         .map(k => ({ k, r: parseObfRange(clean[k]) }))
@@ -10599,15 +10599,15 @@ function validateObf(params) {
         for (let j = i + 1; j < hRanges.length; j++) {
             const a = hRanges[i], b = hRanges[j];
             if (a.r.min <= b.r.max && b.r.min <= a.r.max) {
-                throw new Error(`Диапазоны ${a.k} и ${b.k} пересекаются — приёмник не сможет различить типы пакетов`);
+                throw new Error(`Р”РёР°РїР°Р·РѕРЅС‹ ${a.k} Рё ${b.k} РїРµСЂРµСЃРµРєР°СЋС‚СЃСЏ вЂ” РїСЂРёС‘РјРЅРёРє РЅРµ СЃРјРѕР¶РµС‚ СЂР°Р·Р»РёС‡РёС‚СЊ С‚РёРїС‹ РїР°РєРµС‚РѕРІ`);
             }
         }
     }
     return clean;
 }
 
-// Оценка устойчивости к DPI/ТСПУ. Это эвристика, а не гарантия обхода:
-// она показывает, какие параметры выдают стандартный AmneziaWG.
+// РћС†РµРЅРєР° СѓСЃС‚РѕР№С‡РёРІРѕСЃС‚Рё Рє DPI/РўРЎРџРЈ. Р­С‚Рѕ СЌРІСЂРёСЃС‚РёРєР°, Р° РЅРµ РіР°СЂР°РЅС‚РёСЏ РѕР±С…РѕРґР°:
+// РѕРЅР° РїРѕРєР°Р·С‹РІР°РµС‚, РєР°РєРёРµ РїР°СЂР°РјРµС‚СЂС‹ РІС‹РґР°СЋС‚ СЃС‚Р°РЅРґР°СЂС‚РЅС‹Р№ AmneziaWG.
 function auditObf(params) {
     const p = params || {};
     const findings = [];
@@ -10618,145 +10618,145 @@ function auditObf(params) {
 
     const version = detectObfVersion(p);
 
-    // --- H1-H4: статические/маленькие заголовки — главная сигнатура AWG 1.0 ---
+    // --- H1-H4: СЃС‚Р°С‚РёС‡РµСЃРєРёРµ/РјР°Р»РµРЅСЊРєРёРµ Р·Р°РіРѕР»РѕРІРєРё вЂ” РіР»Р°РІРЅР°СЏ СЃРёРіРЅР°С‚СѓСЂР° AWG 1.0 ---
     const hKeys = ['H1', 'H2', 'H3', 'H4'];
     const hPresent = hKeys.filter(has);
     const hVals = hPresent.map(k => ({ k, r: rng(k) })).filter(x => x.r);
     if (!hPresent.length) {
         score -= 30;
-        add('error', 'h-missing', 'Заголовки H1–H4 не заданы',
-            'Без них пакеты AmneziaWG используют стандартные магические заголовки — DPI опознаёт протокол по первому пакету.',
-            'Сгенерируйте конфиг в Архитекторе (версия 2.0+) и импортируйте его.');
+        add('error', 'h-missing', 'Р—Р°РіРѕР»РѕРІРєРё H1вЂ“H4 РЅРµ Р·Р°РґР°РЅС‹',
+            'Р‘РµР· РЅРёС… РїР°РєРµС‚С‹ AmneziaWG РёСЃРїРѕР»СЊР·СѓСЋС‚ СЃС‚Р°РЅРґР°СЂС‚РЅС‹Рµ РјР°РіРёС‡РµСЃРєРёРµ Р·Р°РіРѕР»РѕРІРєРё вЂ” DPI РѕРїРѕР·РЅР°С‘С‚ РїСЂРѕС‚РѕРєРѕР» РїРѕ РїРµСЂРІРѕРјСѓ РїР°РєРµС‚Сѓ.',
+            'РЎРіРµРЅРµСЂРёСЂСѓР№С‚Рµ РєРѕРЅС„РёРі РІ РђСЂС…РёС‚РµРєС‚РѕСЂРµ (РІРµСЂСЃРёСЏ 2.0+) Рё РёРјРїРѕСЂС‚РёСЂСѓР№С‚Рµ РµРіРѕ.');
     } else {
         if (hPresent.length < 4) {
             score -= 10;
-            add('warn', 'h-partial', `Задано только ${hPresent.length} из 4 заголовков`,
-                'Незаданные H используют значения по умолчанию.', 'Заполните все H1–H4.');
+            add('warn', 'h-partial', `Р—Р°РґР°РЅРѕ С‚РѕР»СЊРєРѕ ${hPresent.length} РёР· 4 Р·Р°РіРѕР»РѕРІРєРѕРІ`,
+                'РќРµР·Р°РґР°РЅРЅС‹Рµ H РёСЃРїРѕР»СЊР·СѓСЋС‚ Р·РЅР°С‡РµРЅРёСЏ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ.', 'Р—Р°РїРѕР»РЅРёС‚Рµ РІСЃРµ H1вЂ“H4.');
         }
         const reserved = hVals.filter(x => x.r.min <= 4 && x.r.max <= 4);
         if (reserved.length) {
             score -= 15;
-            add('error', 'h-reserved', 'H1–H4 в диапазоне 1–4',
-                'Значения 1–4 совпадают с типами сообщений обычного WireGuard — такой трафик распознаётся почти безошибочно.',
-                'Используйте большие непересекающиеся диапазоны (Архитектор делает это автоматически).');
+            add('error', 'h-reserved', 'H1вЂ“H4 РІ РґРёР°РїР°Р·РѕРЅРµ 1вЂ“4',
+                'Р—РЅР°С‡РµРЅРёСЏ 1вЂ“4 СЃРѕРІРїР°РґР°СЋС‚ СЃ С‚РёРїР°РјРё СЃРѕРѕР±С‰РµРЅРёР№ РѕР±С‹С‡РЅРѕРіРѕ WireGuard вЂ” С‚Р°РєРѕР№ С‚СЂР°С„РёРє СЂР°СЃРїРѕР·РЅР°С‘С‚СЃСЏ РїРѕС‡С‚Рё Р±РµР·РѕС€РёР±РѕС‡РЅРѕ.',
+                'РСЃРїРѕР»СЊР·СѓР№С‚Рµ Р±РѕР»СЊС€РёРµ РЅРµРїРµСЂРµСЃРµРєР°СЋС‰РёРµСЃСЏ РґРёР°РїР°Р·РѕРЅС‹ (РђСЂС…РёС‚РµРєС‚РѕСЂ РґРµР»Р°РµС‚ СЌС‚Рѕ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё).');
         }
         const singles = hVals.filter(x => x.r.single);
         if (hVals.length && singles.length === hVals.length) {
             score -= 12;
-            add('warn', 'h-static', 'Все H1–H4 — фиксированные числа',
-                'Заголовок одинаков во всех пакетах. Статистический анализ быстро находит такую сигнатуру.',
-                'Включите диапазоны H1–H4 (AWG 2.0+) или сгенерируйте конфиг в Архитекторе.');
+            add('warn', 'h-static', 'Р’СЃРµ H1вЂ“H4 вЂ” С„РёРєСЃРёСЂРѕРІР°РЅРЅС‹Рµ С‡РёСЃР»Р°',
+                'Р—Р°РіРѕР»РѕРІРѕРє РѕРґРёРЅР°РєРѕРІ РІРѕ РІСЃРµС… РїР°РєРµС‚Р°С…. РЎС‚Р°С‚РёСЃС‚РёС‡РµСЃРєРёР№ Р°РЅР°Р»РёР· Р±С‹СЃС‚СЂРѕ РЅР°С…РѕРґРёС‚ С‚Р°РєСѓСЋ СЃРёРіРЅР°С‚СѓСЂСѓ.',
+                'Р’РєР»СЋС‡РёС‚Рµ РґРёР°РїР°Р·РѕРЅС‹ H1вЂ“H4 (AWG 2.0+) РёР»Рё СЃРіРµРЅРµСЂРёСЂСѓР№С‚Рµ РєРѕРЅС„РёРі РІ РђСЂС…РёС‚РµРєС‚РѕСЂРµ.');
         } else if (singles.length) {
             score -= 5;
-            add('info', 'h-mixed', `${singles.length} из ${hVals.length} заголовков без диапазона`,
-                'Часть заголовков всё ещё фиксирована.', 'Переведите все H1–H4 в диапазоны.');
+            add('info', 'h-mixed', `${singles.length} РёР· ${hVals.length} Р·Р°РіРѕР»РѕРІРєРѕРІ Р±РµР· РґРёР°РїР°Р·РѕРЅР°`,
+                'Р§Р°СЃС‚СЊ Р·Р°РіРѕР»РѕРІРєРѕРІ РІСЃС‘ РµС‰С‘ С„РёРєСЃРёСЂРѕРІР°РЅР°.', 'РџРµСЂРµРІРµРґРёС‚Рµ РІСЃРµ H1вЂ“H4 РІ РґРёР°РїР°Р·РѕРЅС‹.');
         }
         const narrow = hVals.filter(x => !x.r.single && (x.r.max - x.r.min) < 512);
         if (narrow.length) {
             score -= 4;
-            add('info', 'h-narrow', 'Слишком узкие диапазоны H',
-                `У ${narrow.map(x => x.k).join(', ')} диапазон меньше 512 значений — случайность почти не заметна.`,
-                'Расширьте диапазоны до нескольких тысяч значений.');
+            add('info', 'h-narrow', 'РЎР»РёС€РєРѕРј СѓР·РєРёРµ РґРёР°РїР°Р·РѕРЅС‹ H',
+                `РЈ ${narrow.map(x => x.k).join(', ')} РґРёР°РїР°Р·РѕРЅ РјРµРЅСЊС€Рµ 512 Р·РЅР°С‡РµРЅРёР№ вЂ” СЃР»СѓС‡Р°Р№РЅРѕСЃС‚СЊ РїРѕС‡С‚Рё РЅРµ Р·Р°РјРµС‚РЅР°.`,
+                'Р Р°СЃС€РёСЂСЊС‚Рµ РґРёР°РїР°Р·РѕРЅС‹ РґРѕ РЅРµСЃРєРѕР»СЊРєРёС… С‚С‹СЃСЏС‡ Р·РЅР°С‡РµРЅРёР№.');
         }
         for (let i = 0; i < hVals.length; i++) {
             for (let j = i + 1; j < hVals.length; j++) {
                 const a = hVals[i], b = hVals[j];
                 if (a.r.min <= b.r.max && b.r.min <= a.r.max) {
                     score -= 20;
-                    add('error', 'h-overlap', `Пересечение ${a.k} и ${b.k}`,
-                        'Приёмник не сможет однозначно определить тип пакета, а DPI получит простой шаблон.',
-                        'Сгенерируйте непересекающиеся диапазоны в Архитекторе.');
+                    add('error', 'h-overlap', `РџРµСЂРµСЃРµС‡РµРЅРёРµ ${a.k} Рё ${b.k}`,
+                        'РџСЂРёС‘РјРЅРёРє РЅРµ СЃРјРѕР¶РµС‚ РѕРґРЅРѕР·РЅР°С‡РЅРѕ РѕРїСЂРµРґРµР»РёС‚СЊ С‚РёРї РїР°РєРµС‚Р°, Р° DPI РїРѕР»СѓС‡РёС‚ РїСЂРѕСЃС‚РѕР№ С€Р°Р±Р»РѕРЅ.',
+                        'РЎРіРµРЅРµСЂРёСЂСѓР№С‚Рµ РЅРµРїРµСЂРµСЃРµРєР°СЋС‰РёРµСЃСЏ РґРёР°РїР°Р·РѕРЅС‹ РІ РђСЂС…РёС‚РµРєС‚РѕСЂРµ.');
                 }
             }
         }
     }
 
-    // --- S1-S4: паддинг и nonce для HeaderProtectionKey ---
+    // --- S1-S4: РїР°РґРґРёРЅРі Рё nonce РґР»СЏ HeaderProtectionKey ---
     const sKeys = ['S1', 'S2', 'S3', 'S4'];
     const sPresent = sKeys.filter(has);
     const sVal = k => has(k) ? Number(p[k]) : null;
     if (!sPresent.length) {
         score -= 20;
-        add('error', 's-missing', 'Паддинг S1–S4 не задан',
-            'Размеры пакетов остаются предсказуемыми (148/92 байта), что является готовой сигнатурой WireGuard.',
-            'Импортируйте конфиг Архитектора с S1–S4.');
+        add('error', 's-missing', 'РџР°РґРґРёРЅРі S1вЂ“S4 РЅРµ Р·Р°РґР°РЅ',
+            'Р Р°Р·РјРµСЂС‹ РїР°РєРµС‚РѕРІ РѕСЃС‚Р°СЋС‚СЃСЏ РїСЂРµРґСЃРєР°Р·СѓРµРјС‹РјРё (148/92 Р±Р°Р№С‚Р°), С‡С‚Рѕ СЏРІР»СЏРµС‚СЃСЏ РіРѕС‚РѕРІРѕР№ СЃРёРіРЅР°С‚СѓСЂРѕР№ WireGuard.',
+            'РРјРїРѕСЂС‚РёСЂСѓР№С‚Рµ РєРѕРЅС„РёРі РђСЂС…РёС‚РµРєС‚РѕСЂР° СЃ S1вЂ“S4.');
     } else {
         if (sPresent.length < 4) {
             score -= 6;
-            add('warn', 's-partial', `Задано только ${sPresent.length} из 4 размеров S`,
-                'Незаданные S остаются стандартными.', 'Заполните S1–S4.');
+            add('warn', 's-partial', `Р—Р°РґР°РЅРѕ С‚РѕР»СЊРєРѕ ${sPresent.length} РёР· 4 СЂР°Р·РјРµСЂРѕРІ S`,
+                'РќРµР·Р°РґР°РЅРЅС‹Рµ S РѕСЃС‚Р°СЋС‚СЃСЏ СЃС‚Р°РЅРґР°СЂС‚РЅС‹РјРё.', 'Р—Р°РїРѕР»РЅРёС‚Рµ S1вЂ“S4.');
         }
         if (has('S4') && sVal('S4') > 32) {
             score -= 10;
-            add('error', 's4-max', 'S4 больше 32',
-                'Ядро AmneziaWG не принимает S4 > 32 — интерфейс может не подняться.', 'Уменьшите S4 до 12–32.');
+            add('error', 's4-max', 'S4 Р±РѕР»СЊС€Рµ 32',
+                'РЇРґСЂРѕ AmneziaWG РЅРµ РїСЂРёРЅРёРјР°РµС‚ S4 > 32 вЂ” РёРЅС‚РµСЂС„РµР№СЃ РјРѕР¶РµС‚ РЅРµ РїРѕРґРЅСЏС‚СЊСЃСЏ.', 'РЈРјРµРЅСЊС€РёС‚Рµ S4 РґРѕ 12вЂ“32.');
         }
         if (has('HeaderProtectionKey') && sPresent.some(k => sVal(k) < 12)) {
             score -= 18;
-            add('error', 's-hpk-nonce', 'S меньше 12 при включённом HeaderProtectionKey',
-                'Из S-паддинга берётся nonce для шифрования заголовка; при S < 12 его не хватает.',
-                'Поднимите S1–S4 минимум до 12.');
+            add('error', 's-hpk-nonce', 'S РјРµРЅСЊС€Рµ 12 РїСЂРё РІРєР»СЋС‡С‘РЅРЅРѕРј HeaderProtectionKey',
+                'РР· S-РїР°РґРґРёРЅРіР° Р±РµСЂС‘С‚СЃСЏ nonce РґР»СЏ С€РёС„СЂРѕРІР°РЅРёСЏ Р·Р°РіРѕР»РѕРІРєР°; РїСЂРё S < 12 РµРіРѕ РЅРµ С…РІР°С‚Р°РµС‚.',
+                'РџРѕРґРЅРёРјРёС‚Рµ S1вЂ“S4 РјРёРЅРёРјСѓРј РґРѕ 12.');
         }
         if (has('S1') && has('S2') && sVal('S2') === sVal('S1') + 56) {
             score -= 4;
             add('info', 's-collision', 'S2 = S1 + 56',
-                'Размеры пакетов могут совпасть и выдать протокол.', 'Измените S2 или S1.');
+                'Р Р°Р·РјРµСЂС‹ РїР°РєРµС‚РѕРІ РјРѕРіСѓС‚ СЃРѕРІРїР°СЃС‚СЊ Рё РІС‹РґР°С‚СЊ РїСЂРѕС‚РѕРєРѕР».', 'РР·РјРµРЅРёС‚Рµ S2 РёР»Рё S1.');
         }
     }
 
-    // --- Jc/Jmin/Jmax: мусорные пакеты перед рукопожатием ---
+    // --- Jc/Jmin/Jmax: РјСѓСЃРѕСЂРЅС‹Рµ РїР°РєРµС‚С‹ РїРµСЂРµРґ СЂСѓРєРѕРїРѕР¶Р°С‚РёРµРј ---
     const jc = has('Jc') ? Number(p.Jc) : null;
     const jmin = has('Jmin') ? Number(p.Jmin) : null;
     const jmax = has('Jmax') ? Number(p.Jmax) : null;
     if (jc === null || jc === 0) {
         score -= 18;
-        add('error', 'junk-missing', 'Нет мусорных пакетов (Jc = 0)',
-            'Перед рукопожатием не отправляется ничего необычного — DPI видит чистый WireGuard handshake.',
-            'Задайте Jc 3–8 и Jmin/Jmax с разбросом.');
+        add('error', 'junk-missing', 'РќРµС‚ РјСѓСЃРѕСЂРЅС‹С… РїР°РєРµС‚РѕРІ (Jc = 0)',
+            'РџРµСЂРµРґ СЂСѓРєРѕРїРѕР¶Р°С‚РёРµРј РЅРµ РѕС‚РїСЂР°РІР»СЏРµС‚СЃСЏ РЅРёС‡РµРіРѕ РЅРµРѕР±С‹С‡РЅРѕРіРѕ вЂ” DPI РІРёРґРёС‚ С‡РёСЃС‚С‹Р№ WireGuard handshake.',
+            'Р—Р°РґР°Р№С‚Рµ Jc 3вЂ“8 Рё Jmin/Jmax СЃ СЂР°Р·Р±СЂРѕСЃРѕРј.');
     } else {
         if (jc < 3) {
             score -= 5;
-            add('warn', 'junk-low', 'Мало мусорных пакетов',
-                `Jc = ${jc}: для маскировки обычно нужно 3–8.`, 'Увеличьте Jc.');
+            add('warn', 'junk-low', 'РњР°Р»Рѕ РјСѓСЃРѕСЂРЅС‹С… РїР°РєРµС‚РѕРІ',
+                `Jc = ${jc}: РґР»СЏ РјР°СЃРєРёСЂРѕРІРєРё РѕР±С‹С‡РЅРѕ РЅСѓР¶РЅРѕ 3вЂ“8.`, 'РЈРІРµР»РёС‡СЊС‚Рµ Jc.');
         }
         if (jmin === null || jmax === null) {
             score -= 8;
-            add('warn', 'junk-range-missing', 'Не задан Jmin или Jmax',
-                'Размер мусорных пакетов будет фиксированным.', 'Задайте оба значения.');
+            add('warn', 'junk-range-missing', 'РќРµ Р·Р°РґР°РЅ Jmin РёР»Рё Jmax',
+                'Р Р°Р·РјРµСЂ РјСѓСЃРѕСЂРЅС‹С… РїР°РєРµС‚РѕРІ Р±СѓРґРµС‚ С„РёРєСЃРёСЂРѕРІР°РЅРЅС‹Рј.', 'Р—Р°РґР°Р№С‚Рµ РѕР±Р° Р·РЅР°С‡РµРЅРёСЏ.');
         } else if (jmin >= jmax) {
             score -= 10;
-            add('error', 'junk-range-bad', 'Jmin ≥ Jmax',
-                'Диапазон размеров пуст — мусорные пакеты будут одинаковыми.', 'Сделайте Jmax больше Jmin.');
+            add('error', 'junk-range-bad', 'Jmin в‰Ґ Jmax',
+                'Р”РёР°РїР°Р·РѕРЅ СЂР°Р·РјРµСЂРѕРІ РїСѓСЃС‚ вЂ” РјСѓСЃРѕСЂРЅС‹Рµ РїР°РєРµС‚С‹ Р±СѓРґСѓС‚ РѕРґРёРЅР°РєРѕРІС‹РјРё.', 'РЎРґРµР»Р°Р№С‚Рµ Jmax Р±РѕР»СЊС€Рµ Jmin.');
         } else if (jmax - jmin < 64) {
             score -= 5;
-            add('warn', 'junk-range-narrow', 'Узкий разброс Jmin–Jmax',
-                `Разница всего ${jmax - jmin} байт.`, 'Расширьте диапазон до сотен байт.');
+            add('warn', 'junk-range-narrow', 'РЈР·РєРёР№ СЂР°Р·Р±СЂРѕСЃ JminвЂ“Jmax',
+                `Р Р°Р·РЅРёС†Р° РІСЃРµРіРѕ ${jmax - jmin} Р±Р°Р№С‚.`, 'Р Р°СЃС€РёСЂСЊС‚Рµ РґРёР°РїР°Р·РѕРЅ РґРѕ СЃРѕС‚РµРЅ Р±Р°Р№С‚.');
         }
     }
 
-    // --- I1-I5: CPS-мимикрия (клиентская сторона) ---
+    // --- I1-I5: CPS-РјРёРјРёРєСЂРёСЏ (РєР»РёРµРЅС‚СЃРєР°СЏ СЃС‚РѕСЂРѕРЅР°) ---
     const iPresent = OBF_I_KEYS.filter(has);
     const iTotal = iPresent.reduce((sum, k) => sum + String(p[k]).length, 0);
     if (!iPresent.length) {
         score -= 20;
-        add('warn', 'cps-missing', 'Нет цепочки I1–I5 (CPS)',
-            'AmneziaWG не имитирует чужой протокол. Для ТСПУ это один из самых устойчивых признаков: случайный UDP-поток без сигнатуры.',
-            'Сгенерируйте профиль с имитацией QUIC/TLS в Архитекторе.');
+        add('warn', 'cps-missing', 'РќРµС‚ С†РµРїРѕС‡РєРё I1вЂ“I5 (CPS)',
+            'AmneziaWG РЅРµ РёРјРёС‚РёСЂСѓРµС‚ С‡СѓР¶РѕР№ РїСЂРѕС‚РѕРєРѕР». Р”Р»СЏ РўРЎРџРЈ СЌС‚Рѕ РѕРґРёРЅ РёР· СЃР°РјС‹С… СѓСЃС‚РѕР№С‡РёРІС‹С… РїСЂРёР·РЅР°РєРѕРІ: СЃР»СѓС‡Р°Р№РЅС‹Р№ UDP-РїРѕС‚РѕРє Р±РµР· СЃРёРіРЅР°С‚СѓСЂС‹.',
+            'РЎРіРµРЅРµСЂРёСЂСѓР№С‚Рµ РїСЂРѕС„РёР»СЊ СЃ РёРјРёС‚Р°С†РёРµР№ QUIC/TLS РІ РђСЂС…РёС‚РµРєС‚РѕСЂРµ.');
     } else {
         if (iPresent.length < 3) {
             score -= 6;
-            add('info', 'cps-partial', `Заполнено ${iPresent.length} из 5 цепочек I`,
-                'Меньше вариантов мимикрии — шаблон заметнее.', 'Используйте все I1–I5.');
+            add('info', 'cps-partial', `Р—Р°РїРѕР»РЅРµРЅРѕ ${iPresent.length} РёР· 5 С†РµРїРѕС‡РµРє I`,
+                'РњРµРЅСЊС€Рµ РІР°СЂРёР°РЅС‚РѕРІ РјРёРјРёРєСЂРёРё вЂ” С€Р°Р±Р»РѕРЅ Р·Р°РјРµС‚РЅРµРµ.', 'РСЃРїРѕР»СЊР·СѓР№С‚Рµ РІСЃРµ I1вЂ“I5.');
         }
         if (iTotal < 128) {
             score -= 5;
-            add('info', 'cps-short', 'Короткая CPS-цепочка',
-                `Суммарно ${iTotal} символов — имитация выглядит бедно.`, 'Сгенерируйте цепочку в Архитекторе.');
+            add('info', 'cps-short', 'РљРѕСЂРѕС‚РєР°СЏ CPS-С†РµРїРѕС‡РєР°',
+                `РЎСѓРјРјР°СЂРЅРѕ ${iTotal} СЃРёРјРІРѕР»РѕРІ вЂ” РёРјРёС‚Р°С†РёСЏ РІС‹РіР»СЏРґРёС‚ Р±РµРґРЅРѕ.`, 'РЎРіРµРЅРµСЂРёСЂСѓР№С‚Рµ С†РµРїРѕС‡РєСѓ РІ РђСЂС…РёС‚РµРєС‚РѕСЂРµ.');
         }
         if (iTotal > 3200) {
             score -= 15;
-            add('error', 'cps-long', 'CPS-цепочка длиннее 3200 символов',
-                'Модуль ядра Linux не примет такой конфиг («Message too long»).', 'Сократите цепочку.');
+            add('error', 'cps-long', 'CPS-С†РµРїРѕС‡РєР° РґР»РёРЅРЅРµРµ 3200 СЃРёРјРІРѕР»РѕРІ',
+                'РњРѕРґСѓР»СЊ СЏРґСЂР° Linux РЅРµ РїСЂРёРјРµС‚ С‚Р°РєРѕР№ РєРѕРЅС„РёРі (В«Message too longВ»).', 'РЎРѕРєСЂР°С‚РёС‚Рµ С†РµРїРѕС‡РєСѓ.');
         }
     }
 
@@ -10765,61 +10765,61 @@ function auditObf(params) {
         const buf = Buffer.from(String(p.HeaderProtectionKey), 'base64');
         if (buf.length !== 32) {
             score -= 20;
-            add('error', 'hpk-bad', 'Некорректный HeaderProtectionKey',
-                'Ключ должен быть base64 на 32 байта.', 'Перегенерируйте конфиг в Архитекторе.');
+            add('error', 'hpk-bad', 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ HeaderProtectionKey',
+                'РљР»СЋС‡ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ base64 РЅР° 32 Р±Р°Р№С‚Р°.', 'РџРµСЂРµРіРµРЅРµСЂРёСЂСѓР№С‚Рµ РєРѕРЅС„РёРі РІ РђСЂС…РёС‚РµРєС‚РѕСЂРµ.');
         } else {
-            add('ok', 'hpk-ok', 'Заголовки шифруются (HeaderProtectionKey)',
-                'ChaCha20 скрывает типы сообщений от DPI.', '');
+            add('ok', 'hpk-ok', 'Р—Р°РіРѕР»РѕРІРєРё С€РёС„СЂСѓСЋС‚СЃСЏ (HeaderProtectionKey)',
+                'ChaCha20 СЃРєСЂС‹РІР°РµС‚ С‚РёРїС‹ СЃРѕРѕР±С‰РµРЅРёР№ РѕС‚ DPI.', '');
         }
     } else if (version === '3.0' || version === '3.1') {
         score -= 25;
-        add('error', 'hpk-missing', 'HeaderProtectionKey отсутствует',
-            'Для AWG 3.x это значит, что заголовки не шифруются — версия 3.0 работает вхолостую.',
-            'Включите HeaderProtectionKey в Архитекторе (или в настройках протокола Amnezia VPN).');
+        add('error', 'hpk-missing', 'HeaderProtectionKey РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚',
+            'Р”Р»СЏ AWG 3.x СЌС‚Рѕ Р·РЅР°С‡РёС‚, С‡С‚Рѕ Р·Р°РіРѕР»РѕРІРєРё РЅРµ С€РёС„СЂСѓСЋС‚СЃСЏ вЂ” РІРµСЂСЃРёСЏ 3.0 СЂР°Р±РѕС‚Р°РµС‚ РІС…РѕР»РѕСЃС‚СѓСЋ.',
+            'Р’РєР»СЋС‡РёС‚Рµ HeaderProtectionKey РІ РђСЂС…РёС‚РµРєС‚РѕСЂРµ (РёР»Рё РІ РЅР°СЃС‚СЂРѕР№РєР°С… РїСЂРѕС‚РѕРєРѕР»Р° Amnezia VPN).');
     } else {
         score -= 6;
-        add('info', 'hpk-old', 'Нет HeaderProtectionKey (версия ниже 3.0)',
-            'Шифрование заголовков появилось в AWG 3.0.', 'Для защиты от статистического анализа используйте 3.0/3.1.');
+        add('info', 'hpk-old', 'РќРµС‚ HeaderProtectionKey (РІРµСЂСЃРёСЏ РЅРёР¶Рµ 3.0)',
+            'РЁРёС„СЂРѕРІР°РЅРёРµ Р·Р°РіРѕР»РѕРІРєРѕРІ РїРѕСЏРІРёР»РѕСЃСЊ РІ AWG 3.0.', 'Р”Р»СЏ Р·Р°С‰РёС‚С‹ РѕС‚ СЃС‚Р°С‚РёСЃС‚РёС‡РµСЃРєРѕРіРѕ Р°РЅР°Р»РёР·Р° РёСЃРїРѕР»СЊР·СѓР№С‚Рµ 3.0/3.1.');
     }
 
-    // --- Таймеры ---
+    // --- РўР°Р№РјРµСЂС‹ ---
     const timerKeys = ['RekeyAfterTime', 'RekeyTimeout', 'RejectAfterTime', 'KeepaliveTimeout', 'MaxHandshakeAttempts'];
     const tPresent = timerKeys.filter(has);
     if ((version === '3.0' || version === '3.1') && !tPresent.length) {
         score -= 6;
-        add('warn', 'timers-missing', 'Таймеры не рандомизированы',
-            'Фиксированные интервалы — ещё один канал статистического анализа.', 'Импортируйте таймеры из Архитектора.');
+        add('warn', 'timers-missing', 'РўР°Р№РјРµСЂС‹ РЅРµ СЂР°РЅРґРѕРјРёР·РёСЂРѕРІР°РЅС‹',
+            'Р¤РёРєСЃРёСЂРѕРІР°РЅРЅС‹Рµ РёРЅС‚РµСЂРІР°Р»С‹ вЂ” РµС‰С‘ РѕРґРёРЅ РєР°РЅР°Р» СЃС‚Р°С‚РёСЃС‚РёС‡РµСЃРєРѕРіРѕ Р°РЅР°Р»РёР·Р°.', 'РРјРїРѕСЂС‚РёСЂСѓР№С‚Рµ С‚Р°Р№РјРµСЂС‹ РёР· РђСЂС…РёС‚РµРєС‚РѕСЂР°.');
     } else if (tPresent.length) {
         const fixed = tPresent.filter(k => !String(p[k]).includes('-'));
         if (fixed.length === tPresent.length) {
             score -= 8;
-            add('warn', 'timers-fixed', 'Все таймеры — фиксированные числа',
-                'Одинаковые интервалы выдают протокол при длительном наблюдении.', 'Используйте диапазоны вида 110-130.');
+            add('warn', 'timers-fixed', 'Р’СЃРµ С‚Р°Р№РјРµСЂС‹ вЂ” С„РёРєСЃРёСЂРѕРІР°РЅРЅС‹Рµ С‡РёСЃР»Р°',
+                'РћРґРёРЅР°РєРѕРІС‹Рµ РёРЅС‚РµСЂРІР°Р»С‹ РІС‹РґР°СЋС‚ РїСЂРѕС‚РѕРєРѕР» РїСЂРё РґР»РёС‚РµР»СЊРЅРѕРј РЅР°Р±Р»СЋРґРµРЅРёРё.', 'РСЃРїРѕР»СЊР·СѓР№С‚Рµ РґРёР°РїР°Р·РѕРЅС‹ РІРёРґР° 110-130.');
         } else if (fixed.length) {
             score -= 3;
-            add('info', 'timers-mixed', `${fixed.length} таймер(ов) без диапазона`,
-                'Часть интервалов остаётся постоянной.', 'Переведите все таймеры в диапазоны.');
+            add('info', 'timers-mixed', `${fixed.length} С‚Р°Р№РјРµСЂ(РѕРІ) Р±РµР· РґРёР°РїР°Р·РѕРЅР°`,
+                'Р§Р°СЃС‚СЊ РёРЅС‚РµСЂРІР°Р»РѕРІ РѕСЃС‚Р°С‘С‚СЃСЏ РїРѕСЃС‚РѕСЏРЅРЅРѕР№.', 'РџРµСЂРµРІРµРґРёС‚Рµ РІСЃРµ С‚Р°Р№РјРµСЂС‹ РІ РґРёР°РїР°Р·РѕРЅС‹.');
         }
     }
 
-    // --- Флаги 3.1 ---
+    // --- Р¤Р»Р°РіРё 3.1 ---
     const flagOn = k => has(k) && ['1', 'true', 'yes', 'on'].includes(String(p[k]).trim().toLowerCase());
     if (version === '3.1' && !flagOn('RandomTrailers')) {
         score -= 4;
-        add('info', 'trailers-missing', 'RandomTrailers не включён',
-            'Случайный хвост пакета усложняет анализ размеров.', 'Включите RandomTrailers = 1 в Архитекторе.');
+        add('info', 'trailers-missing', 'RandomTrailers РЅРµ РІРєР»СЋС‡С‘РЅ',
+            'РЎР»СѓС‡Р°Р№РЅС‹Р№ С…РІРѕСЃС‚ РїР°РєРµС‚Р° СѓСЃР»РѕР¶РЅСЏРµС‚ Р°РЅР°Р»РёР· СЂР°Р·РјРµСЂРѕРІ.', 'Р’РєР»СЋС‡РёС‚Рµ RandomTrailers = 1 РІ РђСЂС…РёС‚РµРєС‚РѕСЂРµ.');
     }
     if (version === '3.1' && !flagOn('DisableCookies')) {
         score -= 2;
-        add('info', 'cookies-enabled', 'DisableCookies не включён',
-            'Cookie-ответы имеют характерный размер и поведение.', 'Включите DisableCookies = 1, если клиенты поддерживают 3.1.');
+        add('info', 'cookies-enabled', 'DisableCookies РЅРµ РІРєР»СЋС‡С‘РЅ',
+            'Cookie-РѕС‚РІРµС‚С‹ РёРјРµСЋС‚ С…Р°СЂР°РєС‚РµСЂРЅС‹Р№ СЂР°Р·РјРµСЂ Рё РїРѕРІРµРґРµРЅРёРµ.', 'Р’РєР»СЋС‡РёС‚Рµ DisableCookies = 1, РµСЃР»Рё РєР»РёРµРЅС‚С‹ РїРѕРґРґРµСЂР¶РёРІР°СЋС‚ 3.1.');
     }
 
     score = Math.max(0, Math.min(100, score));
     const level = score >= 85 ? 'strong' : score >= 65 ? 'good' : score >= 35 ? 'weak' : 'critical';
     if (score >= 85) {
-        add('ok', 'overall', 'Профиль выглядит устойчивым',
-            'Диапазоны, паддинг, CPS и шифрование заголовков включены. Это не гарантия: при блокировке по IP обфускация не поможет.',
+        add('ok', 'overall', 'РџСЂРѕС„РёР»СЊ РІС‹РіР»СЏРґРёС‚ СѓСЃС‚РѕР№С‡РёРІС‹Рј',
+            'Р”РёР°РїР°Р·РѕРЅС‹, РїР°РґРґРёРЅРі, CPS Рё С€РёС„СЂРѕРІР°РЅРёРµ Р·Р°РіРѕР»РѕРІРєРѕРІ РІРєР»СЋС‡РµРЅС‹. Р­С‚Рѕ РЅРµ РіР°СЂР°РЅС‚РёСЏ: РїСЂРё Р±Р»РѕРєРёСЂРѕРІРєРµ РїРѕ IP РѕР±С„СѓСЃРєР°С†РёСЏ РЅРµ РїРѕРјРѕР¶РµС‚.',
             '');
     }
     return {
@@ -10838,7 +10838,7 @@ function auditObf(params) {
 function applyObfToConf(content, params, opts = {}) {
     const lines = String(content || '').split(/\r?\n/);
     let start = lines.findIndex(l => /^\s*\[Interface\]\s*$/i.test(l));
-    if (start === -1) throw new Error('В конфиге нет секции [Interface]');
+    if (start === -1) throw new Error('Р’ РєРѕРЅС„РёРіРµ РЅРµС‚ СЃРµРєС†РёРё [Interface]');
     let end = lines.length;
     for (let i = start + 1; i < lines.length; i++) {
         if (/^\s*\[.+\]\s*$/.test(lines[i].trim())) { end = i; break; }
@@ -10857,7 +10857,7 @@ function applyObfToConf(content, params, opts = {}) {
             const k = m[1];
             if (keys.includes(k)) {
                 used.add(k);
-                if (String(params[k]) === '') continue; // пустое значение = удалить строку
+                if (String(params[k]) === '') continue; // РїСѓСЃС‚РѕРµ Р·РЅР°С‡РµРЅРёРµ = СѓРґР°Р»РёС‚СЊ СЃС‚СЂРѕРєСѓ
                 body.push(`${k} = ${params[k]}`);
                 continue;
             }
@@ -10873,7 +10873,7 @@ function applyObfToConf(content, params, opts = {}) {
 
 app.get('/api/obf/current', checkAuth, (req, res) => {
     const confPath = serverConfPath();
-    if (!confPath) return res.status(404).json({ error: 'Конфиг сервера не найден' });
+    if (!confPath) return res.status(404).json({ error: 'РљРѕРЅС„РёРі СЃРµСЂРІРµСЂР° РЅРµ РЅР°Р№РґРµРЅ' });
     try {
         const content = fs.readFileSync(confPath, 'utf8');
         const params = readObfFromConf(content);
@@ -10883,7 +10883,7 @@ app.get('/api/obf/current', checkAuth, (req, res) => {
             version: detectObfVersion(params),
             audit: auditObf(params)
         });
-    } catch (e) { res.status(500).json({ error: 'Ошибка чтения конфига' }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ РєРѕРЅС„РёРіР°' }); }
 });
 
 app.post('/api/obf/analyze', checkAuth, (req, res) => {
@@ -10901,7 +10901,7 @@ app.post('/api/obf/analyze', checkAuth, (req, res) => {
             parsed.params = validateObf(parsed.params);
             parsed.version = detectObfVersion(parsed.params);
         }
-        if (!Object.keys(parsed.params).length) throw new Error('Параметры обфускации не найдены');
+        if (!Object.keys(parsed.params).length) throw new Error('РџР°СЂР°РјРµС‚СЂС‹ РѕР±С„СѓСЃРєР°С†РёРё РЅРµ РЅР°Р№РґРµРЅС‹');
         parsed.audit = auditObf(parsed.params);
         res.json(parsed);
     } catch (e) {
@@ -10917,7 +10917,7 @@ function reloadAwgInterface(iface) {
         try {
             sh('systemctl', ['restart', `awg-quick@${iface}`]);
         } catch (e) {
-            // Панель может работать не от root: тогда нужен sudo.
+            // РџР°РЅРµР»СЊ РјРѕР¶РµС‚ СЂР°Р±РѕС‚Р°С‚СЊ РЅРµ РѕС‚ root: С‚РѕРіРґР° РЅСѓР¶РµРЅ sudo.
             if (!/permission|access|not permitted|denied/i.test(String(e.stderr || e.message || ''))) throw e;
             sh('sudo', ['systemctl', 'restart', `awg-quick@${iface}`]);
         }
@@ -10927,7 +10927,7 @@ function reloadAwgInterface(iface) {
     const state = isActive(`awg-quick@${iface}`);
     return state === 'active'
         ? { ok: true, state }
-        : { ok: false, state, error: `интерфейс ${iface} не активен (${state})` };
+        : { ok: false, state, error: `РёРЅС‚РµСЂС„РµР№СЃ ${iface} РЅРµ Р°РєС‚РёРІРµРЅ (${state})` };
 }
 
 function syncClient31Params(onlyName) {
@@ -10958,7 +10958,7 @@ function syncClient31Params(onlyName) {
                 changed = true;
             }
             if (changed) fs.writeFileSync(file, conf, { mode: 0o600 });
-        } catch (e) { /* пропускаем клиента */ }
+        } catch (e) { /* РїСЂРѕРїСѓСЃРєР°РµРј РєР»РёРµРЅС‚Р° */ }
     }
 }
 
@@ -10969,15 +10969,15 @@ function regenClientsSafe() {
     const out = sh('sudo', ['bash', MANAGE, 'regen', '--json'], { maxBuffer: 32 * 1024 * 1024 });
     const data = JSON.parse(out);
     syncClient31Params();
-    // Установщик пересобирает конфиги со своим MTU (обычно 1280) — возвращаем
-    // сохранённое значение, иначе правка «жила» бы до первого regen.
+    // РЈСЃС‚Р°РЅРѕРІС‰РёРє РїРµСЂРµСЃРѕР±РёСЂР°РµС‚ РєРѕРЅС„РёРіРё СЃРѕ СЃРІРѕРёРј MTU (РѕР±С‹С‡РЅРѕ 1280) вЂ” РІРѕР·РІСЂР°С‰Р°РµРј
+    // СЃРѕС…СЂР°РЅС‘РЅРЅРѕРµ Р·РЅР°С‡РµРЅРёРµ, РёРЅР°С‡Рµ РїСЂР°РІРєР° В«Р¶РёР»Р°В» Р±С‹ РґРѕ РїРµСЂРІРѕРіРѕ regen.
     const mtu = applyStoredClientMtu();
     return { regenerated: data.regenerated, simulated: false, mtuApplied: mtu.applied };
 }
 
-// manage_amneziawg.sh сверяет server_hpk.key с awg0.conf. После смены
-// HeaderProtectionKey (обфускация/SNI) файл нужно обновить, иначе regen
-// отказывается работать: «ключ не совпадает».
+// manage_amneziawg.sh СЃРІРµСЂСЏРµС‚ server_hpk.key СЃ awg0.conf. РџРѕСЃР»Рµ СЃРјРµРЅС‹
+// HeaderProtectionKey (РѕР±С„СѓСЃРєР°С†РёСЏ/SNI) С„Р°Р№Р» РЅСѓР¶РЅРѕ РѕР±РЅРѕРІРёС‚СЊ, РёРЅР°С‡Рµ regen
+// РѕС‚РєР°Р·С‹РІР°РµС‚СЃСЏ СЂР°Р±РѕС‚Р°С‚СЊ: В«РєР»СЋС‡ РЅРµ СЃРѕРІРїР°РґР°РµС‚В».
 function syncServerHpk(confText) {
     const hpkPath = path.join(AWG_DIR, 'server_hpk.key');
     const m = String(confText || '').match(/HeaderProtectionKey\s*=\s*([^\r\n]+)/);
@@ -10985,7 +10985,7 @@ function syncServerHpk(confText) {
         writeRootFile(hpkPath, m[1].trim() + '\n', '0600');
         return;
     }
-    try { fs.unlinkSync(hpkPath); } catch (e) { /* ключа нет — и не надо */ }
+    try { fs.unlinkSync(hpkPath); } catch (e) { /* РєР»СЋС‡Р° РЅРµС‚ вЂ” Рё РЅРµ РЅР°РґРѕ */ }
 }
 
 function applyObfParams(req, res, paramsIn, options = {}) {
@@ -10997,12 +10997,12 @@ function applyObfParams(req, res, paramsIn, options = {}) {
     try {
         params = validateObf(paramsIn);
     } catch (e) {
-        return res.status(400).json({ error: 'Не удалось разобрать параметры: ' + e.message });
+        return res.status(400).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЂР°Р·РѕР±СЂР°С‚СЊ РїР°СЂР°РјРµС‚СЂС‹: ' + e.message });
     }
-    if (!Object.keys(params).length) return res.status(400).json({ error: 'Параметры обфускации не найдены' });
+    if (!Object.keys(params).length) return res.status(400).json({ error: 'РџР°СЂР°РјРµС‚СЂС‹ РѕР±С„СѓСЃРєР°С†РёРё РЅРµ РЅР°Р№РґРµРЅС‹' });
 
     const confPath = serverConfPath();
-    if (!confPath) return res.status(404).json({ error: 'Конфиг сервера не найден' });
+    if (!confPath) return res.status(404).json({ error: 'РљРѕРЅС„РёРі СЃРµСЂРІРµСЂР° РЅРµ РЅР°Р№РґРµРЅ' });
 
     let original = '';
     let backup = '';
@@ -11018,12 +11018,12 @@ function applyObfParams(req, res, paramsIn, options = {}) {
         const iface = path.basename(confPath, '.conf');
         const restart = reloadAwgInterface(iface);
         if (!restart.ok) {
-            // Не оставляем сервер с конфигом, который не поднимается.
+            // РќРµ РѕСЃС‚Р°РІР»СЏРµРј СЃРµСЂРІРµСЂ СЃ РєРѕРЅС„РёРіРѕРј, РєРѕС‚РѕСЂС‹Р№ РЅРµ РїРѕРґРЅРёРјР°РµС‚СЃСЏ.
             writeRootFile(confPath, original, '0600');
             syncServerHpk(original);
             reloadAwgInterface(iface);
             return res.status(500).json({
-                error: 'Интерфейс не поднялся после применения параметров — изменения откатены. ' +
+                error: 'РРЅС‚РµСЂС„РµР№СЃ РЅРµ РїРѕРґРЅСЏР»СЃСЏ РїРѕСЃР»Рµ РїСЂРёРјРµРЅРµРЅРёСЏ РїР°СЂР°РјРµС‚СЂРѕРІ вЂ” РёР·РјРµРЅРµРЅРёСЏ РѕС‚РєР°С‚РµРЅС‹. ' +
                     (restart.error || ''),
                 rollback: true,
                 backup
@@ -11035,13 +11035,13 @@ function applyObfParams(req, res, paramsIn, options = {}) {
             try {
                 regen = regenClientsSafe();
             } catch (e) {
-                // Клиенты остались бы со старыми параметрами и потеряли связь.
+                // РљР»РёРµРЅС‚С‹ РѕСЃС‚Р°Р»РёСЃСЊ Р±С‹ СЃРѕ СЃС‚Р°СЂС‹РјРё РїР°СЂР°РјРµС‚СЂР°РјРё Рё РїРѕС‚РµСЂСЏР»Рё СЃРІСЏР·СЊ.
                 writeRootFile(confPath, original, '0600');
                 syncServerHpk(original);
                 reloadAwgInterface(iface);
                 try { regenClientsSafe(); } catch (e2) { /* ignore */ }
                 return res.status(500).json({
-                    error: 'Не удалось перегенерировать клиентов — изменения откатены. ' + e.message,
+                    error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ РєР»РёРµРЅС‚РѕРІ вЂ” РёР·РјРµРЅРµРЅРёСЏ РѕС‚РєР°С‚РµРЅС‹. ' + e.message,
                     rollback: true,
                     backup
                 });
@@ -11053,8 +11053,8 @@ function applyObfParams(req, res, paramsIn, options = {}) {
         const removed = removeMissing
             ? OBF_ALL_KEYS.filter(k => params[k] === undefined && original.match(new RegExp(`^\\s*${k}\\s*=`, 'm')))
             : [];
-        auditLog(req, `Применены параметры обфускации: ${Object.keys(params).join(', ')}` +
-            ` (клиенты regen: ${regenClients ? 'да' : 'нет'}, удалено: ${removed.length})`);
+        auditLog(req, `РџСЂРёРјРµРЅРµРЅС‹ РїР°СЂР°РјРµС‚СЂС‹ РѕР±С„СѓСЃРєР°С†РёРё: ${Object.keys(params).join(', ')}` +
+            ` (РєР»РёРµРЅС‚С‹ regen: ${regenClients ? 'РґР°' : 'РЅРµС‚'}, СѓРґР°Р»РµРЅРѕ: ${removed.length})`);
         res.json({
             success: true,
             applied: Object.keys(params).length,
@@ -11067,7 +11067,7 @@ function applyObfParams(req, res, paramsIn, options = {}) {
             version: detectObfVersion(appliedParams)
         });
     } catch (e) {
-        // Если запись уже успела произойти — пытаемся вернуть исходный конфиг.
+        // Р•СЃР»Рё Р·Р°РїРёСЃСЊ СѓР¶Рµ СѓСЃРїРµР»Р° РїСЂРѕРёР·РѕР№С‚Рё вЂ” РїС‹С‚Р°РµРјСЃСЏ РІРµСЂРЅСѓС‚СЊ РёСЃС…РѕРґРЅС‹Р№ РєРѕРЅС„РёРі.
         try {
             if (original) {
                 writeRootFile(confPath, original, '0600');
@@ -11075,7 +11075,7 @@ function applyObfParams(req, res, paramsIn, options = {}) {
                 reloadAwgInterface(path.basename(confPath, '.conf'));
             }
         } catch (e2) { /* ignore */ }
-        res.status(500).json({ error: 'Ошибка применения: ' + e.message, rollback: !!original });
+        res.status(500).json({ error: 'РћС€РёР±РєР° РїСЂРёРјРµРЅРµРЅРёСЏ: ' + e.message, rollback: !!original });
     }
 }
 
@@ -11087,7 +11087,7 @@ app.post('/api/obf/apply', checkAuth, (req, res) => {
             ? body.params
             : parseObfInput(body.source).params;
     } catch (e) {
-        return res.status(400).json({ error: 'Не удалось разобрать параметры: ' + e.message });
+        return res.status(400).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЂР°Р·РѕР±СЂР°С‚СЊ РїР°СЂР°РјРµС‚СЂС‹: ' + e.message });
     }
     return applyObfParams(req, res, params, {
         regenClients: !!body.regenClients,
@@ -11095,51 +11095,51 @@ app.post('/api/obf/apply', checkAuth, (req, res) => {
     });
 });
 
-// Чинит рассинхрон после ручной правки/неудачного restore: берём
-// HeaderProtectionKey из действующего awg0.conf и записываем в server_hpk.key.
+// Р§РёРЅРёС‚ СЂР°СЃСЃРёРЅС…СЂРѕРЅ РїРѕСЃР»Рµ СЂСѓС‡РЅРѕР№ РїСЂР°РІРєРё/РЅРµСѓРґР°С‡РЅРѕРіРѕ restore: Р±РµСЂС‘Рј
+// HeaderProtectionKey РёР· РґРµР№СЃС‚РІСѓСЋС‰РµРіРѕ awg0.conf Рё Р·Р°РїРёСЃС‹РІР°РµРј РІ server_hpk.key.
 app.post('/api/obf/sync-hpk', checkAuth, requireAdmin, (req, res) => {
     try {
         const confPath = serverConfPath();
-        if (!confPath) return res.status(404).json({ error: 'Конфиг сервера не найден' });
+        if (!confPath) return res.status(404).json({ error: 'РљРѕРЅС„РёРі СЃРµСЂРІРµСЂР° РЅРµ РЅР°Р№РґРµРЅ' });
         const text = fs.readFileSync(confPath, 'utf8');
         const m = text.match(/HeaderProtectionKey\s*=\s*([^\r\n]+)/);
         if (!m || !m[1].trim()) {
-            return res.status(400).json({ error: 'В конфиге нет HeaderProtectionKey' });
+            return res.status(400).json({ error: 'Р’ РєРѕРЅС„РёРіРµ РЅРµС‚ HeaderProtectionKey' });
         }
         syncServerHpk(text);
-        auditLog(req, 'Синхронизирован server_hpk.key с awg0.conf');
+        auditLog(req, 'РЎРёРЅС…СЂРѕРЅРёР·РёСЂРѕРІР°РЅ server_hpk.key СЃ awg0.conf');
         res.json({ success: true, file: confPath });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось синхронизировать ключ: ' + e.message });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРёРЅС…СЂРѕРЅРёР·РёСЂРѕРІР°С‚СЊ РєР»СЋС‡: ' + e.message });
     }
 });
 
 // ---------------------------------------------------------------------------
-// Профили обфускации: встроенные + сохранённые пользователем
+// РџСЂРѕС„РёР»Рё РѕР±С„СѓСЃРєР°С†РёРё: РІСЃС‚СЂРѕРµРЅРЅС‹Рµ + СЃРѕС…СЂР°РЅС‘РЅРЅС‹Рµ РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј
 // ---------------------------------------------------------------------------
 const OBF_BUILTIN_PROFILES = {
     default: {
-        title: 'Стандарт AWG 1.0 (совместимость)',
+        title: 'РЎС‚Р°РЅРґР°СЂС‚ AWG 1.0 (СЃРѕРІРјРµСЃС‚РёРјРѕСЃС‚СЊ)',
         level: 'weak',
-        note: 'H1–H4 = 1–4 — сигнатура обычного WireGuard. Годится только для проверки совместимости, не для обхода ТСПУ.',
+        note: 'H1вЂ“H4 = 1вЂ“4 вЂ” СЃРёРіРЅР°С‚СѓСЂР° РѕР±С‹С‡РЅРѕРіРѕ WireGuard. Р“РѕРґРёС‚СЃСЏ С‚РѕР»СЊРєРѕ РґР»СЏ РїСЂРѕРІРµСЂРєРё СЃРѕРІРјРµСЃС‚РёРјРѕСЃС‚Рё, РЅРµ РґР»СЏ РѕР±С…РѕРґР° РўРЎРџРЈ.',
         params: { Jc: 4, Jmin: 40, Jmax: 70, S1: 50, S2: 100, H1: 1, H2: 2, H3: 3, H4: 4 }
     },
     mobile: {
-        title: 'Мобильные операторы (МТС/Билайн/МегаФон)',
+        title: 'РњРѕР±РёР»СЊРЅС‹Рµ РѕРїРµСЂР°С‚РѕСЂС‹ (РњРўРЎ/Р‘РёР»Р°Р№РЅ/РњРµРіР°Р¤РѕРЅ)',
         level: 'weak',
-        note: 'Фиксированные H и нет CPS/HPK: лучше стандарта, но современный DPI всё ещё видит шаблон.',
+        note: 'Р¤РёРєСЃРёСЂРѕРІР°РЅРЅС‹Рµ H Рё РЅРµС‚ CPS/HPK: Р»СѓС‡С€Рµ СЃС‚Р°РЅРґР°СЂС‚Р°, РЅРѕ СЃРѕРІСЂРµРјРµРЅРЅС‹Р№ DPI РІСЃС‘ РµС‰С‘ РІРёРґРёС‚ С€Р°Р±Р»РѕРЅ.',
         params: { Jc: 3, Jmin: 10, Jmax: 50, S1: 30, S2: 60, H1: 1234567, H2: 2345678, H3: 3456789, H4: 4567890 }
     },
     aggressive: {
-        title: 'Агрессивный (много шума, AWG 2.0)',
+        title: 'РђРіСЂРµСЃСЃРёРІРЅС‹Р№ (РјРЅРѕРіРѕ С€СѓРјР°, AWG 2.0)',
         level: 'weak',
-        note: 'Больше мусора и паддинга, но H1–H4 остаются фиксированными. Для ТСПУ используйте профиль из Архитектора.',
+        note: 'Р‘РѕР»СЊС€Рµ РјСѓСЃРѕСЂР° Рё РїР°РґРґРёРЅРіР°, РЅРѕ H1вЂ“H4 РѕСЃС‚Р°СЋС‚СЃСЏ С„РёРєСЃРёСЂРѕРІР°РЅРЅС‹РјРё. Р”Р»СЏ РўРЎРџРЈ РёСЃРїРѕР»СЊР·СѓР№С‚Рµ РїСЂРѕС„РёР»СЊ РёР· РђСЂС…РёС‚РµРєС‚РѕСЂР°.',
         params: { Jc: 6, Jmin: 50, Jmax: 200, S1: 100, S2: 200, H1: 987654321, H2: 876543210, H3: 765432100, H4: 654321000 }
     }
 };
 
-// Шаблоны CPS-цепочек (формат ядра AmneziaWG). Случайные hex-байты внутри
-// шаблона делают профиль уникальным, но сохраняют проверенную структуру тегов.
+// РЁР°Р±Р»РѕРЅС‹ CPS-С†РµРїРѕС‡РµРє (С„РѕСЂРјР°С‚ СЏРґСЂР° AmneziaWG). РЎР»СѓС‡Р°Р№РЅС‹Рµ hex-Р±Р°Р№С‚С‹ РІРЅСѓС‚СЂРё
+// С€Р°Р±Р»РѕРЅР° РґРµР»Р°СЋС‚ РїСЂРѕС„РёР»СЊ СѓРЅРёРєР°Р»СЊРЅС‹Рј, РЅРѕ СЃРѕС…СЂР°РЅСЏСЋС‚ РїСЂРѕРІРµСЂРµРЅРЅСѓСЋ СЃС‚СЂСѓРєС‚СѓСЂСѓ С‚РµРіРѕРІ.
 const OBF_CPS_TEMPLATES = [
     '<b 0xc200000001135bf9a6a22674b9cb6f926ccddf15ae5ff710430797226ea41175dd0a02cae804df38bb9b577b40b25bba82><rc 17><t><r 154>',
     '<b 0xccd0e656><t><rc 5><r 414><rd 5>',
@@ -11159,17 +11159,17 @@ function obfRandomizeCps(template) {
 }
 
 /**
- * Генерирует готовый профиль обфускации без Архитектора.
- * max      — AWG 3.1: все I1–I5, HPK, таймеры, флаги;
- * balanced — AWG 3.1: три цепочки, меньше нагрузки;
- * compat   — AWG 2.0: без HPK/таймеров/флагов, для старых клиентов.
+ * Р“РµРЅРµСЂРёСЂСѓРµС‚ РіРѕС‚РѕРІС‹Р№ РїСЂРѕС„РёР»СЊ РѕР±С„СѓСЃРєР°С†РёРё Р±РµР· РђСЂС…РёС‚РµРєС‚РѕСЂР°.
+ * max      вЂ” AWG 3.1: РІСЃРµ I1вЂ“I5, HPK, С‚Р°Р№РјРµСЂС‹, С„Р»Р°РіРё;
+ * balanced вЂ” AWG 3.1: С‚СЂРё С†РµРїРѕС‡РєРё, РјРµРЅСЊС€Рµ РЅР°РіСЂСѓР·РєРё;
+ * compat   вЂ” AWG 2.0: Р±РµР· HPK/С‚Р°Р№РјРµСЂРѕРІ/С„Р»Р°РіРѕРІ, РґР»СЏ СЃС‚Р°СЂС‹С… РєР»РёРµРЅС‚РѕРІ.
  */
 function generateObfProfile(preset, sni) {
     const mode = ['max', 'balanced', 'compat'].includes(preset) ? preset : 'balanced';
     const p = {};
 
-    // Четыре непересекающихся диапазона H. Базы разнесены на 1e9, поэтому
-    // даже максимальная ширина 8192 не создаёт пересечений.
+    // Р§РµС‚С‹СЂРµ РЅРµРїРµСЂРµСЃРµРєР°СЋС‰РёС…СЃСЏ РґРёР°РїР°Р·РѕРЅР° H. Р‘Р°Р·С‹ СЂР°Р·РЅРµСЃРµРЅС‹ РЅР° 1e9, РїРѕСЌС‚РѕРјСѓ
+    // РґР°Р¶Рµ РјР°РєСЃРёРјР°Р»СЊРЅР°СЏ С€РёСЂРёРЅР° 8192 РЅРµ СЃРѕР·РґР°С‘С‚ РїРµСЂРµСЃРµС‡РµРЅРёР№.
     const bases = [1000000, 1100000000, 2100000000, 3100000000];
     for (let i = 0; i < 4; i++) {
         const width = obfRandomInt(4096, 8192);
@@ -11177,7 +11177,7 @@ function generateObfProfile(preset, sni) {
         p['H' + (i + 1)] = `${start}-${start + width}`;
     }
 
-    // S1–S3 не меньше 12 (nonce для HeaderProtectionKey), S4 не больше 32.
+    // S1вЂ“S3 РЅРµ РјРµРЅСЊС€Рµ 12 (nonce РґР»СЏ HeaderProtectionKey), S4 РЅРµ Р±РѕР»СЊС€Рµ 32.
     const s1 = obfRandomInt(24, 96);
     let s2 = obfRandomInt(24, 96);
     if (s2 === s1 + 56) s2 = s1 + 55;
@@ -11223,7 +11223,7 @@ app.post('/api/obf/generate', checkAuth, (req, res) => {
         const body = req.body || {};
         const sni = String(body.sni || '').trim();
         if (sni && !HOST_RE.test(sni)) {
-            return res.status(400).json({ error: 'Некорректный SNI-домен' });
+            return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ SNI-РґРѕРјРµРЅ' });
         }
         if (body.version) {
             const g = awgArchitect.generate({
@@ -11260,7 +11260,7 @@ app.post('/api/obf/generate', checkAuth, (req, res) => {
             audit: auditObf(params)
         });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось сгенерировать профиль: ' + e.message });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ РїСЂРѕС„РёР»СЊ: ' + e.message });
     }
 });
 
@@ -11301,18 +11301,18 @@ app.get('/api/obf/profiles', checkAuth, (req, res) => {
 
 app.post('/api/obf/profiles', checkAuth, (req, res) => {
     const name = String((req.body && req.body.name) || '').trim();
-    if (!/^[A-Za-z0-9А-Яа-яЁё _.-]{2,40}$/.test(name)) return res.status(400).json({ error: 'Имя профиля: 2–40 символов' });
+    if (!/^[A-Za-z0-9Рђ-РЇР°-СЏРЃС‘ _.-]{2,40}$/.test(name)) return res.status(400).json({ error: 'РРјСЏ РїСЂРѕС„РёР»СЏ: 2вЂ“40 СЃРёРјРІРѕР»РѕРІ' });
     let params;
     try {
         params = validateObf((req.body && req.body.params) || extractObfFromAny(req.body && req.body.source));
     } catch (e) { return res.status(400).json({ error: e.message }); }
-    if (!Object.keys(params).length) return res.status(400).json({ error: 'Нет параметров для сохранения' });
+    if (!Object.keys(params).length) return res.status(400).json({ error: 'РќРµС‚ РїР°СЂР°РјРµС‚СЂРѕРІ РґР»СЏ СЃРѕС…СЂР°РЅРµРЅРёСЏ' });
     const list = loadObfProfiles();
     const existing = list.find(p => p.name.toLowerCase() === name.toLowerCase());
     if (existing) { existing.params = params; existing.title = name; existing.updatedAt = new Date().toISOString(); }
     else list.push({ name, title: name, params, createdAt: new Date().toISOString() });
     saveObfProfiles(list);
-    auditLog(req, `Сохранён профиль обфускации «${name}»`);
+    auditLog(req, `РЎРѕС…СЂР°РЅС‘РЅ РїСЂРѕС„РёР»СЊ РѕР±С„СѓСЃРєР°С†РёРё В«${name}В»`);
     res.json({ success: true, name, params });
 });
 
@@ -11320,9 +11320,9 @@ app.delete('/api/obf/profiles/:name', checkAuth, (req, res) => {
     const name = String(req.params.name);
     const list = loadObfProfiles();
     const next = list.filter(p => p.name !== name);
-    if (next.length === list.length) return res.status(404).json({ error: 'Профиль не найден' });
+    if (next.length === list.length) return res.status(404).json({ error: 'РџСЂРѕС„РёР»СЊ РЅРµ РЅР°Р№РґРµРЅ' });
     saveObfProfiles(next);
-    auditLog(req, `Удалён профиль обфускации «${name}»`);
+    auditLog(req, `РЈРґР°Р»С‘РЅ РїСЂРѕС„РёР»СЊ РѕР±С„СѓСЃРєР°С†РёРё В«${name}В»`);
     res.json({ success: true });
 });
 
@@ -11331,7 +11331,7 @@ app.post('/api/obf/profiles/:name/apply', checkAuth, (req, res) => {
     const builtin = OBF_BUILTIN_PROFILES[name];
     const custom = loadObfProfiles().find(p => p.name === name);
     const src = builtin ? builtin.params : (custom && custom.params);
-    if (!src) return res.status(404).json({ error: 'Профиль не найден' });
+    if (!src) return res.status(404).json({ error: 'РџСЂРѕС„РёР»СЊ РЅРµ РЅР°Р№РґРµРЅ' });
     return applyObfParams(req, res, src, {
         regenClients: !!(req.body && req.body.regenClients),
         removeMissing: !!(req.body && req.body.removeMissing)
@@ -11340,15 +11340,15 @@ app.post('/api/obf/profiles/:name/apply', checkAuth, (req, res) => {
 
 app.get('/api/obf/export', checkAuth, (req, res) => {
     const confPath = serverConfPath();
-    if (!confPath) return res.status(404).send('Конфиг сервера не найден');
+    if (!confPath) return res.status(404).send('РљРѕРЅС„РёРі СЃРµСЂРІРµСЂР° РЅРµ РЅР°Р№РґРµРЅ');
     let content = '';
-    try { content = fs.readFileSync(confPath, 'utf8'); } catch (e) { return res.status(500).send('Ошибка чтения'); }
+    try { content = fs.readFileSync(confPath, 'utf8'); } catch (e) { return res.status(500).send('РћС€РёР±РєР° С‡С‚РµРЅРёСЏ'); }
     const obf = readObfFromConf(content);
     const ini = parseIni(content);
     const format = String(req.query.format || 'conf');
 
     if (format === 'json') {
-        // Совместимо с импортом сайта-архитектора (Amnezia VpnConfig)
+        // РЎРѕРІРјРµСЃС‚РёРјРѕ СЃ РёРјРїРѕСЂС‚РѕРј СЃР°Р№С‚Р°-Р°СЂС…РёС‚РµРєС‚РѕСЂР° (Amnezia VpnConfig)
         const body = { ...obf, last_config: JSON.stringify({ ...obf, hostName: (ini.Peer && (ini.Peer || {}).Endpoint || '').split(':')[0] }) };
         const cfg = {
             containers: [{ container: 'amnezia-awg', awg: body }],
@@ -11360,16 +11360,16 @@ app.get('/api/obf/export', checkAuth, (req, res) => {
         return res.type('application/json').send(JSON.stringify(cfg, null, 4));
     }
 
-    const lines = ['[Interface]', 'Address = 10.0.0.2/32', 'PrivateKey = <ВСТАВЬТЕ_СВОЙ_КЛЮЧ>'];
+    const lines = ['[Interface]', 'Address = 10.0.0.2/32', 'PrivateKey = <Р’РЎРўРђР’Р¬РўР•_РЎР’РћР™_РљР›Р®Р§>'];
     for (const k of OBF_ALL_KEYS) if (obf[k] !== undefined) lines.push(`${k} = ${obf[k]}`);
-    lines.push('', '[Peer]', 'PublicKey = <ПУБЛИЧНЫЙ_КЛЮЧ_СЕРВЕРА>',
-        'AllowedIPs = 0.0.0.0/0, ::/0', 'Endpoint = <IP_СЕРВЕРА>:<ПОРТ>', 'PersistentKeepalive = 25', '');
+    lines.push('', '[Peer]', 'PublicKey = <РџРЈР‘Р›РР§РќР«Р™_РљР›Р®Р§_РЎР•Р Р’Р•Р Рђ>',
+        'AllowedIPs = 0.0.0.0/0, ::/0', 'Endpoint = <IP_РЎР•Р Р’Р•Р Рђ>:<РџРћР Рў>', 'PersistentKeepalive = 25', '');
     res.setHeader('Content-Disposition', 'attachment; filename="obfuscation-template.conf"');
     res.type('text/plain').send(lines.join('\n'));
 });
 
 // ---------------------------------------------------------------------------
-// Конфиг AmneziaWG
+// РљРѕРЅС„РёРі AmneziaWG
 // ---------------------------------------------------------------------------
 app.get('/api/awg/server-name', checkAuth, (req, res) => {
     res.json({ name: serverDisplayName(), fileBase: serverFileBase() });
@@ -11378,14 +11378,14 @@ app.get('/api/awg/server-name', checkAuth, (req, res) => {
 app.post('/api/awg/server-name', checkAuth, requireAdmin, (req, res) => {
     const name = String((req.body && req.body.name) || '').trim();
     if (!name || name.length > 64 || /[\r\n\t]/.test(name)) {
-        return res.status(400).json({ error: 'Имя сервера: 1–64 символа, без переводов строк' });
+        return res.status(400).json({ error: 'РРјСЏ СЃРµСЂРІРµСЂР°: 1вЂ“64 СЃРёРјРІРѕР»Р°, Р±РµР· РїРµСЂРµРІРѕРґРѕРІ СЃС‚СЂРѕРє' });
     }
     try {
         fs.writeFileSync(AWG_SERVER_NAME_FILE, name + '\n', { mode: 0o600 });
-        auditLog(req, `Имя сервера AWG: ${name}`);
+        auditLog(req, `РРјСЏ СЃРµСЂРІРµСЂР° AWG: ${name}`);
         res.json({ success: true, name, fileBase: serverFileBase() });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось сохранить имя сервера: ' + e.message });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РёРјСЏ СЃРµСЂРІРµСЂР°: ' + e.message });
     }
 });
 
@@ -11393,27 +11393,27 @@ app.get('/api/awg/config', checkAuth, (req, res) => {
     try {
         let confPath = null;
         if (req.query.file) {
-            if (!EDITABLE_CONF.has(String(req.query.file))) return res.status(400).json({ error: 'Недопустимый путь' });
+            if (!EDITABLE_CONF.has(String(req.query.file))) return res.status(400).json({ error: 'РќРµРґРѕРїСѓСЃС‚РёРјС‹Р№ РїСѓС‚СЊ' });
             if (fs.existsSync(String(req.query.file))) confPath = String(req.query.file);
         }
         if (!confPath) confPath = serverConfPath() || existingCascadeConf();
-        if (!confPath) return res.status(404).json({ error: 'Конфиг не найден' });
+        if (!confPath) return res.status(404).json({ error: 'РљРѕРЅС„РёРі РЅРµ РЅР°Р№РґРµРЅ' });
         res.json({ content: fs.readFileSync(confPath, 'utf8'), file: confPath });
-    } catch (e) { res.status(500).json({ error: 'Ошибка чтения конфига' }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ РєРѕРЅС„РёРіР°' }); }
 });
 
 app.post('/api/awg/config', checkAuth, (req, res) => {
     const { content, file } = req.body || {};
-    if (!content || !file) return res.status(400).json({ error: 'Пустой конфиг' });
-    if (!EDITABLE_CONF.has(String(file))) return res.status(400).json({ error: 'Недопустимый путь конфига' });
-    if (String(content).length > 256 * 1024) return res.status(400).json({ error: 'Конфиг слишком большой' });
-    if (!/^\s*\[Interface\]/im.test(content)) return res.status(400).json({ error: 'Конфиг должен содержать [Interface]' });
+    if (!content || !file) return res.status(400).json({ error: 'РџСѓСЃС‚РѕР№ РєРѕРЅС„РёРі' });
+    if (!EDITABLE_CONF.has(String(file))) return res.status(400).json({ error: 'РќРµРґРѕРїСѓСЃС‚РёРјС‹Р№ РїСѓС‚СЊ РєРѕРЅС„РёРіР°' });
+    if (String(content).length > 256 * 1024) return res.status(400).json({ error: 'РљРѕРЅС„РёРі СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№' });
+    if (!/^\s*\[Interface\]/im.test(content)) return res.status(400).json({ error: 'РљРѕРЅС„РёРі РґРѕР»Р¶РµРЅ СЃРѕРґРµСЂР¶Р°С‚СЊ [Interface]' });
     try {
-        auditLog(req, `Изменение конфигурации AWG: ${file}`);
+        auditLog(req, `РР·РјРµРЅРµРЅРёРµ РєРѕРЅС„РёРіСѓСЂР°С†РёРё AWG: ${file}`);
         if (fs.existsSync(file)) writeRootFile(`${file}.bak_${Date.now()}`, fs.readFileSync(file, 'utf8'), '0600');
         writeRootFile(file, content, '0600');
 
-        // Синхронизация ключей сервера (без shell-инъекций)
+        // РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ РєР»СЋС‡РµР№ СЃРµСЂРІРµСЂР° (Р±РµР· shell-РёРЅСЉРµРєС†РёР№)
         try {
             const hpk = content.match(/HeaderProtectionKey\s*=\s*([^\r\n]+)/);
             const priv = content.match(/PrivateKey\s*=\s*([^\r\n]+)/);
@@ -11438,8 +11438,8 @@ app.post('/api/awg/config', checkAuth, (req, res) => {
         catch (e) {
             try { sh('sudo', ['docker', 'restart', 'amnezia-awg']); } catch (e2) { /* ignore */ }
         }
-        // Если правили awg1, возвращаем маршруты и переподключаем
-        // «MTProto через EU» к новому туннелю.
+        // Р•СЃР»Рё РїСЂР°РІРёР»Рё awg1, РІРѕР·РІСЂР°С‰Р°РµРј РјР°СЂС€СЂСѓС‚С‹ Рё РїРµСЂРµРїРѕРґРєР»СЋС‡Р°РµРј
+        // В«MTProto С‡РµСЂРµР· EUВ» Рє РЅРѕРІРѕРјСѓ С‚СѓРЅРЅРµР»СЋ.
         let cascade = null;
         if (String(file) === CASCADE_CONF || String(file) === CASCADE_CONF_LEGACY) {
             cascade = { routed: false, proxyReconnected: false, exitIp: '' };
@@ -11464,11 +11464,11 @@ app.post('/api/awg/config', checkAuth, (req, res) => {
             } catch (e) { cascade.proxyError = e.message || String(e); }
         }
         res.json({ success: true, cascade });
-    } catch (e) { res.status(500).json({ error: 'Ошибка сохранения конфига' }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ РєРѕРЅС„РёРіР°' }); }
 });
 
 // ---------------------------------------------------------------------------
-// Резервные копии
+// Р РµР·РµСЂРІРЅС‹Рµ РєРѕРїРёРё
 // ---------------------------------------------------------------------------
 const BACKUP_PATHS = [
     '/etc/amnezia/amneziawg', '/root/awg', '/root/servpanel', '/root/awg-admin',
@@ -11485,54 +11485,54 @@ app.get('/api/backup', checkAuth, (req, res) => {
     const tempPath = path.join(os.tmpdir(), fileName);
     const args = ['-czf', tempPath, ...BACKUP_PATHS];
     execFile('sudo', ['tar', ...args], { timeout: 180000 }, () => {
-        if (!fs.existsSync(tempPath)) return res.status(500).send('Не удалось создать архив');
-        auditLog(req, 'Скачивание резервной копии');
+        if (!fs.existsSync(tempPath)) return res.status(500).send('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ Р°СЂС…РёРІ');
+        auditLog(req, 'РЎРєР°С‡РёРІР°РЅРёРµ СЂРµР·РµСЂРІРЅРѕР№ РєРѕРїРёРё');
         res.download(tempPath, fileName, () => { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); });
     });
 });
 
 app.post('/api/restore', checkAuth, (req, res) => {
     const { fileData } = req.body || {};
-    if (!fileData || typeof fileData !== 'string') return res.status(400).json({ error: 'Нет данных файла' });
-    if (fileData.length > 48 * 1024 * 1024) return res.status(400).json({ error: 'Архив слишком большой' });
+    if (!fileData || typeof fileData !== 'string') return res.status(400).json({ error: 'РќРµС‚ РґР°РЅРЅС‹С… С„Р°Р№Р»Р°' });
+    if (fileData.length > 48 * 1024 * 1024) return res.status(400).json({ error: 'РђСЂС…РёРІ СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№' });
     let buffer;
     try { buffer = Buffer.from(fileData, 'base64'); }
-    catch (e) { return res.status(400).json({ error: 'Некорректный base64' }); }
+    catch (e) { return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ base64' }); }
 
     const tempPath = path.join(os.tmpdir(), 'restore-' + crypto.randomBytes(6).toString('hex') + '.tar.gz');
     try {
         fs.writeFileSync(tempPath, buffer);
-        // Проверяем содержимое архива ДО распаковки (защита от tar-инъекций)
+        // РџСЂРѕРІРµСЂСЏРµРј СЃРѕРґРµСЂР¶РёРјРѕРµ Р°СЂС…РёРІР° Р”Рћ СЂР°СЃРїР°РєРѕРІРєРё (Р·Р°С‰РёС‚Р° РѕС‚ tar-РёРЅСЉРµРєС†РёР№)
         const listing = sh('tar', ['-tzf', tempPath], { maxBuffer: 32 * 1024 * 1024 });
         for (const raw of listing.split('\n')) {
             const p = raw.replace(/^\.\//, '').trim();
             if (!p || p.endsWith('/')) continue;
             if (p.startsWith('/') || p.split('/').includes('..') || p.includes('\0')) {
-                return res.status(400).json({ error: 'Архив содержит недопустимые пути' });
+                return res.status(400).json({ error: 'РђСЂС…РёРІ СЃРѕРґРµСЂР¶РёС‚ РЅРµРґРѕРїСѓСЃС‚РёРјС‹Рµ РїСѓС‚Рё' });
             }
             if (!RESTORE_ALLOWED_PREFIXES.some(pre => p === pre || p.startsWith(pre))) {
-                return res.status(400).json({ error: 'Архив содержит файлы вне разрешённых каталогов: ' + p });
+                return res.status(400).json({ error: 'РђСЂС…РёРІ СЃРѕРґРµСЂР¶РёС‚ С„Р°Р№Р»С‹ РІРЅРµ СЂР°Р·СЂРµС€С‘РЅРЅС‹С… РєР°С‚Р°Р»РѕРіРѕРІ: ' + p });
             }
         }
         sh('sudo', ['tar', '-xzf', tempPath, '-C', '/'], { timeout: 180000 });
-        auditLog(req, 'Восстановление из резервной копии');
+        auditLog(req, 'Р’РѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ РёР· СЂРµР·РµСЂРІРЅРѕР№ РєРѕРїРёРё');
         res.json({ success: true });
         setTimeout(() => {
             try { sh('sudo', ['bash', '-c', 'pm2 restart awg-admin']); } catch (e) { /* ignore */ }
         }, 1000);
     } catch (e) {
-        res.status(500).json({ error: 'Ошибка распаковки: ' + e.message });
+        res.status(500).json({ error: 'РћС€РёР±РєР° СЂР°СЃРїР°РєРѕРІРєРё: ' + e.message });
     } finally {
         try { fs.unlinkSync(tempPath); } catch (e) { /* ignore */ }
     }
 });
 
 // ---------------------------------------------------------------------------
-// Пароль и информация о сервере
+// РџР°СЂРѕР»СЊ Рё РёРЅС„РѕСЂРјР°С†РёСЏ Рѕ СЃРµСЂРІРµСЂРµ
 // ---------------------------------------------------------------------------
 app.post('/api/change-password', checkAuth, (req, res) => {
     const { newPassword } = req.body || {};
-    if (!newPassword || String(newPassword).length < 8) return res.status(400).json({ error: 'Пароль должен быть не короче 8 символов' });
+    if (!newPassword || String(newPassword).length < 8) return res.status(400).json({ error: 'РџР°СЂРѕР»СЊ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РЅРµ РєРѕСЂРѕС‡Рµ 8 СЃРёРјРІРѕР»РѕРІ' });
     const me = req.session.user || 'admin';
     try {
         if (me === 'admin') {
@@ -11542,16 +11542,16 @@ app.post('/api/change-password', checkAuth, (req, res) => {
         } else {
             const users = loadUsers();
             const u = users.find(x => x.username === me);
-            if (!u) return res.status(404).json({ error: 'Пользователь не найден' });
+            if (!u) return res.status(404).json({ error: 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ' });
             const salt = crypto.randomBytes(16).toString('hex');
             u.salt = salt;
             u.hash = hashPassword(String(newPassword), salt);
             saveUsers(users);
         }
-        auditLog(req, `Изменён пароль пользователя ${me}`);
+        auditLog(req, `РР·РјРµРЅС‘РЅ РїР°СЂРѕР»СЊ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ ${me}`);
         res.json({ success: true });
     } catch (e) {
-        res.status(500).json({ error: 'Ошибка изменения пароля' });
+        res.status(500).json({ error: 'РћС€РёР±РєР° РёР·РјРµРЅРµРЅРёСЏ РїР°СЂРѕР»СЏ' });
     }
 });
 
@@ -11565,7 +11565,7 @@ app.get('/api/server-info', checkAuth, (req, res) => {
     }
     try {
         const domain = panelDomain();
-        let ip = 'Неизвестно';
+        let ip = 'РќРµРёР·РІРµСЃС‚РЅРѕ';
         let country = 'UNKNOWN';
         try {
             const out = sh('curl', ['-s', '--max-time', '8', 'https://ipinfo.io/json']);
@@ -11573,28 +11573,28 @@ app.get('/api/server-info', checkAuth, (req, res) => {
             ip = info.ip || ip;
             country = info.country || country;
         } catch (e) { /* ignore */ }
-        if (ip === 'Неизвестно') {
+        if (ip === 'РќРµРёР·РІРµСЃС‚РЅРѕ') {
             try { ip = sh('curl', ['-4s', '--max-time', '8', 'https://ifconfig.me']).trim(); } catch (e) { /* ignore */ }
         }
         res.json({ ip, domain, country, cert: panelCertificateInfo(domain) });
     } catch (e) {
-        res.json({ ip: 'Неизвестно', domain: '', country: 'UNKNOWN', cert: null });
+        res.json({ ip: 'РќРµРёР·РІРµСЃС‚РЅРѕ', domain: '', country: 'UNKNOWN', cert: null });
     }
 });
 
 // ---------------------------------------------------------------------------
-// Домены и SSL (Let's Encrypt)
+// Р”РѕРјРµРЅС‹ Рё SSL (Let's Encrypt)
 //
-// Возможности вкладки «Домены и SSL»:
-//   • привязать домен к самой панели (Nginx-прокси на локальный порт Node);
-//   • создать отдельный сайт-заглушку в /var/www/<домен>;
-//   • выпустить/продлить сертификат Let's Encrypt через certbot;
-//   • показать точные пути к сертификату (fullchain.pem) и ключу (privkey.pem).
+// Р’РѕР·РјРѕР¶РЅРѕСЃС‚Рё РІРєР»Р°РґРєРё В«Р”РѕРјРµРЅС‹ Рё SSLВ»:
+//   вЂў РїСЂРёРІСЏР·Р°С‚СЊ РґРѕРјРµРЅ Рє СЃР°РјРѕР№ РїР°РЅРµР»Рё (Nginx-РїСЂРѕРєСЃРё РЅР° Р»РѕРєР°Р»СЊРЅС‹Р№ РїРѕСЂС‚ Node);
+//   вЂў СЃРѕР·РґР°С‚СЊ РѕС‚РґРµР»СЊРЅС‹Р№ СЃР°Р№С‚-Р·Р°РіР»СѓС€РєСѓ РІ /var/www/<РґРѕРјРµРЅ>;
+//   вЂў РІС‹РїСѓСЃС‚РёС‚СЊ/РїСЂРѕРґР»РёС‚СЊ СЃРµСЂС‚РёС„РёРєР°С‚ Let's Encrypt С‡РµСЂРµР· certbot;
+//   вЂў РїРѕРєР°Р·Р°С‚СЊ С‚РѕС‡РЅС‹Рµ РїСѓС‚Рё Рє СЃРµСЂС‚РёС„РёРєР°С‚Сѓ (fullchain.pem) Рё РєР»СЋС‡Сѓ (privkey.pem).
 //
-// Безопасность: домен проходит строгую проверку FQDN и только затем
-// подставляется в конфиг Nginx; внешние команды вызываются через execFile
-// с массивом аргументов (без shell). Перед изменением конфигурации создаётся
-// резервная копия, при ошибке `nginx -t` конфиг автоматически откатывается.
+// Р‘РµР·РѕРїР°СЃРЅРѕСЃС‚СЊ: РґРѕРјРµРЅ РїСЂРѕС…РѕРґРёС‚ СЃС‚СЂРѕРіСѓСЋ РїСЂРѕРІРµСЂРєСѓ FQDN Рё С‚РѕР»СЊРєРѕ Р·Р°С‚РµРј
+// РїРѕРґСЃС‚Р°РІР»СЏРµС‚СЃСЏ РІ РєРѕРЅС„РёРі Nginx; РІРЅРµС€РЅРёРµ РєРѕРјР°РЅРґС‹ РІС‹Р·С‹РІР°СЋС‚СЃСЏ С‡РµСЂРµР· execFile
+// СЃ РјР°СЃСЃРёРІРѕРј Р°СЂРіСѓРјРµРЅС‚РѕРІ (Р±РµР· shell). РџРµСЂРµРґ РёР·РјРµРЅРµРЅРёРµРј РєРѕРЅС„РёРіСѓСЂР°С†РёРё СЃРѕР·РґР°С‘С‚СЃСЏ
+// СЂРµР·РµСЂРІРЅР°СЏ РєРѕРїРёСЏ, РїСЂРё РѕС€РёР±РєРµ `nginx -t` РєРѕРЅС„РёРі Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РѕС‚РєР°С‚С‹РІР°РµС‚СЃСЏ.
 // ---------------------------------------------------------------------------
 const LE_ROOT = '/etc/letsencrypt';
 const LE_LIVE = posixJoin(LE_ROOT, 'live');
@@ -11607,26 +11607,26 @@ const SITES_ROOT = '/var/www';
 const PANEL_SITE_NAME = 'awg-admin';
 const PANEL_SITE_CONF = posixJoin(NGX_AVAILABLE, PANEL_SITE_NAME);
 const SSL_STATE_FILE = path.join(DATA_DIR, '.ssl_sites.json');
-// В тестовом и демо-режиме система не трогается: сайты и сертификаты
-// хранятся только в памяти процесса.
+// Р’ С‚РµСЃС‚РѕРІРѕРј Рё РґРµРјРѕ-СЂРµР¶РёРјРµ СЃРёСЃС‚РµРјР° РЅРµ С‚СЂРѕРіР°РµС‚СЃСЏ: СЃР°Р№С‚С‹ Рё СЃРµСЂС‚РёС„РёРєР°С‚С‹
+// С…СЂР°РЅСЏС‚СЃСЏ С‚РѕР»СЊРєРѕ РІ РїР°РјСЏС‚Рё РїСЂРѕС†РµСЃСЃР°.
 const NO_SYSTEM = () => TEST_MODE || DEMO_MODE || process.platform === 'win32';
 const sslVirtual = { sites: [], certs: [] };
 
-// Пути Linux всегда собираем через «/», чтобы конфиги и подписи были
-// одинаковыми и на сервере, и при тестах на Windows.
+// РџСѓС‚Рё Linux РІСЃРµРіРґР° СЃРѕР±РёСЂР°РµРј С‡РµСЂРµР· В«/В», С‡С‚РѕР±С‹ РєРѕРЅС„РёРіРё Рё РїРѕРґРїРёСЃРё Р±С‹Р»Рё
+// РѕРґРёРЅР°РєРѕРІС‹РјРё Рё РЅР° СЃРµСЂРІРµСЂРµ, Рё РїСЂРё С‚РµСЃС‚Р°С… РЅР° Windows.
 function posixJoin(...parts) {
     return parts.filter(p => p !== '' && p != null).join('/').replace(/\/{2,}/g, '/');
 }
 
 function sslTail(text, size = 900) {
     const s = String(text == null ? '' : text).trim();
-    return s.length > size ? '…' + s.slice(-size) : s;
+    return s.length > size ? 'вЂ¦' + s.slice(-size) : s;
 }
 
 function normalizeDomain(value) {
     const d = String(value == null ? '' : value).trim().toLowerCase().replace(/\.$/, '');
     if (!d || d.length > 253) return '';
-    // Только FQDN из букв/цифр/дефиса, минимум две метки, каждая до 63 символов.
+    // РўРѕР»СЊРєРѕ FQDN РёР· Р±СѓРєРІ/С†РёС„СЂ/РґРµС„РёСЃР°, РјРёРЅРёРјСѓРј РґРІРµ РјРµС‚РєРё, РєР°Р¶РґР°СЏ РґРѕ 63 СЃРёРјРІРѕР»РѕРІ.
     if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(d)) return '';
     return d;
 }
@@ -11647,7 +11647,7 @@ function findCommand(name) {
         try {
             fs.accessSync(full, fs.constants.X_OK);
             return full;
-        } catch (e) { /* ищем дальше */ }
+        } catch (e) { /* РёС‰РµРј РґР°Р»СЊС€Рµ */ }
     }
     return '';
 }
@@ -11657,11 +11657,11 @@ function sslTool(name, versionArgs = ['--version']) {
     if (!bin) return { installed: false, path: '', version: '' };
     let version = '';
     try {
-        // nginx -v пишет версию в stderr, certbot — в stdout: читаем оба потока.
+        // nginx -v РїРёС€РµС‚ РІРµСЂСЃРёСЋ РІ stderr, certbot вЂ” РІ stdout: С‡РёС‚Р°РµРј РѕР±Р° РїРѕС‚РѕРєР°.
         const run = spawnSync(bin, versionArgs, { encoding: 'utf8', timeout: 10000 });
         version = String((run.stdout || '') + '\n' + (run.stderr || ''))
             .split(/\r?\n/).map(s => s.trim()).filter(Boolean)[0] || '';
-    } catch (e) { /* версия не критична */ }
+    } catch (e) { /* РІРµСЂСЃРёСЏ РЅРµ РєСЂРёС‚РёС‡РЅР° */ }
     return { installed: true, path: bin, version };
 }
 
@@ -11720,7 +11720,7 @@ function parseCertificate(pem) {
                 .split(',')
                 .map(s => s.trim().replace(/^DNS:/i, '').replace(/^IP Address:/i, ''))
                 .filter(Boolean);
-        } catch (e) { /* SAN может отсутствовать */ }
+        } catch (e) { /* SAN РјРѕР¶РµС‚ РѕС‚СЃСѓС‚СЃС‚РІРѕРІР°С‚СЊ */ }
         return {
             parsed: true,
             subject: x.subject,
@@ -11819,7 +11819,7 @@ function listNginxSites() {
     const names = new Set();
     for (const dir of [NGX_AVAILABLE, NGX_ENABLED]) {
         try { for (const n of fs.readdirSync(dir)) if (n && !n.startsWith('.')) names.add(n); }
-        catch (e) { /* каталога нет */ }
+        catch (e) { /* РєР°С‚Р°Р»РѕРіР° РЅРµС‚ */ }
     }
     const state = readSslState();
     const result = [];
@@ -11881,7 +11881,7 @@ function readSslState() {
     return st;
 }
 function writeSslState(st) {
-    try { writeJson(SSL_STATE_FILE, st, 0o600); } catch (e) { /* не критично */ }
+    try { writeJson(SSL_STATE_FILE, st, 0o600); } catch (e) { /* РЅРµ РєСЂРёС‚РёС‡РЅРѕ */ }
 }
 function rememberSite(entry) {
     const st = readSslState();
@@ -11935,8 +11935,8 @@ function buildSiteConfig(opts) {
         proxy_read_timeout 300s;
         proxy_cache_bypass $http_upgrade;
     }`;
-    const header = '# Servpanel: файл создан автоматически (вкладка «Домены и SSL»).\n' +
-        '# Ручные правки будут перезаписаны при повторной привязке домена.\n\n';
+    const header = '# Servpanel: С„Р°Р№Р» СЃРѕР·РґР°РЅ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё (РІРєР»Р°РґРєР° В«Р”РѕРјРµРЅС‹ Рё SSLВ»).\n' +
+        '# Р СѓС‡РЅС‹Рµ РїСЂР°РІРєРё Р±СѓРґСѓС‚ РїРµСЂРµР·Р°РїРёСЃР°РЅС‹ РїСЂРё РїРѕРІС‚РѕСЂРЅРѕР№ РїСЂРёРІСЏР·РєРµ РґРѕРјРµРЅР°.\n\n';
     const httpBlock = certPath
         ? `server {
     listen 80;
@@ -11987,10 +11987,10 @@ function existingSslPort(text) {
     return m ? parseInt(m[1], 10) : null;
 }
 
-// Все порты, которые уже слушает конфиг сайта (включая [::]:443).
+// Р’СЃРµ РїРѕСЂС‚С‹, РєРѕС‚РѕСЂС‹Рµ СѓР¶Рµ СЃР»СѓС€Р°РµС‚ РєРѕРЅС„РёРі СЃР°Р№С‚Р° (РІРєР»СЋС‡Р°СЏ [::]:443).
 function existingListenPorts(text) {
     const ports = [];
-    // Комментарии убираем, чтобы «# listen 80;» не считался портом.
+    // РљРѕРјРјРµРЅС‚Р°СЂРёРё СѓР±РёСЂР°РµРј, С‡С‚РѕР±С‹ В«# listen 80;В» РЅРµ СЃС‡РёС‚Р°Р»СЃСЏ РїРѕСЂС‚РѕРј.
     const clean = String(text || '').replace(/#[^\n]*/g, '');
     const re = /\blisten\s+([^;]+);/g;
     let m;
@@ -12018,17 +12018,17 @@ function portIsNginxOrFree(port) {
 function chooseHttpsPort(mode, siteName) {
     if (NO_SYSTEM()) return mode === 'panel' ? (PANEL_PUBLIC_PORT || 443) : 443;
     let current = '';
-    try { current = fs.readFileSync(posixJoin(NGX_AVAILABLE, siteName), 'utf8'); } catch (e) { /* нет файла */ }
+    try { current = fs.readFileSync(posixJoin(NGX_AVAILABLE, siteName), 'utf8'); } catch (e) { /* РЅРµС‚ С„Р°Р№Р»Р° */ }
     const existing = existingSslPort(current);
     if (existing && existing !== 80 && portIsNginxOrFree(existing)) return existing;
-    // Если панель уже открывалась по домену на нестандартном порту (например,
-    // 8443), сохраняем этот порт — теперь на нём будет HTTPS, и адрес не изменится.
+    // Р•СЃР»Рё РїР°РЅРµР»СЊ СѓР¶Рµ РѕС‚РєСЂС‹РІР°Р»Р°СЃСЊ РїРѕ РґРѕРјРµРЅСѓ РЅР° РЅРµСЃС‚Р°РЅРґР°СЂС‚РЅРѕРј РїРѕСЂС‚Сѓ (РЅР°РїСЂРёРјРµСЂ,
+    // 8443), СЃРѕС…СЂР°РЅСЏРµРј СЌС‚РѕС‚ РїРѕСЂС‚ вЂ” С‚РµРїРµСЂСЊ РЅР° РЅС‘Рј Р±СѓРґРµС‚ HTTPS, Рё Р°РґСЂРµСЃ РЅРµ РёР·РјРµРЅРёС‚СЃСЏ.
     const previous = existingListenPorts(current).find(p => p !== 80 && p !== PANEL_PORT);
     if (previous && portIsNginxOrFree(previous)) return previous;
     const candidates = mode === 'panel' ? [443, PANEL_PUBLIC_PORT, 8443] : [443, 8443];
     const tried = new Set();
     for (const port of candidates) {
-        // 80 занят HTTP-блоком, PANEL_PORT слушает сам Node — их не предлагаем.
+        // 80 Р·Р°РЅСЏС‚ HTTP-Р±Р»РѕРєРѕРј, PANEL_PORT СЃР»СѓС€Р°РµС‚ СЃР°Рј Node вЂ” РёС… РЅРµ РїСЂРµРґР»Р°РіР°РµРј.
         if (!port || port === 80 || port === PANEL_PORT || tried.has(port)) continue;
         tried.add(port);
         if (portIsNginxOrFree(port)) return port;
@@ -12046,13 +12046,13 @@ async function applySiteConfig(name, content) {
     if (hadTarget) {
         try { fs.copyFileSync(target, backup); hadBackup = true; }
         catch (e) {
-            // Панель может работать не от root — пробуем через sudo.
+            // РџР°РЅРµР»СЊ РјРѕР¶РµС‚ СЂР°Р±РѕС‚Р°С‚СЊ РЅРµ РѕС‚ root вЂ” РїСЂРѕР±СѓРµРј С‡РµСЂРµР· sudo.
             rootShTry('cp', ['-f', target, backup], { timeout: 15000 });
             hadBackup = fs.existsSync(backup);
         }
-        // Без резервной копии перезаписывать рабочий конфиг нельзя:
-        // при ошибке nginx -t откатывать будет нечего.
-        if (!hadBackup) return { ok: false, error: 'Не удалось создать резервную копию конфигурации Nginx.' };
+        // Р‘РµР· СЂРµР·РµСЂРІРЅРѕР№ РєРѕРїРёРё РїРµСЂРµР·Р°РїРёСЃС‹РІР°С‚СЊ СЂР°Р±РѕС‡РёР№ РєРѕРЅС„РёРі РЅРµР»СЊР·СЏ:
+        // РїСЂРё РѕС€РёР±РєРµ nginx -t РѕС‚РєР°С‚С‹РІР°С‚СЊ Р±СѓРґРµС‚ РЅРµС‡РµРіРѕ.
+        if (!hadBackup) return { ok: false, error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ СЂРµР·РµСЂРІРЅСѓСЋ РєРѕРїРёСЋ РєРѕРЅС„РёРіСѓСЂР°С†РёРё Nginx.' };
     }
     try {
         writeRootFile(target, content, '0644');
@@ -12063,12 +12063,12 @@ async function applySiteConfig(name, content) {
         const reload = await rootRun('systemctl', ['reload', 'nginx'], { timeout: 30000 });
         if (!reload.ok) {
             const restart = await rootRun('systemctl', ['restart', 'nginx'], { timeout: 30000 });
-            if (!restart.ok) throw new Error('nginx не перезапустился: ' + sslTail(restart.stderr || restart.stdout));
+            if (!restart.ok) throw new Error('nginx РЅРµ РїРµСЂРµР·Р°РїСѓСЃС‚РёР»СЃСЏ: ' + sslTail(restart.stderr || restart.stdout));
         }
         if (hadBackup) { try { fs.unlinkSync(backup); } catch (e) { rootShTry('rm', ['-f', backup], { timeout: 10000 }); } }
         return { ok: true };
     } catch (e) {
-        // Откат к предыдущей версии конфига.
+        // РћС‚РєР°С‚ Рє РїСЂРµРґС‹РґСѓС‰РµР№ РІРµСЂСЃРёРё РєРѕРЅС„РёРіР°.
         try {
             if (hadBackup) rootSh('install', ['-m', '0644', backup, target], { timeout: 15000 });
             else if (!hadTarget) rootSh('rm', ['-f', target], { timeout: 15000 });
@@ -12103,9 +12103,9 @@ async function ensureSiteRoot(domain) {
 <body>
 <main>
   <h1>${domain}</h1>
-  <p>Сайт создан из панели Servpanel. HTTPS-сертификат Let's Encrypt установлен, ключи и цепочка
-     лежат в <code>/etc/letsencrypt/live/${domain}/</code>.</p>
-  <p>Замените файл <code>/var/www/${domain}/index.html</code> содержимым вашего сайта.</p>
+  <p>РЎР°Р№С‚ СЃРѕР·РґР°РЅ РёР· РїР°РЅРµР»Рё Servpanel. HTTPS-СЃРµСЂС‚РёС„РёРєР°С‚ Let's Encrypt СѓСЃС‚Р°РЅРѕРІР»РµРЅ, РєР»СЋС‡Рё Рё С†РµРїРѕС‡РєР°
+     Р»РµР¶Р°С‚ РІ <code>/etc/letsencrypt/live/${domain}/</code>.</p>
+  <p>Р—Р°РјРµРЅРёС‚Рµ С„Р°Р№Р» <code>/var/www/${domain}/index.html</code> СЃРѕРґРµСЂР¶РёРјС‹Рј РІР°С€РµРіРѕ СЃР°Р№С‚Р°.</p>
 </main>
 </body>
 </html>
@@ -12122,10 +12122,10 @@ async function allowFirewallPorts(ports) {
     }
 }
 
-// Выпуск сертификата через webroot: certbot кладёт файл проверки в
-// /var/www/html, который уже отдаётся в HTTP-блоке нашего конфига. В отличие
-// от `--nginx`, certbot не переписывает конфигурацию Nginx (не добавляет
-// listen 443 и не ломает нестандартный порт панели) — конфиг остаётся нашим.
+// Р’С‹РїСѓСЃРє СЃРµСЂС‚РёС„РёРєР°С‚Р° С‡РµСЂРµР· webroot: certbot РєР»Р°РґС‘С‚ С„Р°Р№Р» РїСЂРѕРІРµСЂРєРё РІ
+// /var/www/html, РєРѕС‚РѕСЂС‹Р№ СѓР¶Рµ РѕС‚РґР°С‘С‚СЃСЏ РІ HTTP-Р±Р»РѕРєРµ РЅР°С€РµРіРѕ РєРѕРЅС„РёРіР°. Р’ РѕС‚Р»РёС‡РёРµ
+// РѕС‚ `--nginx`, certbot РЅРµ РїРµСЂРµРїРёСЃС‹РІР°РµС‚ РєРѕРЅС„РёРіСѓСЂР°С†РёСЋ Nginx (РЅРµ РґРѕР±Р°РІР»СЏРµС‚
+// listen 443 Рё РЅРµ Р»РѕРјР°РµС‚ РЅРµСЃС‚Р°РЅРґР°СЂС‚РЅС‹Р№ РїРѕСЂС‚ РїР°РЅРµР»Рё) вЂ” РєРѕРЅС„РёРі РѕСЃС‚Р°С‘С‚СЃСЏ РЅР°С€РёРј.
 async function issueCertificate(domain, email, www) {
     const args = ['certonly', '--webroot', '-w', ACME_WEBROOT, '-d', domain];
     if (www) args.push('-d', 'www.' + domain);
@@ -12143,7 +12143,7 @@ function resolveDomain(domain) {
             resolve(Array.isArray(list) ? list : []);
         };
         const timer = setTimeout(() => finish([]), 6000);
-        // Сначала A, затем AAAA: домен может быть только IPv6.
+        // РЎРЅР°С‡Р°Р»Р° A, Р·Р°С‚РµРј AAAA: РґРѕРјРµРЅ РјРѕР¶РµС‚ Р±С‹С‚СЊ С‚РѕР»СЊРєРѕ IPv6.
         const try6 = () => dns.promises.resolve6(domain).then(finish).catch(() => finish([]));
         dns.promises.resolve4(domain)
             .then(list => (list && list.length ? finish(list) : try6()))
@@ -12174,8 +12174,8 @@ function sslStatusPayload() {
     const guessed = panelDomain();
     const panelSite = (guessed && sites.find(s => s.domains.includes(guessed))) ||
         sites.find(s => s.name === PANEL_SITE_NAME) || null;
-    // Если домен не удалось определить из /root/awg_domain.txt или конфига,
-    // показываем домен из сайта панели, чтобы статус не был пустым.
+    // Р•СЃР»Рё РґРѕРјРµРЅ РЅРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ РёР· /root/awg_domain.txt РёР»Рё РєРѕРЅС„РёРіР°,
+    // РїРѕРєР°Р·С‹РІР°РµРј РґРѕРјРµРЅ РёР· СЃР°Р№С‚Р° РїР°РЅРµР»Рё, С‡С‚РѕР±С‹ СЃС‚Р°С‚СѓСЃ РЅРµ Р±С‹Р» РїСѓСЃС‚С‹Рј.
     const domain = guessed || (panelSite && panelSite.domains && panelSite.domains[0]) || '';
     const httpsPort = panelSite
         ? (existingSslPort(readTextMaybeRoot(panelSite.available)) || panelSite.httpsPort || PANEL_PUBLIC_PORT)
@@ -12198,15 +12198,15 @@ function sslStatusPayload() {
             ? { active: false, enabled: false }
             : { active: isActive('certbot.timer') === 'active', enabled: isEnabled('certbot.timer') === 'enabled' };
     const warnings = [];
-    if (!tools.nginx.installed) warnings.push('Nginx не установлен — привязка домена недоступна.');
-    if (!tools.certbot.installed) warnings.push("Certbot не установлен — сертификат Let's Encrypt выпустить нельзя.");
-    if (!domain) warnings.push('Панель открыта по IP. Привяжите домен, чтобы включить HTTPS.');
-    else if (!cert && panelSite && !panelSite.ssl) warnings.push('Домен привязан, но сертификат ещё не выпущен.');
+    if (!tools.nginx.installed) warnings.push('Nginx РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ вЂ” РїСЂРёРІСЏР·РєР° РґРѕРјРµРЅР° РЅРµРґРѕСЃС‚СѓРїРЅР°.');
+    if (!tools.certbot.installed) warnings.push("Certbot РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ вЂ” СЃРµСЂС‚РёС„РёРєР°С‚ Let's Encrypt РІС‹РїСѓСЃС‚РёС‚СЊ РЅРµР»СЊР·СЏ.");
+    if (!domain) warnings.push('РџР°РЅРµР»СЊ РѕС‚РєСЂС‹С‚Р° РїРѕ IP. РџСЂРёРІСЏР¶РёС‚Рµ РґРѕРјРµРЅ, С‡С‚РѕР±С‹ РІРєР»СЋС‡РёС‚СЊ HTTPS.');
+    else if (!cert && panelSite && !panelSite.ssl) warnings.push('Р”РѕРјРµРЅ РїСЂРёРІСЏР·Р°РЅ, РЅРѕ СЃРµСЂС‚РёС„РёРєР°С‚ РµС‰С‘ РЅРµ РІС‹РїСѓС‰РµРЅ.');
     if (cert && cert.daysLeft != null && cert.daysLeft <= 21) {
-        warnings.push(`Сертификат ${cert.name} истекает через ${cert.daysLeft} дн. — обновите его.`);
+        warnings.push(`РЎРµСЂС‚РёС„РёРєР°С‚ ${cert.name} РёСЃС‚РµРєР°РµС‚ С‡РµСЂРµР· ${cert.daysLeft} РґРЅ. вЂ” РѕР±РЅРѕРІРёС‚Рµ РµРіРѕ.`);
     }
     if (tools.certbot.installed && !timer.active) {
-        warnings.push('Таймер автопродления certbot.timer неактивен — сертификат может не обновиться сам.');
+        warnings.push('РўР°Р№РјРµСЂ Р°РІС‚РѕРїСЂРѕРґР»РµРЅРёСЏ certbot.timer РЅРµР°РєС‚РёРІРµРЅ вЂ” СЃРµСЂС‚РёС„РёРєР°С‚ РјРѕР¶РµС‚ РЅРµ РѕР±РЅРѕРІРёС‚СЊСЃСЏ СЃР°Рј.');
     }
     return {
         ok: true,
@@ -12245,10 +12245,10 @@ function sslError(res, status, message, extra = {}) {
     return res.status(status).json({ error: message, ...extra });
 }
 
-// Настроен ли HTTPS для домена панели — в отличие от `https` в
-// /api/security/status, который говорит лишь о текущем запросе.
-// Приложению и веб-панели нужен именно факт настройки: внутри SSH-туннеля
-// запрос всегда приходит по http, хотя сертификат выпущен и работает.
+// РќР°СЃС‚СЂРѕРµРЅ Р»Рё HTTPS РґР»СЏ РґРѕРјРµРЅР° РїР°РЅРµР»Рё вЂ” РІ РѕС‚Р»РёС‡РёРµ РѕС‚ `https` РІ
+// /api/security/status, РєРѕС‚РѕСЂС‹Р№ РіРѕРІРѕСЂРёС‚ Р»РёС€СЊ Рѕ С‚РµРєСѓС‰РµРј Р·Р°РїСЂРѕСЃРµ.
+// РџСЂРёР»РѕР¶РµРЅРёСЋ Рё РІРµР±-РїР°РЅРµР»Рё РЅСѓР¶РµРЅ РёРјРµРЅРЅРѕ С„Р°РєС‚ РЅР°СЃС‚СЂРѕР№РєРё: РІРЅСѓС‚СЂРё SSH-С‚СѓРЅРЅРµР»СЏ
+// Р·Р°РїСЂРѕСЃ РІСЃРµРіРґР° РїСЂРёС…РѕРґРёС‚ РїРѕ http, С…РѕС‚СЏ СЃРµСЂС‚РёС„РёРєР°С‚ РІС‹РїСѓС‰РµРЅ Рё СЂР°Р±РѕС‚Р°РµС‚.
 function panelHttpsState() {
     try {
         if (DEMO_MODE) {
@@ -12267,51 +12267,51 @@ function panelHttpsState() {
     }
 }
 
-// Статус: сертификаты, сайты, пути и состояние инструментов.
+// РЎС‚Р°С‚СѓСЃ: СЃРµСЂС‚РёС„РёРєР°С‚С‹, СЃР°Р№С‚С‹, РїСѓС‚Рё Рё СЃРѕСЃС‚РѕСЏРЅРёРµ РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ.
 app.get('/api/ssl/status', checkAuth, (req, res) => {
     try { res.json(sslStatusPayload()); }
-    catch (e) { res.status(500).json({ error: 'Не удалось прочитать состояние SSL: ' + sslTail(e.message, 200) }); }
+    catch (e) { res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ СЃРѕСЃС‚РѕСЏРЅРёРµ SSL: ' + sslTail(e.message, 200) }); }
 });
 
-// Установка nginx/certbot на Debian/Ubuntu (по явной кнопке администратора).
+// РЈСЃС‚Р°РЅРѕРІРєР° nginx/certbot РЅР° Debian/Ubuntu (РїРѕ СЏРІРЅРѕР№ РєРЅРѕРїРєРµ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°).
 app.post('/api/ssl/install-deps', checkAuth, requireAdmin, async (req, res) => {
     if (NO_SYSTEM()) {
-        auditLog(req, '[DEMO] Установка nginx и certbot запрошена');
+        auditLog(req, '[DEMO] РЈСЃС‚Р°РЅРѕРІРєР° nginx Рё certbot Р·Р°РїСЂРѕС€РµРЅР°');
         return res.json({ success: true, demo: true, packages: ['nginx', 'certbot', 'python3-certbot-nginx'] });
     }
     const apt = findCommand('apt-get');
-    if (!apt) return sslError(res, 400, 'Автоустановка поддерживается только на Debian/Ubuntu (нужен apt-get).');
+    if (!apt) return sslError(res, 400, 'РђРІС‚РѕСѓСЃС‚Р°РЅРѕРІРєР° РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ С‚РѕР»СЊРєРѕ РЅР° Debian/Ubuntu (РЅСѓР¶РµРЅ apt-get).');
     try {
         const env = { ...process.env, DEBIAN_FRONTEND: 'noninteractive' };
         await rootRun(apt, ['update'], { timeout: 300000, env });
         const install = await rootRun(apt, ['install', '-y', 'nginx', 'certbot', 'python3-certbot-nginx'], { timeout: 600000, env });
         if (!install.ok) {
-            return sslError(res, 500, 'Не удалось установить пакеты.', { output: sslTail(install.stderr || install.stdout) });
+            return sslError(res, 500, 'РќРµ СѓРґР°Р»РѕСЃСЊ СѓСЃС‚Р°РЅРѕРІРёС‚СЊ РїР°РєРµС‚С‹.', { output: sslTail(install.stderr || install.stdout) });
         }
         await rootRun('systemctl', ['enable', '--now', 'nginx'], { timeout: 60000 });
-        auditLog(req, 'Установлены nginx и certbot из панели');
+        auditLog(req, 'РЈСЃС‚Р°РЅРѕРІР»РµРЅС‹ nginx Рё certbot РёР· РїР°РЅРµР»Рё');
         res.json({ success: true, output: sslTail(install.stdout, 1200) });
     } catch (e) {
-        sslError(res, 500, 'Ошибка установки: ' + sslTail(e.message, 300));
+        sslError(res, 500, 'РћС€РёР±РєР° СѓСЃС‚Р°РЅРѕРІРєРё: ' + sslTail(e.message, 300));
     }
 });
 
-// Привязка домена и (по умолчанию) выпуск сертификата.
+// РџСЂРёРІСЏР·РєР° РґРѕРјРµРЅР° Рё (РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ) РІС‹РїСѓСЃРє СЃРµСЂС‚РёС„РёРєР°С‚Р°.
 app.post('/api/ssl/site', checkAuth, requireAdmin, async (req, res) => {
     const body = req.body || {};
     const domain = normalizeDomain(body.domain);
-    if (!domain) return sslError(res, 400, 'Некорректный домен. Пример: panel.example.com');
+    if (!domain) return sslError(res, 400, 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РґРѕРјРµРЅ. РџСЂРёРјРµСЂ: panel.example.com');
     const mode = body.mode === 'site' ? 'site' : 'panel';
     const www = !!body.www;
     const issue = body.issue !== false;
     const useForVpn = mode === 'panel' && body.useForVpn !== false;
     const email = body.email ? normalizeEmail(body.email) : (`admin@${domain}`);
-    if (body.email && !email) return sslError(res, 400, "Некорректный email для Let's Encrypt.");
+    if (body.email && !email) return sslError(res, 400, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ email РґР»СЏ Let's Encrypt.");
 
     const siteName = mode === 'panel' ? PANEL_SITE_NAME : domain;
     const existingPanel = panelDomain();
     if (mode === 'site' && existingPanel === domain) {
-        return sslError(res, 409, 'Этот домен уже используется панелью. Выберите режим «домен панели».');
+        return sslError(res, 409, 'Р­С‚РѕС‚ РґРѕРјРµРЅ СѓР¶Рµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РїР°РЅРµР»СЊСЋ. Р’С‹Р±РµСЂРёС‚Рµ СЂРµР¶РёРј В«РґРѕРјРµРЅ РїР°РЅРµР»РёВ».');
     }
 
     if (NO_SYSTEM()) {
@@ -12336,7 +12336,7 @@ app.post('/api/ssl/site', checkAuth, requireAdmin, async (req, res) => {
                 .concat(demoCertificate(domain, www ? ['www.' + domain] : []));
         }
         rememberSite({ ...site, email, created: new Date().toISOString(), useForVpn });
-        auditLog(req, `[DEMO] Домен ${domain} привязан (${mode})${issue ? ', сертификат выпущен' : ''}`);
+        auditLog(req, `[DEMO] Р”РѕРјРµРЅ ${domain} РїСЂРёРІСЏР·Р°РЅ (${mode})${issue ? ', СЃРµСЂС‚РёС„РёРєР°С‚ РІС‹РїСѓС‰РµРЅ' : ''}`);
         return res.json({
             success: true,
             demo: true,
@@ -12356,32 +12356,32 @@ app.post('/api/ssl/site', checkAuth, requireAdmin, async (req, res) => {
 
     const tools = { nginx: sslTool('nginx', ['-v']), certbot: sslTool('certbot') };
     if (!tools.nginx.installed) {
-        return sslError(res, 409, 'Nginx не установлен. Установите nginx и certbot кнопкой в этой вкладке.', { needDeps: true });
+        return sslError(res, 409, 'Nginx РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ. РЈСЃС‚Р°РЅРѕРІРёС‚Рµ nginx Рё certbot РєРЅРѕРїРєРѕР№ РІ СЌС‚РѕР№ РІРєР»Р°РґРєРµ.', { needDeps: true });
     }
     if (issue && !tools.certbot.installed) {
-        return sslError(res, 409, "Certbot не установлен. Установите certbot кнопкой в этой вкладке.", { needDeps: true });
+        return sslError(res, 409, "Certbot РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ. РЈСЃС‚Р°РЅРѕРІРёС‚Рµ certbot РєРЅРѕРїРєРѕР№ РІ СЌС‚РѕР№ РІРєР»Р°РґРєРµ.", { needDeps: true });
     }
     if (!portIsNginxOrFree(80)) {
-        return sslError(res, 409, 'Порт 80 занят другим процессом. Освободите его для проверки домена Let\'s Encrypt.');
+        return sslError(res, 409, 'РџРѕСЂС‚ 80 Р·Р°РЅСЏС‚ РґСЂСѓРіРёРј РїСЂРѕС†РµСЃСЃРѕРј. РћСЃРІРѕР±РѕРґРёС‚Рµ РµРіРѕ РґР»СЏ РїСЂРѕРІРµСЂРєРё РґРѕРјРµРЅР° Let\'s Encrypt.');
     }
 
     const dns = await resolveDomain(domain);
     if (!dns.length) {
         return sslError(res, 422,
-            `Домен ${domain} не резолвится. Создайте A-запись на IP сервера и повторите.`, { dns: [] });
+            `Р”РѕРјРµРЅ ${domain} РЅРµ СЂРµР·РѕР»РІРёС‚СЃСЏ. РЎРѕР·РґР°Р№С‚Рµ A-Р·Р°РїРёСЃСЊ РЅР° IP СЃРµСЂРІРµСЂР° Рё РїРѕРІС‚РѕСЂРёС‚Рµ.`, { dns: [] });
     }
     if (www) {
         const wwwDns = await resolveDomain('www.' + domain);
         if (!wwwDns.length) {
             return sslError(res, 422,
-                `Домен www.${domain} не резолвится. Добавьте A-запись для www или снимите галочку «вместе с www».`,
+                `Р”РѕРјРµРЅ www.${domain} РЅРµ СЂРµР·РѕР»РІРёС‚СЃСЏ. Р”РѕР±Р°РІСЊС‚Рµ A-Р·Р°РїРёСЃСЊ РґР»СЏ www РёР»Рё СЃРЅРёРјРёС‚Рµ РіР°Р»РѕС‡РєСѓ В«РІРјРµСЃС‚Рµ СЃ wwwВ».`,
                 { dns: [] });
         }
     }
 
     const httpsPort = chooseHttpsPort(mode, siteName);
     if (!httpsPort) {
-        return sslError(res, 409, 'Не удалось подобрать свободный порт для HTTPS. Освободите 443 или укажите другой внешний порт.');
+        return sslError(res, 409, 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРѕР±СЂР°С‚СЊ СЃРІРѕР±РѕРґРЅС‹Р№ РїРѕСЂС‚ РґР»СЏ HTTPS. РћСЃРІРѕР±РѕРґРёС‚Рµ 443 РёР»Рё СѓРєР°Р¶РёС‚Рµ РґСЂСѓРіРѕР№ РІРЅРµС€РЅРёР№ РїРѕСЂС‚.');
     }
 
     try {
@@ -12389,7 +12389,7 @@ app.post('/api/ssl/site', checkAuth, requireAdmin, async (req, res) => {
         if (issue) await rootRun('mkdir', ['-p', ACME_WEBROOT], { timeout: 15000 });
         const httpConf = buildSiteConfig({ domain, mode, www, httpsPort, certPath: '', keyPath: '' });
         const first = await applySiteConfig(siteName, httpConf);
-        if (!first.ok) return sslError(res, 500, 'Конфигурация Nginx отклонена: ' + first.error);
+        if (!first.ok) return sslError(res, 500, 'РљРѕРЅС„РёРіСѓСЂР°С†РёСЏ Nginx РѕС‚РєР»РѕРЅРµРЅР°: ' + first.error);
 
         await allowFirewallPorts([80, httpsPort]);
 
@@ -12404,14 +12404,14 @@ app.post('/api/ssl/site', checkAuth, requireAdmin, async (req, res) => {
                     lastError: sslTail(run.stderr || run.stdout, 500)
                 });
                 return sslError(res, 502,
-                    'Домен добавлен по HTTP, но сертификат выпустить не удалось. Проверьте A-запись, порт 80 и лимиты Let\'s Encrypt.',
+                    'Р”РѕРјРµРЅ РґРѕР±Р°РІР»РµРЅ РїРѕ HTTP, РЅРѕ СЃРµСЂС‚РёС„РёРєР°С‚ РІС‹РїСѓСЃС‚РёС‚СЊ РЅРµ СѓРґР°Р»РѕСЃСЊ. РџСЂРѕРІРµСЂСЊС‚Рµ A-Р·Р°РїРёСЃСЊ, РїРѕСЂС‚ 80 Рё Р»РёРјРёС‚С‹ Let\'s Encrypt.',
                     { output: sslTail(run.stderr || run.stdout), site: { name: siteName, domain, mode }, dns, needDeps: false });
             }
             const paths = certPathsFor(domain);
             const fullConf = buildSiteConfig({ domain, mode, www, httpsPort, certPath: paths.fullchain, keyPath: paths.privkey });
             const second = await applySiteConfig(siteName, fullConf);
             if (!second.ok) {
-                warnings.push('Сертификат выпущен, но HTTPS-конфиг не применился: ' + second.error);
+                warnings.push('РЎРµСЂС‚РёС„РёРєР°С‚ РІС‹РїСѓС‰РµРЅ, РЅРѕ HTTPS-РєРѕРЅС„РёРі РЅРµ РїСЂРёРјРµРЅРёР»СЃСЏ: ' + second.error);
             } else {
                 issued = paths;
             }
@@ -12419,7 +12419,7 @@ app.post('/api/ssl/site', checkAuth, requireAdmin, async (req, res) => {
 
         if (mode === 'panel' && useForVpn) {
             try { writeRootFile('/root/awg_domain.txt', domain + '\n', '0600'); }
-            catch (e) { warnings.push('Не удалось сохранить домен как адрес VPN-клиентов: ' + sslTail(e.message, 120)); }
+            catch (e) { warnings.push('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РґРѕРјРµРЅ РєР°Рє Р°РґСЂРµСЃ VPN-РєР»РёРµРЅС‚РѕРІ: ' + sslTail(e.message, 120)); }
         }
         if (mode === 'panel') {
             const st = readSslState();
@@ -12432,7 +12432,7 @@ app.post('/api/ssl/site', checkAuth, requireAdmin, async (req, res) => {
             httpsPort
         });
 
-        auditLog(req, `Домен ${domain} привязан (${mode})${issued ? ', сертификат Let\'s Encrypt выпущен' : ''}`);
+        auditLog(req, `Р”РѕРјРµРЅ ${domain} РїСЂРёРІСЏР·Р°РЅ (${mode})${issued ? ', СЃРµСЂС‚РёС„РёРєР°С‚ Let\'s Encrypt РІС‹РїСѓС‰РµРЅ' : ''}`);
         res.json({
             success: true,
             domain,
@@ -12448,17 +12448,17 @@ app.post('/api/ssl/site', checkAuth, requireAdmin, async (req, res) => {
             warnings
         });
     } catch (e) {
-        sslError(res, 500, 'Ошибка привязки домена: ' + sslTail(e.message, 400));
+        sslError(res, 500, 'РћС€РёР±РєР° РїСЂРёРІСЏР·РєРё РґРѕРјРµРЅР°: ' + sslTail(e.message, 400));
     }
 });
 
-// Продление сертификата (certbot renew для конкретного имени).
-// Без флага --nginx: certbot использует способ проверки, записанный при выпуске
-// (/etc/letsencrypt/renewal/<name>.conf), и не переписывает конфиг Nginx.
+// РџСЂРѕРґР»РµРЅРёРµ СЃРµСЂС‚РёС„РёРєР°С‚Р° (certbot renew РґР»СЏ РєРѕРЅРєСЂРµС‚РЅРѕРіРѕ РёРјРµРЅРё).
+// Р‘РµР· С„Р»Р°РіР° --nginx: certbot РёСЃРїРѕР»СЊР·СѓРµС‚ СЃРїРѕСЃРѕР± РїСЂРѕРІРµСЂРєРё, Р·Р°РїРёСЃР°РЅРЅС‹Р№ РїСЂРё РІС‹РїСѓСЃРєРµ
+// (/etc/letsencrypt/renewal/<name>.conf), Рё РЅРµ РїРµСЂРµРїРёСЃС‹РІР°РµС‚ РєРѕРЅС„РёРі Nginx.
 //
-// Certbot при принудительном продлении работает дольше 60 секунд, а nginx
-// обрывает такой запрос с 504. Поэтому продление выполняется в фоне, а
-// браузер опрашивает /api/ssl/renew/status и показывает реальный результат.
+// Certbot РїСЂРё РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕРј РїСЂРѕРґР»РµРЅРёРё СЂР°Р±РѕС‚Р°РµС‚ РґРѕР»СЊС€Рµ 60 СЃРµРєСѓРЅРґ, Р° nginx
+// РѕР±СЂС‹РІР°РµС‚ С‚Р°РєРѕР№ Р·Р°РїСЂРѕСЃ СЃ 504. РџРѕСЌС‚РѕРјСѓ РїСЂРѕРґР»РµРЅРёРµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ РІ С„РѕРЅРµ, Р°
+// Р±СЂР°СѓР·РµСЂ РѕРїСЂР°С€РёРІР°РµС‚ /api/ssl/renew/status Рё РїРѕРєР°Р·С‹РІР°РµС‚ СЂРµР°Р»СЊРЅС‹Р№ СЂРµР·СѓР»СЊС‚Р°С‚.
 let sslRenewJob = null;
 
 function sslRenewPublic(job) {
@@ -12491,17 +12491,17 @@ function startSslRenew(name, force, auditReq) {
             job.output = String(run.stdout || '') + '\n' + String(run.stderr || '');
             if (!run.ok) {
                 job.error = /another instance of certbot|\.certbot\.lock|lock file/i.test(job.output)
-                    ? 'Certbot уже выполняется. Подождите и повторите.'
-                    : 'Certbot не смог обновить сертификат.';
+                    ? 'Certbot СѓР¶Рµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ. РџРѕРґРѕР¶РґРёС‚Рµ Рё РїРѕРІС‚РѕСЂРёС‚Рµ.'
+                    : 'Certbot РЅРµ СЃРјРѕРі РѕР±РЅРѕРІРёС‚СЊ СЃРµСЂС‚РёС„РёРєР°С‚.';
             } else {
                 job.ok = true;
                 job.notDue = /not yet due for renewal|No renewals were attempted/i.test(job.output);
                 await rootRun('systemctl', ['reload', 'nginx'], { timeout: 30000 });
                 job.certificate = currentCertificates().find(c => c.name === name) || null;
-                auditLog(auditReq, `${job.notDue ? 'Проверен' : 'Обновлён'} сертификат ${name}${force ? ' (force)' : ''}`);
+                auditLog(auditReq, `${job.notDue ? 'РџСЂРѕРІРµСЂРµРЅ' : 'РћР±РЅРѕРІР»С‘РЅ'} СЃРµСЂС‚РёС„РёРєР°С‚ ${name}${force ? ' (force)' : ''}`);
             }
         } catch (e) {
-            job.error = 'Ошибка продления: ' + sslTail(e.message, 300);
+            job.error = 'РћС€РёР±РєР° РїСЂРѕРґР»РµРЅРёСЏ: ' + sslTail(e.message, 300);
         } finally {
             job.running = false;
             job.finishedAt = Date.now();
@@ -12515,13 +12515,13 @@ app.post('/api/ssl/renew', checkAuth, requireAdmin, (req, res) => {
     const force = !!(req.body || {}).force;
     const safeName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name) && !name.includes('..');
     if (!normalizeDomain(name) && !safeName) {
-        return sslError(res, 400, 'Некорректное имя сертификата.');
+        return sslError(res, 400, 'РќРµРєРѕСЂСЂРµРєС‚РЅРѕРµ РёРјСЏ СЃРµСЂС‚РёС„РёРєР°С‚Р°.');
     }
     if (NO_SYSTEM()) {
-        auditLog(req, `[DEMO] Обновление сертификата ${name}`);
+        auditLog(req, `[DEMO] РћР±РЅРѕРІР»РµРЅРёРµ СЃРµСЂС‚РёС„РёРєР°С‚Р° ${name}`);
         return res.json({ success: true, demo: true, name, notDue: false, forced: force, running: false });
     }
-    if (!findCommand('certbot')) return sslError(res, 409, 'Certbot не установлен.', { needDeps: true });
+    if (!findCommand('certbot')) return sslError(res, 409, 'Certbot РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ.', { needDeps: true });
     if (sslRenewJob && sslRenewJob.running) {
         return res.status(202).json({
             success: true, started: false, running: true,
@@ -12529,7 +12529,7 @@ app.post('/api/ssl/renew', checkAuth, requireAdmin, (req, res) => {
         });
     }
     const auditReq = { headers: req.headers, socket: req.socket, session: req.session };
-    auditLog(req, `Запущено продление сертификата ${name}${force ? ' (force)' : ''}`);
+    auditLog(req, `Р—Р°РїСѓС‰РµРЅРѕ РїСЂРѕРґР»РµРЅРёРµ СЃРµСЂС‚РёС„РёРєР°С‚Р° ${name}${force ? ' (force)' : ''}`);
     const job = startSslRenew(name, force, auditReq);
     res.status(202).json({ success: true, started: true, running: true, name, force, job: sslRenewPublic(job) });
 });
@@ -12543,19 +12543,19 @@ app.get('/api/ssl/renew/status', checkAuth, (req, res) => {
     res.json({ success: true, running: sslRenewJob.running, job: sslRenewPublic(sslRenewJob) });
 });
 
-// Удаление сайта, созданного из панели (сертификат при этом сохраняется).
+// РЈРґР°Р»РµРЅРёРµ СЃР°Р№С‚Р°, СЃРѕР·РґР°РЅРЅРѕРіРѕ РёР· РїР°РЅРµР»Рё (СЃРµСЂС‚РёС„РёРєР°С‚ РїСЂРё СЌС‚РѕРј СЃРѕС…СЂР°РЅСЏРµС‚СЃСЏ).
 app.delete('/api/ssl/site/:name', checkAuth, requireAdmin, async (req, res) => {
     const name = path.basename(String(req.params.name || ''));
     const st = readSslState();
     const entry = st.sites[name];
     if (!entry || entry.mode !== 'site') {
-        return sslError(res, 403, 'Удалять можно только дополнительные сайты, созданные из панели.');
+        return sslError(res, 403, 'РЈРґР°Р»СЏС‚СЊ РјРѕР¶РЅРѕ С‚РѕР»СЊРєРѕ РґРѕРїРѕР»РЅРёС‚РµР»СЊРЅС‹Рµ СЃР°Р№С‚С‹, СЃРѕР·РґР°РЅРЅС‹Рµ РёР· РїР°РЅРµР»Рё.');
     }
     if (NO_SYSTEM()) {
         sslVirtual.sites = sslVirtual.sites.filter(s => s.name !== name);
         delete st.sites[name];
         writeSslState(st);
-        auditLog(req, `[DEMO] Удалён сайт ${name}`);
+        auditLog(req, `[DEMO] РЈРґР°Р»С‘РЅ СЃР°Р№С‚ ${name}`);
         return res.json({ success: true, demo: true, name });
     }
     const target = posixJoin(NGX_AVAILABLE, name);
@@ -12569,10 +12569,10 @@ app.delete('/api/ssl/site/:name', checkAuth, requireAdmin, async (req, res) => {
         const test = await rootRun(findCommand('nginx') || 'nginx', ['-t'], { timeout: 30000 });
         if (!test.ok) throw new Error('nginx -t: ' + sslTail(test.stderr || test.stdout));
         const reload = await rootRun('systemctl', ['reload', 'nginx'], { timeout: 30000 });
-        if (!reload.ok) throw new Error('nginx не перезагрузился: ' + sslTail(reload.stderr || reload.stdout));
+        if (!reload.ok) throw new Error('nginx РЅРµ РїРµСЂРµР·Р°РіСЂСѓР·РёР»СЃСЏ: ' + sslTail(reload.stderr || reload.stdout));
         delete st.sites[name];
         writeSslState(st);
-        auditLog(req, `Удалён сайт ${name} (сертификат сохранён)`);
+        auditLog(req, `РЈРґР°Р»С‘РЅ СЃР°Р№С‚ ${name} (СЃРµСЂС‚РёС„РёРєР°С‚ СЃРѕС…СЂР°РЅС‘РЅ)`);
         res.json({ success: true, name });
     } catch (e) {
         try {
@@ -12580,19 +12580,19 @@ app.delete('/api/ssl/site/:name', checkAuth, requireAdmin, async (req, res) => {
             rootSh('ln', ['-sf', target, link], { timeout: 10000 });
             await rootRun('systemctl', ['reload', 'nginx'], { timeout: 30000 });
         } catch (e2) { /* ignore */ }
-        sslError(res, 500, 'Не удалось удалить сайт: ' + sslTail(e.message, 300));
+        sslError(res, 500, 'РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ СЃР°Р№С‚: ' + sslTail(e.message, 300));
     } finally {
         try { fs.unlinkSync(backup); } catch (e) { /* ignore */ }
     }
 });
 
 // ---------------------------------------------------------------------------
-// Обновление панели (безопасное, с бэкапом и откатом)
+// РћР±РЅРѕРІР»РµРЅРёРµ РїР°РЅРµР»Рё (Р±РµР·РѕРїР°СЃРЅРѕРµ, СЃ Р±СЌРєР°РїРѕРј Рё РѕС‚РєР°С‚РѕРј)
 //
-// Важно: сам процесс обновления выполняется отдельным detached-процессом
-// lib/update-worker.js. Он переживает `pm2 restart`, поэтому успевает
-// проверить новую версию и откатиться, если она не поднялась.
-// Данные, конфиги AWG, каскад, nginx, fail2ban и AdGuard не изменяются.
+// Р’Р°Р¶РЅРѕ: СЃР°Рј РїСЂРѕС†РµСЃСЃ РѕР±РЅРѕРІР»РµРЅРёСЏ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ РѕС‚РґРµР»СЊРЅС‹Рј detached-РїСЂРѕС†РµСЃСЃРѕРј
+// lib/update-worker.js. РћРЅ РїРµСЂРµР¶РёРІР°РµС‚ `pm2 restart`, РїРѕСЌС‚РѕРјСѓ СѓСЃРїРµРІР°РµС‚
+// РїСЂРѕРІРµСЂРёС‚СЊ РЅРѕРІСѓСЋ РІРµСЂСЃРёСЋ Рё РѕС‚РєР°С‚РёС‚СЊСЃСЏ, РµСЃР»Рё РѕРЅР° РЅРµ РїРѕРґРЅСЏР»Р°СЃСЊ.
+// Р”Р°РЅРЅС‹Рµ, РєРѕРЅС„РёРіРё AWG, РєР°СЃРєР°Рґ, nginx, fail2ban Рё AdGuard РЅРµ РёР·РјРµРЅСЏСЋС‚СЃСЏ.
 // ---------------------------------------------------------------------------
 const UPDATE_BACKUP_DIR = BACKUP_DIR;
 const UPDATE_TMP_PREFIX = '.update-upload-';
@@ -12609,13 +12609,13 @@ function updateConfig() {
 }
 
 function safeUpdateError(res, e) {
-    const msg = String((e && e.message) || e || 'Ошибка обновления');
-    if (/уже выполняется/.test(msg)) return res.status(409).json({ error: msg });
+    const msg = String((e && e.message) || e || 'РћС€РёР±РєР° РѕР±РЅРѕРІР»РµРЅРёСЏ');
+    if (/СѓР¶Рµ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ/.test(msg)) return res.status(409).json({ error: msg });
     return res.status(500).json({ error: msg });
 }
 
-// Извлекаем интерфейсы из mangle-правил, чтобы показать в интерфейсе,
-// что каскад действительно настроен и обновление его не затрагивает.
+// РР·РІР»РµРєР°РµРј РёРЅС‚РµСЂС„РµР№СЃС‹ РёР· mangle-РїСЂР°РІРёР», С‡С‚РѕР±С‹ РїРѕРєР°Р·Р°С‚СЊ РІ РёРЅС‚РµСЂС„РµР№СЃРµ,
+// С‡С‚Рѕ РєР°СЃРєР°Рґ РґРµР№СЃС‚РІРёС‚РµР»СЊРЅРѕ РЅР°СЃС‚СЂРѕРµРЅ Рё РѕР±РЅРѕРІР»РµРЅРёРµ РµРіРѕ РЅРµ Р·Р°С‚СЂР°РіРёРІР°РµС‚.
 function detectedCascadeIfaces() {
     const found = new Set();
     try {
@@ -12680,7 +12680,7 @@ app.get('/api/update/check-git', checkAuth, requireAdmin, (req, res) => {
 
 function startUpdateWorker(res, req, opts, auditText) {
     if ((process.env.SERVEPANEL_DEMO === '1' || process.env.SERVPANEL_DEMO === '1')) {
-        res.status(400).json({ error: 'В демо-режиме обновление отключено' });
+        res.status(400).json({ error: 'Р’ РґРµРјРѕ-СЂРµР¶РёРјРµ РѕР±РЅРѕРІР»РµРЅРёРµ РѕС‚РєР»СЋС‡РµРЅРѕ' });
         return false;
     }
     try {
@@ -12688,7 +12688,7 @@ function startUpdateWorker(res, req, opts, auditText) {
             ...updateConfig(),
             ...opts
         });
-        auditLog(req, auditText || 'Запущено обновление панели');
+        auditLog(req, auditText || 'Р—Р°РїСѓС‰РµРЅРѕ РѕР±РЅРѕРІР»РµРЅРёРµ РїР°РЅРµР»Рё');
         res.json({
             success: true,
             pid: worker && worker.pid ? worker.pid : null,
@@ -12702,18 +12702,18 @@ function startUpdateWorker(res, req, opts, auditText) {
     }
 }
 
-// Обновление из загруженного .tar.gz (base64 в JSON, без multer).
+// РћР±РЅРѕРІР»РµРЅРёРµ РёР· Р·Р°РіСЂСѓР¶РµРЅРЅРѕРіРѕ .tar.gz (base64 РІ JSON, Р±РµР· multer).
 app.post('/api/update/upload', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     const name = String(body.name || 'servpanel.tar.gz').replace(/[^A-Za-z0-9._-]/g, '_').slice(-80);
     const data = String(body.data || '');
-    if (!data) return res.status(400).json({ error: 'Файл не передан' });
-    if (data.length > 10 * 1024 * 1024 * 1.4) return res.status(413).json({ error: 'Файл больше 10 МБ' });
+    if (!data) return res.status(400).json({ error: 'Р¤Р°Р№Р» РЅРµ РїРµСЂРµРґР°РЅ' });
+    if (data.length > 10 * 1024 * 1024 * 1.4) return res.status(413).json({ error: 'Р¤Р°Р№Р» Р±РѕР»СЊС€Рµ 10 РњР‘' });
     let buf;
     try { buf = Buffer.from(data, 'base64'); }
-    catch (e) { return res.status(400).json({ error: 'Некорректный base64' }); }
-    if (!buf.length) return res.status(400).json({ error: 'Пустой файл' });
-    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'Файл больше 10 МБ' });
+    catch (e) { return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ base64' }); }
+    if (!buf.length) return res.status(400).json({ error: 'РџСѓСЃС‚РѕР№ С„Р°Р№Р»' });
+    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'Р¤Р°Р№Р» Р±РѕР»СЊС€Рµ 10 РњР‘' });
 
     const archive = path.join(DATA_DIR, UPDATE_TMP_PREFIX + Date.now() + '-' + name);
     try {
@@ -12723,7 +12723,7 @@ app.post('/api/update/upload', checkAuth, requireAdmin, (req, res) => {
             archive,
             sha256: String(body.sha256 || ''),
             cleanupArchive: true
-        }, `Загружен релиз панели ${name}`);
+        }, `Р—Р°РіСЂСѓР¶РµРЅ СЂРµР»РёР· РїР°РЅРµР»Рё ${name}`);
         if (!started) {
             try { fs.unlinkSync(archive); } catch (e2) { /* ignore */ }
         }
@@ -12733,20 +12733,20 @@ app.post('/api/update/upload', checkAuth, requireAdmin, (req, res) => {
     }
 });
 
-// Обновление по URL (например, свой сервер раздачи релизов).
+// РћР±РЅРѕРІР»РµРЅРёРµ РїРѕ URL (РЅР°РїСЂРёРјРµСЂ, СЃРІРѕР№ СЃРµСЂРІРµСЂ СЂР°Р·РґР°С‡Рё СЂРµР»РёР·РѕРІ).
 app.post('/api/update/url', checkAuth, requireAdmin, async (req, res) => {
     const raw = String((req.body && req.body.url) || '');
     let u;
-    try { u = new URL(raw); } catch (e) { return res.status(400).json({ error: 'Некорректный URL' }); }
-    if (u.protocol !== 'https:' && u.protocol !== 'http:') return res.status(400).json({ error: 'Разрешены только http/https' });
+    try { u = new URL(raw); } catch (e) { return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ URL' }); }
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return res.status(400).json({ error: 'Р Р°Р·СЂРµС€РµРЅС‹ С‚РѕР»СЊРєРѕ http/https' });
     let archive = '';
     try {
         const r = await fetchWithTimeout(u.toString(), {}, 60000);
-        if (!r.ok) return res.status(502).json({ error: 'Сервер отдал HTTP ' + r.status });
+        if (!r.ok) return res.status(502).json({ error: 'РЎРµСЂРІРµСЂ РѕС‚РґР°Р» HTTP ' + r.status });
         const len = parseInt(r.headers.get('content-length') || '0', 10);
-        if (len > 10 * 1024 * 1024) return res.status(413).json({ error: 'Файл больше 10 МБ' });
+        if (len > 10 * 1024 * 1024) return res.status(413).json({ error: 'Р¤Р°Р№Р» Р±РѕР»СЊС€Рµ 10 РњР‘' });
         const buf = Buffer.from(await r.arrayBuffer());
-        if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'Файл больше 10 МБ' });
+        if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'Р¤Р°Р№Р» Р±РѕР»СЊС€Рµ 10 РњР‘' });
         archive = path.join(DATA_DIR, UPDATE_TMP_PREFIX + Date.now() + '-url.tar.gz');
         fs.writeFileSync(archive, buf, { mode: 0o600 });
         const started = startUpdateWorker(res, req, {
@@ -12754,7 +12754,7 @@ app.post('/api/update/url', checkAuth, requireAdmin, async (req, res) => {
             archive,
             sha256: String((req.body && req.body.sha256) || ''),
             cleanupArchive: true
-        }, 'Запущено обновление панели по URL');
+        }, 'Р—Р°РїСѓС‰РµРЅРѕ РѕР±РЅРѕРІР»РµРЅРёРµ РїР°РЅРµР»Рё РїРѕ URL');
         if (!started) {
             try { fs.unlinkSync(archive); } catch (e2) { /* ignore */ }
         }
@@ -12766,23 +12766,23 @@ app.post('/api/update/url', checkAuth, requireAdmin, async (req, res) => {
     }
 });
 
-// GitHub-обновление: только fast-forward, без reset --hard.
+// GitHub-РѕР±РЅРѕРІР»РµРЅРёРµ: С‚РѕР»СЊРєРѕ fast-forward, Р±РµР· reset --hard.
 app.post('/api/update/git', checkAuth, requireAdmin, (req, res) => {
     startUpdateWorker(res, req, { mode: 'git', branch: 'main', remote: 'origin' },
-        'Запущено обновление панели с GitHub');
+        'Р—Р°РїСѓС‰РµРЅРѕ РѕР±РЅРѕРІР»РµРЅРёРµ РїР°РЅРµР»Рё СЃ GitHub');
 });
 
-// Принудительное GitHub-обновление: сбрасывает только отслеживаемые файлы кода
-// к origin/main. Данные панели и конфиги AWG не входят в git и не затрагиваются.
+// РџСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕРµ GitHub-РѕР±РЅРѕРІР»РµРЅРёРµ: СЃР±СЂР°СЃС‹РІР°РµС‚ С‚РѕР»СЊРєРѕ РѕС‚СЃР»РµР¶РёРІР°РµРјС‹Рµ С„Р°Р№Р»С‹ РєРѕРґР°
+// Рє origin/main. Р”Р°РЅРЅС‹Рµ РїР°РЅРµР»Рё Рё РєРѕРЅС„РёРіРё AWG РЅРµ РІС…РѕРґСЏС‚ РІ git Рё РЅРµ Р·Р°С‚СЂР°РіРёРІР°СЋС‚СЃСЏ.
 app.post('/api/update/git-force', checkAuth, requireAdmin, (req, res) => {
     startUpdateWorker(res, req, { mode: 'git-force', branch: 'main', remote: 'origin' },
-        'Запущено принудительное обновление панели с GitHub (сброс локальных изменений кода)');
+        'Р—Р°РїСѓС‰РµРЅРѕ РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕРµ РѕР±РЅРѕРІР»РµРЅРёРµ РїР°РЅРµР»Рё СЃ GitHub (СЃР±СЂРѕСЃ Р»РѕРєР°Р»СЊРЅС‹С… РёР·РјРµРЅРµРЅРёР№ РєРѕРґР°)');
 });
 
-// Старый вызов оставлен совместимым, но теперь он тоже безопасный.
+// РЎС‚Р°СЂС‹Р№ РІС‹Р·РѕРІ РѕСЃС‚Р°РІР»РµРЅ СЃРѕРІРјРµСЃС‚РёРјС‹Рј, РЅРѕ С‚РµРїРµСЂСЊ РѕРЅ С‚РѕР¶Рµ Р±РµР·РѕРїР°СЃРЅС‹Р№.
 app.post('/api/update', checkAuth, requireAdmin, (req, res) => {
     startUpdateWorker(res, req, { mode: 'git', branch: 'main', remote: 'origin' },
-        'Запущено обновление панели с GitHub (совместимый вызов)');
+        'Р—Р°РїСѓС‰РµРЅРѕ РѕР±РЅРѕРІР»РµРЅРёРµ РїР°РЅРµР»Рё СЃ GitHub (СЃРѕРІРјРµСЃС‚РёРјС‹Р№ РІС‹Р·РѕРІ)');
 });
 
 app.post('/api/update/rollback', checkAuth, requireAdmin, (req, res) => {
@@ -12790,23 +12790,23 @@ app.post('/api/update/rollback', checkAuth, requireAdmin, (req, res) => {
         let backup = String((req.body && req.body.backup) || '');
         if (!backup) {
             const list = updater.listBackups(UPDATE_BACKUP_DIR, 1);
-            if (!list.length) return res.status(404).json({ error: 'Резервных копий панели нет' });
+            if (!list.length) return res.status(404).json({ error: 'Р РµР·РµСЂРІРЅС‹С… РєРѕРїРёР№ РїР°РЅРµР»Рё РЅРµС‚' });
             backup = list[0].path;
         }
         const resolved = path.resolve(backup);
         if (!resolved.startsWith(path.resolve(UPDATE_BACKUP_DIR) + path.sep)) {
-            return res.status(400).json({ error: 'Бэкап вне каталога резервных копий' });
+            return res.status(400).json({ error: 'Р‘СЌРєР°Рї РІРЅРµ РєР°С‚Р°Р»РѕРіР° СЂРµР·РµСЂРІРЅС‹С… РєРѕРїРёР№' });
         }
-        if (!fs.existsSync(resolved)) return res.status(404).json({ error: 'Бэкап не найден' });
+        if (!fs.existsSync(resolved)) return res.status(404).json({ error: 'Р‘СЌРєР°Рї РЅРµ РЅР°Р№РґРµРЅ' });
         startUpdateWorker(res, req, { mode: 'rollback', backup: resolved },
-            'Запущен откат панели из резервной копии');
+            'Р—Р°РїСѓС‰РµРЅ РѕС‚РєР°С‚ РїР°РЅРµР»Рё РёР· СЂРµР·РµСЂРІРЅРѕР№ РєРѕРїРёРё');
     } catch (e) {
         safeUpdateError(res, e);
     }
 });
 
 // ---------------------------------------------------------------------------
-// Установка модулей с отслеживанием прогресса
+// РЈСЃС‚Р°РЅРѕРІРєР° РјРѕРґСѓР»РµР№ СЃ РѕС‚СЃР»РµР¶РёРІР°РЅРёРµРј РїСЂРѕРіСЂРµСЃСЃР°
 // ---------------------------------------------------------------------------
 const MODULES = {
     awg: {
@@ -12815,8 +12815,8 @@ const MODULES = {
         title: 'AmneziaWG'
     },
     mtproto: {
-        // Локальный установщик из релиза: не тянем старую закреплённую
-        // версию с GitHub, иначе исправления в панели не доходят.
+        // Р›РѕРєР°Р»СЊРЅС‹Р№ СѓСЃС‚Р°РЅРѕРІС‰РёРє РёР· СЂРµР»РёР·Р°: РЅРµ С‚СЏРЅРµРј СЃС‚Р°СЂСѓСЋ Р·Р°РєСЂРµРїР»С‘РЅРЅСѓСЋ
+        // РІРµСЂСЃРёСЋ СЃ GitHub, РёРЅР°С‡Рµ РёСЃРїСЂР°РІР»РµРЅРёСЏ РІ РїР°РЅРµР»Рё РЅРµ РґРѕС…РѕРґСЏС‚.
         local: path.join(APP_DIR, 'install_mtproto_silent.sh'),
         log: '/var/log/mtproto_install.log',
         title: 'MTProto'
@@ -12857,8 +12857,8 @@ function mtprotoUser(value) {
 
 function installEnv(data) {
     const env = { ...process.env, PANEL_PORT: String(PANEL_PUBLIC_PORT) };
-    // Установщик AWG начинает с чистого листа: снимает состояние и cron
-    // автопродолжения от прошлой (в том числе неудачной) попытки.
+    // РЈСЃС‚Р°РЅРѕРІС‰РёРє AWG РЅР°С‡РёРЅР°РµС‚ СЃ С‡РёСЃС‚РѕРіРѕ Р»РёСЃС‚Р°: СЃРЅРёРјР°РµС‚ СЃРѕСЃС‚РѕСЏРЅРёРµ Рё cron
+    // Р°РІС‚РѕРїСЂРѕРґРѕР»Р¶РµРЅРёСЏ РѕС‚ РїСЂРѕС€Р»РѕР№ (РІ С‚РѕРј С‡РёСЃР»Рµ РЅРµСѓРґР°С‡РЅРѕР№) РїРѕРїС‹С‚РєРё.
     env.PANEL_FRESH_INSTALL = '1';
     if (data.domain && HOST_RE.test(String(data.domain))) env.SERVER_PUB_IP = String(data.domain);
     env.AWG_VERSION = ['1.5', '2.0', '3.1'].includes(String(data.version)) ? String(data.version) : '3.1';
@@ -12869,7 +12869,7 @@ function installEnv(data) {
     }
     env.AWG_IPV6 = ['disallow', 'allow', 'tunnel'].includes(String(data.ipv6)) ? String(data.ipv6) : 'disallow';
     if (isPort(data.port)) env.AWG_PORT = String(data.port);
-    // Подсеть туннеля для каскада: RU — 172.16.17.0/24, EU — 172.16.61.0/24.
+    // РџРѕРґСЃРµС‚СЊ С‚СѓРЅРЅРµР»СЏ РґР»СЏ РєР°СЃРєР°РґР°: RU вЂ” 172.16.17.0/24, EU вЂ” 172.16.61.0/24.
     if (data.subnet && /^(\d{1,3}\.){3}\d{1,3}\/(1[6-9]|2\d|30)$/.test(String(data.subnet))) {
         env.AWG_TUNNEL_SUBNET = String(data.subnet);
     }
@@ -12881,7 +12881,7 @@ function installEnv(data) {
     if (data.remoteIp && isIpOrHost(String(data.remoteIp))) env.REMOTE_IP = String(data.remoteIp);
     env.REMOTE_PORT = isPort(data.remotePort) ? String(data.remotePort) : '22';
     if (data.remotePass) env.REMOTE_PASS = String(data.remotePass);
-    // Опциональный WARP + Xray. Значения проверяются и здесь, и в скрипте.
+    // РћРїС†РёРѕРЅР°Р»СЊРЅС‹Р№ WARP + Xray. Р—РЅР°С‡РµРЅРёСЏ РїСЂРѕРІРµСЂСЏСЋС‚СЃСЏ Рё Р·РґРµСЃСЊ, Рё РІ СЃРєСЂРёРїС‚Рµ.
     env.WARP_LISTEN_IP = IPV4_RE.test(String(data.listenIp || '')) ? String(data.listenIp) : '127.0.0.1';
     const warpListenPort = Number(data.listenPort);
     const warpSocksPort = Number(data.socksPort);
@@ -12890,15 +12890,15 @@ function installEnv(data) {
     env.WARP_SOCKS_PORT = Number.isInteger(warpSocksPort) && warpSocksPort >= 1 && warpSocksPort <= 65535
         ? String(warpSocksPort) : '40000';
     env.WARP_MODE = data.warpMode === 'v1' ? 'v1' : 'v2';
-    // Список доменов выбранных AI-сервисов для routing Xray (вариант 2).
-    // Домены уже провалидированы каталогом, поэтому это безопасная строка.
+    // РЎРїРёСЃРѕРє РґРѕРјРµРЅРѕРІ РІС‹Р±СЂР°РЅРЅС‹С… AI-СЃРµСЂРІРёСЃРѕРІ РґР»СЏ routing Xray (РІР°СЂРёР°РЅС‚ 2).
+    // Р”РѕРјРµРЅС‹ СѓР¶Рµ РїСЂРѕРІР°Р»РёРґРёСЂРѕРІР°РЅС‹ РєР°С‚Р°Р»РѕРіРѕРј, РїРѕСЌС‚РѕРјСѓ СЌС‚Рѕ Р±РµР·РѕРїР°СЃРЅР°СЏ СЃС‚СЂРѕРєР°.
     env.WARP_AI_DOMAINS = warpSelectedDomains().join(',');
     env.WARP_AI_DOMAINS_FILE = WARP_DOMAINS_FILE;
     env.WARP_BLOCK_DOMAINS = warpBlockedDomains().join(',');
     env.WARP_GOOGLE_DIRECT = warpRoutes()['gemini'] === 'warp' ? '0' : '1';
 
-    // MTProto / WEB-прокси (MEKO). Значения проверяются здесь и в скрипте,
-    // чтобы установщик MEKO не задавал ни одного вопроса.
+    // MTProto / WEB-РїСЂРѕРєСЃРё (MEKO). Р—РЅР°С‡РµРЅРёСЏ РїСЂРѕРІРµСЂСЏСЋС‚СЃСЏ Р·РґРµСЃСЊ Рё РІ СЃРєСЂРёРїС‚Рµ,
+    // С‡С‚РѕР±С‹ СѓСЃС‚Р°РЅРѕРІС‰РёРє MEKO РЅРµ Р·Р°РґР°РІР°Р» РЅРё РѕРґРЅРѕРіРѕ РІРѕРїСЂРѕСЃР°.
     env.MTPROTO_KIND = ['telemt', 'zig', 'fix', 'mtg'].includes(String(data.kind)) ? String(data.kind) : 'telemt';
     env.MTPROTO_DOMAIN = data.mtDomain && HOST_RE.test(String(data.mtDomain)) ? String(data.mtDomain) : 'ozon.ru';
     env.MTPROTO_PORT = isPort(data.mtPort) ? String(data.mtPort) : '443';
@@ -12928,8 +12928,8 @@ function installEnv(data) {
         env.MTPROTO_NGINX = '0';
     }
 
-    // MTProxyL (Liafanx/MTProxyL). Расширенные возможности: движок, Zapret2,
-    // NFT SYN limiter, Selfmask, WEB Proxy, API и встроенный Telegram-бот.
+    // MTProxyL (Liafanx/MTProxyL). Р Р°СЃС€РёСЂРµРЅРЅС‹Рµ РІРѕР·РјРѕР¶РЅРѕСЃС‚Рё: РґРІРёР¶РѕРє, Zapret2,
+    // NFT SYN limiter, Selfmask, WEB Proxy, API Рё РІСЃС‚СЂРѕРµРЅРЅС‹Р№ Telegram-Р±РѕС‚.
     env.MTPROXYL_MODE = ['manager', 'reanimator'].includes(String(data.mplMode)) ? String(data.mplMode) : 'manager';
     env.MTPROXYL_ENGINE = ['binary', 'docker'].includes(String(data.mplEngine)) ? String(data.mplEngine) : 'binary';
     env.MTPROXYL_PROXY_MODE = ['mtproto', 'web', 'combined'].includes(String(data.mplProxyMode))
@@ -12979,8 +12979,8 @@ function installEnv(data) {
     }
     env.MTPROXYL_FORCE = data.mplForce ? '1' : '0';
 
-    // AdGuard Home: порт веб-интерфейса и API. Если не задан, установщик
-    // возьмёт 3000 или первый свободный порт в обход порта панели.
+    // AdGuard Home: РїРѕСЂС‚ РІРµР±-РёРЅС‚РµСЂС„РµР№СЃР° Рё API. Р•СЃР»Рё РЅРµ Р·Р°РґР°РЅ, СѓСЃС‚Р°РЅРѕРІС‰РёРє
+    // РІРѕР·СЊРјС‘С‚ 3000 РёР»Рё РїРµСЂРІС‹Р№ СЃРІРѕР±РѕРґРЅС‹Р№ РїРѕСЂС‚ РІ РѕР±С…РѕРґ РїРѕСЂС‚Р° РїР°РЅРµР»Рё.
     const agPort = Number(data.agPort);
     env.ADGUARD_PORT = Number.isInteger(agPort) && agPort >= 1 && agPort <= 65535 ? String(agPort) : '';
     return env;
@@ -12990,7 +12990,7 @@ app.post('/api/install/module', checkAuth, requireAdmin, (req, res) => {
     const data = req.body || {};
     const module = data.module;
     if (typeof module !== 'string' || !Object.prototype.hasOwnProperty.call(MODULES, module)) {
-        return res.status(400).json({ error: 'Неизвестный модуль' });
+        return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ РјРѕРґСѓР»СЊ' });
     }
     const mod = MODULES[module];
     if (module === 'mtproto' && data.publicHost && HOST_RE.test(String(data.publicHost).trim())) {
@@ -12998,98 +12998,98 @@ app.post('/api/install/module', checkAuth, requireAdmin, (req, res) => {
         try {
             const isIp = IPV4_RE.test(host);
             writeProxySettings({ hostType: isIp ? 'ip' : 'domain', domain: isIp ? '' : host });
-        } catch (e) { /* настройки не критичны для установки */ }
+        } catch (e) { /* РЅР°СЃС‚СЂРѕР№РєРё РЅРµ РєСЂРёС‚РёС‡РЅС‹ РґР»СЏ СѓСЃС‚Р°РЅРѕРІРєРё */ }
     }
     if (module === 'awg' && data.awgMode === 'cascade' && (!data.remoteIp || !data.remotePass)) {
-        return res.status(400).json({ error: 'Для каскадной установки нужны IP и пароль удалённого сервера' });
+        return res.status(400).json({ error: 'Р”Р»СЏ РєР°СЃРєР°РґРЅРѕР№ СѓСЃС‚Р°РЅРѕРІРєРё РЅСѓР¶РЅС‹ IP Рё РїР°СЂРѕР»СЊ СѓРґР°Р»С‘РЅРЅРѕРіРѕ СЃРµСЂРІРµСЂР°' });
     }
     if (module === 'mtproto') {
         const kind = String(data.kind || 'telemt');
         if (kind === 'mtg') {
-            return res.status(400).json({ error: 'MEKO пока не поддерживает автоматическую установку MTG. Выберите Telemt, MTProto.zig или только фикс.' });
+            return res.status(400).json({ error: 'MEKO РїРѕРєР° РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєСѓСЋ СѓСЃС‚Р°РЅРѕРІРєСѓ MTG. Р’С‹Р±РµСЂРёС‚Рµ Telemt, MTProto.zig РёР»Рё С‚РѕР»СЊРєРѕ С„РёРєСЃ.' });
         }
         if (!['telemt', 'zig', 'fix'].includes(kind)) {
-            return res.status(400).json({ error: 'Неизвестный вид MTProto-прокси' });
+            return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ РІРёРґ MTProto-РїСЂРѕРєСЃРё' });
         }
         const web = data.web === true || data.web === '1';
         if (web && kind !== 'telemt') {
-            return res.status(400).json({ error: 'WEB-режим доступен только для Telemt' });
+            return res.status(400).json({ error: 'WEB-СЂРµР¶РёРј РґРѕСЃС‚СѓРїРµРЅ С‚РѕР»СЊРєРѕ РґР»СЏ Telemt' });
         }
         if (web && (!data.webHost || !HOST_RE.test(String(data.webHost)))) {
-            return res.status(400).json({ error: 'Для WEB-режима укажите корректный домен' });
+            return res.status(400).json({ error: 'Р”Р»СЏ WEB-СЂРµР¶РёРјР° СѓРєР°Р¶РёС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Р№ РґРѕРјРµРЅ' });
         }
         if (data.mtDomain && !HOST_RE.test(String(data.mtDomain))) {
-            return res.status(400).json({ error: 'Некорректный SNI-домен' });
+            return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ SNI-РґРѕРјРµРЅ' });
         }
         if (data.mtPort && !isPort(data.mtPort)) {
-            return res.status(400).json({ error: 'Некорректный порт прокси' });
+            return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РїРѕСЂС‚ РїСЂРѕРєСЃРё' });
         }
         if (data.fixPort && !isPort(data.fixPort)) {
-            return res.status(400).json({ error: 'Некорректный порт фикса' });
+            return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РїРѕСЂС‚ С„РёРєСЃР°' });
         }
         if (data.adTag && !mtprotoHex32(data.adTag)) {
-            return res.status(400).json({ error: 'ad_tag должен быть 32 hex-символа' });
+            return res.status(400).json({ error: 'ad_tag РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ 32 hex-СЃРёРјРІРѕР»Р°' });
         }
         if (data.mtUser && !mtprotoUser(data.mtUser)) {
-            return res.status(400).json({ error: 'Некорректное имя пользователя' });
+            return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅРѕРµ РёРјСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ' });
         }
         if (data.mtUserSecret && !mtprotoHex32(data.mtUserSecret)) {
-            return res.status(400).json({ error: 'Секрет пользователя должен быть 32 hex-символа' });
+            return res.status(400).json({ error: 'РЎРµРєСЂРµС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ 32 hex-СЃРёРјРІРѕР»Р°' });
         }
         if (data.publicHost && !HOST_RE.test(String(data.publicHost))) {
-            return res.status(400).json({ error: 'Некорректный public_host' });
+            return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ public_host' });
         }
     }
     if (module === 'mtproxyl') {
         if (data.mplMode && !['manager', 'reanimator'].includes(String(data.mplMode))) {
-            return res.status(400).json({ error: 'Неизвестный режим MTProxyL' });
+            return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ СЂРµР¶РёРј MTProxyL' });
         }
         if (data.mplEngine && !['binary', 'docker'].includes(String(data.mplEngine))) {
-            return res.status(400).json({ error: 'Неизвестный движок MTProxyL' });
+            return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ РґРІРёР¶РѕРє MTProxyL' });
         }
         if (data.mplProxyMode && !['mtproto', 'web', 'combined'].includes(String(data.mplProxyMode))) {
-            return res.status(400).json({ error: 'Неизвестный режим прокси MTProxyL' });
+            return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ СЂРµР¶РёРј РїСЂРѕРєСЃРё MTProxyL' });
         }
         if (data.mplPort && !isPort(data.mplPort)) {
-            return res.status(400).json({ error: 'Некорректный порт MTProxyL' });
+            return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РїРѕСЂС‚ MTProxyL' });
         }
         if (data.mplSni && !HOST_RE.test(String(data.mplSni))) {
-            return res.status(400).json({ error: 'Некорректный SNI-домен MTProxyL' });
+            return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ SNI-РґРѕРјРµРЅ MTProxyL' });
         }
         if (data.mplHost && !HOST_RE.test(String(data.mplHost))) {
-            return res.status(400).json({ error: 'Некорректный публичный адрес MTProxyL' });
+            return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РїСѓР±Р»РёС‡РЅС‹Р№ Р°РґСЂРµСЃ MTProxyL' });
         }
         if (data.mplSecret && !mtprotoHex32(data.mplSecret)) {
-            return res.status(400).json({ error: 'Секрет MTProxyL должен быть 32 hex-символа' });
+            return res.status(400).json({ error: 'РЎРµРєСЂРµС‚ MTProxyL РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ 32 hex-СЃРёРјРІРѕР»Р°' });
         }
         if (data.mplAdTag && !mtprotoHex32(data.mplAdTag)) {
-            return res.status(400).json({ error: 'ad_tag MTProxyL должен быть 32 hex-символа' });
+            return res.status(400).json({ error: 'ad_tag MTProxyL РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ 32 hex-СЃРёРјРІРѕР»Р°' });
         }
         if (data.mplUser && !mtprotoUser(data.mplUser)) {
-            return res.status(400).json({ error: 'Некорректное имя пользователя MTProxyL' });
+            return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅРѕРµ РёРјСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ MTProxyL' });
         }
         if (data.mplUserSecret && !mtprotoHex32(data.mplUserSecret)) {
-            return res.status(400).json({ error: 'Секрет пользователя MTProxyL должен быть 32 hex-символа' });
+            return res.status(400).json({ error: 'РЎРµРєСЂРµС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ MTProxyL РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ 32 hex-СЃРёРјРІРѕР»Р°' });
         }
         if (data.mplSynLimiter && !['meko', 'classic', 'off'].includes(String(data.mplSynLimiter))) {
-            return res.status(400).json({ error: 'Неизвестный SYN limiter' });
+            return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ SYN limiter' });
         }
         if (data.mplSelfmask && !HOST_RE.test(String(data.mplSelfmask))) {
-            return res.status(400).json({ error: 'Некорректный домен Selfmask' });
+            return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РґРѕРјРµРЅ Selfmask' });
         }
         const mplWebWanted = data.mplWeb === true || data.mplWeb === 'yes' || data.mplWeb === '1';
         if (mplWebWanted && (!data.mplWebDomain || !HOST_RE.test(String(data.mplWebDomain)))) {
-            return res.status(400).json({ error: 'Для WEB Proxy MTProxyL укажите корректный домен' });
+            return res.status(400).json({ error: 'Р”Р»СЏ WEB Proxy MTProxyL СѓРєР°Р¶РёС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Р№ РґРѕРјРµРЅ' });
         }
         if (data.mplWebCarrier && !['https', 'https-lanes', 'websocket', 'websocket-lanes'].includes(String(data.mplWebCarrier))) {
-            return res.status(400).json({ error: 'Неизвестный carrier WEB Proxy' });
+            return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ carrier WEB Proxy' });
         }
         if (data.mplTgbotToken && !/^\d{5,}:[A-Za-z0-9_-]{20,}$/.test(String(data.mplTgbotToken))) {
-            return res.status(400).json({ error: 'Некорректный токен Telegram-бота' });
+            return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ С‚РѕРєРµРЅ Telegram-Р±РѕС‚Р°' });
         }
     }
     if (module === 'adguard' && data.agPort !== undefined && data.agPort !== '' && !isPort(data.agPort)) {
-        return res.status(400).json({ error: 'Некорректный порт AdGuard' });
+        return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РїРѕСЂС‚ AdGuard' });
     }
     try {
         sh('sudo', ['bash', '-c', `rm -f ${mod.log} && touch ${mod.log} && chmod 666 ${mod.log}`]);
@@ -13108,7 +13108,7 @@ app.post('/api/install/module', checkAuth, requireAdmin, (req, res) => {
         if (mod.local) {
             if (!fs.existsSync(mod.local)) {
                 fs.closeSync(fd);
-                return res.status(500).json({ error: 'Локальный установщик не найден: ' + path.basename(mod.local) });
+                return res.status(500).json({ error: 'Р›РѕРєР°Р»СЊРЅС‹Р№ СѓСЃС‚Р°РЅРѕРІС‰РёРє РЅРµ РЅР°Р№РґРµРЅ: ' + path.basename(mod.local) });
             }
             child = spawn('bash', [mod.local], {
                 env,
@@ -13134,16 +13134,16 @@ app.post('/api/install/module', checkAuth, requireAdmin, (req, res) => {
             }), { mode: 0o644 });
         } catch (e) { /* ignore */ }
 
-        auditLog(req, `Запущена установка модуля ${module}`);
+        auditLog(req, `Р—Р°РїСѓС‰РµРЅР° СѓСЃС‚Р°РЅРѕРІРєР° РјРѕРґСѓР»СЏ ${module}`);
         res.json({ success: true, logFile: mod.log, title: mod.title });
     } catch (e) {
-        res.status(500).json({ error: 'Ошибка запуска установки' });
+        res.status(500).json({ error: 'РћС€РёР±РєР° Р·Р°РїСѓСЃРєР° СѓСЃС‚Р°РЅРѕРІРєРё' });
     }
 });
 
-// Вызов собственного API панели из кода: каскад настраивает «свою» сторону
-// тем же маршрутом, что и вторая панель, поэтому поведение одинаковое.
-// Адрес, на котором панель слушает: заполняется при старте.
+// Р’С‹Р·РѕРІ СЃРѕР±СЃС‚РІРµРЅРЅРѕРіРѕ API РїР°РЅРµР»Рё РёР· РєРѕРґР°: РєР°СЃРєР°Рґ РЅР°СЃС‚СЂР°РёРІР°РµС‚ В«СЃРІРѕСЋВ» СЃС‚РѕСЂРѕРЅСѓ
+// С‚РµРј Р¶Рµ РјР°СЂС€СЂСѓС‚РѕРј, С‡С‚Рѕ Рё РІС‚РѕСЂР°СЏ РїР°РЅРµР»СЊ, РїРѕСЌС‚РѕРјСѓ РїРѕРІРµРґРµРЅРёРµ РѕРґРёРЅР°РєРѕРІРѕРµ.
+// РђРґСЂРµСЃ, РЅР° РєРѕС‚РѕСЂРѕРј РїР°РЅРµР»СЊ СЃР»СѓС€Р°РµС‚: Р·Р°РїРѕР»РЅСЏРµС‚СЃСЏ РїСЂРё СЃС‚Р°СЂС‚Рµ.
 let localApi = null;
 function setLocalApi(v) { localApi = v; }
 function localApiTarget() {
@@ -13152,8 +13152,8 @@ function localApiTarget() {
     return { host, port: PANEL_PORT };
 }
 
-// Вызов собственного API панели: каскад настраивает «свою» сторону тем же
-// маршрутом, что и вторая панель, поэтому поведение одинаковое.
+// Р’С‹Р·РѕРІ СЃРѕР±СЃС‚РІРµРЅРЅРѕРіРѕ API РїР°РЅРµР»Рё: РєР°СЃРєР°Рґ РЅР°СЃС‚СЂР°РёРІР°РµС‚ В«СЃРІРѕСЋВ» СЃС‚РѕСЂРѕРЅСѓ С‚РµРј Р¶Рµ
+// РјР°СЂС€СЂСѓС‚РѕРј, С‡С‚Рѕ Рё РІС‚РѕСЂР°СЏ РїР°РЅРµР»СЊ, РїРѕСЌС‚РѕРјСѓ РїРѕРІРµРґРµРЅРёРµ РѕРґРёРЅР°РєРѕРІРѕРµ.
 async function localPost(apiPath, body) {
     const target = localApiTarget();
     const r = await fetch('http://' + target.host + ':' + target.port + apiPath, {
@@ -13176,17 +13176,17 @@ function readLogTail(logFile, bytes = 262144) {
 }
 
 const INSTALL_STEPS = [
-    { key: 'prepare', title: 'Подготовка', re: /подготов|проверка|начало установки|starting/i },
-    { key: 'download', title: 'Загрузка установщика', re: /скачив|download|curl|wget/i },
-    { key: 'packages', title: 'Установка пакетов', re: /apt|dpkg|dkms|пакет|установка/i },
-    { key: 'config', title: 'Настройка и ключи', re: /настрой|конфигурац|ключ|management|awg0|generate/i },
-    { key: 'finish', title: 'Завершение', re: /INSTALLATION DONE|установка завершена|успешно завершена/i }
+    { key: 'prepare', title: 'РџРѕРґРіРѕС‚РѕРІРєР°', re: /РїРѕРґРіРѕС‚РѕРІ|РїСЂРѕРІРµСЂРєР°|РЅР°С‡Р°Р»Рѕ СѓСЃС‚Р°РЅРѕРІРєРё|starting/i },
+    { key: 'download', title: 'Р—Р°РіСЂСѓР·РєР° СѓСЃС‚Р°РЅРѕРІС‰РёРєР°', re: /СЃРєР°С‡РёРІ|download|curl|wget/i },
+    { key: 'packages', title: 'РЈСЃС‚Р°РЅРѕРІРєР° РїР°РєРµС‚РѕРІ', re: /apt|dpkg|dkms|РїР°РєРµС‚|СѓСЃС‚Р°РЅРѕРІРєР°/i },
+    { key: 'config', title: 'РќР°СЃС‚СЂРѕР№РєР° Рё РєР»СЋС‡Рё', re: /РЅР°СЃС‚СЂРѕР№|РєРѕРЅС„РёРіСѓСЂР°С†|РєР»СЋС‡|management|awg0|generate/i },
+    { key: 'finish', title: 'Р—Р°РІРµСЂС€РµРЅРёРµ', re: /INSTALLATION DONE|СѓСЃС‚Р°РЅРѕРІРєР° Р·Р°РІРµСЂС€РµРЅР°|СѓСЃРїРµС€РЅРѕ Р·Р°РІРµСЂС€РµРЅР°/i }
 ];
 
 function installProgress(logFile) {
     const emptySteps = INSTALL_STEPS.map(s => ({ key: s.key, title: s.title, done: false }));
     if (!fs.existsSync(logFile)) {
-        return { text: 'Ожидание старта установки...', status: 'waiting', steps: emptySteps, done: false, error: false, progress: 0 };
+        return { text: 'РћР¶РёРґР°РЅРёРµ СЃС‚Р°СЂС‚Р° СѓСЃС‚Р°РЅРѕРІРєРё...', status: 'waiting', steps: emptySteps, done: false, error: false, progress: 0 };
     }
     const text = readLogTail(logFile);
     const lines = text.split(/\r?\n/);
@@ -13204,8 +13204,8 @@ function installProgress(logFile) {
     }
     for (let i = 0; i <= foundUpTo; i++) steps[i].done = true;
 
-    const done = /INSTALLATION DONE|установка завершена|успешно завершена/i.test(tail);
-    const error = /(^|\n)\s*(\[?ERROR\]?|ОШИБКА|fatal:|Error:|Failed to install|Failed to start)/i.test(tailShort);
+    const done = /INSTALLATION DONE|СѓСЃС‚Р°РЅРѕРІРєР° Р·Р°РІРµСЂС€РµРЅР°|СѓСЃРїРµС€РЅРѕ Р·Р°РІРµСЂС€РµРЅР°/i.test(tail);
+    const error = /(^|\n)\s*(\[?ERROR\]?|РћРЁРР‘РљРђ|fatal:|Error:|Failed to install|Failed to start)/i.test(tailShort);
     let status = 'running';
     if (done) status = 'done';
     else if (error) status = 'error';
@@ -13215,20 +13215,20 @@ function installProgress(logFile) {
 
 app.get('/api/install/progress', checkAuth, (req, res) => {
     const logFile = String(req.query.file || '');
-    if (!LOG_WHITELIST.includes(logFile)) return res.status(400).json({ error: 'Неверный путь' });
+    if (!LOG_WHITELIST.includes(logFile)) return res.status(400).json({ error: 'РќРµРІРµСЂРЅС‹Р№ РїСѓС‚СЊ' });
     try {
         res.json({ logFile, ...installProgress(logFile) });
-    } catch (e) { res.status(500).json({ error: 'Ошибка чтения лога' }); }
+    } catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ Р»РѕРіР°' }); }
 });
 
 app.get('/api/install/log', checkAuth, (req, res) => {
     const logFile = String(req.query.file || '');
-    if (!LOG_WHITELIST.includes(logFile)) return res.status(400).send('Неверный путь');
+    if (!LOG_WHITELIST.includes(logFile)) return res.status(400).send('РќРµРІРµСЂРЅС‹Р№ РїСѓС‚СЊ');
     try {
-        if (!fs.existsSync(logFile)) return res.send('Ожидание старта установки...');
+        if (!fs.existsSync(logFile)) return res.send('РћР¶РёРґР°РЅРёРµ СЃС‚Р°СЂС‚Р° СѓСЃС‚Р°РЅРѕРІРєРё...');
         const lines = readLogTail(logFile).split(/\r?\n/);
         res.type('text/plain').send(lines.slice(-200).join('\n'));
-    } catch (e) { res.send('Ошибка чтения лога...'); }
+    } catch (e) { res.send('РћС€РёР±РєР° С‡С‚РµРЅРёСЏ Р»РѕРіР°...'); }
 });
 
 app.get('/api/install/state', checkAuth, (req, res) => {
@@ -13240,7 +13240,7 @@ app.get('/api/install/state', checkAuth, (req, res) => {
     } catch (e) { res.json({ active: false }); }
 });
 
-// Настройки ссылок MTProto: IP или домен, и порт Telemt.
+// РќР°СЃС‚СЂРѕР№РєРё СЃСЃС‹Р»РѕРє MTProto: IP РёР»Рё РґРѕРјРµРЅ, Рё РїРѕСЂС‚ Telemt.
 const PROXY_SETTINGS_FILE = path.join(DATA_DIR, '.proxy_settings.json');
 
 function readProxySettings() {
@@ -13450,9 +13450,9 @@ function sanitizeTelemtConfig(text) {
 
 app.get('/api/proxy/config', checkAuth, requireAdmin, (req, res) => {
     const cfg = proxyUsers.configPath();
-    if (!cfg) return res.status(404).json({ error: 'Конфиг telemt не найден' });
+    if (!cfg) return res.status(404).json({ error: 'РљРѕРЅС„РёРі telemt РЅРµ РЅР°Р№РґРµРЅ' });
     const text = readTextSafe(cfg, 256 * 1024);
-    if (!text) return res.status(500).json({ error: 'Не удалось прочитать конфиг' });
+    if (!text) return res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ РєРѕРЅС„РёРі' });
     res.json({
         file: cfg,
         port: telemtConfigPort(text),
@@ -13489,18 +13489,18 @@ app.post('/api/proxy/settings', checkAuth, requireAdmin, async (req, res) => {
     const hostType = data.hostType === 'domain' ? 'domain' : 'ip';
     const domain = String(data.domain || '').trim();
     if (hostType === 'domain' && domain && !HOST_RE.test(domain)) {
-        return res.status(400).json({ error: 'Некорректный домен для ссылок' });
+        return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РґРѕРјРµРЅ РґР»СЏ СЃСЃС‹Р»РѕРє' });
     }
     let port = null;
     if (data.port !== undefined && data.port !== null && data.port !== '') {
         port = Number(data.port);
         if (!Number.isInteger(port) || port < 1 || port > 65535) {
-            return res.status(400).json({ error: 'Некорректный порт' });
+            return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РїРѕСЂС‚' });
         }
     }
     const sni = String(data.sni || '').trim();
     if (sni && !HOST_RE.test(sni)) {
-        return res.status(400).json({ error: 'Некорректный SNI-домен' });
+        return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ SNI-РґРѕРјРµРЅ' });
     }
     try {
         let oldPort = null;
@@ -13510,10 +13510,10 @@ app.post('/api/proxy/settings', checkAuth, requireAdmin, async (req, res) => {
         if (port !== null || sni) {
             const detected = await proxyUsers.detect(true);
             if (detected.backend !== 'telemt') {
-                return res.status(400).json({ error: 'Порт и SNI меняются только для Telemt' });
+                return res.status(400).json({ error: 'РџРѕСЂС‚ Рё SNI РјРµРЅСЏСЋС‚СЃСЏ С‚РѕР»СЊРєРѕ РґР»СЏ Telemt' });
             }
             const cfg = proxyUsers.configPath();
-            if (!cfg) return res.status(400).json({ error: 'Конфиг telemt не найден' });
+            if (!cfg) return res.status(400).json({ error: 'РљРѕРЅС„РёРі telemt РЅРµ РЅР°Р№РґРµРЅ' });
             const text = fs.readFileSync(cfg, 'utf8');
             oldPort = telemtConfigPort(text);
             oldSni = telemtConfigSni(text);
@@ -13531,7 +13531,7 @@ app.post('/api/proxy/settings', checkAuth, requireAdmin, async (req, res) => {
                 try {
                     sh('systemctl', ['restart', 'telemt'], { timeout: 30000 });
                 } catch (e) {
-                    return res.status(500).json({ error: 'Настройки изменены, но служба не перезапустилась: ' + e.message });
+                    return res.status(500).json({ error: 'РќР°СЃС‚СЂРѕР№РєРё РёР·РјРµРЅРµРЅС‹, РЅРѕ СЃР»СѓР¶Р±Р° РЅРµ РїРµСЂРµР·Р°РїСѓСЃС‚РёР»Р°СЃСЊ: ' + e.message });
                 }
                 if (changedPort) {
                     try { sh('ufw', ['allow', `${port}/tcp`], { timeout: 15000 }); } catch (e) { /* ignore */ }
@@ -13541,12 +13541,12 @@ app.post('/api/proxy/settings', checkAuth, requireAdmin, async (req, res) => {
                     try {
                         const ready = await proxyUsers.detect(true);
                         if (ready.backend === 'telemt' && !ready.reason) break;
-                    } catch (e) { /* ещё поднимается */ }
+                    } catch (e) { /* РµС‰С‘ РїРѕРґРЅРёРјР°РµС‚СЃСЏ */ }
                 }
             }
         }
         const saved = writeProxySettings({ hostType, domain });
-        auditLog(req, `Прокси: настройки (${saved.hostType}${saved.domain ? ', ' + saved.domain : ''}${changedPort ? ', порт ' + port : ''}${changedSni ? ', SNI ' + sni : ''})`);
+        auditLog(req, `РџСЂРѕРєСЃРё: РЅР°СЃС‚СЂРѕР№РєРё (${saved.hostType}${saved.domain ? ', ' + saved.domain : ''}${changedPort ? ', РїРѕСЂС‚ ' + port : ''}${changedSni ? ', SNI ' + sni : ''})`);
         res.json({
             success: true,
             ...saved,
@@ -13556,19 +13556,19 @@ app.post('/api/proxy/settings', checkAuth, requireAdmin, async (req, res) => {
             changedSni
         });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось сохранить настройки: ' + e.message });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РЅР°СЃС‚СЂРѕР№РєРё: ' + e.message });
     }
 });
 
 app.get('/api/proxy/fix', checkAuth, (req, res) => {
     try { res.json(proxyFixStatus()); }
-    catch (e) { res.status(500).json({ error: 'Не удалось проверить фикс: ' + e.message }); }
+    catch (e) { res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕРІРµСЂРёС‚СЊ С„РёРєСЃ: ' + e.message }); }
 });
 
 app.post('/api/proxy/fix', checkAuth, requireAdmin, async (req, res) => {
     const type = String((req.body && req.body.type) || '');
     if (!['v2', 'v3', 'v4', 'nft'].includes(type)) {
-        return res.status(400).json({ error: 'Неизвестный тип фикса' });
+        return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ С‚РёРї С„РёРєСЃР°' });
     }
     const cfg = proxyUsers.configPath();
     let port = req.body && req.body.port;
@@ -13582,25 +13582,25 @@ app.post('/api/proxy/fix', checkAuth, requireAdmin, async (req, res) => {
         let backend = '';
         try { backend = (await proxyUsers.detect(true)).backend; } catch (e) { /* ignore */ }
         if (backend === 'mtproxyl') {
-            return res.status(400).json({ error: 'У MTProxyL свой фикс: управляйте им через mtproxyl nft (Zapret2 / SYN limiter)' });
+            return res.status(400).json({ error: 'РЈ MTProxyL СЃРІРѕР№ С„РёРєСЃ: СѓРїСЂР°РІР»СЏР№С‚Рµ РёРј С‡РµСЂРµР· mtproxyl nft (Zapret2 / SYN limiter)' });
         }
-        return res.status(400).json({ error: 'MEKO не установлен — фикс ставится через MEKO' });
+        return res.status(400).json({ error: 'MEKO РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ вЂ” С„РёРєСЃ СЃС‚Р°РІРёС‚СЃСЏ С‡РµСЂРµР· MEKO' });
     }
     let cmd;
     if (type === 'v4') {
         const zapret = '/opt/mtpr-simple/data/zapret2_fix.sh';
-        if (!fs.existsSync(zapret)) return res.status(400).json({ error: 'zapret2_fix.sh не найден' });
+        if (!fs.existsSync(zapret)) return res.status(400).json({ error: 'zapret2_fix.sh РЅРµ РЅР°Р№РґРµРЅ' });
         cmd = `source ${rules}; source ${zapret}; install_syn_fix -auto_install -port ${port} -type v4`;
     } else {
         cmd = `bash ${rules} -auto_install -port ${port} -type ${type}`;
     }
     try {
         const out = sh('bash', ['-c', cmd], { timeout: 600000, maxBuffer: 32 * 1024 * 1024 });
-        auditLog(req, `Прокси: фикс ${type} на порт ${port}`);
+        auditLog(req, `РџСЂРѕРєСЃРё: С„РёРєСЃ ${type} РЅР° РїРѕСЂС‚ ${port}`);
         res.json({ success: true, type, port, output: stripAnsiText(out).slice(-4000), status: proxyFixStatus() });
     } catch (e) {
         res.status(500).json({
-            error: 'Не удалось установить фикс: ' + e.message,
+            error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СѓСЃС‚Р°РЅРѕРІРёС‚СЊ С„РёРєСЃ: ' + e.message,
             output: stripAnsiText((e && (e.stdout || e.message)) || '').slice(-4000)
         });
     }
@@ -13628,16 +13628,16 @@ function proxyOptimizationStatus() {
 
 app.get('/api/proxy/optimization', checkAuth, (req, res) => {
     try { res.json(proxyOptimizationStatus()); }
-    catch (e) { res.status(500).json({ error: 'Не удалось проверить оптимизацию: ' + e.message }); }
+    catch (e) { res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕРІРµСЂРёС‚СЊ РѕРїС‚РёРјРёР·Р°С†РёСЋ: ' + e.message }); }
 });
 
 app.post('/api/proxy/optimization', checkAuth, requireAdmin, async (req, res) => {
     const action = String((req.body && req.body.action) || '');
     if (!['apply', 'remove'].includes(action)) {
-        return res.status(400).json({ error: 'Неизвестное действие' });
+        return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅРѕРµ РґРµР№СЃС‚РІРёРµ' });
     }
     if (!fs.existsSync('/opt/mtpr-simple') && !fs.existsSync('/usr/local/bin/mekopr') && !proxyUsers.configPath()) {
-        return res.status(400).json({ error: 'Telemt не установлен — оптимизация доступна после установки MEKO или MTProxyL' });
+        return res.status(400).json({ error: 'Telemt РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ вЂ” РѕРїС‚РёРјРёР·Р°С†РёСЏ РґРѕСЃС‚СѓРїРЅР° РїРѕСЃР»Рµ СѓСЃС‚Р°РЅРѕРІРєРё MEKO РёР»Рё MTProxyL' });
     }
     const cfg = proxyUsers.configPath() || '/etc/telemt/telemt.toml';
     const applyScript = String.raw`
@@ -13692,7 +13692,7 @@ if [ -f "$CFG" ]; then
 fi
 sysctl --system >/dev/null 2>&1 || true
 systemctl daemon-reload >/dev/null 2>&1 || true
-echo "OK: оптимизация применена"
+echo "OK: РѕРїС‚РёРјРёР·Р°С†РёСЏ РїСЂРёРјРµРЅРµРЅР°"
 `.replace('__CFG__', cfg);
     const removeScript = String.raw`
 set -e
@@ -13733,15 +13733,15 @@ fi
 rm -rf "$SNAP"
 sysctl --system >/dev/null 2>&1 || true
 systemctl daemon-reload >/dev/null 2>&1 || true
-echo "OK: оптимизация откатана"
+echo "OK: РѕРїС‚РёРјРёР·Р°С†РёСЏ РѕС‚РєР°С‚Р°РЅР°"
 `;
     try {
         const out = sh('bash', ['-c', action === 'apply' ? applyScript : removeScript], { timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
-        auditLog(req, action === 'apply' ? 'Прокси: применена оптимизация MEKO' : 'Прокси: откатана оптимизация MEKO');
+        auditLog(req, action === 'apply' ? 'РџСЂРѕРєСЃРё: РїСЂРёРјРµРЅРµРЅР° РѕРїС‚РёРјРёР·Р°С†РёСЏ MEKO' : 'РџСЂРѕРєСЃРё: РѕС‚РєР°С‚Р°РЅР° РѕРїС‚РёРјРёР·Р°С†РёСЏ MEKO');
         res.json({ success: true, action, output: stripAnsiText(out).slice(-2000), status: proxyOptimizationStatus() });
     } catch (e) {
         res.status(500).json({
-            error: 'Не удалось выполнить оптимизацию: ' + e.message,
+            error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РїРѕР»РЅРёС‚СЊ РѕРїС‚РёРјРёР·Р°С†РёСЋ: ' + e.message,
             output: stripAnsiText((e && (e.stdout || e.message)) || '').slice(-2000)
         });
     }
@@ -13753,7 +13753,7 @@ app.get('/api/proxy/checklist', checkAuth, async (req, res) => {
         const diag = await proxyUsers.diagnose().catch(() => ({ checks: [] }));
         const fix = proxyFixStatus();
         let users = [];
-        try { users = await proxyUsers.listUsers(); } catch (e) { /* нет API */ }
+        try { users = await proxyUsers.listUsers(); } catch (e) { /* РЅРµС‚ API */ }
         const cfg = proxyUsers.configPath();
         const text = cfg ? readTextSafe(cfg) : '';
         const port = telemtConfigPort(text);
@@ -13770,31 +13770,31 @@ app.get('/api/proxy/checklist', checkAuth, async (req, res) => {
         const apiCheck = (diag.checks || []).find(c => /^(MTProxyL API|telemt API)$/.test(c.name)) ||
             (diag.checks || []).find(c => /API/.test(c.name));
         const steps = [
-            { key: 'engine', title: 'Движок', ok: !!st.backend && st.backend !== 'none', detail: st.backend || 'не найден' },
-            { key: 'service', title: 'Служба', ok: !!st.running, detail: st.running ? 'запущена' : 'не запущена' },
-            { key: 'port', title: 'Порт', ok: !!(port || st.port), detail: String(port || st.port || '—') },
-            { key: 'api', title: 'API движка', ok: !!(apiCheck && apiCheck.ok), detail: apiCheck ? apiCheck.detail : 'нет данных' },
-            { key: 'users', title: 'Пользователи', ok: users.length > 0, detail: String(users.length) },
-            { key: 'links', title: 'Ссылки', ok: linkCount > 0, detail: String(linkCount) },
-            { key: 'fix', title: 'Фикс', ok: fix.installed, detail: fix.installed ? fix.type : 'не установлен' }
+            { key: 'engine', title: 'Р”РІРёР¶РѕРє', ok: !!st.backend && st.backend !== 'none', detail: st.backend || 'РЅРµ РЅР°Р№РґРµРЅ' },
+            { key: 'service', title: 'РЎР»СѓР¶Р±Р°', ok: !!st.running, detail: st.running ? 'Р·Р°РїСѓС‰РµРЅР°' : 'РЅРµ Р·Р°РїСѓС‰РµРЅР°' },
+            { key: 'port', title: 'РџРѕСЂС‚', ok: !!(port || st.port), detail: String(port || st.port || 'вЂ”') },
+            { key: 'api', title: 'API РґРІРёР¶РєР°', ok: !!(apiCheck && apiCheck.ok), detail: apiCheck ? apiCheck.detail : 'РЅРµС‚ РґР°РЅРЅС‹С…' },
+            { key: 'users', title: 'РџРѕР»СЊР·РѕРІР°С‚РµР»Рё', ok: users.length > 0, detail: String(users.length) },
+            { key: 'links', title: 'РЎСЃС‹Р»РєРё', ok: linkCount > 0, detail: String(linkCount) },
+            { key: 'fix', title: 'Р¤РёРєСЃ', ok: fix.installed, detail: fix.installed ? fix.type : 'РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ' }
         ];
         if (st.backend === 'mtproxyl') {
             const keyFile = '/etc/mtproxyl-api/servpanel.key';
             steps.splice(4, 0, {
-                key: 'key', title: 'Ключ API', ok: fs.existsSync(keyFile),
-                detail: fs.existsSync(keyFile) ? keyFile : 'не выдан'
+                key: 'key', title: 'РљР»СЋС‡ API', ok: fs.existsSync(keyFile),
+                detail: fs.existsSync(keyFile) ? keyFile : 'РЅРµ РІС‹РґР°РЅ'
             });
         }
         if (st.backend === 'telemt' || sni) {
-            steps.push({ key: 'sni', title: 'SNI (FakeTLS)', ok: !!sni, detail: sni || 'не задан' });
+            steps.push({ key: 'sni', title: 'SNI (FakeTLS)', ok: !!sni, detail: sni || 'РЅРµ Р·Р°РґР°РЅ' });
         }
         res.json({ backend: st.backend, steps });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось собрать чек-лист: ' + e.message });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР±СЂР°С‚СЊ С‡РµРє-Р»РёСЃС‚: ' + e.message });
     }
 });
 
-// Ссылки Telemt/MTPROTO: сначала живые из API движка, затем файл установщика.
+// РЎСЃС‹Р»РєРё Telemt/MTPROTO: СЃРЅР°С‡Р°Р»Р° Р¶РёРІС‹Рµ РёР· API РґРІРёР¶РєР°, Р·Р°С‚РµРј С„Р°Р№Р» СѓСЃС‚Р°РЅРѕРІС‰РёРєР°.
 app.get('/api/mtproto/links', checkAuth, async (req, res) => {
     const file = '/root/mtproto_links.txt';
     try {
@@ -13816,7 +13816,7 @@ app.get('/api/mtproto/links', checkAuth, async (req, res) => {
                 }
                 links = [...new Set(flat.filter(Boolean))];
             }
-        } catch (e) { /* останется файл */ }
+        } catch (e) { /* РѕСЃС‚Р°РЅРµС‚СЃСЏ С„Р°Р№Р» */ }
         if (!links.length && fs.existsSync(file)) {
             links = fs.readFileSync(file, 'utf8')
                 .split(/\r?\n/)
@@ -13828,8 +13828,8 @@ app.get('/api/mtproto/links', checkAuth, async (req, res) => {
         let port = null;
         let cfgText = '';
         try { if (cfg) { cfgText = fs.readFileSync(cfg, 'utf8'); port = telemtConfigPort(cfgText); } } catch (e) { /* ignore */ }
-        // public_host из Telemt — запасной вариант, если в настройках
-        // панели ещё не выбран домен. Иначе ссылки остаются с IP.
+        // public_host РёР· Telemt вЂ” Р·Р°РїР°СЃРЅРѕР№ РІР°СЂРёР°РЅС‚, РµСЃР»Рё РІ РЅР°СЃС‚СЂРѕР№РєР°С…
+        // РїР°РЅРµР»Рё РµС‰С‘ РЅРµ РІС‹Р±СЂР°РЅ РґРѕРјРµРЅ. РРЅР°С‡Рµ СЃСЃС‹Р»РєРё РѕСЃС‚Р°СЋС‚СЃСЏ СЃ IP.
         const cfgHost = telemtConfigPublicHost(cfgText);
         const host = proxyLinkHost(settings) ||
             (cfgHost && HOST_RE.test(cfgHost) && !IPV4_RE.test(cfgHost) ? cfgHost : '');
@@ -13841,12 +13841,12 @@ app.get('/api/mtproto/links', checkAuth, async (req, res) => {
             port
         });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось прочитать ссылки MTProto' });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ СЃСЃС‹Р»РєРё MTProto' });
     }
 });
 
 // ---------------------------------------------------------------------------
-// Прокси: пользователи MTProto (MTProxyL / telemt) и Telegram-бот
+// РџСЂРѕРєСЃРё: РїРѕР»СЊР·РѕРІР°С‚РµР»Рё MTProto (MTProxyL / telemt) Рё Telegram-Р±РѕС‚
 // ---------------------------------------------------------------------------
 const PROXY_BOT_FILE = path.join(DATA_DIR, '.proxybot.json');
 const proxyBot = createProxyBot({
@@ -13881,7 +13881,7 @@ function proxyUserPatch(body, { create = false } = {}) {
     if (create) {
         const username = proxyUsername(src.username);
         if (!username) {
-            const e = new Error('Некорректное имя пользователя');
+            const e = new Error('РќРµРєРѕСЂСЂРµРєС‚РЅРѕРµ РёРјСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ');
             e.code = 'bad_request';
             throw e;
         }
@@ -13889,7 +13889,7 @@ function proxyUserPatch(body, { create = false } = {}) {
         if (src.secret !== undefined && src.secret !== '') {
             const secret = mtprotoHex32(src.secret);
             if (!secret) {
-                const e = new Error('Секрет должен быть 32 hex-символа');
+                const e = new Error('РЎРµРєСЂРµС‚ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ 32 hex-СЃРёРјРІРѕР»Р°');
                 e.code = 'bad_request';
                 throw e;
             }
@@ -13903,7 +13903,7 @@ function proxyUserPatch(body, { create = false } = {}) {
         if (!(field in src)) continue;
         const value = proxyInt(src[field]);
         if (value === undefined) {
-            const e = new Error(`Некорректное значение ${field}`);
+            const e = new Error(`РќРµРєРѕСЂСЂРµРєС‚РЅРѕРµ Р·РЅР°С‡РµРЅРёРµ ${field}`);
             e.code = 'bad_request';
             throw e;
         }
@@ -13913,7 +13913,7 @@ function proxyUserPatch(body, { create = false } = {}) {
     if ('expiration_rfc3339' in src) {
         const value = proxyDate(src.expiration_rfc3339);
         if (value === undefined) {
-            const e = new Error('Некорректная дата окончания');
+            const e = new Error('РќРµРєРѕСЂСЂРµРєС‚РЅР°СЏ РґР°С‚Р° РѕРєРѕРЅС‡Р°РЅРёСЏ');
             e.code = 'bad_request';
             throw e;
         }
@@ -13925,7 +13925,7 @@ function proxyUserPatch(body, { create = false } = {}) {
         else {
             const tag = mtprotoHex32(src.user_ad_tag);
             if (!tag) {
-                const e = new Error('ad_tag должен быть 32 hex-символа');
+                const e = new Error('ad_tag РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ 32 hex-СЃРёРјРІРѕР»Р°');
                 e.code = 'bad_request';
                 throw e;
             }
@@ -13960,7 +13960,7 @@ function proxyError(res, e) {
         no_admins: 400
     };
     const status = map[code] || 502;
-    const payload = { error: (e && e.message) || 'Ошибка прокси', code };
+    const payload = { error: (e && e.message) || 'РћС€РёР±РєР° РїСЂРѕРєСЃРё', code };
     if (e && e.key) payload.key = e.key;
     return res.status(status).json(payload);
 }
@@ -13971,12 +13971,12 @@ app.get('/api/proxy/status', checkAuth, async (req, res) => {
     } catch (e) { proxyError(res, e); }
 });
 
-// Диагностика: почему панель не видит прокси. Проверяет файлы ключей,
-// адреса API и отвечает ли /v1/health. Помогает на серверах, где прокси
-// ставили вручную и API остался выключенным.
+// Р”РёР°РіРЅРѕСЃС‚РёРєР°: РїРѕС‡РµРјСѓ РїР°РЅРµР»СЊ РЅРµ РІРёРґРёС‚ РїСЂРѕРєСЃРё. РџСЂРѕРІРµСЂСЏРµС‚ С„Р°Р№Р»С‹ РєР»СЋС‡РµР№,
+// Р°РґСЂРµСЃР° API Рё РѕС‚РІРµС‡Р°РµС‚ Р»Рё /v1/health. РџРѕРјРѕРіР°РµС‚ РЅР° СЃРµСЂРІРµСЂР°С…, РіРґРµ РїСЂРѕРєСЃРё
+// СЃС‚Р°РІРёР»Рё РІСЂСѓС‡РЅСѓСЋ Рё API РѕСЃС‚Р°Р»СЃСЏ РІС‹РєР»СЋС‡РµРЅРЅС‹Рј.
 app.get('/api/proxy/diag', checkAuth, async (req, res) => {
     try { res.json(await proxyUsers.diagnose()); }
-    catch (e) { res.status(500).json({ error: 'Диагностика не удалась: ' + e.message }); }
+    catch (e) { res.status(500).json({ error: 'Р”РёР°РіРЅРѕСЃС‚РёРєР° РЅРµ СѓРґР°Р»Р°СЃСЊ: ' + e.message }); }
 });
 
 app.get('/api/proxy/users', checkAuth, async (req, res) => {
@@ -14000,29 +14000,29 @@ app.post('/api/proxy/users', checkAuth, requireAdmin, async (req, res) => {
     try {
         const payload = proxyUserPatch(req.body, { create: true });
         const created = await proxyUsers.createUser(payload);
-        auditLog(req, `Прокси: создан пользователь ${payload.username}`);
+        auditLog(req, `РџСЂРѕРєСЃРё: СЃРѕР·РґР°РЅ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ ${payload.username}`);
         res.json(created);
     } catch (e) { proxyError(res, e); }
 });
 
 app.patch('/api/proxy/users/:name', checkAuth, requireAdmin, async (req, res) => {
     const name = proxyUsername(req.params.name);
-    if (!name) return res.status(400).json({ error: 'Некорректное имя пользователя' });
+    if (!name) return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅРѕРµ РёРјСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ' });
     try {
         const patch = proxyUserPatch(req.body);
-        if (!Object.keys(patch).length) return res.status(400).json({ error: 'Нет изменений' });
+        if (!Object.keys(patch).length) return res.status(400).json({ error: 'РќРµС‚ РёР·РјРµРЅРµРЅРёР№' });
         const user = await proxyUsers.patchUser(name, patch);
-        auditLog(req, `Прокси: изменён пользователь ${name}`);
+        auditLog(req, `РџСЂРѕРєСЃРё: РёР·РјРµРЅС‘РЅ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ ${name}`);
         res.json(user);
     } catch (e) { proxyError(res, e); }
 });
 
 app.delete('/api/proxy/users/:name', checkAuth, requireAdmin, async (req, res) => {
     const name = proxyUsername(req.params.name);
-    if (!name) return res.status(400).json({ error: 'Некорректное имя пользователя' });
+    if (!name) return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅРѕРµ РёРјСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ' });
     try {
         const result = await proxyUsers.deleteUser(name);
-        auditLog(req, `Прокси: удалён пользователь ${name}`);
+        auditLog(req, `РџСЂРѕРєСЃРё: СѓРґР°Р»С‘РЅ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ ${name}`);
         res.json(result);
     } catch (e) { proxyError(res, e); }
 });
@@ -14030,28 +14030,28 @@ app.delete('/api/proxy/users/:name', checkAuth, requireAdmin, async (req, res) =
 app.post('/api/proxy/users/:name/:action', checkAuth, requireAdmin, async (req, res) => {
     const name = proxyUsername(req.params.name);
     const action = String(req.params.action || '');
-    if (!name) return res.status(400).json({ error: 'Некорректное имя пользователя' });
+    if (!name) return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅРѕРµ РёРјСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ' });
     if (!['enable', 'disable', 'rotate-secret', 'reset-quota', 'reset-traffic'].includes(action)) {
-        return res.status(400).json({ error: 'Неизвестное действие' });
+        return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅРѕРµ РґРµР№СЃС‚РІРёРµ' });
     }
     try {
         let body;
         if (action === 'rotate-secret') {
             const secret = req.body && req.body.secret ? mtprotoHex32(req.body.secret) : '';
             if (req.body && req.body.secret && !secret) {
-                return res.status(400).json({ error: 'Секрет должен быть 32 hex-символа' });
+                return res.status(400).json({ error: 'РЎРµРєСЂРµС‚ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ 32 hex-СЃРёРјРІРѕР»Р°' });
             }
             body = { secret: secret || crypto.randomBytes(16).toString('hex') };
         }
         const result = await proxyUsers.userAction(name, action, body);
-        auditLog(req, `Прокси: действие ${action} для ${name}`);
+        auditLog(req, `РџСЂРѕРєСЃРё: РґРµР№СЃС‚РІРёРµ ${action} РґР»СЏ ${name}`);
         res.json(result);
     } catch (e) { proxyError(res, e); }
 });
 
 app.get('/api/proxy/users/:name/links', checkAuth, async (req, res) => {
     const name = proxyUsername(req.params.name);
-    if (!name) return res.status(400).json({ error: 'Некорректное имя пользователя' });
+    if (!name) return res.status(400).json({ error: 'РќРµРєРѕСЂСЂРµРєС‚РЅРѕРµ РёРјСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ' });
     try {
         const links = await proxyUsers.userLinks(name);
         const flat = [];
@@ -14078,8 +14078,8 @@ app.get('/api/proxy/users/:name/links', checkAuth, async (req, res) => {
     } catch (e) { proxyError(res, e); }
 });
 
-// Журнал движка прокси: помогает увидеть ошибки egress/DC, когда Telegram
-// висит на «Проверка...».
+// Р–СѓСЂРЅР°Р» РґРІРёР¶РєР° РїСЂРѕРєСЃРё: РїРѕРјРѕРіР°РµС‚ СѓРІРёРґРµС‚СЊ РѕС€РёР±РєРё egress/DC, РєРѕРіРґР° Telegram
+// РІРёСЃРёС‚ РЅР° В«РџСЂРѕРІРµСЂРєР°...В».
 app.get('/api/proxy/log', checkAuth, requireAdmin, (req, res) => {
     const units = ['telemt', 'mtproxyl', 'cachebridged', 'kvguardd'];
     const out = {};
@@ -14111,14 +14111,14 @@ async function proxyRestartHard() {
 app.post('/api/proxy/restart', checkAuth, requireAdmin, async (req, res) => {
     try {
         const result = await proxyRestartHard();
-        auditLog(req, 'Прокси: перезапуск движка');
+        auditLog(req, 'РџСЂРѕРєСЃРё: РїРµСЂРµР·Р°РїСѓСЃРє РґРІРёР¶РєР°');
         res.json(result || { restarted: true });
     } catch (e) { proxyError(res, e); }
 });
 
-// Сторож MTProto-прокси: если служба активна, а API не отвечает несколько
-// проверок подряд, перезапускаем движок. После восстановления каскада также
-// перезапускаем telemt, чтобы он пересоздал upstream-сокеты через awg1.
+// РЎС‚РѕСЂРѕР¶ MTProto-РїСЂРѕРєСЃРё: РµСЃР»Рё СЃР»СѓР¶Р±Р° Р°РєС‚РёРІРЅР°, Р° API РЅРµ РѕС‚РІРµС‡Р°РµС‚ РЅРµСЃРєРѕР»СЊРєРѕ
+// РїСЂРѕРІРµСЂРѕРє РїРѕРґСЂСЏРґ, РїРµСЂРµР·Р°РїСѓСЃРєР°РµРј РґРІРёР¶РѕРє. РџРѕСЃР»Рµ РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ РєР°СЃРєР°РґР° С‚Р°РєР¶Рµ
+// РїРµСЂРµР·Р°РїСѓСЃРєР°РµРј telemt, С‡С‚РѕР±С‹ РѕРЅ РїРµСЂРµСЃРѕР·РґР°Р» upstream-СЃРѕРєРµС‚С‹ С‡РµСЂРµР· awg1.
 const proxyWatch = { fails: 0, cascadeDown: false, lastRestart: 0, tick: 0, busy: false };
 
 async function proxyWatchdog() {
@@ -14169,9 +14169,9 @@ async function proxyWatchdog() {
             proxyWatch.lastRestart = Date.now();
             try {
                 await proxyRestartHard();
-                console.log('[proxy-watchdog] прокси перезапущен после зависания');
+                console.log('[proxy-watchdog] РїСЂРѕРєСЃРё РїРµСЂРµР·Р°РїСѓС‰РµРЅ РїРѕСЃР»Рµ Р·Р°РІРёСЃР°РЅРёСЏ');
             } catch (e) {
-                console.error('[proxy-watchdog] перезапуск не удался:', e.message);
+                console.error('[proxy-watchdog] РїРµСЂРµР·Р°РїСѓСЃРє РЅРµ СѓРґР°Р»СЃСЏ:', e.message);
             }
         }
     } catch (e) { /* ignore */ } finally {
@@ -14184,18 +14184,18 @@ if (!TEST_MODE) {
     setInterval(proxyWatchdog, 60000);
 }
 
-// Ключ API MTProxyL нельзя прочитать повторно (хранится SHA-256), поэтому
-// панель выдаёт новый ключ и сохраняет его у себя.
+// РљР»СЋС‡ API MTProxyL РЅРµР»СЊР·СЏ РїСЂРѕС‡РёС‚Р°С‚СЊ РїРѕРІС‚РѕСЂРЅРѕ (С…СЂР°РЅРёС‚СЃСЏ SHA-256), РїРѕСЌС‚РѕРјСѓ
+// РїР°РЅРµР»СЊ РІС‹РґР°С‘С‚ РЅРѕРІС‹Р№ РєР»СЋС‡ Рё СЃРѕС…СЂР°РЅСЏРµС‚ РµРіРѕ Сѓ СЃРµР±СЏ.
 app.post('/api/proxy/api-key', checkAuth, requireAdmin, async (req, res) => {
     try {
         const detected = await proxyUsers.detect(true);
         if (detected.backend !== 'mtproxyl') {
             return res.status(400).json({
-                error: 'Ключ API нужен только для MTProxyL. Telemt работает через локальный API без ключа.'
+                error: 'РљР»СЋС‡ API РЅСѓР¶РµРЅ С‚РѕР»СЊРєРѕ РґР»СЏ MTProxyL. Telemt СЂР°Р±РѕС‚Р°РµС‚ С‡РµСЂРµР· Р»РѕРєР°Р»СЊРЅС‹Р№ API Р±РµР· РєР»СЋС‡Р°.'
             });
         }
         const result = proxyUsers.rotatePanelKey();
-        auditLog(req, 'Прокси: выдан новый ключ API MTProxyL');
+        auditLog(req, 'РџСЂРѕРєСЃРё: РІС‹РґР°РЅ РЅРѕРІС‹Р№ РєР»СЋС‡ API MTProxyL');
         res.json(result);
     } catch (e) { proxyError(res, e); }
 });
@@ -14204,7 +14204,7 @@ app.get('/api/proxy/bot', checkAuth, requireAdmin, (req, res) => {
     const st = proxyBot.status();
     res.json({
         ...st,
-        token: st.token ? `${st.token.slice(0, 8)}…${st.token.slice(-4)}` : '',
+        token: st.token ? `${st.token.slice(0, 8)}вЂ¦${st.token.slice(-4)}` : '',
         configFile: PROXY_BOT_FILE
     });
 });
@@ -14212,8 +14212,8 @@ app.get('/api/proxy/bot', checkAuth, requireAdmin, (req, res) => {
 app.post('/api/proxy/bot', checkAuth, requireAdmin, async (req, res) => {
     try {
         const st = await proxyBot.update(req.body || {});
-        auditLog(req, `Прокси-бот: ${st.enabled ? 'включён' : 'выключен'}`);
-        res.json({ ...st, token: st.token ? `${st.token.slice(0, 8)}…${st.token.slice(-4)}` : '' });
+        auditLog(req, `РџСЂРѕРєСЃРё-Р±РѕС‚: ${st.enabled ? 'РІРєР»СЋС‡С‘РЅ' : 'РІС‹РєР»СЋС‡РµРЅ'}`);
+        res.json({ ...st, token: st.token ? `${st.token.slice(0, 8)}вЂ¦${st.token.slice(-4)}` : '' });
     } catch (e) { proxyError(res, e); }
 });
 
@@ -14225,19 +14225,19 @@ app.post('/api/proxy/bot/test', checkAuth, requireAdmin, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Состояние и удаление модулей (AdGuard Home, WARP + Xray, прокси, AWG)
+// РЎРѕСЃС‚РѕСЏРЅРёРµ Рё СѓРґР°Р»РµРЅРёРµ РјРѕРґСѓР»РµР№ (AdGuard Home, WARP + Xray, РїСЂРѕРєСЃРё, AWG)
 // ---------------------------------------------------------------------------
-// Раньше из панели удалялся только AWG: AdGuard и WARP оставались в системе и
-// мешали повторной установке (занятый порт, чужой конфиг Xray). Теперь у
-// каждого компонента есть состояние и полное удаление.
+// Р Р°РЅСЊС€Рµ РёР· РїР°РЅРµР»Рё СѓРґР°Р»СЏР»СЃСЏ С‚РѕР»СЊРєРѕ AWG: AdGuard Рё WARP РѕСЃС‚Р°РІР°Р»РёСЃСЊ РІ СЃРёСЃС‚РµРјРµ Рё
+// РјРµС€Р°Р»Рё РїРѕРІС‚РѕСЂРЅРѕР№ СѓСЃС‚Р°РЅРѕРІРєРµ (Р·Р°РЅСЏС‚С‹Р№ РїРѕСЂС‚, С‡СѓР¶РѕР№ РєРѕРЅС„РёРі Xray). РўРµРїРµСЂСЊ Сѓ
+// РєР°Р¶РґРѕРіРѕ РєРѕРјРїРѕРЅРµРЅС‚Р° РµСЃС‚СЊ СЃРѕСЃС‚РѕСЏРЅРёРµ Рё РїРѕР»РЅРѕРµ СѓРґР°Р»РµРЅРёРµ.
 const AG_DIR = '/opt/AdGuardHome';
 const AG_CONFIG = AG_DIR + '/AdGuardHome.yaml';
 const AG_SNAP_DIR = '/var/snap/adguard-home';
 
-// AdGuard Home хранит порты в YAML. В старых версиях это http.bind_port, в
-// новых — http.address вида «0.0.0.0:3001»; HTTPS-порт лежит в tls.port.
-// Раньше читался только bind_port, поэтому после первого запуска AdGuard
-// (он переписывает конфиг) панель показывала пустой порт и «не находила» его.
+// AdGuard Home С…СЂР°РЅРёС‚ РїРѕСЂС‚С‹ РІ YAML. Р’ СЃС‚Р°СЂС‹С… РІРµСЂСЃРёСЏС… СЌС‚Рѕ http.bind_port, РІ
+// РЅРѕРІС‹С… вЂ” http.address РІРёРґР° В«0.0.0.0:3001В»; HTTPS-РїРѕСЂС‚ Р»РµР¶РёС‚ РІ tls.port.
+// Р Р°РЅСЊС€Рµ С‡РёС‚Р°Р»СЃСЏ С‚РѕР»СЊРєРѕ bind_port, РїРѕСЌС‚РѕРјСѓ РїРѕСЃР»Рµ РїРµСЂРІРѕРіРѕ Р·Р°РїСѓСЃРєР° AdGuard
+// (РѕРЅ РїРµСЂРµРїРёСЃС‹РІР°РµС‚ РєРѕРЅС„РёРі) РїР°РЅРµР»СЊ РїРѕРєР°Р·С‹РІР°Р»Р° РїСѓСЃС‚РѕР№ РїРѕСЂС‚ Рё В«РЅРµ РЅР°С…РѕРґРёР»Р°В» РµРіРѕ.
 function yamlBlock(text, name) {
     const lines = String(text || '').split(/\r?\n/);
     const out = [];
@@ -14286,8 +14286,8 @@ function adguardInfo() {
     const httpPort = ports.http || adguardEnvPort();
     let tlsPort = ports.tls;
     if (!tlsPort && installed) {
-        // HTTPS-порт AdGuard не всегда попадает в YAML: определяем по тому,
-        // что процесс реально слушает, и исключаем DNS-порты и HTTP.
+        // HTTPS-РїРѕСЂС‚ AdGuard РЅРµ РІСЃРµРіРґР° РїРѕРїР°РґР°РµС‚ РІ YAML: РѕРїСЂРµРґРµР»СЏРµРј РїРѕ С‚РѕРјСѓ,
+        // С‡С‚Рѕ РїСЂРѕС†РµСЃСЃ СЂРµР°Р»СЊРЅРѕ СЃР»СѓС€Р°РµС‚, Рё РёСЃРєР»СЋС‡Р°РµРј DNS-РїРѕСЂС‚С‹ Рё HTTP.
         const dnsPorts = new Set([53, 553, 853, Number(httpPort) || 0]);
         const extra = [...listeningPortsByProc('AdGuardHome')]
             .filter(p => p > 1024 && !dnsPorts.has(p))
@@ -14300,7 +14300,7 @@ function adguardInfo() {
         state,
         service: 'AdGuardHome',
         manager: snap ? 'snap' : 'systemd',
-        // port — веб-интерфейс по HTTP (первая установка), tlsPort — HTTPS.
+        // port вЂ” РІРµР±-РёРЅС‚РµСЂС„РµР№СЃ РїРѕ HTTP (РїРµСЂРІР°СЏ СѓСЃС‚Р°РЅРѕРІРєР°), tlsPort вЂ” HTTPS.
         port: httpPort || tlsPort,
         httpPort,
         tlsPort,
@@ -14321,8 +14321,8 @@ function warpInfo() {
         port: cfg.listenPort,
         listenIp: cfg.listenIp,
         socksPort: cfg.socksPort,
-        // Отдельно показываем, есть ли Xray: чужой xray без WARP больше не
-        // выдаётся за установленный WARP.
+        // РћС‚РґРµР»СЊРЅРѕ РїРѕРєР°Р·С‹РІР°РµРј, РµСЃС‚СЊ Р»Рё Xray: С‡СѓР¶РѕР№ xray Р±РµР· WARP Р±РѕР»СЊС€Рµ РЅРµ
+        // РІС‹РґР°С‘С‚СЃСЏ Р·Р° СѓСЃС‚Р°РЅРѕРІР»РµРЅРЅС‹Р№ WARP.
         xray: hasXray,
         configPath: fileExists(XRAY_CONFIG) ? XRAY_CONFIG : WARP_ENV_FILE
     };
@@ -14334,7 +14334,7 @@ const TELEMT_MODULE_CONFIGS = [
     '/etc/telemt.toml',
     '/opt/telemt/telemt.toml',
     '/opt/telemt/config.toml',
-    // Telemt, которым управляет MTProxyL: своего systemd-юнита у него нет.
+    // Telemt, РєРѕС‚РѕСЂС‹Рј СѓРїСЂР°РІР»СЏРµС‚ MTProxyL: СЃРІРѕРµРіРѕ systemd-СЋРЅРёС‚Р° Сѓ РЅРµРіРѕ РЅРµС‚.
     '/opt/mtproxyl/mtproxy/telemt.toml',
     '/opt/mtproxyl/mtproxy/config.toml',
     '/opt/mtproxyl/telemt.toml'
@@ -14366,12 +14366,12 @@ function listeningTcpPorts() {
             const m = line.trim().match(/:(\d{1,5})$/);
             if (m) set.add(Number(m[1]));
         }
-    } catch (e) { /* ss недоступен — останется проверка по кэшу API */ }
+    } catch (e) { /* ss РЅРµРґРѕСЃС‚СѓРїРµРЅ вЂ” РѕСЃС‚Р°РЅРµС‚СЃСЏ РїСЂРѕРІРµСЂРєР° РїРѕ РєСЌС€Сѓ API */ }
     return set;
 }
 
-// Порты, которые слушает конкретный процесс (ss -p). Нужны для AdGuard: его
-// HTTPS-порт может быть задан не в YAML, а только фактическим listen.
+// РџРѕСЂС‚С‹, РєРѕС‚РѕСЂС‹Рµ СЃР»СѓС€Р°РµС‚ РєРѕРЅРєСЂРµС‚РЅС‹Р№ РїСЂРѕС†РµСЃСЃ (ss -p). РќСѓР¶РЅС‹ РґР»СЏ AdGuard: РµРіРѕ
+// HTTPS-РїРѕСЂС‚ РјРѕР¶РµС‚ Р±С‹С‚СЊ Р·Р°РґР°РЅ РЅРµ РІ YAML, Р° С‚РѕР»СЊРєРѕ С„Р°РєС‚РёС‡РµСЃРєРёРј listen.
 function listeningPortsByProc(name) {
     const set = new Set();
     try {
@@ -14397,12 +14397,12 @@ function mtprotoInfo() {
     const activeUnit = units.find(u => isActive(u) === 'active') || '';
     const installed = (!!backend && backend !== 'none' && backend !== 'demo') || !!telemtCfg ||
         !!activeUnit || fileExists('/usr/local/bin/telemt') || fileExists('/usr/local/bin/mtproxyl');
-    // Telemt из MTProxyL не имеет своего юнита: считаем запущенным, если
-    // слушается API-порт из его конфига или панель уже успешно с ним говорила.
+    // Telemt РёР· MTProxyL РЅРµ РёРјРµРµС‚ СЃРІРѕРµРіРѕ СЋРЅРёС‚Р°: СЃС‡РёС‚Р°РµРј Р·Р°РїСѓС‰РµРЅРЅС‹Рј, РµСЃР»Рё
+    // СЃР»СѓС€Р°РµС‚СЃСЏ API-РїРѕСЂС‚ РёР· РµРіРѕ РєРѕРЅС„РёРіР° РёР»Рё РїР°РЅРµР»СЊ СѓР¶Рµ СѓСЃРїРµС€РЅРѕ СЃ РЅРёРј РіРѕРІРѕСЂРёР»Р°.
     const apiLive = !!(telemtCfg && cfgPorts.api && listeningTcpPorts().has(Number(cfgPorts.api)));
     const cachedLive = !!(cached && cached.running && ['telemt', 'mtproxyl'].includes(cached.backend));
-    // Прокси-порт из конфига тоже доказывает, что telemt запущен: так модуль
-    // не зависит от того, открывали ли вкладку «Прокси» в этой сессии.
+    // РџСЂРѕРєСЃРё-РїРѕСЂС‚ РёР· РєРѕРЅС„РёРіР° С‚РѕР¶Рµ РґРѕРєР°Р·С‹РІР°РµС‚, С‡С‚Рѕ telemt Р·Р°РїСѓС‰РµРЅ: С‚Р°Рє РјРѕРґСѓР»СЊ
+    // РЅРµ Р·Р°РІРёСЃРёС‚ РѕС‚ С‚РѕРіРѕ, РѕС‚РєСЂС‹РІР°Р»Рё Р»Рё РІРєР»Р°РґРєСѓ В«РџСЂРѕРєСЃРёВ» РІ СЌС‚РѕР№ СЃРµСЃСЃРёРё.
     const proxyLive = !!(telemtCfg && cfgPorts.proxy && listeningTcpPorts().has(Number(cfgPorts.proxy)));
     const running = !!activeUnit || apiLive || proxyLive || cachedLive;
     return {
@@ -14429,10 +14429,10 @@ function awgModuleInfo() {
 }
 
 const MODULE_DESCRIPTIONS = {
-    adguard: 'DNS-фильтр рекламы. Веб-интерфейс и API на своём порту.',
-    warp: 'Xray принимает TLS, WARP уводит DNS в SOCKS5.',
-    mtproto: 'Telemt, MTProxyL или MTProto.zig с фиксом MEKO.',
-    awg: 'VPN-сервер и клиенты.'
+    adguard: 'DNS-С„РёР»СЊС‚СЂ СЂРµРєР»Р°РјС‹. Р’РµР±-РёРЅС‚РµСЂС„РµР№СЃ Рё API РЅР° СЃРІРѕС‘Рј РїРѕСЂС‚Сѓ.',
+    warp: 'Xray РїСЂРёРЅРёРјР°РµС‚ TLS, WARP СѓРІРѕРґРёС‚ DNS РІ SOCKS5.',
+    mtproto: 'Telemt, MTProxyL РёР»Рё MTProto.zig СЃ С„РёРєСЃРѕРј MEKO.',
+    awg: 'VPN-СЃРµСЂРІРµСЂ Рё РєР»РёРµРЅС‚С‹.'
 };
 
 function modulesSnapshot() {
@@ -14440,14 +14440,14 @@ function modulesSnapshot() {
         return [
             { id: 'adguard', title: 'AdGuard Home', installed: true, running: true, state: 'active', service: 'AdGuardHome', manager: 'systemd', port: '3001', configPath: '/opt/AdGuardHome/AdGuardHome.yaml' },
             { id: 'warp', title: 'Cloudflare WARP + Xray', installed: false, running: false, state: 'inactive', service: 'xray', port: '443', listenIp: '127.0.0.1', socksPort: '40000', configPath: '' },
-            { id: 'mtproto', title: 'MTProto-прокси', installed: true, running: true, state: 'active', service: 'telemt', backend: 'demo', port: '443', configPath: '/etc/telemt/telemt.toml' },
+            { id: 'mtproto', title: 'MTProto-РїСЂРѕРєСЃРё', installed: true, running: true, state: 'active', service: 'telemt', backend: 'demo', port: '443', configPath: '/etc/telemt/telemt.toml' },
             { id: 'awg', title: 'AmneziaWG', installed: true, running: true, state: 'active', service: 'awg-quick@awg0', port: '', configPath: path.join(AWG_CONF_DIR, 'awg0.conf') }
         ].map(m => ({ ...m, description: MODULE_DESCRIPTIONS[m.id] }));
     }
     const items = [
         { id: 'adguard', title: 'AdGuard Home', ...adguardInfo() },
         { id: 'warp', title: 'Cloudflare WARP + Xray', ...warpInfo() },
-        { id: 'mtproto', title: 'MTProto-прокси', ...mtprotoInfo() },
+        { id: 'mtproto', title: 'MTProto-РїСЂРѕРєСЃРё', ...mtprotoInfo() },
         { id: 'awg', title: 'AmneziaWG', ...awgModuleInfo() }
     ];
     return items.map(m => ({ ...m, description: MODULE_DESCRIPTIONS[m.id] }));
@@ -14455,7 +14455,7 @@ function modulesSnapshot() {
 
 app.get('/api/modules', checkAuth, (req, res) => {
     try { res.json({ modules: modulesSnapshot() }); }
-    catch (e) { res.status(500).json({ error: 'Не удалось прочитать состояние модулей' }); }
+    catch (e) { res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ СЃРѕСЃС‚РѕСЏРЅРёРµ РјРѕРґСѓР»РµР№' }); }
 });
 
 const MODULE_UNINSTALL = {
@@ -14468,7 +14468,7 @@ AG_DIR=/opt/AdGuardHome
 SNAP_DIR=/var/snap/adguard-home
 
 if [ -d "$SNAP_DIR" ]; then
-  echo "AdGuard установлен через snap — удаляем snap-пакет."
+  echo "AdGuard СѓСЃС‚Р°РЅРѕРІР»РµРЅ С‡РµСЂРµР· snap вЂ” СѓРґР°Р»СЏРµРј snap-РїР°РєРµС‚."
   snap remove adguard-home >/dev/null 2>&1 || true
 fi
 
@@ -14526,16 +14526,16 @@ systemctl stop xray >/dev/null 2>&1 || true
 systemctl disable xray >/dev/null 2>&1 || true
 
 if [ "$XRAY_OURS" = "1" ]; then
-  echo "Удаляем конфиг Xray, созданный панелью."
+  echo "РЈРґР°Р»СЏРµРј РєРѕРЅС„РёРі Xray, СЃРѕР·РґР°РЅРЅС‹Р№ РїР°РЅРµР»СЊСЋ."
   LAST_BAK="$(ls -1t "$XRAY_CONFIG".bak_* 2>/dev/null | head -1 || true)"
   rm -f "$XRAY_CONFIG"
   if [ -n "\${LAST_BAK:-}" ]; then
-    cp -a "$LAST_BAK" "$XRAY_CONFIG" && echo "Возвращён предыдущий конфиг Xray: $LAST_BAK"
+    cp -a "$LAST_BAK" "$XRAY_CONFIG" && echo "Р’РѕР·РІСЂР°С‰С‘РЅ РїСЂРµРґС‹РґСѓС‰РёР№ РєРѕРЅС„РёРі Xray: $LAST_BAK"
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl start xray >/dev/null 2>&1 || true
   fi
 else
-  echo "Xray установлен не панелью — оставляем его конфиг как есть."
+  echo "Xray СѓСЃС‚Р°РЅРѕРІР»РµРЅ РЅРµ РїР°РЅРµР»СЊСЋ вЂ” РѕСЃС‚Р°РІР»СЏРµРј РµРіРѕ РєРѕРЅС„РёРі РєР°Рє РµСЃС‚СЊ."
 fi
 rm -rf /var/log/xray
 find /usr/local/bin /usr/local/share -maxdepth 2 -name 'xray*' -exec rm -rf {} + 2>/dev/null || true
@@ -14566,11 +14566,11 @@ fi
 `
     },
     mtproto: {
-        title: 'MTProto-прокси',
+        title: 'MTProto-РїСЂРѕРєСЃРё',
         log: '/var/log/mtproto_uninstall.log',
         bin: 'mtproto_uninstall',
         script: String.raw`
-# 1. Откат базовой оптимизации MEKO (если применялась)
+# 1. РћС‚РєР°С‚ Р±Р°Р·РѕРІРѕР№ РѕРїС‚РёРјРёР·Р°С†РёРё MEKO (РµСЃР»Рё РїСЂРёРјРµРЅСЏР»Р°СЃСЊ)
 SNAP=/opt/mtpr-simple/opt-snapshot
 if [ -f "$SNAP/sysctl.conf" ]; then
   cp -a "$SNAP/sysctl.conf" /etc/sysctl.d/99-custom.conf 2>/dev/null || true
@@ -14596,21 +14596,21 @@ fi
 sysctl --system >/dev/null 2>&1 || true
 systemctl daemon-reload >/dev/null 2>&1 || true
 
-# 2. Штатное полное удаление MEKO: менеджер + все фиксы + Telemt
+# 2. РЁС‚Р°С‚РЅРѕРµ РїРѕР»РЅРѕРµ СѓРґР°Р»РµРЅРёРµ MEKO: РјРµРЅРµРґР¶РµСЂ + РІСЃРµ С„РёРєСЃС‹ + Telemt
 if command -v mekopr >/dev/null 2>&1; then
-  echo "Запускаем mekopr remove all -y"
+  echo "Р—Р°РїСѓСЃРєР°РµРј mekopr remove all -y"
   mekopr remove all -y || true
 elif [ -x /opt/mtpr-simple/main.sh ]; then
-  echo "Запускаем main.sh remove all -y"
+  echo "Р—Р°РїСѓСЃРєР°РµРј main.sh remove all -y"
   bash /opt/mtpr-simple/main.sh remove all -y || true
 fi
 
-# 3. Добиваем остатки, если MEKO не смог
+# 3. Р”РѕР±РёРІР°РµРј РѕСЃС‚Р°С‚РєРё, РµСЃР»Рё MEKO РЅРµ СЃРјРѕРі
 for unit in mtpr-zapret2-watch mtpr-zapret2 mtpr-nft-synfix mtpr-synfix \
             mtproxyl-bridge-watch mtproxyl-zapret2 mtproxyl-syn-limit mtproxyl-telemt mtproxyl \
             mtproxyl-api mtproto.zig mtproto-zig mtg telemt mtproto kvguardd; do
   if systemctl list-unit-files 2>/dev/null | grep -q "^\${unit}\.service"; then
-    echo "Останавливаем \${unit}.service"
+    echo "РћСЃС‚Р°РЅР°РІР»РёРІР°РµРј \${unit}.service"
     systemctl stop "$unit" >/dev/null 2>&1 || true
     systemctl disable "$unit" >/dev/null 2>&1 || true
   fi
@@ -14621,12 +14621,12 @@ pkill -f '/opt/mtproxyl-zapret2/bin/nfqws2' 2>/dev/null || true
 
 if command -v docker >/dev/null 2>&1; then
   for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Ei 'telemt|mtproto|mtg|mtproxyl|zapret' || true); do
-    echo "Удаляем контейнер $c"
+    echo "РЈРґР°Р»СЏРµРј РєРѕРЅС‚РµР№РЅРµСЂ $c"
     docker rm -f "$c" >/dev/null 2>&1 || true
   done
 fi
 
-# iptables: SYN-фикс, u32, GEOIP, NAT
+# iptables: SYN-С„РёРєСЃ, u32, GEOIP, NAT
 iptables -t filter -D INPUT -j MTPR_SYNFIX 2>/dev/null || true
 iptables -t filter -F MTPR_SYNFIX 2>/dev/null || true
 iptables -t filter -X MTPR_SYNFIX 2>/dev/null || true
@@ -14634,7 +14634,7 @@ iptables -t mangle -S PREROUTING 2>/dev/null | grep -E 'set-mark 0x400|u32|MTPR_
 iptables -S INPUT 2>/dev/null | grep -Ei 'geoip|xt_geoip' | sed 's/^-A /-D /' | xargs -r -L1 iptables 2>/dev/null || true
 iptables -t nat -S POSTROUTING 2>/dev/null | grep -Ei 'telemt|mtpr|mtproto' | sed 's/^-A /-D /' | xargs -r -L1 iptables -t nat 2>/dev/null || true
 
-# nftables: SYN-фикс, Zapret2, лимитер, iOS-фикс
+# nftables: SYN-С„РёРєСЃ, Zapret2, Р»РёРјРёС‚РµСЂ, iOS-С„РёРєСЃ
 nft delete table inet mtpr_synfix 2>/dev/null || true
 nft delete table ip MTProto 2>/dev/null || true
 nft delete table inet telemt_limit 2>/dev/null || true
@@ -14643,7 +14643,7 @@ nft delete table inet mtproxyl_limit 2>/dev/null || true
 nft delete table ip MTProtoL 2>/dev/null || true
 nft delete table inet mtproxyl_ios2 2>/dev/null || true
 
-# Файлы и службы
+# Р¤Р°Р№Р»С‹ Рё СЃР»СѓР¶Р±С‹
 rm -rf /opt/mtpr-simple /opt/zapret2 /etc/zapret2 /etc/telemt /opt/telemt \
        /etc/mtproxyl /opt/mtproxyl /etc/mtproxyl-api /opt/mtproto.zig /etc/mtproto.zig \
        /opt/mtproxyl-zapret2 /etc/mtproxyl-zapret2
@@ -14672,10 +14672,10 @@ fi
 function runDetached(title, logFile, script) {
     sh('sudo', ['bash', '-c', `rm -f ${logFile} && touch ${logFile} && chmod 666 ${logFile}`]);
     const file = `/tmp/run_uninstall_${logFile.replace(/\W+/g, '_')}.sh`;
-    fs.writeFileSync(file, `#!/bin/bash\nset -u\n${script}\necho "=== УДАЛЕНИЕ ЗАВЕРШЕНО ==="\n`, { mode: 0o700 });
-    // Отдельный systemd-юнит: удаление переживает перезапуск панели. Раньше
-    // процесс жил в cgroup панели, и её рестарт убивал dpkg посреди работы —
-    // пакеты оставались в прерванном состоянии.
+    fs.writeFileSync(file, `#!/bin/bash\nset -u\n${script}\necho "=== РЈР”РђР›Р•РќРР• Р—РђР’Р•Р РЁР•РќРћ ==="\n`, { mode: 0o700 });
+    // РћС‚РґРµР»СЊРЅС‹Р№ systemd-СЋРЅРёС‚: СѓРґР°Р»РµРЅРёРµ РїРµСЂРµР¶РёРІР°РµС‚ РїРµСЂРµР·Р°РїСѓСЃРє РїР°РЅРµР»Рё. Р Р°РЅСЊС€Рµ
+    // РїСЂРѕС†РµСЃСЃ Р¶РёР» РІ cgroup РїР°РЅРµР»Рё, Рё РµС‘ СЂРµСЃС‚Р°СЂС‚ СѓР±РёРІР°Р» dpkg РїРѕСЃСЂРµРґРё СЂР°Р±РѕС‚С‹ вЂ”
+    // РїР°РєРµС‚С‹ РѕСЃС‚Р°РІР°Р»РёСЃСЊ РІ РїСЂРµСЂРІР°РЅРЅРѕРј СЃРѕСЃС‚РѕСЏРЅРёРё.
     const unit = 'servpanel-uninstall-' + String(title).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 20);
     const viaSystemd = `if command -v systemd-run >/dev/null 2>&1; then systemd-run --unit=${unit} --collect --quiet --property=Type=oneshot bash ${file}; else setsid bash ${file} </dev/null >>${logFile} 2>&1 & fi`;
     try {
@@ -14697,28 +14697,28 @@ function runDetached(title, logFile, script) {
 const AWG_UNINSTALL_SCRIPT = `#!/bin/bash
 LOG=/var/log/awg_uninstall.log
 exec >>"$LOG" 2>&1
-echo "Начинаем удаление AmneziaWG..."
-# 1. Снимаем автопродолжение установки: иначе при следующей перезагрузке
-#    сервер снова начнёт ставить AWG (в том числе после неудачной попытки).
+echo "РќР°С‡РёРЅР°РµРј СѓРґР°Р»РµРЅРёРµ AmneziaWG..."
+# 1. РЎРЅРёРјР°РµРј Р°РІС‚РѕРїСЂРѕРґРѕР»Р¶РµРЅРёРµ СѓСЃС‚Р°РЅРѕРІРєРё: РёРЅР°С‡Рµ РїСЂРё СЃР»РµРґСѓСЋС‰РµР№ РїРµСЂРµР·Р°РіСЂСѓР·РєРµ
+#    СЃРµСЂРІРµСЂ СЃРЅРѕРІР° РЅР°С‡РЅС‘С‚ СЃС‚Р°РІРёС‚СЊ AWG (РІ С‚РѕРј С‡РёСЃР»Рµ РїРѕСЃР»Рµ РЅРµСѓРґР°С‡РЅРѕР№ РїРѕРїС‹С‚РєРё).
 rm -f /etc/cron.d/awg_resume /root/awg_installer_wrapper.sh /root/awg_install_params.env /root/awg/.resume_count
 pkill -f install_amneziawg.sh 2>/dev/null || true
 pkill -f install_awg_stateful.sh 2>/dev/null || true
 sleep 1
-# 2. Чиним dpkg, если прошлое удаление/установка были прерваны перезагрузкой.
+# 2. Р§РёРЅРёРј dpkg, РµСЃР»Рё РїСЂРѕС€Р»РѕРµ СѓРґР°Р»РµРЅРёРµ/СѓСЃС‚Р°РЅРѕРІРєР° Р±С‹Р»Рё РїСЂРµСЂРІР°РЅС‹ РїРµСЂРµР·Р°РіСЂСѓР·РєРѕР№.
 export DEBIAN_FRONTEND=noninteractive
 dpkg --configure -a >/dev/null 2>&1 || true
 apt-get -f install -y >/dev/null 2>&1 || true
-# 3. Штатное удаление установщиком.
+# 3. РЁС‚Р°С‚РЅРѕРµ СѓРґР°Р»РµРЅРёРµ СѓСЃС‚Р°РЅРѕРІС‰РёРєРѕРј.
 if [ -f "/root/install_amneziawg.sh" ]; then
     bash /root/install_amneziawg.sh --uninstall --yes
 else
     curl -fsSL https://raw.githubusercontent.com/bivlked/amneziawg-installer/main/install_amneziawg.sh -o /tmp/uninstall_awg.sh
     bash /tmp/uninstall_awg.sh --uninstall --yes
 fi
-# 4. Если пакеты остались (например, прерванный pre-removal) — добиваем.
+# 4. Р•СЃР»Рё РїР°РєРµС‚С‹ РѕСЃС‚Р°Р»РёСЃСЊ (РЅР°РїСЂРёРјРµСЂ, РїСЂРµСЂРІР°РЅРЅС‹Р№ pre-removal) вЂ” РґРѕР±РёРІР°РµРј.
 for p in amneziawg-dkms amneziawg amneziawg-tools; do
     if dpkg -s "$p" >/dev/null 2>&1; then
-        echo "Дочищаю пакет $p"
+        echo "Р”РѕС‡РёС‰Р°СЋ РїР°РєРµС‚ $p"
         apt-get purge -y "$p" || true
     fi
 done
@@ -14729,13 +14729,13 @@ systemctl disable awg-routing.timer 2>/dev/null || true
 rm -f /etc/systemd/system/awg-routing.service /etc/systemd/system/awg-routing.timer
 rm -rf /etc/amnezia/amneziawg /root/awg /root/awg_domain.txt
 systemctl daemon-reload 2>/dev/null || true
-echo "=== УДАЛЕНИЕ ЗАВЕРШЕНО ==="
+echo "=== РЈР”РђР›Р•РќРР• Р—РђР’Р•Р РЁР•РќРћ ==="
 `;
 
 function awgUninstall() {
     fs.writeFileSync('/tmp/run_uninstall_awg.sh', AWG_UNINSTALL_SCRIPT, { mode: 0o700 });
-    // Отдельный юнит systemd: панель может перезапуститься, и тогда dpkg
-    // останется прерванным (именно это давало 502 посреди удаления).
+    // РћС‚РґРµР»СЊРЅС‹Р№ СЋРЅРёС‚ systemd: РїР°РЅРµР»СЊ РјРѕР¶РµС‚ РїРµСЂРµР·Р°РїСѓСЃС‚РёС‚СЊСЃСЏ, Рё С‚РѕРіРґР° dpkg
+    // РѕСЃС‚Р°РЅРµС‚СЃСЏ РїСЂРµСЂРІР°РЅРЅС‹Рј (РёРјРµРЅРЅРѕ СЌС‚Рѕ РґР°РІР°Р»Рѕ 502 РїРѕСЃСЂРµРґРё СѓРґР°Р»РµРЅРёСЏ).
     const cmd = 'if command -v systemd-run >/dev/null 2>&1; then ' +
         'systemd-run --unit=servpanel-uninstall-awg --collect --quiet --property=Type=oneshot bash /tmp/run_uninstall_awg.sh; ' +
         'else setsid bash /tmp/run_uninstall_awg.sh </dev/null >>/var/log/awg_uninstall.log 2>&1 & fi';
@@ -14744,8 +14744,8 @@ function awgUninstall() {
     return { success: true, title: 'AmneziaWG', logFile: '/var/log/awg_uninstall.log' };
 }
 
-// Порты, которые нужно закрыть в UFW при удалении: состояние читаем до
-// удаления, потому что после него конфигов уже нет.
+// РџРѕСЂС‚С‹, РєРѕС‚РѕСЂС‹Рµ РЅСѓР¶РЅРѕ Р·Р°РєСЂС‹С‚СЊ РІ UFW РїСЂРё СѓРґР°Р»РµРЅРёРё: СЃРѕСЃС‚РѕСЏРЅРёРµ С‡РёС‚Р°РµРј РґРѕ
+// СѓРґР°Р»РµРЅРёСЏ, РїРѕС‚РѕРјСѓ С‡С‚Рѕ РїРѕСЃР»Рµ РЅРµРіРѕ РєРѕРЅС„РёРіРѕРІ СѓР¶Рµ РЅРµС‚.
 function modulePorts(id) {
     const ports = [];
     if (id === 'adguard') {
@@ -14763,39 +14763,39 @@ app.post('/api/modules/uninstall', checkAuth, requireAdmin, (req, res) => {
     try {
         if (id === 'awg') {
             const r = awgUninstall();
-            auditLog(req, 'Запущено полное удаление AmneziaWG');
+            auditLog(req, 'Р—Р°РїСѓС‰РµРЅРѕ РїРѕР»РЅРѕРµ СѓРґР°Р»РµРЅРёРµ AmneziaWG');
             return res.json(r);
         }
         const mod = MODULE_UNINSTALL[id];
-        if (!mod) return res.status(400).json({ error: 'Неизвестный модуль' });
+        if (!mod) return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ РјРѕРґСѓР»СЊ' });
         const list = modulePorts(id).map(p => `'${p}'`).join(' ');
         const result = runDetached(mod.title, mod.log, `PORTS=(${list})\n${mod.script}`);
-        auditLog(req, `Запущено удаление модуля ${mod.title}`);
+        auditLog(req, `Р—Р°РїСѓС‰РµРЅРѕ СѓРґР°Р»РµРЅРёРµ РјРѕРґСѓР»СЏ ${mod.title}`);
         res.json(result);
     } catch (e) {
-        res.status(500).json({ error: 'Ошибка запуска удаления: ' + (e.message || 'неизвестно') });
+        res.status(500).json({ error: 'РћС€РёР±РєР° Р·Р°РїСѓСЃРєР° СѓРґР°Р»РµРЅРёСЏ: ' + (e.message || 'РЅРµРёР·РІРµСЃС‚РЅРѕ') });
     }
 });
 
 // ---------------------------------------------------------------------------
-// Полное удаление AmneziaWG
+// РџРѕР»РЅРѕРµ СѓРґР°Р»РµРЅРёРµ AmneziaWG
 // ---------------------------------------------------------------------------
 app.post('/api/uninstall/awg', checkAuth, requireAdmin, (req, res) => {
     try {
         const r = awgUninstall();
-        auditLog(req, 'Запущено полное удаление AmneziaWG');
+        auditLog(req, 'Р—Р°РїСѓС‰РµРЅРѕ РїРѕР»РЅРѕРµ СѓРґР°Р»РµРЅРёРµ AmneziaWG');
         res.json({ success: true, logFile: r.logFile });
     } catch (e) {
-        res.status(500).json({ error: 'Ошибка запуска удаления' });
+        res.status(500).json({ error: 'РћС€РёР±РєР° Р·Р°РїСѓСЃРєР° СѓРґР°Р»РµРЅРёСЏ' });
     }
 });
 
 // ---------------------------------------------------------------------------
-// Диагностика
+// Р”РёР°РіРЅРѕСЃС‚РёРєР°
 // ---------------------------------------------------------------------------
 app.post('/api/diag/ping', checkAuth, (req, res) => {
     const host = String((req.body && req.body.host) || '').trim();
-    if (!host || !isIpOrHost(host)) return res.status(400).json({ error: 'Укажите корректный IP или домен' });
+    if (!host || !isIpOrHost(host)) return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Р№ IP РёР»Рё РґРѕРјРµРЅ' });
     if (DEMO_MODE) {
         return res.json({ ok: true, host, output: `PING ${host} (${host}) 56(84) bytes of data.\n64 bytes from ${host}: icmp_seq=1 ttl=57 time=8.4 ms\n64 bytes from ${host}: icmp_seq=2 ttl=57 time=8.1 ms\n64 bytes from ${host}: icmp_seq=3 ttl=57 time=8.7 ms\n64 bytes from ${host}: icmp_seq=4 ttl=57 time=8.2 ms\n\n--- ${host} ping statistics ---\n4 packets transmitted, 4 received, 0% packet loss, time 3004ms\nrtt min/avg/max/mdev = 8.1/8.35/8.7/0.2 ms\n` });
     }
@@ -14806,7 +14806,7 @@ app.post('/api/diag/ping', checkAuth, (req, res) => {
 
 app.post('/api/diag/traceroute', checkAuth, (req, res) => {
     const host = String((req.body && req.body.host) || '').trim();
-    if (!host || !isIpOrHost(host)) return res.status(400).json({ error: 'Укажите корректный IP или домен' });
+    if (!host || !isIpOrHost(host)) return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Р№ IP РёР»Рё РґРѕРјРµРЅ' });
     if (DEMO_MODE) {
         return res.json({ ok: true, host, output: `traceroute to ${host} (${host}), 12 hops max, 60 byte packets\n 1  gateway (10.0.0.1)  0.452 ms  0.417 ms  0.401 ms\n 2  172.16.0.1 (172.16.0.1)  1.203 ms  1.187 ms  1.174 ms\n 3  ${host} (${host})  8.221 ms  8.190 ms  8.172 ms\n` });
     }
@@ -14815,12 +14815,12 @@ app.post('/api/diag/traceroute', checkAuth, (req, res) => {
     });
 });
 
-// Диагностика шейпинга и сетевых счётчиков: помогает понять, почему
-// скорость через туннель отличается от канала.
+// Р”РёР°РіРЅРѕСЃС‚РёРєР° С€РµР№РїРёРЅРіР° Рё СЃРµС‚РµРІС‹С… СЃС‡С‘С‚С‡РёРєРѕРІ: РїРѕРјРѕРіР°РµС‚ РїРѕРЅСЏС‚СЊ, РїРѕС‡РµРјСѓ
+// СЃРєРѕСЂРѕСЃС‚СЊ С‡РµСЂРµР· С‚СѓРЅРЅРµР»СЊ РѕС‚Р»РёС‡Р°РµС‚СЃСЏ РѕС‚ РєР°РЅР°Р»Р°.
 // ---------------------------------------------------------------------------
-// Мониторинг канала: периодический замер iperf3 через туннель.
-// Нужен, чтобы увидеть шейпер во времени: разовый Speedtest попадает в burst
-// и показывает не тот потолок, который держится через минуту.
+// РњРѕРЅРёС‚РѕСЂРёРЅРі РєР°РЅР°Р»Р°: РїРµСЂРёРѕРґРёС‡РµСЃРєРёР№ Р·Р°РјРµСЂ iperf3 С‡РµСЂРµР· С‚СѓРЅРЅРµР»СЊ.
+// РќСѓР¶РµРЅ, С‡С‚РѕР±С‹ СѓРІРёРґРµС‚СЊ С€РµР№РїРµСЂ РІРѕ РІСЂРµРјРµРЅРё: СЂР°Р·РѕРІС‹Р№ Speedtest РїРѕРїР°РґР°РµС‚ РІ burst
+// Рё РїРѕРєР°Р·С‹РІР°РµС‚ РЅРµ С‚РѕС‚ РїРѕС‚РѕР»РѕРє, РєРѕС‚РѕСЂС‹Р№ РґРµСЂР¶РёС‚СЃСЏ С‡РµСЂРµР· РјРёРЅСѓС‚Сѓ.
 // ---------------------------------------------------------------------------
 const CHANNEL_MONITOR_FILE = path.join(DATA_DIR, '.channel_monitor.json');
 let channelMonitorTimer = null;
@@ -14905,14 +14905,14 @@ function channelMonitorStart(intervalMin, opts) {
     state.until = hours > 0 ? Date.now() + hours * 3600000 : 0;
     channelMonitorWrite(state);
     channelMonitorTimer = setInterval(() => {
-        channelMonitorTick().catch(() => { /* следующий тик попробует снова */ });
+        channelMonitorTick().catch(() => { /* СЃР»РµРґСѓСЋС‰РёР№ С‚РёРє РїРѕРїСЂРѕР±СѓРµС‚ СЃРЅРѕРІР° */ });
     }, state.intervalMin * 60000);
     if (channelMonitorTimer.unref) channelMonitorTimer.unref();
-    channelMonitorTick().catch(() => { /* первый замер не критичен */ });
+    channelMonitorTick().catch(() => { /* РїРµСЂРІС‹Р№ Р·Р°РјРµСЂ РЅРµ РєСЂРёС‚РёС‡РµРЅ */ });
     return state;
 }
 
-// После перезапуска панели мониторинг продолжается сам.
+// РџРѕСЃР»Рµ РїРµСЂРµР·Р°РїСѓСЃРєР° РїР°РЅРµР»Рё РјРѕРЅРёС‚РѕСЂРёРЅРі РїСЂРѕРґРѕР»Р¶Р°РµС‚СЃСЏ СЃР°Рј.
 function channelMonitorEnsure() {
     const state = channelMonitorState();
     if (state.running && !channelMonitorTimer) channelMonitorStart(state.intervalMin, state);
@@ -14920,8 +14920,8 @@ function channelMonitorEnsure() {
 const channelMonitorBoot = setTimeout(() => { try { channelMonitorEnsure(); } catch (e) { /* ignore */ } }, 5000);
 if (channelMonitorBoot.unref) channelMonitorBoot.unref();
 
-// После перезагрузки панели возвращаем режим Xray: маршруты и правила
-// не сохраняются в ядре, поэтому их надо накатить заново.
+// РџРѕСЃР»Рµ РїРµСЂРµР·Р°РіСЂСѓР·РєРё РїР°РЅРµР»Рё РІРѕР·РІСЂР°С‰Р°РµРј СЂРµР¶РёРј Xray: РјР°СЂС€СЂСѓС‚С‹ Рё РїСЂР°РІРёР»Р°
+// РЅРµ СЃРѕС…СЂР°РЅСЏСЋС‚СЃСЏ РІ СЏРґСЂРµ, РїРѕСЌС‚РѕРјСѓ РёС… РЅР°РґРѕ РЅР°РєР°С‚РёС‚СЊ Р·Р°РЅРѕРІРѕ.
 const xrayBoot = setTimeout(() => {
     try {
         const st = xrayReadState();
@@ -14937,8 +14937,8 @@ app.get('/api/diag/monitor', checkAuth, (req, res) => {
 app.post('/api/diag/monitor/start', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     const state = channelMonitorStart(body.intervalMin, body);
-    auditLog(req, `Мониторинг канала: старт, интервал ${state.intervalMin} мин` +
-        (state.until ? `, до ${new Date(state.until).toISOString()}` : ''));
+    auditLog(req, `РњРѕРЅРёС‚РѕСЂРёРЅРі РєР°РЅР°Р»Р°: СЃС‚Р°СЂС‚, РёРЅС‚РµСЂРІР°Р» ${state.intervalMin} РјРёРЅ` +
+        (state.until ? `, РґРѕ ${new Date(state.until).toISOString()}` : ''));
     res.json({ success: true, ...state });
 });
 
@@ -14947,7 +14947,7 @@ app.post('/api/diag/monitor/stop', checkAuth, requireAdmin, (req, res) => {
     const state = channelMonitorState();
     state.running = false;
     channelMonitorWrite(state);
-    auditLog(req, 'Мониторинг канала: остановлен');
+    auditLog(req, 'РњРѕРЅРёС‚РѕСЂРёРЅРі РєР°РЅР°Р»Р°: РѕСЃС‚Р°РЅРѕРІР»РµРЅ');
     res.json({ success: true, ...state });
 });
 
@@ -14968,8 +14968,8 @@ app.get('/api/diag/monitor/csv', checkAuth, requireAdmin, (req, res) => {
     res.type('text/csv').send(rows.join('\n') + '\n');
 });
 
-// TCP BBR: к UDP-каскаду не применяется, но ускоряет TCP на длинных RTT
-// и безвреден для сервера. Ставим вместе с fq, иначе растёт задержка.
+// TCP BBR: Рє UDP-РєР°СЃРєР°РґСѓ РЅРµ РїСЂРёРјРµРЅСЏРµС‚СЃСЏ, РЅРѕ СѓСЃРєРѕСЂСЏРµС‚ TCP РЅР° РґР»РёРЅРЅС‹С… RTT
+// Рё Р±РµР·РІСЂРµРґРµРЅ РґР»СЏ СЃРµСЂРІРµСЂР°. РЎС‚Р°РІРёРј РІРјРµСЃС‚Рµ СЃ fq, РёРЅР°С‡Рµ СЂР°СЃС‚С‘С‚ Р·Р°РґРµСЂР¶РєР°.
 app.get('/api/system/bbr', checkAuth, (req, res) => {
     const read = k => String(shTry('sysctl', ['-n', k]) || '').trim();
     const current = read('net.ipv4.tcp_congestion_control');
@@ -14994,17 +14994,17 @@ app.post('/api/system/bbr', checkAuth, requireAdmin, (req, res) => {
             try { sh('sudo', ['rm', '-f', '/etc/sysctl.d/99-bbr.conf']); } catch (e) { /* ignore */ }
             sh('sudo', ['sysctl', '-w', 'net.ipv4.tcp_congestion_control=cubic']);
         }
-        auditLog(req, 'TCP BBR: ' + (enabled ? 'включён' : 'выключен'));
+        auditLog(req, 'TCP BBR: ' + (enabled ? 'РІРєР»СЋС‡С‘РЅ' : 'РІС‹РєР»СЋС‡РµРЅ'));
         const current = String(shTry('sysctl', ['-n', 'net.ipv4.tcp_congestion_control']) || '').trim();
         res.json({ success: true, enabled: current === 'bbr', current });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось изменить BBR: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РёР·РјРµРЅРёС‚СЊ BBR: ' + (e.message || e) });
     }
 });
 
 // ---------------------------------------------------------------------------
-// Xray: VLESS + XHTTP + Reality. Ставится по кнопке, конфиги генерирует
-// панель. Используется как TCP-транспорт каскада вместо UDP-туннеля AWG.
+// Xray: VLESS + XHTTP + Reality. РЎС‚Р°РІРёС‚СЃСЏ РїРѕ РєРЅРѕРїРєРµ, РєРѕРЅС„РёРіРё РіРµРЅРµСЂРёСЂСѓРµС‚
+// РїР°РЅРµР»СЊ. РСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РєР°Рє TCP-С‚СЂР°РЅСЃРїРѕСЂС‚ РєР°СЃРєР°РґР° РІРјРµСЃС‚Рѕ UDP-С‚СѓРЅРЅРµР»СЏ AWG.
 // ---------------------------------------------------------------------------
 const XRAY_BIN = '/usr/local/bin/xray';
 const XRAY_CONF = '/usr/local/etc/xray/servpanel.json';
@@ -15071,35 +15071,35 @@ function xrayPublicFromPrivate(priv) {
     const out = String(sh(XRAY_BIN, ['x25519', '-i', priv]) || '');
     const pub = (out.match(/Password\s*\(PublicKey\)\s*:\s*(\S+)/i)
         || out.match(/Public\s*key\s*:\s*(\S+)/i) || [])[1] || '';
-    if (!pub) throw new Error('Не удалось вывести publicKey из privateKey');
+    if (!pub) throw new Error('РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РІРµСЃС‚Рё publicKey РёР· privateKey');
     return pub;
 }
 
 function xrayKeypair() {
     const out = String(sh(XRAY_BIN, ['x25519']) || '');
     const priv = (out.match(/Private\s*key\s*:\s*(\S+)/i) || [])[1] || '';
-    if (!priv) throw new Error('Не удалось сгенерировать ключи Reality: ' + out.replace(/\s+/g, ' ').slice(0, 120));
-    // publicKey всегда выводим из privateKey, иначе пары расходятся.
+    if (!priv) throw new Error('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ РєР»СЋС‡Рё Reality: ' + out.replace(/\s+/g, ' ').slice(0, 120));
+    // publicKey РІСЃРµРіРґР° РІС‹РІРѕРґРёРј РёР· privateKey, РёРЅР°С‡Рµ РїР°СЂС‹ СЂР°СЃС…РѕРґСЏС‚СЃСЏ.
     return { privateKey: priv, publicKey: xrayPublicFromPrivate(priv) };
 }
 
 function xrayUuid() {
     const out = String(sh(XRAY_BIN, ['uuid']) || '').trim();
-    if (!/^[0-9a-f-]{36}$/i.test(out)) throw new Error('Не удалось сгенерировать UUID');
+    if (!/^[0-9a-f-]{36}$/i.test(out)) throw new Error('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРіРµРЅРµСЂРёСЂРѕРІР°С‚СЊ UUID');
     return out;
 }
 
-// Готовые пары dest/SNI для Reality: сайты с TLS 1.3 и HTTP/2,
-// популярные и нейтральные по ASN.
+// Р“РѕС‚РѕРІС‹Рµ РїР°СЂС‹ dest/SNI РґР»СЏ Reality: СЃР°Р№С‚С‹ СЃ TLS 1.3 Рё HTTP/2,
+// РїРѕРїСѓР»СЏСЂРЅС‹Рµ Рё РЅРµР№С‚СЂР°Р»СЊРЅС‹Рµ РїРѕ ASN.
 const XRAY_PRESETS = [
-    { id: 'vimeo', label: 'Vimeo', dest: 'vimeo.com:443', serverName: 'vimeo.com', note: 'CDN, проверено на тестах' },
-    { id: 'cloudflare', label: 'Cloudflare', dest: 'www.cloudflare.com:443', serverName: 'www.cloudflare.com', note: 'огромная CDN' },
-    { id: 'microsoft', label: 'Microsoft', dest: 'www.microsoft.com:443', serverName: 'www.microsoft.com', note: 'крупный сайт, TLS 1.3' },
-    { id: 'google', label: 'Google (dl)', dest: 'dl.google.com:443', serverName: 'dl.google.com', note: 'раздача, много трафика' },
-    { id: 'apple', label: 'Apple', dest: 'www.apple.com:443', serverName: 'www.apple.com', note: 'стабильный H2' },
-    { id: 'icloud', label: 'iCloud', dest: 'gateway.icloud.com:443', serverName: 'gateway.icloud.com', note: 'служебный домен Apple' },
-    { id: 'mozilla', label: 'Mozilla', dest: 'addons.mozilla.org:443', serverName: 'addons.mozilla.org', note: 'магазин расширений' },
-    { id: 'samsung', label: 'Samsung', dest: 'www.samsung.com:443', serverName: 'www.samsung.com', note: 'крупный медиа-домен' }
+    { id: 'vimeo', label: 'Vimeo', dest: 'vimeo.com:443', serverName: 'vimeo.com', note: 'CDN, РїСЂРѕРІРµСЂРµРЅРѕ РЅР° С‚РµСЃС‚Р°С…' },
+    { id: 'cloudflare', label: 'Cloudflare', dest: 'www.cloudflare.com:443', serverName: 'www.cloudflare.com', note: 'РѕРіСЂРѕРјРЅР°СЏ CDN' },
+    { id: 'microsoft', label: 'Microsoft', dest: 'www.microsoft.com:443', serverName: 'www.microsoft.com', note: 'РєСЂСѓРїРЅС‹Р№ СЃР°Р№С‚, TLS 1.3' },
+    { id: 'google', label: 'Google (dl)', dest: 'dl.google.com:443', serverName: 'dl.google.com', note: 'СЂР°Р·РґР°С‡Р°, РјРЅРѕРіРѕ С‚СЂР°С„РёРєР°' },
+    { id: 'apple', label: 'Apple', dest: 'www.apple.com:443', serverName: 'www.apple.com', note: 'СЃС‚Р°Р±РёР»СЊРЅС‹Р№ H2' },
+    { id: 'icloud', label: 'iCloud', dest: 'gateway.icloud.com:443', serverName: 'gateway.icloud.com', note: 'СЃР»СѓР¶РµР±РЅС‹Р№ РґРѕРјРµРЅ Apple' },
+    { id: 'mozilla', label: 'Mozilla', dest: 'addons.mozilla.org:443', serverName: 'addons.mozilla.org', note: 'РјР°РіР°Р·РёРЅ СЂР°СЃС€РёСЂРµРЅРёР№' },
+    { id: 'samsung', label: 'Samsung', dest: 'www.samsung.com:443', serverName: 'www.samsung.com', note: 'РєСЂСѓРїРЅС‹Р№ РјРµРґРёР°-РґРѕРјРµРЅ' }
 ];
 
 const XRAY_FINGERPRINTS = ['firefox', 'chrome', 'safari', 'ios', 'android', 'edge', 'random', 'randomized'];
@@ -15109,26 +15109,26 @@ function xrayFingerprint(v) {
     return XRAY_FINGERPRINTS.includes(s) ? s : 'firefox';
 }
 
-// Проверка dest: TLS 1.3, ALPN h2 и RTT. Если сайт не даёт H2 или 1.3 —
-// Reality с ним будет выглядеть подозрительно.
+// РџСЂРѕРІРµСЂРєР° dest: TLS 1.3, ALPN h2 Рё RTT. Р•СЃР»Рё СЃР°Р№С‚ РЅРµ РґР°С‘С‚ H2 РёР»Рё 1.3 вЂ”
+// Reality СЃ РЅРёРј Р±СѓРґРµС‚ РІС‹РіР»СЏРґРµС‚СЊ РїРѕРґРѕР·СЂРёС‚РµР»СЊРЅРѕ.
 function xrayDestCheck(dest) {
     const s = String(dest || '').trim();
     const m = s.match(/^([a-z0-9.-]+)(?::(\d+))?$/i);
-    if (!m) throw new Error('Формат dest: host:port');
+    if (!m) throw new Error('Р¤РѕСЂРјР°С‚ dest: host:port');
     const host = m[1];
     const port = Number(m[2]) || 443;
     const script = 'echo | timeout 12 openssl s_client -connect ' + host + ':' + port +
         ' -servername ' + host + ' -alpn h2 -tls1_3 2>&1 | head -60';
     const out = String(shTry('bash', ['-c', script], { timeout: 20000 }) || '');
-    // Версию смотрим по всему выводу: разные сборки печатают
-    // «New, TLSv1.3» или «Protocol  : TLSv1.3», а иногда только второе.
+    // Р’РµСЂСЃРёСЋ СЃРјРѕС‚СЂРёРј РїРѕ РІСЃРµРјСѓ РІС‹РІРѕРґСѓ: СЂР°Р·РЅС‹Рµ СЃР±РѕСЂРєРё РїРµС‡Р°С‚Р°СЋС‚
+    // В«New, TLSv1.3В» РёР»Рё В«Protocol  : TLSv1.3В», Р° РёРЅРѕРіРґР° С‚РѕР»СЊРєРѕ РІС‚РѕСЂРѕРµ.
     const rtt = String(shTry('curl', ['-4', '-sS', '-o', '/dev/null', '-k', '--max-time', '8',
         '--tlsv1.3', '--tls-max', '1.3', '-w', '%{time_connect} %{http_version}', 'https://' + host + ':' + port + '/'], { timeout: 15000 }) || '').trim();
     const rttParts = rtt.split(/\s+/);
     const rttMs = Math.round((Number(rttParts[0]) || 0) * 1000);
-    // Если TLS 1.3 прошёл в curl — сайт его поддерживает, даже когда openssl молчит.
+    // Р•СЃР»Рё TLS 1.3 РїСЂРѕС€С‘Р» РІ curl вЂ” СЃР°Р№С‚ РµРіРѕ РїРѕРґРґРµСЂР¶РёРІР°РµС‚, РґР°Р¶Рµ РєРѕРіРґР° openssl РјРѕР»С‡РёС‚.
     const tls13 = /TLSv1\.3/i.test(out) || rttMs > 0;
-    // ALPN надёжнее спросить у curl: «2» — значит HTTP/2 поверх TLS 1.3.
+    // ALPN РЅР°РґС‘Р¶РЅРµРµ СЃРїСЂРѕСЃРёС‚СЊ Сѓ curl: В«2В» вЂ” Р·РЅР°С‡РёС‚ HTTP/2 РїРѕРІРµСЂС… TLS 1.3.
     const alpn = rttParts[1] === '2' || /ALPN protocol:\s*h2/i.test(out);
     return {
         host, port, tls13, alpn, rttMs,
@@ -15137,9 +15137,9 @@ function xrayDestCheck(dest) {
     };
 }
 
-// Свой публичный адрес не должен уходить в туннель: иначе панель, SSH и
-// RustDesk (hbbs/hbbr на этом же сервере) доступны клиентам только через
-// петлю RU → EU → RU, и релей отвечает «нет соединения».
+// РЎРІРѕР№ РїСѓР±Р»РёС‡РЅС‹Р№ Р°РґСЂРµСЃ РЅРµ РґРѕР»Р¶РµРЅ СѓС…РѕРґРёС‚СЊ РІ С‚СѓРЅРЅРµР»СЊ: РёРЅР°С‡Рµ РїР°РЅРµР»СЊ, SSH Рё
+// RustDesk (hbbs/hbbr РЅР° СЌС‚РѕРј Р¶Рµ СЃРµСЂРІРµСЂРµ) РґРѕСЃС‚СѓРїРЅС‹ РєР»РёРµРЅС‚Р°Рј С‚РѕР»СЊРєРѕ С‡РµСЂРµР·
+// РїРµС‚Р»СЋ RU в†’ EU в†’ RU, Рё СЂРµР»РµР№ РѕС‚РІРµС‡Р°РµС‚ В«РЅРµС‚ СЃРѕРµРґРёРЅРµРЅРёСЏВ».
 function xraySelfIp() {
     try {
         const out = String(shTry('ip', ['-4', 'route', 'get', '1.1.1.1']) || '');
@@ -15152,11 +15152,11 @@ function xraySelfIp() {
 function xraySelfDirect(enable) {
     const ip = xraySelfIp();
     if (!ip) return { ip: '', applied: false };
-    try { sh('sudo', ['ipset', 'create', 'ru', 'hash:net', '-exist']); } catch (e) { /* нет ipset */ }
+    try { sh('sudo', ['ipset', 'create', 'ru', 'hash:net', '-exist']); } catch (e) { /* РЅРµС‚ ipset */ }
     try {
         if (enable === false) sh('sudo', ['ipset', 'del', 'ru', ip]);
         else sh('sudo', ['ipset', 'add', 'ru', ip, '-exist']);
-    } catch (e) { /* записи нет */ }
+    } catch (e) { /* Р·Р°РїРёСЃРё РЅРµС‚ */ }
     return { ip, applied: true };
 }
 
@@ -15167,8 +15167,8 @@ function xraySelfDirectState() {
     return { ip, inRu };
 }
 
-// Токен для замера «скачать с самого RU-сервера»: клиент качает через
-// панель напрямую, минуя EU и Xray, — видно чистое плечо RU → клиент.
+// РўРѕРєРµРЅ РґР»СЏ Р·Р°РјРµСЂР° В«СЃРєР°С‡Р°С‚СЊ СЃ СЃР°РјРѕРіРѕ RU-СЃРµСЂРІРµСЂР°В»: РєР»РёРµРЅС‚ РєР°С‡Р°РµС‚ С‡РµСЂРµР·
+// РїР°РЅРµР»СЊ РЅР°РїСЂСЏРјСѓСЋ, РјРёРЅСѓСЏ EU Рё Xray, вЂ” РІРёРґРЅРѕ С‡РёСЃС‚РѕРµ РїР»РµС‡Рѕ RU в†’ РєР»РёРµРЅС‚.
 function xraySpeedToken() {
     const st = xrayReadState();
     if (st.speedToken) return st.speedToken;
@@ -15177,9 +15177,9 @@ function xraySpeedToken() {
     return t;
 }
 
-// Тюнинг TCP для туннеля: один поток упирается в окно (~20 Мбит/с при
-// RTT 39 мс), хотя несколько потоков дают 70+. Снимаем htb с awg0
-// (у него burst 1680 байт — режет пачки), ставим fq и большие буферы.
+// РўСЋРЅРёРЅРі TCP РґР»СЏ С‚СѓРЅРЅРµР»СЏ: РѕРґРёРЅ РїРѕС‚РѕРє СѓРїРёСЂР°РµС‚СЃСЏ РІ РѕРєРЅРѕ (~20 РњР±РёС‚/СЃ РїСЂРё
+// RTT 39 РјСЃ), С…РѕС‚СЏ РЅРµСЃРєРѕР»СЊРєРѕ РїРѕС‚РѕРєРѕРІ РґР°СЋС‚ 70+. РЎРЅРёРјР°РµРј htb СЃ awg0
+// (Сѓ РЅРµРіРѕ burst 1680 Р±Р°Р№С‚ вЂ” СЂРµР¶РµС‚ РїР°С‡РєРё), СЃС‚Р°РІРёРј fq Рё Р±РѕР»СЊС€РёРµ Р±СѓС„РµСЂС‹.
 function xrayTuneTcp() {
     const sysctls = {
         'net.core.default_qdisc': 'fq',
@@ -15197,8 +15197,8 @@ function xrayTuneTcp() {
     try {
         sh('sudo', ['bash', '-c',
             'sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1 || true']);
-    } catch (e) { /* нет bbr */ }
-    // Постоянно, чтобы переживало перезагрузку.
+    } catch (e) { /* РЅРµС‚ bbr */ }
+    // РџРѕСЃС‚РѕСЏРЅРЅРѕ, С‡С‚РѕР±С‹ РїРµСЂРµР¶РёРІР°Р»Рѕ РїРµСЂРµР·Р°РіСЂСѓР·РєСѓ.
     try {
         writeRootFile('/etc/sysctl.d/99-servpanel-tunnel.conf',
             Object.entries(sysctls).map(([k, v]) => k + '=' + v).join('\n') + '\n', '0644');
@@ -15219,11 +15219,11 @@ function xrayTuneTcp() {
 }
 
 function xrayXhttpSettings(st) {
-    // Для auto поле mode не передаём: Xray сам выбирает режим.
+    // Р”Р»СЏ auto РїРѕР»Рµ mode РЅРµ РїРµСЂРµРґР°С‘Рј: Xray СЃР°Рј РІС‹Р±РёСЂР°РµС‚ СЂРµР¶РёРј.
     const x = { path: st.path };
     if (st.xhttpMode && st.xhttpMode !== 'auto') x.mode = st.xhttpMode;
-    // Несколько HTTP/2-соединений вместо одного: у каждого своё окно,
-    // иначе скачивание упирается в per-stream окно.
+    // РќРµСЃРєРѕР»СЊРєРѕ HTTP/2-СЃРѕРµРґРёРЅРµРЅРёР№ РІРјРµСЃС‚Рѕ РѕРґРЅРѕРіРѕ: Сѓ РєР°Р¶РґРѕРіРѕ СЃРІРѕС‘ РѕРєРЅРѕ,
+    // РёРЅР°С‡Рµ СЃРєР°С‡РёРІР°РЅРёРµ СѓРїРёСЂР°РµС‚СЃСЏ РІ per-stream РѕРєРЅРѕ.
     x.xmux = { maxConcurrency: '8-16', cMaxReuseTimes: '64-128' };
     return x;
 }
@@ -15294,7 +15294,7 @@ function xrayClientConfig(st) {
                     shortId: st.shortId,
                     spiderX: '/',
                     fingerprint: xrayFingerprint(st.fingerprint),
-                    // HTTP/1.1 убирает per-stream окна HTTP/2, которые режут скачивание.
+                    // HTTP/1.1 СѓР±РёСЂР°РµС‚ per-stream РѕРєРЅР° HTTP/2, РєРѕС‚РѕСЂС‹Рµ СЂРµР¶СѓС‚ СЃРєР°С‡РёРІР°РЅРёРµ.
                     alpn: ['http/1.1']
                 }
             },
@@ -15314,8 +15314,8 @@ function xrayApplyConfig(config) {
         try { fs.unlinkSync(tmp); } catch (e) { /* ignore */ }
     }
     writeRootFile(XRAY_CONF, text + '\n', '0644');
-    // Отдельный юнит: на серверах может уже работать xray для WARP/AdGuard,
-    // и перезапуск общего xray.service поднял бы чужой конфиг.
+    // РћС‚РґРµР»СЊРЅС‹Р№ СЋРЅРёС‚: РЅР° СЃРµСЂРІРµСЂР°С… РјРѕР¶РµС‚ СѓР¶Рµ СЂР°Р±РѕС‚Р°С‚СЊ xray РґР»СЏ WARP/AdGuard,
+    // Рё РїРµСЂРµР·Р°РїСѓСЃРє РѕР±С‰РµРіРѕ xray.service РїРѕРґРЅСЏР» Р±С‹ С‡СѓР¶РѕР№ РєРѕРЅС„РёРі.
     writeRootFile('/etc/systemd/system/' + XRAY_UNIT, [
         '[Unit]',
         'Description=Servpanel Xray (VLESS + XHTTP + Reality)',
@@ -15370,28 +15370,28 @@ app.post('/api/xray/install', checkAuth, requireAdmin, (req, res) => {
     try {
         const url = String((req.body || {}).url || '').trim();
         if (url) {
-            if (!/^https?:\/\//i.test(url)) throw new Error('Нужен http(s)-URL');
+            if (!/^https?:\/\//i.test(url)) throw new Error('РќСѓР¶РµРЅ http(s)-URL');
             const tmp = path.join(os.tmpdir(), 'servpanel-xray-bin');
             sh('curl', ['-fsSL', '-o', tmp, url], { timeout: 300000 });
             sh('sudo', ['install', '-m', '0755', '-o', 'root', '-g', 'root', tmp, XRAY_BIN], { timeout: 60000 });
             try { fs.unlinkSync(tmp); } catch (e) { /* ignore */ }
             sh('sudo', ['systemctl', 'restart', XRAY_UNIT], { timeout: 60000 });
             const r = { installed: xrayInstalled(), version: xrayVersion(), running: xrayRunning(), custom: true };
-            auditLog(req, 'Xray: установлен свой бинарник ' + url);
+            auditLog(req, 'Xray: СѓСЃС‚Р°РЅРѕРІР»РµРЅ СЃРІРѕР№ Р±РёРЅР°СЂРЅРёРє ' + url);
             return res.json({ success: true, ...r });
         }
         const r = xrayInstall();
-        auditLog(req, 'Xray: установлен ' + (r.version || ''));
+        auditLog(req, 'Xray: СѓСЃС‚Р°РЅРѕРІР»РµРЅ ' + (r.version || ''));
         res.json({ success: true, ...r, running: xrayRunning() });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось установить Xray: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СѓСЃС‚Р°РЅРѕРІРёС‚СЊ Xray: ' + (e.message || e) });
     }
 });
 
 app.post('/api/xray/server', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     try {
-        if (!xrayInstalled()) throw new Error('Сначала установите Xray');
+        if (!xrayInstalled()) throw new Error('РЎРЅР°С‡Р°Р»Р° СѓСЃС‚Р°РЅРѕРІРёС‚Рµ Xray');
         const keys = (body.privateKey && body.publicKey) ? { privateKey: body.privateKey, publicKey: body.publicKey } : xrayKeypair();
         const shortId = String(body.shortId || crypto.randomBytes(4).toString('hex')).replace(/[^0-9a-f]/gi, '').slice(0, 16) || '00';
         const clientId = String(body.clientId || '') || xrayUuid();
@@ -15410,21 +15410,21 @@ app.post('/api/xray/server', checkAuth, requireAdmin, (req, res) => {
             clients: [{ id: clientId, name: String(body.clientName || 'cascade'), createdAt: Date.now() }]
         });
         xrayApplyConfig(xrayServerConfig(st));
-        auditLog(req, `Xray: сервер на ${st.port}, dest ${st.dest}`);
+        auditLog(req, `Xray: СЃРµСЂРІРµСЂ РЅР° ${st.port}, dest ${st.dest}`);
         res.json({ success: true, running: xrayRunning(), state: st, clientProfile: {
             port: st.port, id: clientId, publicKey: st.publicKey, shortId: st.shortId,
             serverName: st.serverName, path: st.path, xhttpMode: st.xhttpMode,
             fingerprint: xrayFingerprint(st.fingerprint)
         } });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось настроить сервер Xray: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РЅР°СЃС‚СЂРѕРёС‚СЊ СЃРµСЂРІРµСЂ Xray: ' + (e.message || e) });
     }
 });
 
 app.post('/api/xray/client', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     try {
-        if (!xrayInstalled()) throw new Error('Сначала установите Xray');
+        if (!xrayInstalled()) throw new Error('РЎРЅР°С‡Р°Р»Р° СѓСЃС‚Р°РЅРѕРІРёС‚Рµ Xray');
         const st = xrayWriteState({
             role: 'ru',
             address: String(body.address || '').trim(),
@@ -15437,12 +15437,12 @@ app.post('/api/xray/client', checkAuth, requireAdmin, (req, res) => {
             xhttpMode: ['auto', 'packet-up', 'stream-up', 'stream-one'].includes(String(body.xhttpMode)) ? String(body.xhttpMode) : 'auto',
             fingerprint: xrayFingerprint(body.fingerprint)
         });
-        if (!st.address || !st.clientId || !st.publicKey) throw new Error('Нужны address, id и publicKey');
+        if (!st.address || !st.clientId || !st.publicKey) throw new Error('РќСѓР¶РЅС‹ address, id Рё publicKey');
         xrayApplyConfig(xrayClientConfig(st));
-        auditLog(req, `Xray: клиент на ${st.address}:${st.port}`);
+        auditLog(req, `Xray: РєР»РёРµРЅС‚ РЅР° ${st.address}:${st.port}`);
         res.json({ success: true, running: xrayRunning(), state: st });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось настроить клиент Xray: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РЅР°СЃС‚СЂРѕРёС‚СЊ РєР»РёРµРЅС‚ Xray: ' + (e.message || e) });
     }
 });
 
@@ -15467,10 +15467,10 @@ app.post('/api/xray/test', checkAuth, requireAdmin, (req, res) => {
         }
         const test = { at: Date.now(), ip, mbps: Number(mbps.toFixed(2)), streams };
         xrayWriteState({ lastTest: test });
-        auditLog(req, `Xray: тест — ${ip || '-'}, ${mbps.toFixed(2)} Мбит/с, потоков ${streams}`);
+        auditLog(req, `Xray: С‚РµСЃС‚ вЂ” ${ip || '-'}, ${mbps.toFixed(2)} РњР±РёС‚/СЃ, РїРѕС‚РѕРєРѕРІ ${streams}`);
         res.json({ success: true, ip, mbps: Number(mbps.toFixed(2)), streams });
     } catch (e) {
-        res.status(500).json({ error: 'Тест через Xray не удался: ' + (e.message || e) });
+        res.status(500).json({ error: 'РўРµСЃС‚ С‡РµСЂРµР· Xray РЅРµ СѓРґР°Р»СЃСЏ: ' + (e.message || e) });
     }
 });
 
@@ -15479,18 +15479,18 @@ app.post('/api/xray/mode', checkAuth, requireAdmin, (req, res) => {
     try {
         const st = xrayReadState();
         if (mode === 'xray') {
-            if (st.role !== 'ru') throw new Error('Переключение делается на RU-панели (клиент каскада)');
-            if (!st.address || !st.publicKey) throw new Error('Сначала настройте клиент Xray');
+            if (st.role !== 'ru') throw new Error('РџРµСЂРµРєР»СЋС‡РµРЅРёРµ РґРµР»Р°РµС‚СЃСЏ РЅР° RU-РїР°РЅРµР»Рё (РєР»РёРµРЅС‚ РєР°СЃРєР°РґР°)');
+            if (!st.address || !st.publicKey) throw new Error('РЎРЅР°С‡Р°Р»Р° РЅР°СЃС‚СЂРѕР№С‚Рµ РєР»РёРµРЅС‚ Xray');
             xrayApplyConfig(xrayClientConfig(st));
             xrayTproxy(true);
         } else {
             xrayTproxy(false);
         }
         const next = xrayWriteState({ mode });
-        auditLog(req, 'Протокол каскада: ' + mode);
+        auditLog(req, 'РџСЂРѕС‚РѕРєРѕР» РєР°СЃРєР°РґР°: ' + mode);
         res.json({ success: true, mode: next.mode });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось переключить протокол: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµРєР»СЋС‡РёС‚СЊ РїСЂРѕС‚РѕРєРѕР»: ' + (e.message || e) });
     }
 });
 
@@ -15498,17 +15498,17 @@ function xrayTproxy(enable) {
     const exits = cascadeExitList();
     const iface = existingIfaces().find(i => i === 'awg0') || 'awg0';
     const port = 12345;
-    // Панель, SSH и RustDesk живут на этом же сервере: их адрес исключаем
-    // из туннеля, иначе клиент ходит к ним через петлю RU → EU → RU.
+    // РџР°РЅРµР»СЊ, SSH Рё RustDesk Р¶РёРІСѓС‚ РЅР° СЌС‚РѕРј Р¶Рµ СЃРµСЂРІРµСЂРµ: РёС… Р°РґСЂРµСЃ РёСЃРєР»СЋС‡Р°РµРј
+    // РёР· С‚СѓРЅРЅРµР»СЏ, РёРЅР°С‡Рµ РєР»РёРµРЅС‚ С…РѕРґРёС‚ Рє РЅРёРј С‡РµСЂРµР· РїРµС‚Р»СЋ RU в†’ EU в†’ RU.
     if (enable) xraySelfDirect(true);
-    if (enable) { try { xrayTuneTcp(); } catch (e) { /* не критично */ } }
-    // Xray терминирует TCP локально и объявляет MSS по MTU awg0 (1280 -> 1240),
-    // а у клиента MTU 1200. Без клампинга скачиваемые пакеты 1280 байт
-    // не влезают в клиентский туннель и теряются.
+    if (enable) { try { xrayTuneTcp(); } catch (e) { /* РЅРµ РєСЂРёС‚РёС‡РЅРѕ */ } }
+    // Xray С‚РµСЂРјРёРЅРёСЂСѓРµС‚ TCP Р»РѕРєР°Р»СЊРЅРѕ Рё РѕР±СЉСЏРІР»СЏРµС‚ MSS РїРѕ MTU awg0 (1280 -> 1240),
+    // Р° Сѓ РєР»РёРµРЅС‚Р° MTU 1200. Р‘РµР· РєР»Р°РјРїРёРЅРіР° СЃРєР°С‡РёРІР°РµРјС‹Рµ РїР°РєРµС‚С‹ 1280 Р±Р°Р№С‚
+    // РЅРµ РІР»РµР·Р°СЋС‚ РІ РєР»РёРµРЅС‚СЃРєРёР№ С‚СѓРЅРЅРµР»СЊ Рё С‚РµСЂСЏСЋС‚СЃСЏ.
     const clampDel = ['-w', '5', '-t', 'mangle', '-D', 'OUTPUT', '-o', iface, '-p', 'tcp',
         '--tcp-flags', 'SYN,RST', 'SYN', '-j', 'TCPMSS', '--set-mss', '1160'];
-    try { sh('sudo', ['iptables'].concat(clampDel)); } catch (err) { /* правила нет */ }
-    // Подсеть клиентов: ответы Xray должны уходить в awg0, а не в local-таблицу.
+    try { sh('sudo', ['iptables'].concat(clampDel)); } catch (err) { /* РїСЂР°РІРёР»Р° РЅРµС‚ */ }
+    // РџРѕРґСЃРµС‚СЊ РєР»РёРµРЅС‚РѕРІ: РѕС‚РІРµС‚С‹ Xray РґРѕР»Р¶РЅС‹ СѓС…РѕРґРёС‚СЊ РІ awg0, Р° РЅРµ РІ local-С‚Р°Р±Р»РёС†Сѓ.
     let clientNet = '';
     let selfAddr = '';
     try {
@@ -15522,10 +15522,10 @@ function xrayTproxy(enable) {
             const net = (ipNum & mask) >>> 0;
             clientNet = [net >>> 24, (net >> 16) & 255, (net >> 8) & 255, net & 255].join('.') + '/' + prefix;
         }
-    } catch (e) { /* без подсети */ }
-    // Трафик клиентов к самому серверу (панель, SOCKS, SSH по туннельному
-    // адресу) не должен перехватываться: иначе он идёт через Xray дважды —
-    // REDIRECT в dokodemo, обратно в локальный порт и ещё раз в туннель.
+    } catch (e) { /* Р±РµР· РїРѕРґСЃРµС‚Рё */ }
+    // РўСЂР°С„РёРє РєР»РёРµРЅС‚РѕРІ Рє СЃР°РјРѕРјСѓ СЃРµСЂРІРµСЂСѓ (РїР°РЅРµР»СЊ, SOCKS, SSH РїРѕ С‚СѓРЅРЅРµР»СЊРЅРѕРјСѓ
+    // Р°РґСЂРµСЃСѓ) РЅРµ РґРѕР»Р¶РµРЅ РїРµСЂРµС…РІР°С‚С‹РІР°С‚СЊСЃСЏ: РёРЅР°С‡Рµ РѕРЅ РёРґС‘С‚ С‡РµСЂРµР· Xray РґРІР°Р¶РґС‹ вЂ”
+    // REDIRECT РІ dokodemo, РѕР±СЂР°С‚РЅРѕ РІ Р»РѕРєР°Р»СЊРЅС‹Р№ РїРѕСЂС‚ Рё РµС‰С‘ СЂР°Р· РІ С‚СѓРЅРЅРµР»СЊ.
     const netAddr = (clientNet || '').split('/')[0];
     const dropSelfRules = () => {
         const targets = [selfAddr, netAddr].filter((v, i, a) => v && a.indexOf(v) === i);
@@ -15539,8 +15539,8 @@ function xrayTproxy(enable) {
         }
     };
     dropSelfRules();
-    // Ставим исключение один раз до цикла выходов: иначе на каждый выход
-    // появляется свой дубль правила.
+    // РЎС‚Р°РІРёРј РёСЃРєР»СЋС‡РµРЅРёРµ РѕРґРёРЅ СЂР°Р· РґРѕ С†РёРєР»Р° РІС‹С…РѕРґРѕРІ: РёРЅР°С‡Рµ РЅР° РєР°Р¶РґС‹Р№ РІС‹С…РѕРґ
+    // РїРѕСЏРІР»СЏРµС‚СЃСЏ СЃРІРѕР№ РґСѓР±Р»СЊ РїСЂР°РІРёР»Р°.
     const addSelfRules = () => {
         if (!selfAddr) return;
         for (const table of ['nat', 'mangle']) {
@@ -15554,22 +15554,22 @@ function xrayTproxy(enable) {
     for (const e of exits) {
         const mark = cascadeExitMark(e.index);
         const table = String(cascadeExitTable(e.index));
-        // TCP — через NAT REDIRECT.
+        // TCP вЂ” С‡РµСЂРµР· NAT REDIRECT.
         const tcpDel = ['-w', '5', '-t', 'nat', '-D', 'PREROUTING', '-i', iface, '-p', 'tcp',
             '-m', 'mark', '--mark', mark, '-j', 'REDIRECT', '--to-ports', '12345'];
-        try { sh('sudo', ['iptables'].concat(tcpDel)); } catch (err) { /* правила нет */ }
-        // Чистим и старый TPROXY для TCP, если остался от прежних сборок.
+        try { sh('sudo', ['iptables'].concat(tcpDel)); } catch (err) { /* РїСЂР°РІРёР»Р° РЅРµС‚ */ }
+        // Р§РёСЃС‚РёРј Рё СЃС‚Р°СЂС‹Р№ TPROXY РґР»СЏ TCP, РµСЃР»Рё РѕСЃС‚Р°Р»СЃСЏ РѕС‚ РїСЂРµР¶РЅРёС… СЃР±РѕСЂРѕРє.
         try {
             sh('sudo', ['iptables', '-w', '5', '-t', 'mangle', '-D', 'PREROUTING', '-i', iface, '-p', 'tcp',
                 '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', '12345', '--tproxy-mark', mark]);
-        } catch (err) { /* правила нет */ }
-        // UDP — через TPROXY (REDIRECT для UDP не работает).
+        } catch (err) { /* РїСЂР°РІРёР»Р° РЅРµС‚ */ }
+        // UDP вЂ” С‡РµСЂРµР· TPROXY (REDIRECT РґР»СЏ UDP РЅРµ СЂР°Р±РѕС‚Р°РµС‚).
         const udpDel = ['-w', '5', '-t', 'mangle', '-D', 'PREROUTING', '-i', iface, '-p', 'udp',
             '-m', 'mark', '--mark', mark, '-j', 'TPROXY', '--on-port', '12346', '--tproxy-mark', mark];
-        try { sh('sudo', ['iptables'].concat(udpDel)); } catch (err) { /* правила нет */ }
-        // TPROXY доставляет пакеты локально, и UFW режет их на INPUT.
+        try { sh('sudo', ['iptables'].concat(udpDel)); } catch (err) { /* РїСЂР°РІРёР»Р° РЅРµС‚ */ }
+        // TPROXY РґРѕСЃС‚Р°РІР»СЏРµС‚ РїР°РєРµС‚С‹ Р»РѕРєР°Р»СЊРЅРѕ, Рё UFW СЂРµР¶РµС‚ РёС… РЅР° INPUT.
         const inDel = ['-w', '5', '-t', 'filter', '-D', 'INPUT', '-m', 'mark', '--mark', mark, '-j', 'ACCEPT'];
-        try { sh('sudo', ['iptables'].concat(inDel)); } catch (err) { /* правила нет */ }
+        try { sh('sudo', ['iptables'].concat(inDel)); } catch (err) { /* РїСЂР°РІРёР»Р° РЅРµС‚ */ }
         if (enable) {
             sh('sudo', ['ip', 'route', 'replace', 'local', 'default', 'dev', 'lo', 'table', table]);
             if (clientNet) sh('sudo', ['ip', 'route', 'replace', clientNet, 'dev', iface, 'table', table]);
@@ -15586,7 +15586,7 @@ function xrayTproxy(enable) {
         }
     }
     if (enable) {
-        // Таймер маршрутов перезаписывает таблицы — на время Xray его останавливаем.
+        // РўР°Р№РјРµСЂ РјР°СЂС€СЂСѓС‚РѕРІ РїРµСЂРµР·Р°РїРёСЃС‹РІР°РµС‚ С‚Р°Р±Р»РёС†С‹ вЂ” РЅР° РІСЂРµРјСЏ Xray РµРіРѕ РѕСЃС‚Р°РЅР°РІР»РёРІР°РµРј.
         try { sh('sudo', ['systemctl', 'stop', 'awg-routing.timer']); } catch (e) { /* ignore */ }
     } else {
         try { sh('sudo', ['systemctl', 'start', 'awg-routing.timer']); } catch (e) { /* ignore */ }
@@ -15607,12 +15607,12 @@ app.post('/api/xray/service', checkAuth, requireAdmin, (req, res) => {
             try { sh('sudo', ['systemctl', 'daemon-reload']); } catch (e) { /* ignore */ }
             xrayWriteState({ role: '', mode: 'awg' });
         } else {
-            throw new Error('Неизвестное действие');
+            throw new Error('РќРµРёР·РІРµСЃС‚РЅРѕРµ РґРµР№СЃС‚РІРёРµ');
         }
-        auditLog(req, 'Xray: служба ' + action);
+        auditLog(req, 'Xray: СЃР»СѓР¶Р±Р° ' + action);
         res.json({ success: true, action, running: xrayRunning() });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось выполнить: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РїРѕР»РЅРёС‚СЊ: ' + (e.message || e) });
     }
 });
 
@@ -15624,37 +15624,37 @@ app.post('/api/xray/clients', checkAuth, requireAdmin, (req, res) => {
     const body = req.body || {};
     try {
         const st = xrayReadState();
-        if (st.role !== 'eu') throw new Error('Добавлять клиентов можно только на сервере (EU)');
+        if (st.role !== 'eu') throw new Error('Р”РѕР±Р°РІР»СЏС‚СЊ РєР»РёРµРЅС‚РѕРІ РјРѕР¶РЅРѕ С‚РѕР»СЊРєРѕ РЅР° СЃРµСЂРІРµСЂРµ (EU)');
         const name = String(body.name || '').trim().slice(0, 40);
-        if (!name) throw new Error('Укажите имя клиента');
+        if (!name) throw new Error('РЈРєР°Р¶РёС‚Рµ РёРјСЏ РєР»РёРµРЅС‚Р°');
         const id = xrayUuid();
         const clients = st.clients.concat([{ id, name, createdAt: Date.now() }]);
         const next = xrayWriteState({ clients });
         xrayApplyConfig(xrayServerConfig(next));
-        auditLog(req, `Xray: клиент ${name}`);
+        auditLog(req, `Xray: РєР»РёРµРЅС‚ ${name}`);
         res.json({ success: true, id, name, clients });
     } catch (e) {
-        res.status(500).json({ error: e.message || 'Не удалось добавить клиента' });
+        res.status(500).json({ error: e.message || 'РќРµ СѓРґР°Р»РѕСЃСЊ РґРѕР±Р°РІРёС‚СЊ РєР»РёРµРЅС‚Р°' });
     }
 });
 
 app.get('/api/xray/log', checkAuth, requireAdmin, (req, res) => {
     try {
         const out = String(sh('sudo', ['journalctl', '-u', XRAY_UNIT, '-n', '200', '--no-pager', '--output', 'cat'], { timeout: 20000 }) || '');
-        res.type('text/plain').send(out || 'Лог пуст');
+        res.type('text/plain').send(out || 'Р›РѕРі РїСѓСЃС‚');
     } catch (e) {
-        res.type('text/plain').send('Не удалось прочитать лог: ' + (e.message || e));
+        res.type('text/plain').send('РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ Р»РѕРі: ' + (e.message || e));
     }
 });
 
 // ---------------------------------------------------------------------------
-// Профили Xray: наборы параметров «сервер» и «клиент» с импортом/экспортом.
+// РџСЂРѕС„РёР»Рё Xray: РЅР°Р±РѕСЂС‹ РїР°СЂР°РјРµС‚СЂРѕРІ В«СЃРµСЂРІРµСЂВ» Рё В«РєР»РёРµРЅС‚В» СЃ РёРјРїРѕСЂС‚РѕРј/СЌРєСЃРїРѕСЂС‚РѕРј.
 // ---------------------------------------------------------------------------
 function xrayProfileFromBody(body, base) {
     const st = base || xrayReadState();
     const p = {
         id: String(body.id || ('p' + crypto.randomBytes(4).toString('hex'))),
-        name: String(body.name || '').trim().slice(0, 60) || 'Профиль',
+        name: String(body.name || '').trim().slice(0, 60) || 'РџСЂРѕС„РёР»СЊ',
         role: String(body.role || st.role || 'eu') === 'ru' ? 'ru' : 'eu',
         port: Math.max(1, Math.min(65535, Number(body.port) || st.port || 443)),
         dest: String(body.dest || st.dest || 'vimeo.com:443'),
@@ -15691,7 +15691,7 @@ function xrayProfileExport(p) {
     };
 }
 
-// История загрузки CPU: короткие замеры не ловят пик, а история ловит.
+// РСЃС‚РѕСЂРёСЏ Р·Р°РіСЂСѓР·РєРё CPU: РєРѕСЂРѕС‚РєРёРµ Р·Р°РјРµСЂС‹ РЅРµ Р»РѕРІСЏС‚ РїРёРє, Р° РёСЃС‚РѕСЂРёСЏ Р»РѕРІРёС‚.
 const CPU_HISTORY = [];
 let cpuHistPrev = null;
 try {
@@ -15716,8 +15716,8 @@ app.get('/api/diag/cpu-history', checkAuth, requireAdmin, (req, res) => {
     res.json({ success: true, peak, items });
 });
 
-// iperf3-сервер на туннельном адресе: клиент мерит плечо RU → клиент
-// чистым TCP, без nginx и буферизации. Одна сессия — один замер.
+// iperf3-СЃРµСЂРІРµСЂ РЅР° С‚СѓРЅРЅРµР»СЊРЅРѕРј Р°РґСЂРµСЃРµ: РєР»РёРµРЅС‚ РјРµСЂРёС‚ РїР»РµС‡Рѕ RU в†’ РєР»РёРµРЅС‚
+// С‡РёСЃС‚С‹Рј TCP, Р±РµР· nginx Рё Р±СѓС„РµСЂРёР·Р°С†РёРё. РћРґРЅР° СЃРµСЃСЃРёСЏ вЂ” РѕРґРёРЅ Р·Р°РјРµСЂ.
 let xrayIperfRun = null;
 function xrayIperfStop() {
     if (!xrayIperfRun) return;
@@ -15730,14 +15730,14 @@ app.post('/api/xray/iperf', checkAuth, requireAdmin, (req, res) => {
         const iface = existingIfaces().find(i => i === 'awg0') || 'awg0';
         const m = String(shTry('ip', ['-o', '-f', 'inet', 'addr', 'show', iface]) || '').match(/inet\s+(\d+\.\d+\.\d+\.\d+)/);
         const host = m ? m[1] : '';
-        if (!host) throw new Error('у ' + iface + ' нет IPv4');
+        if (!host) throw new Error('Сѓ ' + iface + ' РЅРµС‚ IPv4');
         xrayIperfStop();
         iperfEnsureInstalled();
         const port = crypto.randomInt(20000, 60000);
         sh('sudo', ['bash', '-c', 'nohup iperf3 -s -p ' + port + ' -B ' + host + ' -1 >/tmp/servpanel-iperf.log 2>&1 &'], { timeout: 15000 });
         try { sh('sudo', ['ufw', 'allow', 'in', 'on', iface, 'to', 'any', 'port', String(port), 'proto', 'tcp']); } catch (e) { /* ignore */ }
         xrayIperfRun = { port, host, iface, startedAt: Date.now() };
-        auditLog(req, 'iperf3 на ' + host + ':' + port);
+        auditLog(req, 'iperf3 РЅР° ' + host + ':' + port);
         res.json({ success: true, ip: host, port, wait: 5 });
     } catch (e) {
         res.status(500).json({ error: 'iperf3: ' + (e.message || e) });
@@ -15751,40 +15751,40 @@ app.post('/api/xray/iperf/stop', checkAuth, requireAdmin, (req, res) => {
 app.post('/api/xray/tune', checkAuth, requireAdmin, (req, res) => {
     try {
         const r = xrayTuneTcp();
-        auditLog(req, 'Тюнинг TCP туннеля: ' + r.qdisc);
+        auditLog(req, 'РўСЋРЅРёРЅРі TCP С‚СѓРЅРЅРµР»СЏ: ' + r.qdisc);
         res.json({ success: true, ...r });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось применить тюнинг: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРёРјРµРЅРёС‚СЊ С‚СЋРЅРёРЅРі: ' + (e.message || e) });
     }
 });
 
-// UDP-проба сервер → клиент через iperf3: -b 0 (unlimited), режим -R.
-// Показывает чистую доставку без TCP-окон и потери в процентах.
+// UDP-РїСЂРѕР±Р° СЃРµСЂРІРµСЂ в†’ РєР»РёРµРЅС‚ С‡РµСЂРµР· iperf3: -b 0 (unlimited), СЂРµР¶РёРј -R.
+// РџРѕРєР°Р·С‹РІР°РµС‚ С‡РёСЃС‚СѓСЋ РґРѕСЃС‚Р°РІРєСѓ Р±РµР· TCP-РѕРєРѕРЅ Рё РїРѕС‚РµСЂРё РІ РїСЂРѕС†РµРЅС‚Р°С….
 app.post('/api/xray/udp-blast', checkAuth, requireAdmin, (req, res) => {
     const b = req.body || {};
     const host = String(b.ip || '');
     const port = Math.max(1, Math.min(65535, Number(b.port) || 0));
     const seconds = Math.max(3, Math.min(30, Number(b.seconds) || 10));
     if (!/^\d+\.\d+\.\d+\.\d+$/.test(host) || !port) {
-        return res.status(400).json({ error: 'Нужны ip и port' });
+        return res.status(400).json({ error: 'РќСѓР¶РЅС‹ ip Рё port' });
     }
     try {
         iperfEnsureInstalled();
         const out = String(sh('iperf3', ['-c', host, '-p', String(port), '-u', '-b', '0', '-R', '-t', String(seconds), '-J'], { timeout: (seconds + 20) * 1000 }) || '');
         let j;
-        try { j = JSON.parse(out); } catch (e) { throw new Error('iperf3 не вернул JSON: ' + out.slice(-200)); }
+        try { j = JSON.parse(out); } catch (e) { throw new Error('iperf3 РЅРµ РІРµСЂРЅСѓР» JSON: ' + out.slice(-200)); }
         const sum = (j.end && j.end.sum) || {};
         const mbps = (Number(sum.bits_per_second) || 0) / 1e6;
         const lost = Number(sum.lost_percent) || 0;
-        auditLog(req, 'UDP-проба ' + host + ':' + port + ' — ' + mbps.toFixed(1) + ' Мбит/с, потери ' + lost + '%');
+        auditLog(req, 'UDP-РїСЂРѕР±Р° ' + host + ':' + port + ' вЂ” ' + mbps.toFixed(1) + ' РњР±РёС‚/СЃ, РїРѕС‚РµСЂРё ' + lost + '%');
         res.json({ success: true, mbps: Number(mbps.toFixed(2)), lost, seconds });
     } catch (e) {
-        res.status(500).json({ error: 'UDP-проба не удалась: ' + String((e.stderr || e.message || e)).slice(0, 300) });
+        res.status(500).json({ error: 'UDP-РїСЂРѕР±Р° РЅРµ СѓРґР°Р»Р°СЃСЊ: ' + String((e.stderr || e.message || e)).slice(0, 300) });
     }
 });
 
-// Замер плеча RU → клиент: отдаёт N мегабайт напрямую с RU-сервера.
-// Только по токену из панели, иначе это был бы открытый генератор трафика.
+// Р—Р°РјРµСЂ РїР»РµС‡Р° RU в†’ РєР»РёРµРЅС‚: РѕС‚РґР°С‘С‚ N РјРµРіР°Р±Р°Р№С‚ РЅР°РїСЂСЏРјСѓСЋ СЃ RU-СЃРµСЂРІРµСЂР°.
+// РўРѕР»СЊРєРѕ РїРѕ С‚РѕРєРµРЅСѓ РёР· РїР°РЅРµР»Рё, РёРЅР°С‡Рµ СЌС‚Рѕ Р±С‹Р» Р±С‹ РѕС‚РєСЂС‹С‚С‹Р№ РіРµРЅРµСЂР°С‚РѕСЂ С‚СЂР°С„РёРєР°.
 function readCpuTimes() {
     try {
         const line = (fs.readFileSync('/proc/stat', 'utf8').split('\n')[0] || '').trim();
@@ -15799,7 +15799,7 @@ app.get('/api/speed/down', (req, res) => {
     const token = String(req.query.t || '');
     const st = xrayReadState();
     if (!st.speedToken || token !== st.speedToken) {
-        return res.status(403).type('text/plain').send('Нет доступа');
+        return res.status(403).type('text/plain').send('РќРµС‚ РґРѕСЃС‚СѓРїР°');
     }
     const mb = Math.max(1, Math.min(200, Number(req.query.mb) || 25));
     const total = mb * 1024 * 1024;
@@ -15809,7 +15809,7 @@ app.get('/api/speed/down', (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     let sent = 0;
     let stopped = false;
-    // CPU сервера во время передачи: покажет, упирается ли шифрование в ядра.
+    // CPU СЃРµСЂРІРµСЂР° РІРѕ РІСЂРµРјСЏ РїРµСЂРµРґР°С‡Рё: РїРѕРєР°Р¶РµС‚, СѓРїРёСЂР°РµС‚СЃСЏ Р»Рё С€РёС„СЂРѕРІР°РЅРёРµ РІ СЏРґСЂР°.
     const startedAt = Date.now();
     const hrtime = process.hrtime.bigint();
     let cpuPrev = readCpuTimes();
@@ -15877,10 +15877,10 @@ app.post('/api/xray/selfdirect', checkAuth, requireAdmin, (req, res) => {
     try {
         const r = xraySelfDirect(enabled);
         const state = xraySelfDirectState();
-        auditLog(req, 'Xray: свой адрес ' + (enabled ? 'выведен из туннеля' : 'возвращён в туннель') + (r.ip ? ' (' + r.ip + ')' : ''));
+        auditLog(req, 'Xray: СЃРІРѕР№ Р°РґСЂРµСЃ ' + (enabled ? 'РІС‹РІРµРґРµРЅ РёР· С‚СѓРЅРЅРµР»СЏ' : 'РІРѕР·РІСЂР°С‰С‘РЅ РІ С‚СѓРЅРЅРµР»СЊ') + (r.ip ? ' (' + r.ip + ')' : ''));
         res.json({ success: true, ...state, applied: r.applied });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось изменить исключение: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РёР·РјРµРЅРёС‚СЊ РёСЃРєР»СЋС‡РµРЅРёРµ: ' + (e.message || e) });
     }
 });
 
@@ -15888,7 +15888,7 @@ app.post('/api/xray/destcheck', checkAuth, requireAdmin, (req, res) => {
     try {
         res.json({ success: true, ...xrayDestCheck((req.body || {}).dest) });
     } catch (e) {
-        res.status(500).json({ error: e.message || 'Не удалось проверить dest' });
+        res.status(500).json({ error: e.message || 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕРІРµСЂРёС‚СЊ dest' });
     }
 });
 
@@ -15903,10 +15903,10 @@ app.post('/api/xray/profiles', checkAuth, requireAdmin, (req, res) => {
         const p = xrayProfileFromBody(body, st);
         const profiles = st.profiles.filter(x => x.id !== p.id).concat([p]);
         xrayWriteState({ profiles });
-        auditLog(req, 'Xray: сохранён профиль ' + p.name);
+        auditLog(req, 'Xray: СЃРѕС…СЂР°РЅС‘РЅ РїСЂРѕС„РёР»СЊ ' + p.name);
         res.json({ success: true, profile: p, profiles });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось сохранить профиль: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РїСЂРѕС„РёР»СЊ: ' + (e.message || e) });
     }
 });
 
@@ -15914,8 +15914,8 @@ app.post('/api/xray/profiles/:id/apply', checkAuth, requireAdmin, (req, res) => 
     try {
         const st = xrayReadState();
         const p = st.profiles.find(x => x.id === String(req.params.id));
-        if (!p) throw new Error('Профиль не найден');
-        if (!xrayInstalled()) throw new Error('Сначала установите Xray');
+        if (!p) throw new Error('РџСЂРѕС„РёР»СЊ РЅРµ РЅР°Р№РґРµРЅ');
+        if (!xrayInstalled()) throw new Error('РЎРЅР°С‡Р°Р»Р° СѓСЃС‚Р°РЅРѕРІРёС‚Рµ Xray');
         const next = xrayWriteState({
             role: p.role,
             port: p.port,
@@ -15931,17 +15931,17 @@ app.post('/api/xray/profiles/:id/apply', checkAuth, requireAdmin, (req, res) => 
             clientId: p.clientId
         });
         if (p.role === 'eu') {
-            if (!next.privateKey) throw new Error('В профиле нет privateKey');
+            if (!next.privateKey) throw new Error('Р’ РїСЂРѕС„РёР»Рµ РЅРµС‚ privateKey');
             if (!next.clients.length) next.clients = [{ id: next.clientId || xrayUuid(), name: 'cascade', createdAt: Date.now() }];
             xrayApplyConfig(xrayServerConfig(xrayWriteState({ clients: next.clients })));
         } else {
-            if (!next.address || !next.publicKey) throw new Error('В профиле нет адреса или publicKey');
+            if (!next.address || !next.publicKey) throw new Error('Р’ РїСЂРѕС„РёР»Рµ РЅРµС‚ Р°РґСЂРµСЃР° РёР»Рё publicKey');
             xrayApplyConfig(xrayClientConfig(next));
         }
-        auditLog(req, 'Xray: применён профиль ' + p.name);
+        auditLog(req, 'Xray: РїСЂРёРјРµРЅС‘РЅ РїСЂРѕС„РёР»СЊ ' + p.name);
         res.json({ success: true, running: xrayRunning(), profile: p, state: xrayReadState() });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось применить профиль: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРёРјРµРЅРёС‚СЊ РїСЂРѕС„РёР»СЊ: ' + (e.message || e) });
     }
 });
 
@@ -15949,13 +15949,13 @@ app.post('/api/xray/profiles/:id/delete', checkAuth, requireAdmin, (req, res) =>
     const st = xrayReadState();
     const profiles = st.profiles.filter(x => x.id !== String(req.params.id));
     xrayWriteState({ profiles });
-    auditLog(req, 'Xray: удалён профиль ' + req.params.id);
+    auditLog(req, 'Xray: СѓРґР°Р»С‘РЅ РїСЂРѕС„РёР»СЊ ' + req.params.id);
     res.json({ success: true, profiles });
 });
 
 app.get('/api/xray/profiles/:id/export', checkAuth, requireAdmin, (req, res) => {
     const p = xrayReadState().profiles.find(x => x.id === String(req.params.id));
-    if (!p) return res.status(404).json({ error: 'Профиль не найден' });
+    if (!p) return res.status(404).json({ error: 'РџСЂРѕС„РёР»СЊ РЅРµ РЅР°Р№РґРµРЅ' });
     const name = (p.name || 'xray').replace(/[^a-z0-9._-]+/gi, '-');
     res.setHeader('Content-Disposition', 'attachment; filename="xray-' + name + '.json"');
     res.type('application/json').send(JSON.stringify(xrayProfileExport(p), null, 2));
@@ -15967,51 +15967,51 @@ app.post('/api/xray/import', checkAuth, requireAdmin, (req, res) => {
         let data = body.json || body.profile || body;
         if (typeof data === 'string') data = JSON.parse(data);
         const src = data && data.profile ? data.profile : data;
-        if (!src || typeof src !== 'object') throw new Error('В файле нет профиля');
+        if (!src || typeof src !== 'object') throw new Error('Р’ С„Р°Р№Р»Рµ РЅРµС‚ РїСЂРѕС„РёР»СЏ');
         const st = xrayReadState();
         const p = xrayProfileFromBody(src, st);
-        // Импортированный профиль всегда получает новый id, чтобы не затирать существующий.
+        // РРјРїРѕСЂС‚РёСЂРѕРІР°РЅРЅС‹Р№ РїСЂРѕС„РёР»СЊ РІСЃРµРіРґР° РїРѕР»СѓС‡Р°РµС‚ РЅРѕРІС‹Р№ id, С‡С‚РѕР±С‹ РЅРµ Р·Р°С‚РёСЂР°С‚СЊ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№.
         p.id = 'p' + crypto.randomBytes(4).toString('hex');
         p.createdAt = Date.now();
         const profiles = st.profiles.concat([p]);
         xrayWriteState({ profiles });
-        auditLog(req, 'Xray: импортирован профиль ' + p.name);
+        auditLog(req, 'Xray: РёРјРїРѕСЂС‚РёСЂРѕРІР°РЅ РїСЂРѕС„РёР»СЊ ' + p.name);
         res.json({ success: true, profile: p, profiles });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось импортировать профиль: ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РёРјРїРѕСЂС‚РёСЂРѕРІР°С‚СЊ РїСЂРѕС„РёР»СЊ: ' + (e.message || e) });
     }
 });
 
-// Скачивание Xray для ПК через панель: GitHub из РФ часто недоступен,
-// а панель до него достаёт.
+// РЎРєР°С‡РёРІР°РЅРёРµ Xray РґР»СЏ РџРљ С‡РµСЂРµР· РїР°РЅРµР»СЊ: GitHub РёР· Р Р¤ С‡Р°СЃС‚Рѕ РЅРµРґРѕСЃС‚СѓРїРµРЅ,
+// Р° РїР°РЅРµР»СЊ РґРѕ РЅРµРіРѕ РґРѕСЃС‚Р°С‘С‚.
 app.get('/api/xray/download', checkAuth, requireAdmin, (req, res) => {
     const os = ['windows', 'linux', 'macos'].includes(String(req.query.os)) ? String(req.query.os) : 'windows';
     const arch = ['64', 'arm64', '32'].includes(String(req.query.arch)) ? String(req.query.arch) : '64';
     const name = 'Xray-' + os + '-' + arch + (os === 'windows' ? '.zip' : '.zip');
-    const cacheDir = path.join(DATA_DIR, '.xray-dl');
+    const cacheDir = path.join(DATA_DIR, 'xray-dl');
     const cache = path.join(cacheDir, name);
     try {
         if (!fs.existsSync(cache) || fs.statSync(cache).size < 1024 * 1024) {
             const url = 'https://github.com/XTLS/Xray-core/releases/latest/download/' + name;
             const res1 = String(shTry('curl', ['-fSL', '--retry', '1', '-o', cache, url], { timeout: 180000 }) || '');
             if (!fs.existsSync(cache)) {
-                return res.status(502).json({ error: 'GitHub не отдал ' + name, detail: res1.slice(-300) });
+                return res.status(502).json({ error: 'GitHub РЅРµ РѕС‚РґР°Р» ' + name, detail: res1.slice(-300) });
             }
         }
         const size = fs.statSync(cache).size;
-        auditLog(req, 'Xray: скачивание клиента ' + name + ' (' + size + ' Б)');
+        auditLog(req, 'Xray: СЃРєР°С‡РёРІР°РЅРёРµ РєР»РёРµРЅС‚Р° ' + name + ' (' + size + ' Р‘)');
         res.download(cache, name);
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось скачать ' + name + ': ' + (e.message || e) });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ ' + name + ': ' + (e.message || e) });
     }
 });
 
 app.get('/api/xray/capture', checkAuth, requireAdmin, (req, res) => {
     try {
         const out = String(sh('sudo', ['timeout', '8', 'tcpdump', '-nn', '-i', 'any', '-c', '40', 'port', '12345'], { timeout: 15000 }) || '');
-        res.type('text/plain').send(out || 'Пакетов нет');
+        res.type('text/plain').send(out || 'РџР°РєРµС‚РѕРІ РЅРµС‚');
     } catch (e) {
-        res.type('text/plain').send('tcpdump не сработал: ' + (e.stdout || e.message || e));
+        res.type('text/plain').send('tcpdump РЅРµ СЃСЂР°Р±РѕС‚Р°Р»: ' + (e.stdout || e.message || e));
     }
 });
 
@@ -16075,7 +16075,7 @@ app.post('/api/xray/debugmode', checkAuth, requireAdmin, (req, res) => {
         else if (st.role === 'ru') xrayApplyConfig(xrayClientConfig(xrayReadState()));
         res.json({ success: true, enabled });
     } catch (e) {
-        res.status(500).json({ error: e.message || 'Не удалось включить debug' });
+        res.status(500).json({ error: e.message || 'РќРµ СѓРґР°Р»РѕСЃСЊ РІРєР»СЋС‡РёС‚СЊ debug' });
     }
 });
 
@@ -16102,8 +16102,8 @@ app.get('/api/diag/tc', checkAuth, requireAdmin, (req, res) => {
     });
 });
 
-// Диагностика плеча AWG: ядро/модуль, ingress-шейпер и CPU.
-// Нужна, когда туннель упирается в ~20 Мбит/с при быстром интернете.
+// Р”РёР°РіРЅРѕСЃС‚РёРєР° РїР»РµС‡Р° AWG: СЏРґСЂРѕ/РјРѕРґСѓР»СЊ, ingress-С€РµР№РїРµСЂ Рё CPU.
+// РќСѓР¶РЅР°, РєРѕРіРґР° С‚СѓРЅРЅРµР»СЊ СѓРїРёСЂР°РµС‚СЃСЏ РІ ~20 РњР±РёС‚/СЃ РїСЂРё Р±С‹СЃС‚СЂРѕРј РёРЅС‚РµСЂРЅРµС‚Рµ.
 app.get('/api/diag/awg', checkAuth, requireAdmin, (req, res) => {
     const run = (cmd, args, timeout) => {
         try { return String(shTry(cmd, args, { timeout: timeout || 15000 }) || ''); }
@@ -16122,8 +16122,8 @@ app.get('/api/diag/awg', checkAuth, requireAdmin, (req, res) => {
     });
 });
 
-// Скорость внешнего канала сервера (не через VPN): помогает понять,
-// ограничен ли сам сервер или проблема на пути EU→RU/телефон.
+// РЎРєРѕСЂРѕСЃС‚СЊ РІРЅРµС€РЅРµРіРѕ РєР°РЅР°Р»Р° СЃРµСЂРІРµСЂР° (РЅРµ С‡РµСЂРµР· VPN): РїРѕРјРѕРіР°РµС‚ РїРѕРЅСЏС‚СЊ,
+// РѕРіСЂР°РЅРёС‡РµРЅ Р»Рё СЃР°Рј СЃРµСЂРІРµСЂ РёР»Рё РїСЂРѕР±Р»РµРјР° РЅР° РїСѓС‚Рё EUв†’RU/С‚РµР»РµС„РѕРЅ.
 app.get('/api/diag/wan-speed', checkAuth, requireAdmin, (req, res) => {
     if (NO_SYSTEM()) return res.json({ demo: true });
     const urls = [
@@ -16182,26 +16182,26 @@ app.get('/api/diag/log', checkAuth, (req, res) => {
             '2026-10-20 12:00:20  demo: journal is simulated'
         ].join('\n'));
     }
-    if (!LOG_WHITELIST.includes(logFile)) return res.status(400).json({ error: 'Неверный путь' });
+    if (!LOG_WHITELIST.includes(logFile)) return res.status(400).json({ error: 'РќРµРІРµСЂРЅС‹Р№ РїСѓС‚СЊ' });
     try {
-        if (!fs.existsSync(logFile)) return res.send('Файл не найден');
+        if (!fs.existsSync(logFile)) return res.send('Р¤Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ');
         const lines = readLogTail(logFile).split(/\r?\n/);
         res.type('text/plain').send(lines.slice(-300).join('\n'));
-    } catch (e) { res.send('Ошибка чтения лога'); }
+    } catch (e) { res.send('РћС€РёР±РєР° С‡С‚РµРЅРёСЏ Р»РѕРіР°'); }
 });
 
-// Последние необработанные ошибки панели: помогает разобрать 500 без SSH.
+// РџРѕСЃР»РµРґРЅРёРµ РЅРµРѕР±СЂР°Р±РѕС‚Р°РЅРЅС‹Рµ РѕС€РёР±РєРё РїР°РЅРµР»Рё: РїРѕРјРѕРіР°РµС‚ СЂР°Р·РѕР±СЂР°С‚СЊ 500 Р±РµР· SSH.
 app.get('/api/diag/last-error', checkAuth, requireAdmin, (req, res) => {
     try {
         const p = path.join(DATA_DIR, '.last-error.log');
-        if (!fs.existsSync(p)) return res.type('text/plain').send('Ошибок нет');
+        if (!fs.existsSync(p)) return res.type('text/plain').send('РћС€РёР±РѕРє РЅРµС‚');
         const lines = fs.readFileSync(p, 'utf8').trim().split(/\n/);
         res.type('text/plain').send(lines.slice(-60).join('\n'));
-    } catch (e) { res.type('text/plain').send('Не удалось прочитать: ' + (e.message || e)); }
+    } catch (e) { res.type('text/plain').send('РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ: ' + (e.message || e)); }
 });
 
 // ---------------------------------------------------------------------------
-// Вспомогательные функции: INI, vpn:// и скрипт переименования
+// Р’СЃРїРѕРјРѕРіР°С‚РµР»СЊРЅС‹Рµ С„СѓРЅРєС†РёРё: INI, vpn:// Рё СЃРєСЂРёРїС‚ РїРµСЂРµРёРјРµРЅРѕРІР°РЅРёСЏ
 // ---------------------------------------------------------------------------
 function parseIni(text) {
     const out = {};
@@ -16229,7 +16229,7 @@ function vpnDecode(str) {
     let b;
     try {
         b = Buffer.from(String(str).trim().replace(/^vpn:\/\//i, '').replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-    } catch (e) { throw new Error('Некорректный vpn://'); }
+    } catch (e) { throw new Error('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ vpn://'); }
     const txt = b.toString('utf8');
     if (txt.trimStart().startsWith('{')) return JSON.parse(txt);
     try { return JSON.parse(zlib.inflateSync(b.subarray(4)).toString('utf8')); }
@@ -16240,7 +16240,7 @@ function serverDisplayName() {
     try {
         const name = fs.readFileSync(AWG_SERVER_NAME_FILE, 'utf8').trim();
         if (name) return name;
-    } catch (e) { /* ещё не задано */ }
+    } catch (e) { /* РµС‰С‘ РЅРµ Р·Р°РґР°РЅРѕ */ }
     return 'Servpanel';
 }
 
@@ -16337,10 +16337,10 @@ echo '{"ok":true,"name":"'"$NEW"'"}'
 `;
 
 // ---------------------------------------------------------------------------
-// API мобильного приложения: статус, APK и метрики
+// API РјРѕР±РёР»СЊРЅРѕРіРѕ РїСЂРёР»РѕР¶РµРЅРёСЏ: СЃС‚Р°С‚СѓСЃ, APK Рё РјРµС‚СЂРёРєРё
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
-// SSH-доступ для приложения: панель сама выдаёт ключ, без входа на сервер
+// SSH-РґРѕСЃС‚СѓРї РґР»СЏ РїСЂРёР»РѕР¶РµРЅРёСЏ: РїР°РЅРµР»СЊ СЃР°РјР° РІС‹РґР°С‘С‚ РєР»СЋС‡, Р±РµР· РІС…РѕРґР° РЅР° СЃРµСЂРІРµСЂ
 // ---------------------------------------------------------------------------
 app.get('/api/ssh-access/status', checkAuth, requireAdmin, (req, res) => {
     if (NO_SYSTEM()) {
@@ -16367,7 +16367,7 @@ app.get('/api/ssh-access/status', checkAuth, requireAdmin, (req, res) => {
             publicPort: PANEL_PUBLIC_PORT
         }));
     } catch (e) {
-        res.status(500).json({ error: e.message || 'Не удалось прочитать SSH-настройки' });
+        res.status(500).json({ error: e.message || 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ SSH-РЅР°СЃС‚СЂРѕР№РєРё' });
     }
 });
 
@@ -16376,10 +16376,10 @@ app.post('/api/ssh-access/enable', checkAuth, requireAdmin, (req, res) => {
     const permitPort = Number((req.body && req.body.port) || PANEL_PORT) || PANEL_PORT;
 
     if (NO_SYSTEM()) {
-        // Демо/тесты: ключ не ставим, но отвечаем так, будто всё получилось.
+        // Р”РµРјРѕ/С‚РµСЃС‚С‹: РєР»СЋС‡ РЅРµ СЃС‚Р°РІРёРј, РЅРѕ РѕС‚РІРµС‡Р°РµРј С‚Р°Рє, Р±СѓРґС‚Рѕ РІСЃС‘ РїРѕР»СѓС‡РёР»РѕСЃСЊ.
         try {
             const key = sshAccess.parsePublicKey(publicKey);
-            auditLog(req, `SSH-доступ приложения (демо): ключ ${key.fingerprint}`);
+            auditLog(req, `SSH-РґРѕСЃС‚СѓРї РїСЂРёР»РѕР¶РµРЅРёСЏ (РґРµРјРѕ): РєР»СЋС‡ ${key.fingerprint}`);
             return res.json({
                 success: true,
                 user: sshAccess.USER,
@@ -16396,16 +16396,16 @@ app.post('/api/ssh-access/enable', checkAuth, requireAdmin, (req, res) => {
 
     try {
         const result = sshAccess.enable({ publicKey, permitPort });
-        auditLog(req, `SSH-доступ приложения: добавлен ключ ${result.fingerprint}`);
+        auditLog(req, `SSH-РґРѕСЃС‚СѓРї РїСЂРёР»РѕР¶РµРЅРёСЏ: РґРѕР±Р°РІР»РµРЅ РєР»СЋС‡ ${result.fingerprint}`);
         res.json(result);
     } catch (e) {
-        res.status(400).json({ error: e.message || 'Не удалось установить ключ' });
+        res.status(400).json({ error: e.message || 'РќРµ СѓРґР°Р»РѕСЃСЊ СѓСЃС‚Р°РЅРѕРІРёС‚СЊ РєР»СЋС‡' });
     }
 });
 
 app.post('/api/ssh-access/restrict', checkAuth, requireAdmin, (req, res) => {
     if (NO_SYSTEM()) {
-        auditLog(req, 'SSH-доступ приложения (демо): панель закрыта на loopback');
+        auditLog(req, 'SSH-РґРѕСЃС‚СѓРї РїСЂРёР»РѕР¶РµРЅРёСЏ (РґРµРјРѕ): РїР°РЅРµР»СЊ Р·Р°РєСЂС‹С‚Р° РЅР° loopback');
         return res.json({ success: true, alreadyLoopback: false, restarted: false, restartInMs: 0, demo: true });
     }
     try {
@@ -16413,32 +16413,32 @@ app.post('/api/ssh-access/restrict', checkAuth, requireAdmin, (req, res) => {
             panelHost: PANEL_HOST,
             publicPort: PANEL_PUBLIC_PORT
         });
-        auditLog(req, `Панель переведена на 127.0.0.1:${PANEL_PORT}, внешний порт ${PANEL_PUBLIC_PORT} закрыт`);
-        // Ответ должен уйти до перезапуска процесса.
+        auditLog(req, `РџР°РЅРµР»СЊ РїРµСЂРµРІРµРґРµРЅР° РЅР° 127.0.0.1:${PANEL_PORT}, РІРЅРµС€РЅРёР№ РїРѕСЂС‚ ${PANEL_PUBLIC_PORT} Р·Р°РєСЂС‹С‚`);
+        // РћС‚РІРµС‚ РґРѕР»Р¶РµРЅ СѓР№С‚Рё РґРѕ РїРµСЂРµР·Р°РїСѓСЃРєР° РїСЂРѕС†РµСЃСЃР°.
         res.json(result);
     } catch (e) {
         res.status(400).json({ error: e.message });
     }
 });
 
-// Вернуть внешний доступ (вызывается через туннель, если он ещё работает).
+// Р’РµСЂРЅСѓС‚СЊ РІРЅРµС€РЅРёР№ РґРѕСЃС‚СѓРї (РІС‹Р·С‹РІР°РµС‚СЃСЏ С‡РµСЂРµР· С‚СѓРЅРЅРµР»СЊ, РµСЃР»Рё РѕРЅ РµС‰С‘ СЂР°Р±РѕС‚Р°РµС‚).
 app.post('/api/ssh-access/restore', checkAuth, requireAdmin, (req, res) => {
     if (NO_SYSTEM()) return res.json({ success: true, demo: true });
     try {
         const result = sshAccess.restore({ publicPort: PANEL_PUBLIC_PORT });
-        auditLog(req, 'Внешний доступ к панели восстановлен');
+        auditLog(req, 'Р’РЅРµС€РЅРёР№ РґРѕСЃС‚СѓРї Рє РїР°РЅРµР»Рё РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅ');
         res.json(result);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
 
-// Полностью убрать ключи и пользователя и вернуть внешний доступ.
+// РџРѕР»РЅРѕСЃС‚СЊСЋ СѓР±СЂР°С‚СЊ РєР»СЋС‡Рё Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Рё РІРµСЂРЅСѓС‚СЊ РІРЅРµС€РЅРёР№ РґРѕСЃС‚СѓРї.
 app.post('/api/ssh-access/disable', checkAuth, requireAdmin, (req, res) => {
     if (NO_SYSTEM()) return res.json({ success: true, demo: true });
     try {
         const result = sshAccess.disable({ publicPort: PANEL_PUBLIC_PORT });
-        auditLog(req, 'SSH-доступ приложения отключён');
+        auditLog(req, 'SSH-РґРѕСЃС‚СѓРї РїСЂРёР»РѕР¶РµРЅРёСЏ РѕС‚РєР»СЋС‡С‘РЅ');
         res.json(result);
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -16451,20 +16451,20 @@ app.get('/api/app/status', checkAuth, async (req, res) => {
         await fetchLatestAppVersion(refresh);
         res.json(appStatusPayload(req, appVersionCache.value || ''));
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось прочитать настройки приложения' });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ РЅР°СЃС‚СЂРѕР№РєРё РїСЂРёР»РѕР¶РµРЅРёСЏ' });
     }
 });
 
 // ---------------------------------------------------------------------------
-// RustDesk: установка своего ID/relay-сервера, клиенты и обновления.
+// RustDesk: СѓСЃС‚Р°РЅРѕРІРєР° СЃРІРѕРµРіРѕ ID/relay-СЃРµСЂРІРµСЂР°, РєР»РёРµРЅС‚С‹ Рё РѕР±РЅРѕРІР»РµРЅРёСЏ.
 // ---------------------------------------------------------------------------
 const RUSTDESK_PORTS = [
     { port: 21115, proto: 'tcp', label: 'NAT test' },
-    { port: 21116, proto: 'tcp', label: 'ID-сервер' },
-    { port: 21116, proto: 'udp', label: 'ID-сервер' },
+    { port: 21116, proto: 'tcp', label: 'ID-СЃРµСЂРІРµСЂ' },
+    { port: 21116, proto: 'udp', label: 'ID-СЃРµСЂРІРµСЂ' },
     { port: 21117, proto: 'tcp', label: 'Relay' },
-    { port: 21118, proto: 'tcp', label: 'Веб-клиент' },
-    { port: 21119, proto: 'tcp', label: 'Веб-клиент' }
+    { port: 21118, proto: 'tcp', label: 'Р’РµР±-РєР»РёРµРЅС‚' },
+    { port: 21119, proto: 'tcp', label: 'Р’РµР±-РєР»РёРµРЅС‚' }
 ];
 const RUSTDESK_CLIENT_PLATFORMS = [
     { id: 'windows-x64-exe', group: 'Windows', label: 'Windows x64 (.exe)', re: /^rustdesk-[\d.]+-x86_64\.exe$/ },
@@ -16653,39 +16653,39 @@ function rustdeskCleanupCache(version) {
 }
 
 async function rustdeskHostCheck(host) {
-    if (!host) return { ok: false, detail: 'адрес не задан' };
+    if (!host) return { ok: false, detail: 'Р°РґСЂРµСЃ РЅРµ Р·Р°РґР°РЅ' };
     if (IPV4_RE.test(host)) return { ok: true, detail: 'IP ' + host };
-    if (!normalizeDomain(host)) return { ok: false, detail: 'некорректный домен' };
+    if (!normalizeDomain(host)) return { ok: false, detail: 'РЅРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РґРѕРјРµРЅ' };
     try {
         const addrs = await dns.promises.lookup(host, { all: true, family: 4 });
         const ip = rustdeskPublicIp();
         const list = addrs.map(a => a.address).join(', ');
         const match = !ip || addrs.some(a => a.address === ip);
-        return { ok: match, detail: match ? `${host} → ${list}` : `${host} → ${list}, а IP сервера ${ip}` };
+        return { ok: match, detail: match ? `${host} в†’ ${list}` : `${host} в†’ ${list}, Р° IP СЃРµСЂРІРµСЂР° ${ip}` };
     } catch (e) {
-        return { ok: false, detail: 'DNS не резолвится: ' + e.message };
+        return { ok: false, detail: 'DNS РЅРµ СЂРµР·РѕР»РІРёС‚СЃСЏ: ' + e.message };
     }
 }
 
 async function rustdeskChecklist(settings, installed, latest, clients, key, ports, host) {
     const items = [];
-    items.push({ id: 'installed', title: 'Сервер установлен', ok: !!installed, detail: installed || 'не установлен' });
+    items.push({ id: 'installed', title: 'РЎРµСЂРІРµСЂ СѓСЃС‚Р°РЅРѕРІР»РµРЅ', ok: !!installed, detail: installed || 'РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ' });
     const hbbs = rustdeskService('rustdesk-hbbs');
     const hbbr = rustdeskService('rustdesk-hbbr');
-    items.push({ id: 'hbbs', title: 'Служба hbbs', ok: hbbs.state === 'active', detail: `hbbs: ${hbbs.state}` });
-    items.push({ id: 'hbbr', title: 'Служба hbbr', ok: hbbr.state === 'active', detail: `hbbr: ${hbbr.state}` });
+    items.push({ id: 'hbbs', title: 'РЎР»СѓР¶Р±Р° hbbs', ok: hbbs.state === 'active', detail: `hbbs: ${hbbs.state}` });
+    items.push({ id: 'hbbr', title: 'РЎР»СѓР¶Р±Р° hbbr', ok: hbbr.state === 'active', detail: `hbbr: ${hbbr.state}` });
     const core = ports.filter(p => p.port <= 21117);
     const missing = core.filter(p => !p.open);
     items.push({
-        id: 'ports', title: 'Порты открыты', ok: missing.length === 0,
-        detail: missing.length ? 'не открыты: ' + missing.map(p => `${p.port}/${p.proto}`).join(', ') : '21115/tcp, 21116/tcp+udp, 21117/tcp'
+        id: 'ports', title: 'РџРѕСЂС‚С‹ РѕС‚РєСЂС‹С‚С‹', ok: missing.length === 0,
+        detail: missing.length ? 'РЅРµ РѕС‚РєСЂС‹С‚С‹: ' + missing.map(p => `${p.port}/${p.proto}`).join(', ') : '21115/tcp, 21116/tcp+udp, 21117/tcp'
     });
-    items.push({ id: 'key', title: 'Ключ сервера', ok: !!key, detail: key ? 'получен' : 'не сгенерирован' });
+    items.push({ id: 'key', title: 'РљР»СЋС‡ СЃРµСЂРІРµСЂР°', ok: !!key, detail: key ? 'РїРѕР»СѓС‡РµРЅ' : 'РЅРµ СЃРіРµРЅРµСЂРёСЂРѕРІР°РЅ' });
     const hostCheck = await rustdeskHostCheck(host);
-    items.push({ id: 'host', title: 'Адрес сервера', ok: hostCheck.ok, detail: hostCheck.detail });
+    items.push({ id: 'host', title: 'РђРґСЂРµСЃ СЃРµСЂРІРµСЂР°', ok: hostCheck.ok, detail: hostCheck.detail });
     const versionOk = !!(installed && latest && rustdeskCompareVersions(installed, latest) >= 0);
-    items.push({ id: 'version', title: 'Версия актуальна', ok: versionOk, detail: installed ? `${installed} / ${latest || '—'}` : 'сервер не установлен' });
-    items.push({ id: 'clients', title: 'Клиенты доступны', ok: clients.length > 0, detail: clients.length ? `${clients.length} вариантов` : 'не найдены на GitHub' });
+    items.push({ id: 'version', title: 'Р’РµСЂСЃРёСЏ Р°РєС‚СѓР°Р»СЊРЅР°', ok: versionOk, detail: installed ? `${installed} / ${latest || 'вЂ”'}` : 'СЃРµСЂРІРµСЂ РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ' });
+    items.push({ id: 'clients', title: 'РљР»РёРµРЅС‚С‹ РґРѕСЃС‚СѓРїРЅС‹', ok: clients.length > 0, detail: clients.length ? `${clients.length} РІР°СЂРёР°РЅС‚РѕРІ` : 'РЅРµ РЅР°Р№РґРµРЅС‹ РЅР° GitHub' });
     return items;
 }
 
@@ -16706,13 +16706,13 @@ async function rustdeskStatusPayload(force) {
         try {
             const rel = await rustdeskLatestRelease(RUSTDESK_SERVER_REPO, force);
             latest = String(rel.tag_name || '').replace(/^v/, '');
-        } catch (e) { error = 'Сервер: ' + e.message; }
+        } catch (e) { error = 'РЎРµСЂРІРµСЂ: ' + e.message; }
         try {
             const rel = await rustdeskLatestRelease(RUSTDESK_CLIENT_REPO, force);
             clientVersion = String(rel.tag_name || '').replace(/^v/, '');
             clients = rustdeskClientCatalog(rel);
             if (clientVersion) rustdeskCleanupCache(clientVersion);
-        } catch (e) { error = (error ? error + '; ' : '') + 'Клиенты: ' + e.message; }
+        } catch (e) { error = (error ? error + '; ' : '') + 'РљР»РёРµРЅС‚С‹: ' + e.message; }
     }
     const services = {
         hbbs: rustdeskService('rustdesk-hbbs'),
@@ -16767,7 +16767,7 @@ function rustdeskArch() {
     if (process.arch === 'arm64') return 'arm64';
     if (process.arch === 'arm') return 'armhf';
     if (process.arch === 'ia32') return 'i386';
-    throw new Error('Архитектура ' + process.arch + ' не поддерживается RustDesk');
+    throw new Error('РђСЂС…РёС‚РµРєС‚СѓСЂР° ' + process.arch + ' РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ RustDesk');
 }
 
 function rustdeskApplyRelay(host) {
@@ -16780,7 +16780,7 @@ async function rustdeskOpenPorts(job) {
     for (const p of RUSTDESK_PORTS) {
         if (p.port >= 21118 && !settings.webClient) continue;
         const r = await rootRun('ufw', ['allow', `${p.port}/${p.proto}`], { timeout: 15000 });
-        rustdeskLog(job, `UFW ${p.port}/${p.proto}: ${r.ok ? 'открыт' : 'пропущен'}`);
+        rustdeskLog(job, `UFW ${p.port}/${p.proto}: ${r.ok ? 'РѕС‚РєСЂС‹С‚' : 'РїСЂРѕРїСѓС‰РµРЅ'}`);
     }
 }
 
@@ -16790,11 +16790,11 @@ async function rustdeskWaitServices(job) {
         await new Promise(r => setTimeout(r, 1000));
     }
     const status = await rootRun('systemctl', ['status', 'rustdesk-hbbs', 'rustdesk-hbbr', '--no-pager', '-l'], { timeout: 15000 });
-    throw new Error('Службы не запустились: ' + String(status.stdout || status.stderr || '').slice(-800));
+    throw new Error('РЎР»СѓР¶Р±С‹ РЅРµ Р·Р°РїСѓСЃС‚РёР»РёСЃСЊ: ' + String(status.stdout || status.stderr || '').slice(-800));
 }
 
 async function rustdeskDownload(url, dest, job) {
-    rustdeskLog(job, `Скачиваю ${path.basename(dest)}…`);
+    rustdeskLog(job, `РЎРєР°С‡РёРІР°СЋ ${path.basename(dest)}вЂ¦`);
     const res = await fetchWithTimeout(url, {
         headers: { 'User-Agent': 'servpanel-rustdesk', Accept: 'application/octet-stream' },
         redirect: 'follow'
@@ -16821,18 +16821,18 @@ function rustdeskRestoreBinaries(dir, job) {
     }
     rootShTry('systemctl', ['daemon-reload']);
     rootShTry('systemctl', ['restart', 'rustdesk-hbbs', 'rustdesk-hbbr']);
-    rustdeskLog(job, 'Восстановлены предыдущие бинарники RustDesk.');
+    rustdeskLog(job, 'Р’РѕСЃСЃС‚Р°РЅРѕРІР»РµРЅС‹ РїСЂРµРґС‹РґСѓС‰РёРµ Р±РёРЅР°СЂРЅРёРєРё RustDesk.');
 }
 
 async function runRustdeskInstall(job) {
     const action = job.action;
-    rustdeskLog(job, 'Проверяю последнюю версию на GitHub…');
+    rustdeskLog(job, 'РџСЂРѕРІРµСЂСЏСЋ РїРѕСЃР»РµРґРЅСЋСЋ РІРµСЂСЃРёСЋ РЅР° GitHubвЂ¦');
     const release = await rustdeskLatestRelease(RUSTDESK_SERVER_REPO, true);
     const version = String(release.tag_name || '').replace(/^v/, '');
     job.toVersion = version;
     const current = rustdeskInstalledVersion();
     if (action === 'update' && current && rustdeskCompareVersions(version, current) <= 0) {
-        rustdeskLog(job, `Уже установлена последняя версия ${current}.`);
+        rustdeskLog(job, `РЈР¶Рµ СѓСЃС‚Р°РЅРѕРІР»РµРЅР° РїРѕСЃР»РµРґРЅСЏСЏ РІРµСЂСЃРёСЏ ${current}.`);
         return;
     }
     const arch = rustdeskArch();
@@ -16841,9 +16841,9 @@ async function runRustdeskInstall(job) {
     const assets = release.assets || [];
     const hbbs = assets.find(a => a.name === hbbsName);
     const hbbr = assets.find(a => a.name === hbbrName);
-    if (!hbbs || !hbbr) throw new Error(`В релизе ${version} нет .deb для ${arch}`);
+    if (!hbbs || !hbbr) throw new Error(`Р’ СЂРµР»РёР·Рµ ${version} РЅРµС‚ .deb РґР»СЏ ${arch}`);
     const host = rustdeskHost();
-    if (!host) throw new Error('Не удалось определить IP сервера. Укажите домен в настройках.');
+    if (!host) throw new Error('РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ IP СЃРµСЂРІРµСЂР°. РЈРєР°Р¶РёС‚Рµ РґРѕРјРµРЅ РІ РЅР°СЃС‚СЂРѕР№РєР°С….');
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rustdesk-'));
     let backup = '';
     try {
@@ -16852,28 +16852,28 @@ async function runRustdeskInstall(job) {
         await rustdeskDownload(hbbs.browser_download_url, hbbsPath, job);
         await rustdeskDownload(hbbr.browser_download_url, hbbrPath, job);
         backup = rustdeskBackupBinaries();
-        rustdeskLog(job, 'Устанавливаю пакеты hbbs/hbbr…');
+        rustdeskLog(job, 'РЈСЃС‚Р°РЅР°РІР»РёРІР°СЋ РїР°РєРµС‚С‹ hbbs/hbbrвЂ¦');
         let r = await rootRun('dpkg', ['-i', hbbsPath, hbbrPath], { timeout: 300000 });
         if (!r.ok) {
             rustdeskLog(job, 'dpkg: ' + String(r.stderr || r.stdout || '').slice(-600));
             const fix = await rootRun('apt-get', ['-f', 'install', '-y'], {
                 timeout: 300000, env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' }
             });
-            if (!fix.ok) throw new Error('Не удалось установить зависимости: ' + String(fix.stderr || fix.stdout || '').slice(-600));
+            if (!fix.ok) throw new Error('РќРµ СѓРґР°Р»РѕСЃСЊ СѓСЃС‚Р°РЅРѕРІРёС‚СЊ Р·Р°РІРёСЃРёРјРѕСЃС‚Рё: ' + String(fix.stderr || fix.stdout || '').slice(-600));
             r = await rootRun('dpkg', ['-i', hbbsPath, hbbrPath], { timeout: 300000 });
             if (!r.ok) throw new Error('dpkg: ' + String(r.stderr || r.stdout || '').slice(-600));
         }
-        rustdeskLog(job, `Настраиваю relay ${host}:21117…`);
+        rustdeskLog(job, `РќР°СЃС‚СЂР°РёРІР°СЋ relay ${host}:21117вЂ¦`);
         rustdeskApplyRelay(host);
         await rootRun('systemctl', ['daemon-reload'], { timeout: 30000 });
         await rootRun('systemctl', ['enable', '--now', 'rustdesk-hbbs', 'rustdesk-hbbr'], { timeout: 60000 });
         await rootRun('systemctl', ['restart', 'rustdesk-hbbs', 'rustdesk-hbbr'], { timeout: 60000 });
         if (readRustdeskSettings().openPorts) await rustdeskOpenPorts(job);
-        rustdeskLog(job, 'Проверяю службы…');
+        rustdeskLog(job, 'РџСЂРѕРІРµСЂСЏСЋ СЃР»СѓР¶Р±С‹вЂ¦');
         await rustdeskWaitServices(job);
-        rustdeskLog(job, 'Готово. Версия: ' + (rustdeskInstalledVersion() || version));
+        rustdeskLog(job, 'Р“РѕС‚РѕРІРѕ. Р’РµСЂСЃРёСЏ: ' + (rustdeskInstalledVersion() || version));
     } catch (e) {
-        rustdeskLog(job, 'Ошибка: ' + (e.message || e));
+        rustdeskLog(job, 'РћС€РёР±РєР°: ' + (e.message || e));
         try { rustdeskRestoreBinaries(backup, job); } catch (err) { /* ignore */ }
         throw e;
     } finally {
@@ -16882,11 +16882,11 @@ async function runRustdeskInstall(job) {
 }
 
 async function runRustdeskUninstall(job) {
-    rustdeskLog(job, 'Останавливаю службы…');
+    rustdeskLog(job, 'РћСЃС‚Р°РЅР°РІР»РёРІР°СЋ СЃР»СѓР¶Р±С‹вЂ¦');
     await rootRun('systemctl', ['disable', '--now', 'rustdesk-hbbs', 'rustdesk-hbbr'], { timeout: 60000 });
     const installed = rustdeskInstalledVersion();
     if (installed) {
-        rustdeskLog(job, 'Удаляю пакеты hbbs/hbbr…');
+        rustdeskLog(job, 'РЈРґР°Р»СЏСЋ РїР°РєРµС‚С‹ hbbs/hbbrвЂ¦');
         let r = await rootRun('dpkg', ['--purge', 'rustdesk-server-hbbs', 'rustdesk-server-hbbr'], {
             timeout: 300000, env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' }
         });
@@ -16895,10 +16895,10 @@ async function runRustdeskUninstall(job) {
             r = await rootRun('apt-get', ['purge', '-y', 'rustdesk-server-hbbs', 'rustdesk-server-hbbr'], {
                 timeout: 300000, env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' }
             });
-            if (!r.ok) throw new Error('Не удалось удалить пакеты: ' + String(r.stderr || r.stdout || '').slice(-600));
+            if (!r.ok) throw new Error('РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ РїР°РєРµС‚С‹: ' + String(r.stderr || r.stdout || '').slice(-600));
         }
     }
-    rustdeskLog(job, 'Удаляю данные, ключи и кэш…');
+    rustdeskLog(job, 'РЈРґР°Р»СЏСЋ РґР°РЅРЅС‹Рµ, РєР»СЋС‡Рё Рё РєСЌС€вЂ¦');
     await rootRun('rm', ['-rf',
         '/etc/systemd/system/rustdesk-hbbs.service.d',
         '/etc/systemd/system/rustdesk-hbbr.service.d',
@@ -16906,14 +16906,14 @@ async function runRustdeskUninstall(job) {
         '/var/log/rustdesk-server',
         RUSTDESK_CACHE_DIR
     ], { timeout: 60000 });
-    try { fs.unlinkSync(RUSTDESK_SETTINGS_FILE); } catch (e) { /* файла может не быть */ }
+    try { fs.unlinkSync(RUSTDESK_SETTINGS_FILE); } catch (e) { /* С„Р°Р№Р»Р° РјРѕР¶РµС‚ РЅРµ Р±С‹С‚СЊ */ }
     await rootRun('systemctl', ['daemon-reload'], { timeout: 30000 });
     await rootRun('systemctl', ['reset-failed'], { timeout: 30000 });
-    rustdeskLog(job, 'Закрываю порты…');
+    rustdeskLog(job, 'Р—Р°РєСЂС‹РІР°СЋ РїРѕСЂС‚С‹вЂ¦');
     for (const p of RUSTDESK_PORTS) {
         await rootRun('ufw', ['delete', 'allow', `${p.port}/${p.proto}`], { timeout: 15000 });
     }
-    rustdeskLog(job, 'RustDesk полностью удалён.');
+    rustdeskLog(job, 'RustDesk РїРѕР»РЅРѕСЃС‚СЊСЋ СѓРґР°Р»С‘РЅ.');
 }
 
 async function runRustdeskAction(job) {
@@ -16934,11 +16934,11 @@ function startRustdeskJob(action, req) {
             await runRustdeskAction(job);
             job.ok = true;
         } catch (e) {
-            job.error = e.message || 'Ошибка операции RustDesk';
+            job.error = e.message || 'РћС€РёР±РєР° РѕРїРµСЂР°С†РёРё RustDesk';
         } finally {
             job.running = false;
             job.finishedAt = Date.now();
-            auditLog(auditReq, `RustDesk ${action}: ${job.ok ? 'успешно' : 'ошибка'} ${job.error}`.trim());
+            auditLog(auditReq, `RustDesk ${action}: ${job.ok ? 'СѓСЃРїРµС€РЅРѕ' : 'РѕС€РёР±РєР°'} ${job.error}`.trim());
         }
     })();
     return job;
@@ -16948,7 +16948,7 @@ app.get('/api/rustdesk/status', checkAuth, async (req, res) => {
     try {
         res.json(await rustdeskStatusPayload(req.query.refresh === '1'));
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось прочитать состояние RustDesk: ' + e.message });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ СЃРѕСЃС‚РѕСЏРЅРёРµ RustDesk: ' + e.message });
     }
 });
 
@@ -16986,11 +16986,11 @@ app.post('/api/rustdesk/uninstall', checkAuth, requireAdmin, (req, res) => {
 app.post('/api/rustdesk/settings', checkAuth, requireAdmin, async (req, res) => {
     const body = req.body || {};
     const hostType = body.hostType === 'domain' ? 'domain' : 'ip';
-    // Если домен не передали, подтягиваем его из настроек AWG/SSL — так же,
-    // как это делает создание клиентов AmneziaWG.
+    // Р•СЃР»Рё РґРѕРјРµРЅ РЅРµ РїРµСЂРµРґР°Р»Рё, РїРѕРґС‚СЏРіРёРІР°РµРј РµРіРѕ РёР· РЅР°СЃС‚СЂРѕРµРє AWG/SSL вЂ” С‚Р°Рє Р¶Рµ,
+    // РєР°Рє СЌС‚Рѕ РґРµР»Р°РµС‚ СЃРѕР·РґР°РЅРёРµ РєР»РёРµРЅС‚РѕРІ AmneziaWG.
     const domain = normalizeDomain(body.domain || '') || normalizeDomain(domainInfo().domain);
     if (hostType === 'domain' && !domain) {
-        return res.status(400).json({ error: 'Укажите корректный домен для RustDesk' });
+        return res.status(400).json({ error: 'РЈРєР°Р¶РёС‚Рµ РєРѕСЂСЂРµРєС‚РЅС‹Р№ РґРѕРјРµРЅ РґР»СЏ RustDesk' });
     }
     const settings = {
         hostType, domain,
@@ -17006,10 +17006,10 @@ app.post('/api/rustdesk/settings', checkAuth, requireAdmin, async (req, res) => 
             if (settings.openPorts) await rustdeskOpenPorts(null);
             await rustdeskWaitServices(null);
         } catch (e) {
-            return res.status(500).json({ error: 'Настройки сохранены, но hbbs не перезапустился: ' + e.message });
+            return res.status(500).json({ error: 'РќР°СЃС‚СЂРѕР№РєРё СЃРѕС…СЂР°РЅРµРЅС‹, РЅРѕ hbbs РЅРµ РїРµСЂРµР·Р°РїСѓСЃС‚РёР»СЃСЏ: ' + e.message });
         }
     }
-    auditLog(req, `RustDesk: адрес ${rustdeskHost()}, порты ${settings.openPorts ? 'авто' : 'вручную'}`);
+    auditLog(req, `RustDesk: Р°РґСЂРµСЃ ${rustdeskHost()}, РїРѕСЂС‚С‹ ${settings.openPorts ? 'Р°РІС‚Рѕ' : 'РІСЂСѓС‡РЅСѓСЋ'}`);
     res.json({ success: true, settings, host: rustdeskHost(), relay: `${rustdeskHost()}:21117`, publicKey: rustdeskPublicKey() });
 });
 
@@ -17019,24 +17019,24 @@ app.post('/api/rustdesk/ports', checkAuth, requireAdmin, async (req, res) => {
         await rustdeskOpenPorts(null);
         res.json({ success: true, ports: rustdeskPortsStatus() });
     } catch (e) {
-        res.status(500).json({ error: 'Не удалось открыть порты: ' + e.message });
+        res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ РїРѕСЂС‚С‹: ' + e.message });
     }
 });
 
 app.get('/api/rustdesk/client/:platform', checkAuth, async (req, res) => {
     const id = String(req.params.platform || '');
     const def = RUSTDESK_CLIENT_PLATFORMS.find(p => p.id === id);
-    if (!def) return res.status(400).json({ error: 'Неизвестный клиент RustDesk' });
-    if (NO_SYSTEM()) return res.status(404).json({ error: 'В демо-режиме скачивание отключено' });
+    if (!def) return res.status(400).json({ error: 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ РєР»РёРµРЅС‚ RustDesk' });
+    if (NO_SYSTEM()) return res.status(404).json({ error: 'Р’ РґРµРјРѕ-СЂРµР¶РёРјРµ СЃРєР°С‡РёРІР°РЅРёРµ РѕС‚РєР»СЋС‡РµРЅРѕ' });
     let release;
     try {
         release = await rustdeskLatestRelease(RUSTDESK_CLIENT_REPO);
     } catch (e) {
-        return res.status(502).json({ error: 'GitHub недоступен: ' + e.message });
+        return res.status(502).json({ error: 'GitHub РЅРµРґРѕСЃС‚СѓРїРµРЅ: ' + e.message });
     }
     const version = String(release.tag_name || '').replace(/^v/, '');
     const asset = (release.assets || []).find(a => def.re.test(a.name));
-    if (!asset) return res.status(404).json({ error: 'В последнем релизе нет ' + def.label });
+    if (!asset) return res.status(404).json({ error: 'Р’ РїРѕСЃР»РµРґРЅРµРј СЂРµР»РёР·Рµ РЅРµС‚ ' + def.label });
     const dir = path.join(RUSTDESK_CACHE_DIR, version);
     const file = path.join(dir, asset.name);
     const cached = fs.existsSync(file) && fs.statSync(file).size === asset.size;
@@ -17050,24 +17050,24 @@ app.get('/api/rustdesk/client/:platform', checkAuth, async (req, res) => {
                 redirect: 'follow'
             }, 300000);
         } catch (e) {
-            auditLog(req, `RustDesk: не удалось скачать ${asset.name}: ${e.message}`);
-            return res.status(502).json({ error: 'Не удалось скачать с GitHub: ' + e.message });
+            auditLog(req, `RustDesk: РЅРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ ${asset.name}: ${e.message}`);
+            return res.status(502).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ СЃ GitHub: ' + e.message });
         }
         if (!upstream.ok || !upstream.body) {
-            auditLog(req, `RustDesk: GitHub HTTP ${upstream.status} для ${asset.name}`);
+            auditLog(req, `RustDesk: GitHub HTTP ${upstream.status} РґР»СЏ ${asset.name}`);
             return res.status(502).json({ error: 'GitHub: HTTP ' + upstream.status });
         }
         try {
             await pipeline(Readable.fromWeb(upstream.body), fs.createWriteStream(tmp));
             const size = fs.statSync(tmp).size;
-            if (size !== asset.size) throw new Error(`размер ${size} вместо ${asset.size}`);
+            if (size !== asset.size) throw new Error(`СЂР°Р·РјРµСЂ ${size} РІРјРµСЃС‚Рѕ ${asset.size}`);
             fs.renameSync(tmp, file);
             rustdeskCleanupCache(version);
-            auditLog(req, `RustDesk: ${asset.name} сохранён в кэш (${size} байт)`);
+            auditLog(req, `RustDesk: ${asset.name} СЃРѕС…СЂР°РЅС‘РЅ РІ РєСЌС€ (${size} Р±Р°Р№С‚)`);
         } catch (e) {
             try { fs.unlinkSync(tmp); } catch (err) { /* ignore */ }
-            auditLog(req, `RustDesk: ошибка кэша ${asset.name}: ${e.message}`);
-            return res.status(502).json({ error: 'Не удалось сохранить установщик RustDesk: ' + e.message });
+            auditLog(req, `RustDesk: РѕС€РёР±РєР° РєСЌС€Р° ${asset.name}: ${e.message}`);
+            return res.status(502).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ СѓСЃС‚Р°РЅРѕРІС‰РёРє RustDesk: ' + e.message });
         }
     }
     res.setHeader('Content-Type', 'application/octet-stream');
@@ -17084,30 +17084,30 @@ app.get('/api/rustdesk/instructions', checkAuth, (req, res) => {
     const ports = rustdeskPortsStatus().filter(p => p.port <= 21117 || settings.webClient);
     if (String(req.query.format || '') === 'txt') {
         return res.type('text/plain').send([
-            'RustDesk — подключение к своему серверу',
+            'RustDesk вЂ” РїРѕРґРєР»СЋС‡РµРЅРёРµ Рє СЃРІРѕРµРјСѓ СЃРµСЂРІРµСЂСѓ',
             '',
-            'ID-сервер: ' + (host || 'не настроен'),
-            'Relay: ' + (relay || 'не настроен'),
-            'Ключ: ' + (key || 'не сгенерирован'),
+            'ID-СЃРµСЂРІРµСЂ: ' + (host || 'РЅРµ РЅР°СЃС‚СЂРѕРµРЅ'),
+            'Relay: ' + (relay || 'РЅРµ РЅР°СЃС‚СЂРѕРµРЅ'),
+            'РљР»СЋС‡: ' + (key || 'РЅРµ СЃРіРµРЅРµСЂРёСЂРѕРІР°РЅ'),
             '',
-            'Порты: ' + ports.map(p => `${p.port}/${p.proto}`).join(', '),
+            'РџРѕСЂС‚С‹: ' + ports.map(p => `${p.port}/${p.proto}`).join(', '),
             '',
-            'Windows: скачайте .exe/.msi, установите, откройте Настройки → Сеть → ID/Relay Server.',
-            'Android: скачайте .apk, установите, откройте Настройки → ID/Relay Server.',
-            'Linux: установите .deb/.rpm или запустите AppImage, затем Настройки → Сеть → ID/Relay Server.',
+            'Windows: СЃРєР°С‡Р°Р№С‚Рµ .exe/.msi, СѓСЃС‚Р°РЅРѕРІРёС‚Рµ, РѕС‚РєСЂРѕР№С‚Рµ РќР°СЃС‚СЂРѕР№РєРё в†’ РЎРµС‚СЊ в†’ ID/Relay Server.',
+            'Android: СЃРєР°С‡Р°Р№С‚Рµ .apk, СѓСЃС‚Р°РЅРѕРІРёС‚Рµ, РѕС‚РєСЂРѕР№С‚Рµ РќР°СЃС‚СЂРѕР№РєРё в†’ ID/Relay Server.',
+            'Linux: СѓСЃС‚Р°РЅРѕРІРёС‚Рµ .deb/.rpm РёР»Рё Р·Р°РїСѓСЃС‚РёС‚Рµ AppImage, Р·Р°С‚РµРј РќР°СЃС‚СЂРѕР№РєРё в†’ РЎРµС‚СЊ в†’ ID/Relay Server.',
             '',
-            'Везде укажите ID-сервер, Relay и ключ выше.',
-            'Клиенты: https://github.com/rustdesk/rustdesk/releases/latest',
-            'Сервер: https://github.com/rustdesk/rustdesk-server/releases/latest'
+            'Р’РµР·РґРµ СѓРєР°Р¶РёС‚Рµ ID-СЃРµСЂРІРµСЂ, Relay Рё РєР»СЋС‡ РІС‹С€Рµ.',
+            'РљР»РёРµРЅС‚С‹: https://github.com/rustdesk/rustdesk/releases/latest',
+            'РЎРµСЂРІРµСЂ: https://github.com/rustdesk/rustdesk-server/releases/latest'
         ].join('\n'));
     }
-    const safeHost = escapeHtml(host || 'не настроен');
-    const safeRelay = escapeHtml(relay || 'не настроен');
-    const safeKey = escapeHtml(key || 'не сгенерирован');
+    const safeHost = escapeHtml(host || 'РЅРµ РЅР°СЃС‚СЂРѕРµРЅ');
+    const safeRelay = escapeHtml(relay || 'РЅРµ РЅР°СЃС‚СЂРѕРµРЅ');
+    const safeKey = escapeHtml(key || 'РЅРµ СЃРіРµРЅРµСЂРёСЂРѕРІР°РЅ');
     const portList = ports.map(p => `${p.port}/${p.proto}`).join(', ');
     res.type('html').send(`<!DOCTYPE html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RustDesk — подключение</title>
+<title>RustDesk вЂ” РїРѕРґРєР»СЋС‡РµРЅРёРµ</title>
 <style>
 body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0d1117;color:#c9d1d9;margin:0;padding:20px}
 .card{max-width:720px;margin:0 auto;background:#161b22;border:1px solid #30363d;border-radius:12px;padding:22px}
@@ -17118,34 +17118,34 @@ textarea{width:100%;box-sizing:border-box;resize:vertical}
 button{background:#2f81f7;color:#fff;border:0;border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer;margin:6px 6px 0 0}
 .warn{background:rgba(255,127,80,.08);border:1px solid #ff7b72;border-radius:8px;padding:10px;font-size:12px;color:#ffb3ad;margin-top:16px}
 </style></head><body><div class="card">
-<h1>RustDesk — подключение</h1>
-<p class="muted">Свой ID/relay-сервер. Данные ниже вводятся в клиенте RustDesk.</p>
-<h2>ID-сервер</h2><textarea id="host" readonly rows="1">${safeHost}</textarea>
+<h1>RustDesk вЂ” РїРѕРґРєР»СЋС‡РµРЅРёРµ</h1>
+<p class="muted">РЎРІРѕР№ ID/relay-СЃРµСЂРІРµСЂ. Р”Р°РЅРЅС‹Рµ РЅРёР¶Рµ РІРІРѕРґСЏС‚СЃСЏ РІ РєР»РёРµРЅС‚Рµ RustDesk.</p>
+<h2>ID-СЃРµСЂРІРµСЂ</h2><textarea id="host" readonly rows="1">${safeHost}</textarea>
 <h2>Relay</h2><textarea id="relay" readonly rows="1">${safeRelay}</textarea>
-<h2>Ключ</h2><textarea id="key" readonly rows="3">${safeKey}</textarea>
-<p class="muted">Порты: ${escapeHtml(portList)}</p>
+<h2>РљР»СЋС‡</h2><textarea id="key" readonly rows="3">${safeKey}</textarea>
+<p class="muted">РџРѕСЂС‚С‹: ${escapeHtml(portList)}</p>
 <div class="controls">
-<button onclick="navigator.clipboard.writeText(document.getElementById('host').value)">Скопировать ID-сервер</button>
-<button onclick="navigator.clipboard.writeText(document.getElementById('relay').value)">Скопировать Relay</button>
-<button onclick="navigator.clipboard.writeText(document.getElementById('key').value)">Скопировать ключ</button>
+<button onclick="navigator.clipboard.writeText(document.getElementById('host').value)">РЎРєРѕРїРёСЂРѕРІР°С‚СЊ ID-СЃРµСЂРІРµСЂ</button>
+<button onclick="navigator.clipboard.writeText(document.getElementById('relay').value)">РЎРєРѕРїРёСЂРѕРІР°С‚СЊ Relay</button>
+<button onclick="navigator.clipboard.writeText(document.getElementById('key').value)">РЎРєРѕРїРёСЂРѕРІР°С‚СЊ РєР»СЋС‡</button>
 </div>
 <h2>Windows</h2>
-<ol><li>Скачайте установщик на вкладке RustDesk в панели.</li><li>Установите и откройте RustDesk.</li><li>Настройки → Сеть → ID/Relay Server.</li><li>Укажите ID-сервер, Relay и ключ выше.</li></ol>
+<ol><li>РЎРєР°С‡Р°Р№С‚Рµ СѓСЃС‚Р°РЅРѕРІС‰РёРє РЅР° РІРєР»Р°РґРєРµ RustDesk РІ РїР°РЅРµР»Рё.</li><li>РЈСЃС‚Р°РЅРѕРІРёС‚Рµ Рё РѕС‚РєСЂРѕР№С‚Рµ RustDesk.</li><li>РќР°СЃС‚СЂРѕР№РєРё в†’ РЎРµС‚СЊ в†’ ID/Relay Server.</li><li>РЈРєР°Р¶РёС‚Рµ ID-СЃРµСЂРІРµСЂ, Relay Рё РєР»СЋС‡ РІС‹С€Рµ.</li></ol>
 <h2>Android</h2>
-<ol><li>Скачайте .apk на вкладке RustDesk.</li><li>Установите (разрешите установку из этого источника).</li><li>Настройки → ID/Relay Server.</li><li>Укажите ID-сервер, Relay и ключ выше.</li></ol>
+<ol><li>РЎРєР°С‡Р°Р№С‚Рµ .apk РЅР° РІРєР»Р°РґРєРµ RustDesk.</li><li>РЈСЃС‚Р°РЅРѕРІРёС‚Рµ (СЂР°Р·СЂРµС€РёС‚Рµ СѓСЃС‚Р°РЅРѕРІРєСѓ РёР· СЌС‚РѕРіРѕ РёСЃС‚РѕС‡РЅРёРєР°).</li><li>РќР°СЃС‚СЂРѕР№РєРё в†’ ID/Relay Server.</li><li>РЈРєР°Р¶РёС‚Рµ ID-СЃРµСЂРІРµСЂ, Relay Рё РєР»СЋС‡ РІС‹С€Рµ.</li></ol>
 <h2>Linux</h2>
-<ol><li>Скачайте .deb/.rpm или AppImage.</li><li>Установите и запустите RustDesk.</li><li>Настройки → Сеть → ID/Relay Server.</li><li>Укажите ID-сервер, Relay и ключ выше.</li></ol>
-<div class="warn">Не публикуйте ключ и не открывайте лишние порты. Сервер обновляйте с GitHub через панель.</div>
-<p class="muted">Источник клиентов: github.com/rustdesk/rustdesk (AGPL-3.0). Сервер: github.com/rustdesk/rustdesk-server.</p>
+<ol><li>РЎРєР°С‡Р°Р№С‚Рµ .deb/.rpm РёР»Рё AppImage.</li><li>РЈСЃС‚Р°РЅРѕРІРёС‚Рµ Рё Р·Р°РїСѓСЃС‚РёС‚Рµ RustDesk.</li><li>РќР°СЃС‚СЂРѕР№РєРё в†’ РЎРµС‚СЊ в†’ ID/Relay Server.</li><li>РЈРєР°Р¶РёС‚Рµ ID-СЃРµСЂРІРµСЂ, Relay Рё РєР»СЋС‡ РІС‹С€Рµ.</li></ol>
+<div class="warn">РќРµ РїСѓР±Р»РёРєСѓР№С‚Рµ РєР»СЋС‡ Рё РЅРµ РѕС‚РєСЂС‹РІР°Р№С‚Рµ Р»РёС€РЅРёРµ РїРѕСЂС‚С‹. РЎРµСЂРІРµСЂ РѕР±РЅРѕРІР»СЏР№С‚Рµ СЃ GitHub С‡РµСЂРµР· РїР°РЅРµР»СЊ.</div>
+<p class="muted">РСЃС‚РѕС‡РЅРёРє РєР»РёРµРЅС‚РѕРІ: github.com/rustdesk/rustdesk (AGPL-3.0). РЎРµСЂРІРµСЂ: github.com/rustdesk/rustdesk-server.</p>
 </div></body></html>`);
 });
 
-// Компактные метрики доступны и на основном API — приложению не обязателен
-// отдельный порт. Отдельный listener нужен для мониторинга/Prometheus.
+// РљРѕРјРїР°РєС‚РЅС‹Рµ РјРµС‚СЂРёРєРё РґРѕСЃС‚СѓРїРЅС‹ Рё РЅР° РѕСЃРЅРѕРІРЅРѕРј API вЂ” РїСЂРёР»РѕР¶РµРЅРёСЋ РЅРµ РѕР±СЏР·Р°С‚РµР»РµРЅ
+// РѕС‚РґРµР»СЊРЅС‹Р№ РїРѕСЂС‚. РћС‚РґРµР»СЊРЅС‹Р№ listener РЅСѓР¶РµРЅ РґР»СЏ РјРѕРЅРёС‚РѕСЂРёРЅРіР°/Prometheus.
 app.get('/api/metrics', checkAuth, (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     try { res.json(metricsSnapshot()); }
-    catch (e) { res.status(500).json({ error: 'Ошибка чтения метрик' }); }
+    catch (e) { res.status(500).json({ error: 'РћС€РёР±РєР° С‡С‚РµРЅРёСЏ РјРµС‚СЂРёРє' }); }
 });
 
 app.get('/api/app/apk', checkAuth, (req, res) => {
@@ -17159,21 +17159,21 @@ app.get('/api/app/apk', checkAuth, (req, res) => {
         res.setHeader('Cache-Control', 'no-store');
         const stream = fs.createReadStream(local.path);
         stream.on('error', () => {
-            if (!res.headersSent) res.status(500).json({ error: 'Не удалось отдать APK' });
+            if (!res.headersSent) res.status(500).json({ error: 'РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РґР°С‚СЊ APK' });
             else res.end();
         });
         return stream.pipe(res);
     }
-    res.status(404).json({ error: 'APK недоступен: укажите PANEL_APK_URL или добавьте файл в app/servpanel.apk.' });
+    res.status(404).json({ error: 'APK РЅРµРґРѕСЃС‚СѓРїРµРЅ: СѓРєР°Р¶РёС‚Рµ PANEL_APK_URL РёР»Рё РґРѕР±Р°РІСЊС‚Рµ С„Р°Р№Р» РІ app/servpanel.apk.' });
 });
 
-// Загрузка APK из панели убрана: панель только отдаёт последнюю сборку.
+// Р—Р°РіСЂСѓР·РєР° APK РёР· РїР°РЅРµР»Рё СѓР±СЂР°РЅР°: РїР°РЅРµР»СЊ С‚РѕР»СЊРєРѕ РѕС‚РґР°С‘С‚ РїРѕСЃР»РµРґРЅСЋСЋ СЃР±РѕСЂРєСѓ.
 app.post('/api/app/apk', checkAuth, (req, res) => {
-    res.status(405).json({ error: 'Загрузка APK из панели отключена. Скачайте последнюю сборку из GitHub.' });
+    res.status(405).json({ error: 'Р—Р°РіСЂСѓР·РєР° APK РёР· РїР°РЅРµР»Рё РѕС‚РєР»СЋС‡РµРЅР°. РЎРєР°С‡Р°Р№С‚Рµ РїРѕСЃР»РµРґРЅСЋСЋ СЃР±РѕСЂРєСѓ РёР· GitHub.' });
 });
 
 app.delete('/api/app/apk', checkAuth, (req, res) => {
-    res.status(405).json({ error: 'Загрузка APK из панели отключена. Скачайте последнюю сборку из GitHub.' });
+    res.status(405).json({ error: 'Р—Р°РіСЂСѓР·РєР° APK РёР· РїР°РЅРµР»Рё РѕС‚РєР»СЋС‡РµРЅР°. РЎРєР°С‡Р°Р№С‚Рµ РїРѕСЃР»РµРґРЅСЋСЋ СЃР±РѕСЂРєСѓ РёР· GitHub.' });
 });
 
 app.post('/api/app/metrics', checkAuth, requireAdmin, async (req, res) => {
@@ -17187,7 +17187,7 @@ app.post('/api/app/metrics', checkAuth, requireAdmin, async (req, res) => {
     const busy = [PANEL_PORT, PANEL_TLS_PORT, PANEL_API_PORT].filter(Boolean);
     if (next.enabled && busy.includes(next.port)) {
         return res.status(409).json({
-            error: `Порт ${next.port} уже занят панелью. Выберите другой порт для метрик.`
+            error: `РџРѕСЂС‚ ${next.port} СѓР¶Рµ Р·Р°РЅСЏС‚ РїР°РЅРµР»СЊСЋ. Р’С‹Р±РµСЂРёС‚Рµ РґСЂСѓРіРѕР№ РїРѕСЂС‚ РґР»СЏ РјРµС‚СЂРёРє.`
         });
     }
     let generatedToken = false;
@@ -17199,8 +17199,8 @@ app.post('/api/app/metrics', checkAuth, requireAdmin, async (req, res) => {
     writeAppSettings(current);
     startMetricsServer(next);
     await waitForMetrics();
-    auditLog(req, `Метрики: ${next.enabled ? 'включены' : 'выключены'} на ${next.host}:${next.port}` +
-        (next.publicPort !== next.port ? ` (внешний ${next.publicPort})` : ''));
+    auditLog(req, `РњРµС‚СЂРёРєРё: ${next.enabled ? 'РІРєР»СЋС‡РµРЅС‹' : 'РІС‹РєР»СЋС‡РµРЅС‹'} РЅР° ${next.host}:${next.port}` +
+        (next.publicPort !== next.port ? ` (РІРЅРµС€РЅРёР№ ${next.publicPort})` : ''));
     const status = appStatusPayload(req);
     res.json({
         success: true,
@@ -17216,12 +17216,12 @@ app.post('/api/app/metrics/token', checkAuth, requireAdmin, async (req, res) => 
     writeAppSettings(settings);
     startMetricsServer(settings.metrics);
     await waitForMetrics();
-    auditLog(req, 'Сгенерирован новый токен метрик');
+    auditLog(req, 'РЎРіРµРЅРµСЂРёСЂРѕРІР°РЅ РЅРѕРІС‹Р№ С‚РѕРєРµРЅ РјРµС‚СЂРёРє');
     res.json({ success: true, token: settings.metrics.token, status: appStatusPayload(req) });
 });
 
 // ---------------------------------------------------------------------------
-// Запуск
+// Р—Р°РїСѓСЃРє
 // ---------------------------------------------------------------------------
 function readPortFile() {
     try {
@@ -17235,11 +17235,11 @@ function readPublicPortFile() {
         return Number.isInteger(p) && p > 0 && p < 65536 ? p : null;
     } catch (e) { return null; }
 }
-// Внутренний порт, который слушает Node. Файл важнее переменной окружения:
-// так обновление панели не сбрасывает кастомный порт.
+// Р’РЅСѓС‚СЂРµРЅРЅРёР№ РїРѕСЂС‚, РєРѕС‚РѕСЂС‹Р№ СЃР»СѓС€Р°РµС‚ Node. Р¤Р°Р№Р» РІР°Р¶РЅРµРµ РїРµСЂРµРјРµРЅРЅРѕР№ РѕРєСЂСѓР¶РµРЅРёСЏ:
+// С‚Р°Рє РѕР±РЅРѕРІР»РµРЅРёРµ РїР°РЅРµР»Рё РЅРµ СЃР±СЂР°СЃС‹РІР°РµС‚ РєР°СЃС‚РѕРјРЅС‹Р№ РїРѕСЂС‚.
 const PANEL_PORT = readPortFile() || parseInt(process.env.PANEL_PORT, 10) || 3000;
-// Прямой HTTPS без Nginx: PANEL_TLS_PORT + PANEL_TLS_CERT/PANEL_TLS_KEY.
-// При включённом TLS обычный HTTP по умолчанию не поднимается (PANEL_HTTP=1 вернёт его).
+// РџСЂСЏРјРѕР№ HTTPS Р±РµР· Nginx: PANEL_TLS_PORT + PANEL_TLS_CERT/PANEL_TLS_KEY.
+// РџСЂРё РІРєР»СЋС‡С‘РЅРЅРѕРј TLS РѕР±С‹С‡РЅС‹Р№ HTTP РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ РЅРµ РїРѕРґРЅРёРјР°РµС‚СЃСЏ (PANEL_HTTP=1 РІРµСЂРЅС‘С‚ РµРіРѕ).
 const PANEL_TLS_PORT = parseInt(process.env.PANEL_TLS_PORT, 10) || 0;
 const PANEL_TLS_HOST = process.env.PANEL_TLS_HOST || process.env.PANEL_HOST || '0.0.0.0';
 const PANEL_TLS_CERT = process.env.PANEL_TLS_CERT || '';
@@ -17247,60 +17247,60 @@ const PANEL_TLS_KEY = process.env.PANEL_TLS_KEY || '';
 const HTTP_ENABLED = process.env.PANEL_HTTP !== undefined
     ? process.env.PANEL_HTTP !== '0'
     : !PANEL_TLS_PORT;
-// Порт, по которому панель доступна снаружи (для правил UFW установщика).
+// РџРѕСЂС‚, РїРѕ РєРѕС‚РѕСЂРѕРјСѓ РїР°РЅРµР»СЊ РґРѕСЃС‚СѓРїРЅР° СЃРЅР°СЂСѓР¶Рё (РґР»СЏ РїСЂР°РІРёР» UFW СѓСЃС‚Р°РЅРѕРІС‰РёРєР°).
 const PANEL_PUBLIC_PORT = readPublicPortFile() || parseInt(process.env.PANEL_PUBLIC_PORT, 10) || PANEL_TLS_PORT || PANEL_PORT;
 const PANEL_HOST = process.env.PANEL_HOST || '0.0.0.0';
-// Необязательный второй порт, который отвечает только на /api/*.
-// Удобно, когда веб-интерфейс выключен (PANEL_WEB=0) или спрятан за VPN.
+// РќРµРѕР±СЏР·Р°С‚РµР»СЊРЅС‹Р№ РІС‚РѕСЂРѕР№ РїРѕСЂС‚, РєРѕС‚РѕСЂС‹Р№ РѕС‚РІРµС‡Р°РµС‚ С‚РѕР»СЊРєРѕ РЅР° /api/*.
+// РЈРґРѕР±РЅРѕ, РєРѕРіРґР° РІРµР±-РёРЅС‚РµСЂС„РµР№СЃ РІС‹РєР»СЋС‡РµРЅ (PANEL_WEB=0) РёР»Рё СЃРїСЂСЏС‚Р°РЅ Р·Р° VPN.
 const PANEL_API_PORT = parseInt(process.env.PANEL_API_PORT, 10) || 0;
 const PANEL_API_HOST = process.env.PANEL_API_HOST || '0.0.0.0';
 
 app.use((err, req, res, next) => {
-    if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'Файл слишком большой' });
-    console.error('Ошибка запроса:', err && (err.stack || err.message));
+    if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'Р¤Р°Р№Р» СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№' });
+    console.error('РћС€РёР±РєР° Р·Р°РїСЂРѕСЃР°:', err && (err.stack || err.message));
     try {
         fs.appendFileSync(path.join(DATA_DIR, '.last-error.log'),
             '[' + new Date().toISOString() + '] ' + req.method + ' ' + req.originalUrl + '\n' + String((err && (err.stack || err.message)) || err) + '\n\n');
     } catch (e) { /* ignore */ }
     if (res.headersSent) return next(err);
-    // Администратору показываем причину: без этого 500 нечем диагностировать.
+    // РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ РїРѕРєР°Р·С‹РІР°РµРј РїСЂРёС‡РёРЅСѓ: Р±РµР· СЌС‚РѕРіРѕ 500 РЅРµС‡РµРј РґРёР°РіРЅРѕСЃС‚РёСЂРѕРІР°С‚СЊ.
     const admin = !!(req.session && req.session.role === 'admin');
     res.status(500).json({
-        error: 'Внутренняя ошибка сервера',
+        error: 'Р’РЅСѓС‚СЂРµРЅРЅСЏСЏ РѕС€РёР±РєР° СЃРµСЂРІРµСЂР°',
         detail: admin ? String((err && err.message) || err).slice(0, 400) : undefined
     });
 });
 
 if (require.main === module) {
-    console.log(`Режим: DEMO=${(process.env.SERVEPANEL_DEMO || process.env.SERVPANEL_DEMO || '-')} TEST=${process.env.SERVPANEL_TEST || '-'} DEMO_MODE=${DEMO_MODE}`);
-    if (!WEB_ENABLED) console.warn('PANEL_WEB=0: веб-интерфейс выключен, доступен только /api/*.');
-    if (DEMO_MODE) console.warn('DEMO MODE: используется локальный конфиг-макет, systemd и AmneziaWG не затрагиваются.');
+    console.log(`Р РµР¶РёРј: DEMO=${(process.env.SERVEPANEL_DEMO || process.env.SERVPANEL_DEMO || '-')} TEST=${process.env.SERVPANEL_TEST || '-'} DEMO_MODE=${DEMO_MODE}`);
+    if (!WEB_ENABLED) console.warn('PANEL_WEB=0: РІРµР±-РёРЅС‚РµСЂС„РµР№СЃ РІС‹РєР»СЋС‡РµРЅ, РґРѕСЃС‚СѓРїРµРЅ С‚РѕР»СЊРєРѕ /api/*.');
+    if (DEMO_MODE) console.warn('DEMO MODE: РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ Р»РѕРєР°Р»СЊРЅС‹Р№ РєРѕРЅС„РёРі-РјР°РєРµС‚, systemd Рё AmneziaWG РЅРµ Р·Р°С‚СЂР°РіРёРІР°СЋС‚СЃСЏ.');
     if (ADMIN_PASSWORD === 'admin123') {
-        console.warn('ВНИМАНИЕ: используется пароль по умолчанию admin123. Смените его в интерфейсе!');
+        console.warn('Р’РќРРњРђРќРР•: РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РїР°СЂРѕР»СЊ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ admin123. РЎРјРµРЅРёС‚Рµ РµРіРѕ РІ РёРЅС‚РµСЂС„РµР№СЃРµ!');
     }
 
-    // Переезд репозитория на новый аккаунт: чиним уже установленную панель,
-    // не дожидаясь редиректа GitHub.
+    // РџРµСЂРµРµР·Рґ СЂРµРїРѕР·РёС‚РѕСЂРёСЏ РЅР° РЅРѕРІС‹Р№ Р°РєРєР°СѓРЅС‚: С‡РёРЅРёРј СѓР¶Рµ СѓСЃС‚Р°РЅРѕРІР»РµРЅРЅСѓСЋ РїР°РЅРµР»СЊ,
+    // РЅРµ РґРѕР¶РёРґР°СЏСЃСЊ СЂРµРґРёСЂРµРєС‚Р° GitHub.
     migrateLegacySettings();
     try {
         if (updater.normalizeRemote(APP_DIR)) {
-            console.log('Git: origin переключён на https://github.com/AmShaegar-dev/servpanel.git');
+            console.log('Git: origin РїРµСЂРµРєР»СЋС‡С‘РЅ РЅР° https://github.com/AmShaegar-dev/servpanel.git');
         }
     } catch (e) {
-        console.warn('Git: не удалось проверить origin —', e.message);
+        console.warn('Git: РЅРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕРІРµСЂРёС‚СЊ origin вЂ”', e.message);
     }
 
-    // TLS-сертификат: сначала PANEL_TLS_CERT/PANEL_TLS_KEY, затем сертификат
-    // панели из вкладки «Домены и SSL» (/etc/letsencrypt/live/<домен>/).
+    // TLS-СЃРµСЂС‚РёС„РёРєР°С‚: СЃРЅР°С‡Р°Р»Р° PANEL_TLS_CERT/PANEL_TLS_KEY, Р·Р°С‚РµРј СЃРµСЂС‚РёС„РёРєР°С‚
+    // РїР°РЅРµР»Рё РёР· РІРєР»Р°РґРєРё В«Р”РѕРјРµРЅС‹ Рё SSLВ» (/etc/letsencrypt/live/<РґРѕРјРµРЅ>/).
     let tlsCreds = null;
     try { tlsCreds = loadTlsCredentials(); } catch (e) {
-        console.error('Не удалось прочитать TLS-сертификат:', e.message);
+        console.error('РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ TLS-СЃРµСЂС‚РёС„РёРєР°С‚:', e.message);
     }
     const tlsServers = [];
 
     const listenLogged = (srv, port, host, label, scheme) => {
         srv.on('error', err => {
-            console.error(`${label}: не удалось открыть ${host}:${port} — ${err.message}`);
+            console.error(`${label}: РЅРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РєСЂС‹С‚СЊ ${host}:${port} вЂ” ${err.message}`);
         });
         srv.listen(port, host, () => {
             const addr = srv.address();
@@ -17315,14 +17315,14 @@ if (require.main === module) {
         const http = require('http');
         listenLogged(http.createServer(app), PANEL_PORT, PANEL_HOST, 'Servpanel (FileManager 4.0)', 'http');
     } else {
-        console.log('PANEL_HTTP=0 (или включён TLS): обычный HTTP-listener не запускается.');
+        console.log('PANEL_HTTP=0 (РёР»Рё РІРєР»СЋС‡С‘РЅ TLS): РѕР±С‹С‡РЅС‹Р№ HTTP-listener РЅРµ Р·Р°РїСѓСЃРєР°РµС‚СЃСЏ.');
     }
 
-    // Прямой HTTPS без Nginx и без внешнего прокси.
+    // РџСЂСЏРјРѕР№ HTTPS Р±РµР· Nginx Рё Р±РµР· РІРЅРµС€РЅРµРіРѕ РїСЂРѕРєСЃРё.
     if (PANEL_TLS_PORT) {
         if (!tlsCreds) {
-            console.error('PANEL_TLS_PORT задан, но сертификат не найден. Укажите PANEL_TLS_CERT/PANEL_TLS_KEY ' +
-                'или привяжите домен во вкладке «Домены и SSL».');
+            console.error('PANEL_TLS_PORT Р·Р°РґР°РЅ, РЅРѕ СЃРµСЂС‚РёС„РёРєР°С‚ РЅРµ РЅР°Р№РґРµРЅ. РЈРєР°Р¶РёС‚Рµ PANEL_TLS_CERT/PANEL_TLS_KEY ' +
+                'РёР»Рё РїСЂРёРІСЏР¶РёС‚Рµ РґРѕРјРµРЅ РІРѕ РІРєР»Р°РґРєРµ В«Р”РѕРјРµРЅС‹ Рё SSLВ».');
             process.exit(1);
         }
         const https = require('https');
@@ -17331,13 +17331,13 @@ if (require.main === module) {
             listenLogged(tlsServer, PANEL_TLS_PORT, PANEL_TLS_HOST, 'Servpanel HTTPS', 'https');
             tlsServers.push(tlsServer);
         } catch (e) {
-            console.error('Не удалось создать HTTPS-listener:', e.message);
+            console.error('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ HTTPS-listener:', e.message);
             process.exit(1);
         }
     }
 
-    // Второй listener: только API, без HTML и статики.
-    // Если сертификат есть — он тоже HTTPS (приложение не должно ходить по HTTP).
+    // Р’С‚РѕСЂРѕР№ listener: С‚РѕР»СЊРєРѕ API, Р±РµР· HTML Рё СЃС‚Р°С‚РёРєРё.
+    // Р•СЃР»Рё СЃРµСЂС‚РёС„РёРєР°С‚ РµСЃС‚СЊ вЂ” РѕРЅ С‚РѕР¶Рµ HTTPS (РїСЂРёР»РѕР¶РµРЅРёРµ РЅРµ РґРѕР»Р¶РЅРѕ С…РѕРґРёС‚СЊ РїРѕ HTTP).
     if (PANEL_API_PORT && PANEL_API_PORT !== PANEL_TLS_PORT) {
         const apiApp = express();
         apiApp.disable('x-powered-by');
@@ -17351,57 +17351,57 @@ if (require.main === module) {
         if (tlsCreds) {
             const https = require('https');
             apiServer = https.createServer({ key: tlsCreds.key, cert: tlsCreds.cert }, apiApp);
-            listenLogged(apiServer, PANEL_API_PORT, PANEL_API_HOST, 'Servpanel API (только /api/*)', 'https');
+            listenLogged(apiServer, PANEL_API_PORT, PANEL_API_HOST, 'Servpanel API (С‚РѕР»СЊРєРѕ /api/*)', 'https');
             tlsServers.push(apiServer);
         } else {
             const http = require('http');
             apiServer = http.createServer(apiApp);
-            listenLogged(apiServer, PANEL_API_PORT, PANEL_API_HOST, 'Servpanel API (только /api/*)', 'http');
-            console.warn('API-порт работает без TLS: укажите PANEL_TLS_CERT/PANEL_TLS_KEY или привяжите домен.');
+            listenLogged(apiServer, PANEL_API_PORT, PANEL_API_HOST, 'Servpanel API (С‚РѕР»СЊРєРѕ /api/*)', 'http');
+            console.warn('API-РїРѕСЂС‚ СЂР°Р±РѕС‚Р°РµС‚ Р±РµР· TLS: СѓРєР°Р¶РёС‚Рµ PANEL_TLS_CERT/PANEL_TLS_KEY РёР»Рё РїСЂРёРІСЏР¶РёС‚Рµ РґРѕРјРµРЅ.');
         }
     } else if (PANEL_API_PORT && PANEL_API_PORT === PANEL_TLS_PORT) {
-        console.log(`API-порт ${PANEL_API_PORT} совпадает с HTTPS-портом — отдельный listener не нужен.`);
+        console.log(`API-РїРѕСЂС‚ ${PANEL_API_PORT} СЃРѕРІРїР°РґР°РµС‚ СЃ HTTPS-РїРѕСЂС‚РѕРј вЂ” РѕС‚РґРµР»СЊРЅС‹Р№ listener РЅРµ РЅСѓР¶РµРЅ.`);
     }
 
-    // Если панель перезагрузилась посреди сборки каскада (например, после
-    // перезагрузки RU при установке AWG), продолжаем её автоматически.
+    // Р•СЃР»Рё РїР°РЅРµР»СЊ РїРµСЂРµР·Р°РіСЂСѓР·РёР»Р°СЃСЊ РїРѕСЃСЂРµРґРё СЃР±РѕСЂРєРё РєР°СЃРєР°РґР° (РЅР°РїСЂРёРјРµСЂ, РїРѕСЃР»Рµ
+    // РїРµСЂРµР·Р°РіСЂСѓР·РєРё RU РїСЂРё СѓСЃС‚Р°РЅРѕРІРєРµ AWG), РїСЂРѕРґРѕР»Р¶Р°РµРј РµС‘ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё.
     setTimeout(() => {
-        try { resumeCascadeJob(); } catch (e) { console.warn('Каскад: не удалось продолжить сборку —', e.message); }
+        try { resumeCascadeJob(); } catch (e) { console.warn('РљР°СЃРєР°Рґ: РЅРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕРґРѕР»Р¶РёС‚СЊ СЃР±РѕСЂРєСѓ вЂ”', e.message); }
     }, 8000);
 
-    // Перечитать сертификат без простоя: kill -HUP <pid> или pm2 reload.
-    // Обновляем и HTTPS-панель, и API-порт, и HTTPS-метрики.
+    // РџРµСЂРµС‡РёС‚Р°С‚СЊ СЃРµСЂС‚РёС„РёРєР°С‚ Р±РµР· РїСЂРѕСЃС‚РѕСЏ: kill -HUP <pid> РёР»Рё pm2 reload.
+    // РћР±РЅРѕРІР»СЏРµРј Рё HTTPS-РїР°РЅРµР»СЊ, Рё API-РїРѕСЂС‚, Рё HTTPS-РјРµС‚СЂРёРєРё.
     process.on('SIGHUP', () => {
         try {
             const fresh = loadTlsCredentials();
-            if (!fresh) throw new Error('сертификат не найден');
+            if (!fresh) throw new Error('СЃРµСЂС‚РёС„РёРєР°С‚ РЅРµ РЅР°Р№РґРµРЅ');
             for (const srv of tlsServers) srv.setSecureContext({ key: fresh.key, cert: fresh.cert });
             if (metricsServer && metricsRuntime.tls) {
                 metricsServer.setSecureContext({ key: fresh.key, cert: fresh.cert });
             }
-            console.log('TLS-сертификат перечитан (панель, API и метрики)');
+            console.log('TLS-СЃРµСЂС‚РёС„РёРєР°С‚ РїРµСЂРµС‡РёС‚Р°РЅ (РїР°РЅРµР»СЊ, API Рё РјРµС‚СЂРёРєРё)');
         } catch (e) {
-            console.error('Не удалось перечитать TLS-сертификат:', e.message);
+            console.error('РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµС‡РёС‚Р°С‚СЊ TLS-СЃРµСЂС‚РёС„РёРєР°С‚:', e.message);
         }
     });
 
-    // Отдельный порт метрик. Запускается только если включён в настройках.
+    // РћС‚РґРµР»СЊРЅС‹Р№ РїРѕСЂС‚ РјРµС‚СЂРёРє. Р—Р°РїСѓСЃРєР°РµС‚СЃСЏ С‚РѕР»СЊРєРѕ РµСЃР»Рё РІРєР»СЋС‡С‘РЅ РІ РЅР°СЃС‚СЂРѕР№РєР°С….
     const startupSettings = readAppSettings();
     if (startupSettings.metrics.enabled) {
         startMetricsServer(startupSettings.metrics);
     } else {
-        console.log('Метрики: отдельный порт выключен (включается во вкладке «Приложение»).');
+        console.log('РњРµС‚СЂРёРєРё: РѕС‚РґРµР»СЊРЅС‹Р№ РїРѕСЂС‚ РІС‹РєР»СЋС‡РµРЅ (РІРєР»СЋС‡Р°РµС‚СЃСЏ РІРѕ РІРєР»Р°РґРєРµ В«РџСЂРёР»РѕР¶РµРЅРёРµВ»).');
     }
 
-    // Telegram-бот управления прокси. Работает внутри панели, поэтому
-    // отдельная служба не нужна; при выключенном конфиге просто не стартует.
+    // Telegram-Р±РѕС‚ СѓРїСЂР°РІР»РµРЅРёСЏ РїСЂРѕРєСЃРё. Р Р°Р±РѕС‚Р°РµС‚ РІРЅСѓС‚СЂРё РїР°РЅРµР»Рё, РїРѕСЌС‚РѕРјСѓ
+    // РѕС‚РґРµР»СЊРЅР°СЏ СЃР»СѓР¶Р±Р° РЅРµ РЅСѓР¶РЅР°; РїСЂРё РІС‹РєР»СЋС‡РµРЅРЅРѕРј РєРѕРЅС„РёРіРµ РїСЂРѕСЃС‚Рѕ РЅРµ СЃС‚Р°СЂС‚СѓРµС‚.
     proxyBot.start().catch((e) => {
-        console.warn('Прокси-бот: не удалось запустить —', e.message);
+        console.warn('РџСЂРѕРєСЃРё-Р±РѕС‚: РЅРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РїСѓСЃС‚РёС‚СЊ вЂ”', e.message);
     });
 }
 
 module.exports = app;
-// Экспорт внутренних функций для тестов (не влияет на работу панели)
+// Р­РєСЃРїРѕСЂС‚ РІРЅСѓС‚СЂРµРЅРЅРёС… С„СѓРЅРєС†РёР№ РґР»СЏ С‚РµСЃС‚РѕРІ (РЅРµ РІР»РёСЏРµС‚ РЅР° СЂР°Р±РѕС‚Сѓ РїР°РЅРµР»Рё)
 module.exports._internals = {
     vpnEncode, vpnDecode, buildVpnUriFromConf, parseIni, validateObf, applyObfToConf,
     readObfFromConf, extractObfFromAny, parseObfInput, auditObf, detectObfVersion,
