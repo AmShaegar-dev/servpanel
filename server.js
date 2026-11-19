@@ -15063,16 +15063,20 @@ function xrayInstall() {
     return { installed: xrayInstalled(), version: xrayVersion() };
 }
 
+function xrayPublicFromPrivate(priv) {
+    const out = String(sh(XRAY_BIN, ['x25519', '-i', priv]) || '');
+    const pub = (out.match(/Password\s*\(PublicKey\)\s*:\s*(\S+)/i)
+        || out.match(/Public\s*key\s*:\s*(\S+)/i) || [])[1] || '';
+    if (!pub) throw new Error('Не удалось вывести publicKey из privateKey');
+    return pub;
+}
+
 function xrayKeypair() {
     const out = String(sh(XRAY_BIN, ['x25519']) || '');
-    // Xray 25+: "PrivateKey: ...", "Password (PublicKey): ...", "Hash32: ..."
-    // Старые сборки: "Private key: ...", "Public key: ..."
     const priv = (out.match(/Private\s*key\s*:\s*(\S+)/i) || [])[1] || '';
-    const pub = (out.match(/Password\s*\(PublicKey\)\s*:\s*(\S+)/i)
-        || out.match(/Public\s*key\s*:\s*(\S+)/i)
-        || out.match(/PublicKey\s*:\s*(\S+)/i) || [])[1] || '';
-    if (!priv || !pub) throw new Error('Не удалось сгенерировать ключи Reality: ' + out.replace(/\s+/g, ' ').slice(0, 120));
-    return { privateKey: priv, publicKey: pub };
+    if (!priv) throw new Error('Не удалось сгенерировать ключи Reality: ' + out.replace(/\s+/g, ' ').slice(0, 120));
+    // publicKey всегда выводим из privateKey, иначе пары расходятся.
+    return { privateKey: priv, publicKey: xrayPublicFromPrivate(priv) };
 }
 
 function xrayUuid() {
