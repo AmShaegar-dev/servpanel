@@ -15468,10 +15468,12 @@ function xrayTproxy(enable) {
     try { sh('sudo', ['iptables'].concat(clampDel)); } catch (err) { /* правила нет */ }
     // Подсеть клиентов: ответы Xray должны уходить в awg0, а не в local-таблицу.
     let clientNet = '';
+    let selfAddr = '';
     try {
         const addr = String(sh('ip', ['-o', '-f', 'inet', 'addr', 'show', iface]) || '');
         const m = addr.match(/inet\s+(\d+)\.(\d+)\.(\d+)\.(\d+)\/(\d+)/);
         if (m) {
+            selfAddr = [m[1], m[2], m[3], m[4]].join('.');
             const ipNum = ((+m[1] << 24) | (+m[2] << 16) | (+m[3] << 8) | +m[4]) >>> 0;
             const prefix = Number(m[5]);
             const mask = prefix === 0 ? 0 : (0xFFFFFFFF << (32 - prefix)) >>> 0;
@@ -15482,13 +15484,15 @@ function xrayTproxy(enable) {
     // Трафик клиентов к самому серверу (панель, SOCKS, SSH по туннельному
     // адресу) не должен перехватываться: иначе он идёт через Xray дважды —
     // REDIRECT в dokodemo, обратно в локальный порт и ещё раз в туннель.
-    const selfAddr = (clientNet || '').split('/')[0];
+    const netAddr = (clientNet || '').split('/')[0];
     const dropSelfRules = () => {
-        if (!selfAddr) return;
+        const targets = [selfAddr, netAddr].filter((v, i, a) => v && a.indexOf(v) === i);
         for (const table of ['nat', 'mangle']) {
-            for (let i = 0; i < 4; i++) {
-                try { sh('sudo', ['iptables', '-w', '5', '-t', table, '-D', 'PREROUTING', '-i', iface, '-d', selfAddr, '-j', 'RETURN']); }
-                catch (err) { break; }
+            for (const t of targets) {
+                for (let i = 0; i < 8; i++) {
+                    try { sh('sudo', ['iptables', '-w', '5', '-t', table, '-D', 'PREROUTING', '-i', iface, '-d', t, '-j', 'RETURN']); }
+                    catch (err) { break; }
+                }
             }
         }
     };
