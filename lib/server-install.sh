@@ -236,9 +236,23 @@ pm2 save
 # ==================== 4. СЕТЬ И ДОСТУП ====================
 echo -e "\n${CYAN}[4/4] Настройка Nginx и фаервола...${NC}"
 
-# UFW: не трогаем чужие правила, но открываем SSH, панель и уже
+# UFW: не трогаем чужие правила, но открываем действующий SSH, панель и уже
 # установленные AWG-порты (если панель ставят на сервер с AWG).
-ufw allow ssh >/dev/null 2>&1 || ufw allow 22/tcp >/dev/null 2>&1 || true
+# Порт SSH бывает не 22 (например, 2233) — определяем фактический.
+detect_ssh_ports() {
+    local ports=""
+    if command -v sshd >/dev/null 2>&1; then
+        ports="$(sshd -T 2>/dev/null | awk 'tolower($1)=="port"{print $2}')"
+    fi
+    if [ -z "$ports" ]; then
+        ports="$(ss -H -ltnp 2>/dev/null | awk '/sshd/ {n=split($4,a,":"); print a[n]}')"
+    fi
+    [ -n "$ports" ] || ports="22"
+    printf '%s\n' "$ports" | grep -E '^[0-9]+$' | sort -u
+}
+for ssh_port in $(detect_ssh_ports); do
+    ufw allow "$ssh_port"/tcp >/dev/null 2>&1 || true
+done
 for conf in /etc/amnezia/amneziawg/*.conf /etc/wireguard/*.conf; do
     [ -f "$conf" ] || continue
     awg_port="$(awk -F'=' '/^[[:space:]]*ListenPort/{gsub(/[^0-9]/,"",$2); print $2; exit}' "$conf")"

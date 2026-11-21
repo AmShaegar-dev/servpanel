@@ -221,9 +221,8 @@ remove_shared_stack() {
     fi
     rm -f /etc/logrotate.d/servpanel
     rm -f /var/log/servpanel_auth.log /var/log/awg_audit.log
-    if command -v ufw >/dev/null 2>&1; then
-        ufw delete allow 22/tcp >/dev/null 2>&1 || true
-    fi
+    # Правило SSH не удаляем: оно могло быть открыто до панели, а на серверах
+    # с нестандартным портом (2233 и т.п.) это может отрезать доступ.
 }
 
 remove_nginx_site() {
