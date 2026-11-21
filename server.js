@@ -13122,11 +13122,11 @@ function startSslRenew(name, force, auditReq, dryRun) {
     sslRenewJob = job;
     (async () => {
         try {
-            const args = ['renew', '--non-interactive'];
+            const args = ['renew', '--non-interactive', '--no-random-sleep-on-renew'];
             if (dryRun) args.push('--dry-run');
             if (name) args.push('--cert-name', name);
             if (force) args.push('--force-renewal');
-            const run = await rootRun(findCommand('certbot') || 'certbot', args, { timeout: 300000 });
+            const run = await rootRun(findCommand('certbot') || 'certbot', args, { timeout: 600000 });
             job.output = String(run.stdout || '') + '\n' + String(run.stderr || '');
             if (!run.ok) {
                 const portBusy = /Could not bind TCP port 80|already in use|Address already in use/i.test(job.output);
@@ -13285,14 +13285,15 @@ async function sslChecklist(name, domainHint) {
     const certs = currentCertificates();
     const sites = currentSites();
     const hintDomain = normalizeDomain(domainHint) || '';
-    const site = sites.find(s => name && (s.name === name || s.domains.includes(name)))
-        || sites.find(s => hintDomain && s.domains.includes(hintDomain))
-        || null;
+    const nameDomain = normalizeDomain(name) || '';
+    let site = sites.find(s => (name && (s.name === name || s.domains.includes(name))) || (hintDomain && s.domains.includes(hintDomain))) || null;
     // Домен вычисляем до поиска сертификата: без имени (кнопка в шапке) он
     // берётся из состояния панели, и сертификат находится по домену.
-    const domain = hintDomain || (site && site.domains && site.domains[0]) || normalizeDomain(name) || panelDomain() || '';
+    let domain = hintDomain || (site && site.domains && site.domains[0]) || nameDomain || '';
+    if (!domain) domain = panelDomain() || '';
+    if (!site && domain) site = sites.find(s => s.domains.includes(domain)) || null;
     const cert = certs.find(c => name && c.name === name) || certs.find(c => c.domains.includes(domain)) || null;
-    const certName = (cert && cert.name) || (normalizeDomain(name) ? name : '') || domain || '';
+    const certName = (cert && cert.name) || nameDomain || domain || '';
     const steps = [];
     const add = (id, title, status, detail, extra) => steps.push({ id, title, status, detail: detail || '', ...(extra || {}) });
 
@@ -13382,7 +13383,7 @@ async function sslChecklist(name, domainHint) {
             }
             const siteCfg = site ? readTextMaybeRoot(site.available) : '';
             const sslPorts = existingSslPorts(siteCfg);
-            const expected = (site && Number(site.httpsPort)) || sslPorts[0] || PANEL_PUBLIC_PORT;
+            const expected = sslPorts[0] || (site && Number(site.httpsPort)) || PANEL_PUBLIC_PORT;
             const redirectOk = targetPort === expected || sslPorts.includes(targetPort);
             const shown = 'https://' + domain + (targetPort === 443 ? '' : ':' + targetPort);
             add('redirect', 'Редирект HTTP → HTTPS', redirectOk ? 'ok' : 'warn',
@@ -13834,7 +13835,8 @@ const LOG_WHITELIST = [
     '/var/log/mtproxyl_install.log',
     '/var/log/awg_uninstall.log', '/var/log/ru-drop.log', '/var/log/awg_audit.log',
     WARP_LOG,
-    '/var/log/nginx/error.log', '/var/log/nginx/access.log', '/var/log/auth.log', '/var/log/syslog'
+    '/var/log/nginx/error.log', '/var/log/nginx/access.log', '/var/log/auth.log', '/var/log/syslog',
+    '/var/log/letsencrypt/letsencrypt.log'
 ];
 
 function mtprotoHex32(value) {
@@ -17094,6 +17096,100 @@ app.post('/api/app/metrics/token', checkAuth, requireAdmin, async (req, res) => 
 // ---------------------------------------------------------------------------
 // Запуск
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Миграция внутреннего порта панели (3000 -> 2999).
+// nginx остаётся входной точкой: меняется только proxy_pass на loopback,
+// затем пишется .panel_port и панель перезапускается уже на новом порту.
+// При неудачном nginx -t или перезапуске всё возвращается назад.
+// ---------------------------------------------------------------------------
+const INTERNAL_PORT_TARGET = 2999;
+
+function readInternalPortNow() {
+    try {
+        const p = parseInt(fs.readFileSync(path.join(APP_DIR, '.panel_port'), 'utf8').trim(), 10);
+        if (Number.isInteger(p) && p > 0 && p < 65536) return p;
+    } catch (e) { /* файла нет */ }
+    return parseInt(process.env.PANEL_PORT, 10) || 3000;
+}
+
+function internalPortPlan() {
+    if (NO_SYSTEM()) return null;
+    const current = readInternalPortNow();
+    if (current === INTERNAL_PORT_TARGET) return null;
+    const cfg = path.join(NGX_AVAILABLE, PANEL_SITE_NAME);
+    if (!fs.existsSync(cfg)) return null;
+    let text = '';
+    try { text = fs.readFileSync(cfg, 'utf8'); } catch (e) { return null; }
+    const needle = 'proxy_pass http://127.0.0.1:' + current;
+    if (!text.includes(needle)) return null;
+    // Если целевой порт уже занят чужим процессом — не рискуем.
+    try {
+        const busy = String(shTry('ss', ['-H', '-ltn', 'sport = :' + INTERNAL_PORT_TARGET], { timeout: 5000 }) || '').trim();
+        if (busy) return null;
+    } catch (e) { return null; }
+    return { current, target: INTERNAL_PORT_TARGET, cfg, needle };
+}
+
+function applyInternalPortPlan(plan) {
+    const backup = plan.cfg + '.port-migration-bak';
+    try {
+        fs.copyFileSync(plan.cfg, backup);
+        const text = fs.readFileSync(plan.cfg, 'utf8').split(plan.needle)
+            .join('proxy_pass http://127.0.0.1:' + plan.target);
+        fs.writeFileSync(plan.cfg, text);
+        const test = spawnSync(findCommand('nginx') || 'nginx', ['-t'], { encoding: 'utf8', timeout: 20000 });
+        if (test.status !== 0) {
+            try { fs.copyFileSync(backup, plan.cfg); } catch (e) { /* ignore */ }
+            console.warn('Миграция внутреннего порта: nginx -t не прошёл, откат');
+            return false;
+        }
+        fs.writeFileSync(path.join(APP_DIR, '.panel_port'), plan.target + '\n', { mode: 0o600 });
+        const reload = spawnSync('systemctl', ['reload', 'nginx'], { encoding: 'utf8', timeout: 20000 });
+        if (reload.status !== 0) console.warn('Миграция внутреннего порта: nginx reload не удался');
+        console.log('Внутренний порт панели: ' + plan.current + ' -> ' + plan.target);
+        return true;
+    } catch (e) {
+        console.warn('Миграция внутреннего порта не выполнена: ' + (e && e.message || e));
+        return false;
+    }
+}
+
+function revertInternalPortPlan(plan) {
+    try { fs.copyFileSync(plan.cfg + '.port-migration-bak', plan.cfg); } catch (e) { /* ignore */ }
+    try { fs.writeFileSync(path.join(APP_DIR, '.panel_port'), plan.current + '\n', { mode: 0o600 }); } catch (e) { /* ignore */ }
+    try { spawnSync('systemctl', ['reload', 'nginx'], { encoding: 'utf8', timeout: 20000 }); } catch (e) { /* ignore */ }
+}
+
+// Порт меняем сразу при обычном старте. Если прямо сейчас идёт обновление,
+// старый воркер ждёт панель на прежнем порту — тогда мигрируем после него.
+(function scheduleInternalPortMigration() {
+    const plan = internalPortPlan();
+    if (!plan) return;
+    const lock = path.join(DATA_DIR, '.update.lock');
+    if (!fs.existsSync(lock)) {
+        applyInternalPortPlan(plan);
+        return;
+    }
+    let tries = 0;
+    const timer = setInterval(() => {
+        tries++;
+        if (fs.existsSync(lock)) {
+            if (tries > 120) clearInterval(timer);
+            return;
+        }
+        clearInterval(timer);
+        const fresh = internalPortPlan();
+        if (!fresh || !applyInternalPortPlan(fresh)) return;
+        try {
+            const pm2bin = process.env.PM2_BIN || (fs.existsSync('/usr/local/bin/pm2') ? '/usr/local/bin/pm2' : 'pm2');
+            const r = spawnSync(pm2bin, ['restart', PM2_NAME], { encoding: 'utf8', timeout: 60000 });
+            if (r.status !== 0) revertInternalPortPlan(fresh);
+        } catch (e) {
+            revertInternalPortPlan(fresh);
+        }
+    }, 5000);
+})();
+
 function readPortFile() {
     try {
         const p = parseInt(fs.readFileSync(path.join(APP_DIR, '.panel_port'), 'utf8').trim(), 10);
