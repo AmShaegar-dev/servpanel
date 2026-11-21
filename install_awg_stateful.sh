@@ -75,7 +75,11 @@ else
     echo "@reboot root bash $WRAPPER_SCRIPT >> $LOG_FILE 2>&1" > "$CRON_FILE"
 fi
 
-PORT_TO_OPEN="${PANEL_PORT:-4444}"
+PORT_TO_OPEN="${PANEL_PORT:-}"
+# Старые установщики передавали порт панели не всегда — читаем из её файлов.
+if [ -z "$PORT_TO_OPEN" ] && [ -f /root/servpanel/.panel_public_port ]; then
+    PORT_TO_OPEN="$(tr -dc '0-9' < /root/servpanel/.panel_public_port)"
+fi
 
 ufw_open() {
     local port="$1" proto="${2:-tcp}"
@@ -87,15 +91,26 @@ ufw_open() {
     fi
 }
 
-# Открываем порты панели и AWG. UDP-порт AWG открываем и до установки
-# (если задан), и после — по фактическому ListenPort из конфига.
-echo "Проверка портов панели (${PORT_TO_OPEN}, 80, 443, 22, 2233, 4443)..."
-ufw_open "$PORT_TO_OPEN" tcp
-ufw_open 80 tcp
-ufw_open 443 tcp
-ufw_open 22 tcp
-ufw_open 2233 tcp
-ufw_open 4443 tcp
+# Действующий порт(ы) SSH: из конфига sshd, иначе по слушающему процессу.
+detect_ssh_ports() {
+    local ports=""
+    if command -v sshd >/dev/null 2>&1; then
+        ports="$(sshd -T 2>/dev/null | awk 'tolower($1)=="port"{print $2}')"
+    fi
+    if [ -z "$ports" ]; then
+        ports="$(ss -H -ltnp 2>/dev/null | awk '/sshd/ {n=split($4,a,":"); print a[n]}')"
+    fi
+    [ -n "$ports" ] || ports="22"
+    printf '%s\n' "$ports" | grep -E '^[0-9]+$' | sort -u
+}
+
+# Открываем только то, что действительно нужно: действующий SSH, порт панели и
+# выбранный порт AWG/туннеля. Ранее открытые порты не трогаем (UFW не чистим).
+echo "Проверка портов: SSH, панель (${PORT_TO_OPEN:-не задан}), AWG (${AWG_PORT:-не задан})..."
+for ssh_port in $(detect_ssh_ports); do
+    ufw_open "$ssh_port" tcp
+done
+[ -n "$PORT_TO_OPEN" ] && ufw_open "$PORT_TO_OPEN" tcp
 [ -n "${AWG_PORT:-}" ] && ufw_open "$AWG_PORT" udp
 
 
