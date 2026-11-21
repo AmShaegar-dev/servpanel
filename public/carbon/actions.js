@@ -606,6 +606,32 @@ async function carbonSslSite(mode) {
   });
 }
 
+async function carbonSslTimer() {
+  if (!confirm('Включить автопродление сертификатов (certbot.timer)?')) return;
+  const r = await api('/api/ssl/certbot', { method: 'POST', body: { action: 'enable' } });
+  const t = r && r.timer;
+  await carbonRefresh(t && t.active ? 'Автопродление включено' : 'Таймер не запустился');
+}
+
+async function carbonSslDryRun() {
+  if (!confirm('Проверить продление всех сертификатов без выпуска (certbot renew --dry-run)?')) return;
+  const start = await api('/api/ssl/renew', { method: 'POST', body: { dryRun: true } });
+  if (start.demo) { showToast('Демо-режим: проверка не выполняется'); return; }
+  if (!start.running) { await carbonRefresh('Проверка не запущена'); return; }
+  showToast('Проверка продления запущена, ждём…');
+  for (let i = 0; i < 120; i++) {
+    await carbonSleep(2000);
+    const s = await api('/api/ssl/renew/status').catch(() => null);
+    if (s && s.job && !s.job.running) {
+      if (s.job.error) { showToast('Ошибка: ' + s.job.error); return; }
+      showToast('Проверка пройдена: продление выполнится автоматически');
+      await carbonRefresh();
+      return;
+    }
+  }
+  showToast('Проверка всё ещё идёт — смотрите статус позже');
+}
+
 async function carbonSslRenew(name, daysLeft) {
   let force = false;
   if (daysLeft != null && daysLeft > 30) {
@@ -1116,6 +1142,42 @@ async function carbonInstallMtproxyl() {
   const d = await api('/api/install/module', { method: 'POST', body: { module: 'mtproxyl' } });
   await carbonWatchInstall(d && d.logFile, 'Установка MTProxyL');
   await carbonRefresh();
+}
+
+async function carbonCascade2Install() {
+  const st = (carbon.cascade2 && carbon.cascade2.state) || {};
+  showCarbonForm({
+    title: 'Каскад 2 (релей)',
+    sub: 'Клиенты и ключи переезжают с RU на EU. Входной порт остаётся, выходной RU — на единицу выше.',
+    fields: [
+      { name: 'euHost', label: 'Адрес панели EU', placeholder: 'https://eu.example.com:4446', value: st.euHost || '' },
+      { name: 'ruPort', label: 'Входной порт RU', type: 'number', value: st.ruPort || 3977, min: 1, max: 65535 },
+      { name: 'ports', label: 'Дополнительные порты (через запятую)', placeholder: '443, 8443', value: ((st.ports || []).filter(p => p !== (st.ruPort || 3977))).join(', ') },
+      { name: 'ruExitPort', label: 'Порт туннеля к RU', type: 'number', value: st.ruExitPort || ((st.ruPort || 3977) + 1), min: 1, max: 65535 },
+      { name: 'ifaces', label: 'Интерфейсы фильтрации на EU', type: 'checkboxes', value: st.ifaces || ['awg0'], options: (st.euIfaces && st.euIfaces.length ? st.euIfaces : ['awg0', 'awg1']) },
+      { name: 'panelUser', label: 'Логин панели EU', value: '', placeholder: 'admin' },
+      { name: 'panelPass', label: 'Пароль панели EU', type: 'password', value: '' }
+    ],
+    submitText: 'Включить',
+    onSubmit: async v => {
+      const ports = [Number(v.ruPort) || 3977].concat(String(v.ports || '').split(',').map(x => Number(x.trim())).filter(n => n > 0 && n < 65536));
+      await api('/api/cascade2/install', { method: 'POST', body: {
+        euHost: v.euHost, ruPort: Number(v.ruPort) || 3977, ports,
+        ruExitPort: Number(v.ruExitPort) || 0,
+        ifaces: Array.isArray(v.ifaces) ? v.ifaces : String(v.ifaces || 'awg0').split(',').map(x => x.trim()).filter(Boolean),
+        panelUser: v.panelUser, panelPass: v.panelPass
+      } });
+      await carbonRefresh('Каскад 2 включён');
+    }
+  });
+}
+
+async function carbonCascade2Refresh() {
+  try {
+    const d = await api('/api/cascade2/status');
+    carbon.cascade2 = d;
+    await carbonRefresh('Каскад 2 обновлён');
+  } catch (e) { showToast(e.message || 'Не удалось обновить'); }
 }
 
 async function carbonCascadeMode(mode) {
@@ -2461,6 +2523,8 @@ document.addEventListener('click', async event => {
     }
     else if (action === 'update-rollback') await carbonUpdateRollback();
     else if (action === 'ssl-deps') await carbonSslDeps();
+    else if (action === 'ssl-timer') await carbonSslTimer();
+    else if (action === 'ssl-dryrun') await carbonSslDryRun();
     else if (action === 'ssl-bind') await carbonSslSite('panel');
     else if (action === 'ssl-site') await carbonSslSite('site');
     else if (action === 'ssl-renew') await carbonSslRenew(name, btn.dataset.days == null ? null : Number(btn.dataset.days));
@@ -2505,6 +2569,15 @@ document.addEventListener('click', async event => {
     else if (action === 'awg-install') await carbonAwgInstall();
     else if (action === 'cascade-build') await carbonCascadeBuild();
     else if (action === 'cascade-mode') await carbonCascadeMode(btn.dataset.mode || 'classic');
+    else if (action === 'cascade2-install') await carbonCascade2Install();
+    else if (action === 'cascade2-refresh') await carbonCascade2Refresh();
+    else if (action === 'cascade2-port-add') await carbonCascade2PortAdd();
+    else if (action === 'cascade2-ifaces-save') await carbonCascade2IfacesSave();
+    else if (action === 'cascade2-classic') await carbonCascade2Disable();
+    else if (action === 'cascade2-port-del') await carbonCascade2PortDel(Number(btn.dataset.port) || 0);
+    else if (action === 'cascade2-host-save') await carbonCascade2HostSave();
+    else if (action === 'cascade2-endpoint-save') await carbonCascade2EndpointSave();
+    else if (action === 'cascade2-awg1') await carbonCascade2Awg1();
     else if (action === 'cascade-balance-settings') await carbonBalanceSettings();
     else if (action === 'cascade-exit-capacity') await carbonCascadeExitCapacity(btn.dataset.id);
     else if (action === 'cascade-exit-iperf') await carbonCascadeExitIperf(btn.dataset.id);
@@ -2607,3 +2680,94 @@ window.carbonAfterRender = function (tab) {
     carbonBbrLoad().catch(function () {});
   }
 };
+
+async function carbonCascade2Refresh() {
+  try {
+    const d = await api('/api/cascade2/status');
+    carbon.cascade2 = d;
+    await carbonRefresh('Каскад 2 обновлён');
+  } catch (e) { showToast(e.message || 'Не удалось обновить'); }
+}
+
+async function carbonCascade2PortAdd() {
+  const el = document.getElementById('carbonC2Port');
+  const port = Number(el && el.value);
+  if (!port || port < 1 || port > 65535) { showToast('Порт 1–65535'); return; }
+  const st = (carbon.cascade2 && carbon.cascade2.state) || {};
+  const ports = Array.from(new Set([].concat(st.ports || [st.ruPort || 3977], [port]))).sort((a, b) => a - b);
+  try {
+    const d = await api('/api/cascade2/config', { method: 'POST', body: { ports } });
+    carbon.cascade2 = Object.assign({}, carbon.cascade2, { state: d.state });
+    await carbonRefresh('Порт ' + port + ' добавлен');
+  } catch (e) { showToast(e.message || 'Не удалось добавить порт'); }
+}
+
+async function carbonCascade2PortDel(port) {
+  if (!port) return;
+  const st = (carbon.cascade2 && carbon.cascade2.state) || {};
+  const ports = (st.ports || []).filter(p => Number(p) !== Number(port));
+  if (!ports.length) { showToast('Нужен хотя бы один порт'); return; }
+  try {
+    const d = await api('/api/cascade2/config', { method: 'POST', body: { ports } });
+    carbon.cascade2 = Object.assign({}, carbon.cascade2, { state: d.state });
+    await carbonRefresh('Порт ' + port + ' убран');
+  } catch (e) { showToast(e.message || 'Не удалось убрать порт'); }
+}
+
+async function carbonCascade2HostSave() {
+  const el = document.getElementById('carbonC2Host');
+  const host = String((el && el.value) || '').trim().replace(/^https?:\/\//, '').replace(/:\d+$/, '');
+  if (!host) { showToast('Укажите IP или домен каскада'); return; }
+  try {
+    const d = await api('/api/cascade2/config', { method: 'POST', body: { euHost: host } });
+    carbon.cascade2 = Object.assign({}, carbon.cascade2, { state: d.state });
+    await carbonRefresh('IP каскада сохранён');
+  } catch (e) { showToast(e.message || 'Не удалось сохранить IP'); }
+}
+
+async function carbonCascade2IfacesSave() {
+  const boxes = Array.from(document.querySelectorAll('[data-c2-iface]'));
+  const ifaces = boxes.filter(b => b.checked).map(b => b.value);
+  if (!ifaces.length) { showToast('Выберите хотя бы один интерфейс'); return; }
+  try {
+    const d = await api('/api/cascade2/config', { method: 'POST', body: { ifaces } });
+    carbon.cascade2 = Object.assign({}, carbon.cascade2, { state: d.state });
+    await carbonRefresh('Интерфейсы сохранены');
+  } catch (e) { showToast(e.message || 'Не удалось сохранить'); }
+}
+
+async function carbonCascade2Disable() {
+  if (!confirm('Выключить каскад 2 и вернуться к обычному каскаду? Правила релея будут сняты.')) return;
+  try {
+    await api('/api/cascade2/disable', { method: 'POST', body: {} });
+    await carbonRefresh('Каскад 2 выключен');
+  } catch (e) { showToast(e.message || 'Не удалось выключить'); }
+}
+
+async function carbonCascade2EndpointSave() {
+  const el = document.getElementById('carbonC2Endpoint');
+  const val = String((el && el.value) || '').trim();
+  try {
+    const d = await api('/api/cascade2/config', { method: 'POST', body: { clientEndpoint: val } });
+    carbon.cascade2 = Object.assign({}, carbon.cascade2, { state: d.state, clientEndpoint: val });
+    await carbonRefresh(val ? 'Endpoint клиентов: ' + val : 'Endpoint клиентов: автоматически');
+  } catch (e) { showToast(e.message || 'Не удалось сохранить endpoint'); }
+}
+
+async function carbonCascade2Awg1() {
+  let content = '';
+  try {
+    const d = await api('/api/cascade2/awg1');
+    content = d.content || '';
+  } catch (e) { showToast(e.message || 'Не удалось прочитать awg1'); return; }
+  showCarbonForm({
+    title: 'Конфиг awg1',
+    sub: 'Туннель релея. После сохранения интерфейс перезапускается.',
+    fields: [{ name: 'content', label: 'awg1.conf', type: 'textarea', rows: 16, value: content }],
+    submitText: 'Сохранить и перезапустить',
+    onSubmit: async v => {
+      await api('/api/cascade2/awg1', { method: 'POST', body: { content: v.content } });
+      await carbonRefresh('awg1 обновлён');
+    }
+  });
+}

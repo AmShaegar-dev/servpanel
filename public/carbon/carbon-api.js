@@ -515,6 +515,7 @@ function assignCarbonPath(path, data) {
   else if (p === '/api/fail2ban/status') carbon.fail2ban = data;
   else if (p === '/api/warp/status') carbon.warp = data;
   else if (p === '/api/cascade/status') carbon.cascade = data;
+  else if (p === '/api/cascade2/status') carbon.cascade2 = data;
   else if (p === '/api/cascade/proxy') carbon.cascadeProxy = data;
   else if (p === '/api/obf/current') carbon.obf = data;
   else if (p === '/api/obf/profiles') carbon.profiles = data;
@@ -539,7 +540,8 @@ function loadDashboardExtras() {
   if (dashboardExtrasLoading) return dashboardExtrasLoading;
   const paths = [
     '/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global',
-    '/api/traffic/distribution'
+    '/api/traffic/distribution',
+    '/api/cascade2/status'
   ];
   dashboardExtrasLoading = Promise.all(paths.map(p => api(p).catch(() => null))).then(results => {
     dashboardExtrasLoading = null;
@@ -547,6 +549,14 @@ function loadDashboardExtras() {
     if (typeof state !== 'undefined' && state.tab === 'dashboard') {
       updateDashboardSystem();
       updateDashboardDonut();
+    }
+    const c2 = carbon.cascade2;
+    if (c2 && c2.state && c2.state.type === 'relay') {
+      const cc = c2.counters || {};
+      const rxEl = document.getElementById('liveRx');
+      const txEl = document.getElementById('liveTx');
+      if (rxEl) rxEl.textContent = fmtBytes(Number(cc.totalRx) || 0);
+      if (txEl) txEl.textContent = fmtBytes(Number(cc.totalTx) || 0);
     }
   }).catch(() => { dashboardExtrasLoading = null; });
   // Если /api/stats не успел за первый проход, повторяем отдельно,
@@ -566,12 +576,12 @@ function loadDashboardExtras() {
 }
 
 const TAB_DATA = {
-  dashboard: ['/api/stats', '/api/sysinfo', '/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global', '/api/traffic/distribution'],
+  dashboard: ['/api/stats', '/api/sysinfo', '/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global', '/api/traffic/distribution', '/api/cascade2/status'],
   keenetic: ['/api/keenetic/overview', '/api/keenetic/events'],
   clients: ['/api/clients'],
   install: ['/api/modules'],
   network: ['/api/interfaces', '/api/ufw', '/api/iptables', '/api/awg/config'],
-  cascade: ['/api/cascade/status', '/api/cascade/proxy', '/api/cascade/interfaces', '/api/cascade/schedule'],
+  cascade: ['/api/cascade/status', '/api/cascade/proxy', '/api/cascade/interfaces', '/api/cascade/schedule', '/api/cascade2/status'],
   obfuscation: ['/api/obf/current', '/api/obf/profiles'],
   services: ['/api/services', '/api/warp/status'],
   domains: ['/api/ssl/status'],
@@ -593,7 +603,7 @@ function ensureTabData(tab) {
     let got = false;
     paths.forEach((p, i) => { if (assignCarbonPath(p, results[i])) got = true; });
     applyShellData();
-    if (got && typeof state !== 'undefined' && state.tab === tab) render();
+    if (typeof state !== 'undefined' && state.tab === tab) render();
   }).catch(() => { tabDataBusy[tab] = false; });
 }
 
@@ -899,7 +909,13 @@ function realTrafficDistribution() {
   if (!carbon.distribution) {
     return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">загрузка данных…</div></div>${tag('…', 'muted')}</div><div class="empty-row" style="min-height:220px;display:flex;align-items:center;justify-content:center">Загрузка диаграммы…</div></section>`;
   }
-  const d = carbon.distribution || {};
+  let d = carbon.distribution || {};
+  const c2d = carbon.cascade2 || {};
+  if (c2d.state && c2d.state.type === 'relay' && c2d.counters) {
+    const ru = Number(c2d.counters.ruBytes) || 0;
+    const eu = Number(c2d.counters.euBytes) || 0;
+    d = { role: 'relay', tunnel: ru, direct: eu, blocked: 0, source: 'cascade2' };
+  }
   const role = d.role || 'ru';
   const isEu = role === 'eu';
   const tunnel = Number(d.tunnel) || 0;
@@ -907,10 +923,15 @@ function realTrafficDistribution() {
   const passed = Number(d.passed) || 0;
   const blocked = Number(d.blocked) || 0;
   const source = d.source || 'unavailable';
-  const total = isEu ? passed + blocked : tunnel + direct + blocked;
+  const total = role === 'relay' ? tunnel + direct : (isEu ? passed + blocked : tunnel + direct + blocked);
   const exits = !isEu && Array.isArray(d.exits) && d.exits.length ? d.exits : null;
   const exitColors = ['#5b8cff', '#8b5cf6', '#2dd4a7', '#f5b84b', '#ff6b6b', '#4dd0e1'];
-  const parts = isEu
+  const parts = role === 'relay'
+    ? [
+        { key: 'direct', label: 'На EU', short: 'на EU', value: direct, color: '#5b8cff' },
+        { key: 'tunnel', label: 'Выход с RU', short: 'с RU', value: tunnel, color: 'var(--accent)' }
+      ]
+    : isEu
     ? [
         { key: 'passed', label: 'Прошло через EU', short: 'прошло', value: passed, color: '#5b8cff' },
         { key: 'blocked', label: 'GeoIP blocked', short: 'заблокировано', value: blocked, color: '#d29922' }
@@ -940,7 +961,7 @@ function realTrafficDistribution() {
   const note = total
     ? (isEu ? 'Данные из интерфейса awg0 и правил GeoIP.' : exits ? 'Данные по каждому выходу каскада и RU-направлению.' : (source === 'mangle' ? 'Данные из счётчиков mangle (ipset ru) и awg0/awg1.' : source === 'cached' ? 'Счётчики маршрутизации пересозданы — показаны последние известные доли.' : 'Данные из счётчиков маршрутизации.'))
     : 'Нет данных: счётчики маршрутизации ещё не накоплены.';
-  return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">${isEu ? 'EU-выход · прошло / GeoIP blocked' : exits ? 'RU-вход · выходы / RU' : 'RU-вход · туннель / RU выход'}${!isEu && blocked > 0 ? ' / GeoIP' : ''}</div></div>${tag(tagText, tagTone)}</div>
+  return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">${role === 'relay' ? 'НА EU · ВЫХОД С RU' : isEu ? 'EU-выход · прошло / GeoIP blocked' : exits ? 'RU-вход · выходы / RU' : 'RU-вход · туннель / RU выход'}${!isEu && blocked > 0 ? ' / GeoIP' : ''}</div></div>${tag(tagText, tagTone)}</div>
     <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
       <div style="position:relative;width:196px;height:196px;flex:0 0 auto">
         <svg viewBox="0 0 120 120" style="width:100%;height:100%"><circle cx="60" cy="60" r="46" fill="none" stroke="var(--surface-3)" stroke-width="12"/>${rings}</svg>
@@ -958,8 +979,15 @@ function realTrafficDistribution() {
 function realDashboard() {
   const clients = carbon.clients;
   const online = clients.filter(clientStatus).length;
-  const rx = clients.reduce((a, c) => a + (Number(c.rx) || 0), 0);
-  const tx = clients.reduce((a, c) => a + (Number(c.tx) || 0), 0);
+  let rx = clients.reduce((a, c) => a + (Number(c.rx) || 0), 0);
+  let tx = clients.reduce((a, c) => a + (Number(c.tx) || 0), 0);
+  // Каскад 2: клиентов на входе нет, трафик берём из счётчиков релея.
+  const c2s = carbon.cascade2 && carbon.cascade2.state;
+  if (c2s && c2s.type === 'relay' && !clients.length) {
+    const c2c = carbon.cascade2.counters || {};
+    rx = Number(c2c.totalRx) || Number(c2c.ruBytes) || 0;
+    tx = Number(c2c.totalTx) || Number(c2c.ruBytes) || 0;
+  }
   const s = carbon.server || {};
   const sys = carbon.sys || {};
   return `
@@ -1082,7 +1110,48 @@ function realNetwork() {
     </div>`;
 }
 
+function cascade2Switch(relay) {
+  return relay
+    ? `<button class="btn btn-primary" data-carbon-action="cascade2-install">${icon('cascade')}Каскад 2 · релей</button><button class="btn" data-carbon-action="cascade2-classic">${icon('cascade')}Обычный каскад</button>`
+    : `<button class="btn" data-carbon-action="cascade2-install">${icon('cascade')}Каскад 2 · релей</button>`;
+}
+
+function realCascadeRelay() {
+  const c2 = carbon.cascade2 || {};
+  const s = c2.state || {};
+  const c = c2.counters || {};
+  const t = c2.tunnel || {};
+  const ports = (s.ports || [s.ruPort || 3977]).slice().sort((a, b) => a - b);
+  const mb = b => ((Number(b) || 0) / 1048576).toFixed(1);
+  const total = (Number(c.ruBytes) || 0) + (Number(c.euBytes) || 0);
+  const ruPct = total ? Math.round((Number(c.ruBytes) || 0) * 100 / total) : 0;
+  const euPct = total ? 100 - ruPct : 0;
+  const ifaceList = (s.euIfaces && s.euIfaces.length) ? s.euIfaces : ['awg0', 'awg1'];
+  return `<div class="page-head"><div><div class="page-title">Каскад 2 · релей</div><div class="page-sub">Вход RU ничего не расшифровывает. Клиенты терминируются на EU, российские адреса выходят с RU.</div></div><div class="page-actions">${cascade2Switch(true)}<button class="btn" data-carbon-action="cascade2-refresh">${icon('refresh')}Обновить</button></div></div>
+    <div class="mini-grid">${mini('Вход RU', String(s.ruPort || '—') + '/udp', 'портов: ' + ports.length)}${mini('Выход с RU', mb(c.ruBytes) + ' МБ', ruPct + '% трафика')}${mini('На EU', mb(c.euBytes) + ' МБ', euPct + '% трафика')}${mini('Туннель EU↔RU', t.age >= 0 ? (t.age + ' с назад') : 'нет связи', t.iface || 'awg1')}${mini('Сетей в ipset ru', String(c2.nets || 0), (s.ifaces || []).join(', ') || '—')}</div>
+    <div class="grid">
+      <section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Порты входа</div><div class="card-sub">Каждый порт пробрасывается на EU без расшифровки</div></div>${tag(String(ports.length), 'muted')}</div>
+        <div class="list">${ports.map(p => `<div class="list-row"><b>${p}/udp</b><span class="mono">→ ${escHtml(s.euHost || s.ruIp || '—')}:${p}</span>${ports.length > 1 ? `<button class="row-action" data-carbon-action="cascade2-port-del" data-port="${p}" title="Убрать">${icon('trash')}</button>` : ''}</div>`).join('')}</div>
+        <div class="page-actions" style="margin-top:12px"><label class="field" style="min-width:140px"><span>Новый порт</span><input id="carbonC2Port" type="number" min="1" max="65535" placeholder="443"></label><button class="btn" data-carbon-action="cascade2-port-add">${icon('plus')}Добавить порт</button></div>
+        <div class="donut-note">Порты применяются к релею сразу; UFW открывается автоматически.</div></section>
+      <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Выход RU</div><div class="card-sub">Туннель для российских адресов</div></div>${tag(t.age >= 0 && t.age < 180 ? 'активен' : 'нет связи', t.age >= 0 && t.age < 180 ? 'good' : 'warn')}</div>
+        <div class="list"><div class="list-row"><b>EU</b><span class="mono">${escHtml(s.euHost || s.ruIp || '—')}</span></div><div class="list-row"><b>Порт туннеля</b><span class="mono">${s.ruExitPort || '—'}</span></div><div class="list-row"><b>Интерфейсы фильтрации</b><span class="mono">${escHtml((s.ifaces || []).join(', ') || '—')}</span></div><div class="list-row"><b>Пометка</b><span class="mono">ipset ru → awg1</span></div></div>
+        ${carbon.cascade2 && carbon.cascade2.role === 'ru' ? `<div class="page-actions" style="margin-top:12px"><label class="field" style="min-width:220px"><span>IP или домен каскада</span><input id="carbonC2Host" value="${escHtml(s.euHost || '')}" placeholder="eu.example.com"></label><button class="btn" data-carbon-action="cascade2-host-save">${icon('check')}Сохранить IP</button></div>` : ''}
+        <div class="page-actions" style="margin-top:12px">${ifaceList.map(i => `<span class="tag ${(s.ifaces || []).includes(i) ? 'good' : 'muted'}">${escHtml(i)}</span>`).join(' ')}</div></section>
+      ${(carbon.cascade2 && carbon.cascade2.role === 'eu') ? `<section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Интерфейсы фильтрации на EU</div><div class="card-sub">На этих интерфейсах российские адреса помечаются и уходят через RU</div></div>${tag(String((s.ifaces || []).length), 'muted')}</div>
+        <div class="switch-grid">${ifaceList.map(i => `<label class="switch"><input type="checkbox" data-c2-iface value="${escHtml(i)}" ${(s.ifaces || []).includes(i) ? 'checked' : ''}> ${escHtml(i)}</label>`).join('')}</div>
+        <div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="cascade2-ifaces-save">${icon('check')}Сохранить интерфейсы</button></div></section>` : ''}
+      <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Конфиги клиентов</div><div class="card-sub">На EU клиентские профили отдаются с endpoint российского входа</div></div>${tag(c2.clientEndpoint || 'авто', 'muted')}</div>
+        <div class="page-actions" style="margin-top:8px"><label class="field" style="min-width:260px"><span>Endpoint для клиентов (пусто — автоматически)</span><input id="carbonC2Endpoint" value="${escHtml(s.clientEndpoint || '')}" placeholder="${escHtml(c2.clientEndpoint || '45.0.0.1:3977')}"></label><button class="btn" data-carbon-action="cascade2-endpoint-save">${icon('check')}Сохранить</button><button class="btn" data-carbon-action="cascade2-awg1">${icon('wrench')}Конфиг awg1</button></div></section>
+      <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">Сколько ушло через российский выход и сколько напрямую с EU</div></div></div>
+        <div class="list"><div class="list-row"><b>Выход с RU</b><span class="mono">${mb(c.ruBytes)} МБ · ${ruPct}%</span></div><div class="list-row"><b>На EU</b><span class="mono">${mb(c.euBytes)} МБ · ${euPct}%</span></div><div class="list-row"><b>Всего принято</b><span class="mono">${mb(c.totalRx)} МБ</span></div></div></section>
+    </div>`;
+}
+
 function realCascade() {
+  const _c2 = carbon.cascade2 && carbon.cascade2.state;
+  const s = _c2 || {};
+  if (_c2 && _c2.type === 'relay') return realCascadeRelay();
   const c = carbon.cascade || {};
   const p = carbon.cascadeProxy || {};
   const ci = carbon.cascadeInterfaces || {};
@@ -1093,6 +1162,18 @@ function realCascade() {
   const csOptions = [[300, '5m', 'Каждые 5 минут'], [3600, '1h', 'Каждый час'], [21600, '6h', 'Каждые 6 часов'], [86400, '24h', 'Раз в сутки'], [0, 'off', 'Выключено']]
     .map(([sec, val, label]) => `<option value="${val}" ${csSeconds === sec ? 'selected' : ''}>${label}</option>`).join('');
   const csCard = cs.applicable === false ? '' : `<section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Обновление списков RU</div><div class="card-sub">Ручное обновление и автообновление ipset ru</div></div>${tag(cs.active ? 'авто' : 'выкл', cs.active ? 'good' : 'warn')}</div><div class="form-grid" style="grid-template-columns:minmax(220px,320px)"><label class="field"><span>Автообновление</span><select id="carbonCascadeSchedule">${csOptions}</select></label></div><div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="cascade-list-refresh">${icon('refresh')}Обновить список RU</button><button class="btn" data-carbon-action="cascade-schedule-save">${icon('check')}Сохранить расписание</button></div><div class="donut-note">Скрипт скачивает свежий список RU и пересобирает ipset и маршруты.</div></section>`;
+
+  const c2 = carbon.cascade2 || {};
+  const c2s = c2.state || {};
+  const c2c = c2.counters || {};
+  const c2Tunnel = c2.tunnel || {};
+  const mb = b => (Number(b) || 0) / 1048576;
+  const c2Card = (s.enabled && c2s.type === 'relay')
+    ? `<section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Каскад 2: релей без расшифровки</div><div class="card-sub">Клиенты входят на RU, туннель терминируется на EU</div></div>${tag('relay', 'good')}</div>
+      <div class="mini-grid">${mini('Вход RU', String(c2s.ruPort || '—') + '/udp', 'DNAT без расшифровки')}${mini('Туннель к RU', c2Tunnel.age >= 0 ? (c2Tunnel.age + ' с назад') : '—', c2Tunnel.iface || 'awg1')}${mini('Выход с RU', mb(c2c.ruBytes).toFixed(1) + ' МБ', 'через российский выход')}${mini('На EU', mb(c2c.euBytes).toFixed(1) + ' МБ', 'напрямую с EU')}${mini('Сетей RU', String(c2.nets || 0), (c2s.ifaces || []).join(', ') || 'awg0')}</div>
+      <div class="list"><div class="list-row"><b>Порты входа</b><span class="mono">${(c2s.ports || [c2s.ruPort]).join(', ')}</span></div><div class="list-row"><b>Выход RU</b><span class="mono">${c2s.euHost || '—'}:${c2s.ruExitPort || '—'}</span></div><div class="list-row"><b>Интерфейсы фильтрации</b><span class="mono">${(c2s.ifaces || []).join(', ') || '—'}</span></div></div>
+      <div class="page-actions" style="margin-top:12px"><button class="btn" data-carbon-action="cascade2-install">${icon('wrench')}Переустановить</button><button class="btn btn-sm" data-carbon-action="cascade2-refresh">${icon('refresh')}Обновить</button></div></section>`
+    : `<section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Каскад 2: релей без расшифровки</div><div class="card-sub">Новая схема: вход RU не расшифровывает трафик, клиенты живут на EU</div></div>${tag('не включён', 'warn')}</div><div class="donut-note">При включении клиенты, ключи и пиры переносятся с RU на EU. Входной порт остаётся прежним, для российского выхода используется порт на единицу выше.</div><div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="cascade2-install">${icon('cascade')}Включить каскад 2</button></div></section>`;
 
   const balance = c.balance || {};
   const balanceMode = balance.mode === 'balance';
@@ -1140,12 +1221,12 @@ function realCascade() {
   };
   const classicRouteCard = `<section class="card cascade-route-card"><div class="card-top"><div><div class="card-title">Маршрут каскада</div><div class="card-sub">awg1 · активный выход и резервные конфиги</div></div><div class="page-actions" style="margin:0"><span class="tag ${routeTone}">${routeLabel}</span><button class="btn btn-sm" data-carbon-action="cascade-backup-add">${icon('plus')}Резервный сервер</button><button class="btn btn-sm" data-carbon-action="cascade-failover-settings">${icon('wrench')}Резервирование</button><button class="btn btn-sm ${isBackupActive ? 'btn-danger' : ''}" data-carbon-action="cascade-failover-switch">${icon('cascade')}${switchLabel}</button></div></div><div class="cascade-route-layout"><div class="cascade-ru"><div class="cascade-ru-kicker">RU вход</div><div class="cascade-ru-name"><span class="cascade-ru-dot"></span>Россия</div><div class="cascade-ru-ip">${escHtml(c.role === 'ru' ? 'awg0 · вход' : (c.role || '—'))}</div><div class="cascade-ru-iface">awg1 → EU</div></div><div class="cascade-flow-link"><span class="cascade-flow-label">awg1</span></div><div class="cascade-servers">${serverCard(primary, 'primary', 0)}${backups.map((b, i) => serverCard(b, 'backup', i)).join('')}<button class="cascade-add-card" data-carbon-action="cascade-backup-add">${icon('plus')}<span>Добавить резерв</span></button></div></div><div class="cascade-route-foot"><div class="cascade-legend">Красный — основной, голубой — резерв, серый — нет связи. Бегущая полоса — активное подключение.</div><div style="display:flex;gap:6px"><span class="tag blue">${backups.length} резервов</span><span class="tag ${foSettings && foSettings.enabled ? 'good' : 'warn'}">${escHtml(checkTag)}</span></div></div></section>`;
   const routeCard = balanceMode ? exitCards : classicRouteCard;
-  return `<div class="page-head"><div><div class="page-title">Каскад RU → EU</div><div class="page-sub">Статус туннеля, резервирование и MTProto через EU.</div></div><div class="page-actions"><button class="btn btn-primary" data-carbon-action="cascade-build">${icon('cascade')}Построить каскад</button><button class="btn" data-carbon-action="cascade-progress">${icon('pulse')}Прогресс</button><button class="btn" data-carbon-action="cascade-manual">${icon('edit')}Ручная настройка</button><button class="btn" data-carbon-action="cascade-config-edit">${icon('terminal')}Изменить awg1</button><button class="btn" data-carbon-action="cascade-repair">${icon('refresh')}Пересобрать</button><button class="btn" data-carbon-action="cascade-cleanup">${icon('trash')}Удалить каскад</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
+  return `<div class="page-head"><div><div class="page-title">Каскад RU → EU</div><div class="page-sub">Статус туннеля, резервирование и MTProto через EU.</div></div><div class="page-actions">${cascade2Switch(false)}<button class="btn btn-primary" data-carbon-action="cascade-build">${icon('cascade')}Построить каскад</button><button class="btn" data-carbon-action="cascade-progress">${icon('pulse')}Прогресс</button><button class="btn" data-carbon-action="cascade-manual">${icon('edit')}Ручная настройка</button><button class="btn" data-carbon-action="cascade-config-edit">${icon('terminal')}Изменить awg1</button><button class="btn" data-carbon-action="cascade-repair">${icon('refresh')}Пересобрать</button><button class="btn" data-carbon-action="cascade-cleanup">${icon('trash')}Удалить каскад</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     ${modeCard}
     ${routeCard}
     <div class="mini-grid" style="margin-top:14px">${mini('Настроен', c.configured ? 'да' : 'нет', 'awg1')}${mini('Активен', c.active ? 'да' : 'нет', 'туннель')}${mini('Endpoint', escHtml(c.endpoint || '—'), 'EU')}${mini('Handshake', c.handshakeAgo == null ? '—' : c.handshakeAgo + ' c', 'назад')}${balanceMode ? mini('Выходы', String(exitCount), exits.filter(e => e.healthy).length + ' активны') : ''}</div>
     <div class="grid"><section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Состояние</div><div class="card-sub">/api/cascade/status</div></div>${tag(c.active ? 'активен' : 'не активен', c.active ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>Роль</b><span class="mono">${escHtml(c.role || '—')}</span></div><div class="list-row"><b>Интерфейсы</b><span class="mono">${escHtml((c.ifaces || []).join(', ') || '—')}</span></div><div class="list-row"><b>Маршрут</b><span class="mono">${escHtml(c.tableRoute || '—')}</span></div><div class="list-row"><b>ipset</b><span class="mono">${escHtml(String(c.ipsetCount || 0))}</span></div></div></section>
-    <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">MTProto через EU</div><div class="card-sub">/api/cascade/proxy</div></div>${tag(p.enabled ? 'включено' : 'выключено', p.enabled ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>middle_proxy_nat_ip</b><span class="mono">${escHtml(p.middleProxyNatIp || p.natIp || '—')}</span></div><div class="list-row"><b>Пользователи</b><span class="mono">${escHtml((p.users || []).join(', ') || '—')}</span></div></div></section><section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Интерфейсы каскада</div><div class="card-sub">${balanceMode ? 'ipset ru → напрямую · MARK 0x2000+ → выходы' : 'ipset ru → напрямую · MARK 0x1 → EU-туннель'}</div></div>${tag(String(selectedIfaces.length), selectedIfaces.length ? 'good' : 'warn')}</div><div class="chips">${ifaceList.map(i => `<label class="chip ${selectedIfaces.includes(i) ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-cascade-iface value="${escHtml(i)}" ${selectedIfaces.includes(i) ? 'checked' : ''}> ${escHtml(i)}</label>`).join('') || '<span class="muted">Интерфейсы не найдены</span>'}</div><div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="cascade-ifaces-save">${icon('check')}Применить интерфейсы</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div><div class="donut-note">К выбранным интерфейсам применяются правила RU-маршрутизации: RU-направления идут напрямую, остальное — ${balanceMode ? 'в назначенный выход каскада' : 'в EU-туннель'}.</div>${ci.reason && !ifaceList.length ? `<div class="donut-note">${escHtml(ci.reason)}</div>` : ''}</section>${csCard}</div>`;
+    <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">MTProto через EU</div><div class="card-sub">/api/cascade/proxy</div></div>${tag(p.enabled ? 'включено' : 'выключено', p.enabled ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>middle_proxy_nat_ip</b><span class="mono">${escHtml(p.middleProxyNatIp || p.natIp || '—')}</span></div><div class="list-row"><b>Пользователи</b><span class="mono">${escHtml((p.users || []).join(', ') || '—')}</span></div></div></section><section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Интерфейсы каскада</div><div class="card-sub">${balanceMode ? 'ipset ru → напрямую · MARK 0x2000+ → выходы' : 'ipset ru → напрямую · MARK 0x1 → EU-туннель'}</div></div>${tag(String(selectedIfaces.length), selectedIfaces.length ? 'good' : 'warn')}</div><div class="chips">${ifaceList.map(i => `<label class="chip ${selectedIfaces.includes(i) ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-cascade-iface value="${escHtml(i)}" ${selectedIfaces.includes(i) ? 'checked' : ''}> ${escHtml(i)}</label>`).join('') || '<span class="muted">Интерфейсы не найдены</span>'}</div><div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="cascade-ifaces-save">${icon('check')}Применить интерфейсы</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div><div class="donut-note">К выбранным интерфейсам применяются правила RU-маршрутизации: RU-направления идут напрямую, остальное — ${balanceMode ? 'в назначенный выход каскада' : 'в EU-туннель'}.</div>${ci.reason && !ifaceList.length ? `<div class="donut-note">${escHtml(ci.reason)}</div>` : ''}</section>${c2Card}${csCard}</div>`;
 }
 
 function realObfuscation() {
@@ -1235,9 +1316,14 @@ function realDomains() {
   const panel = s.panel || {};
   const certs = s.certificates || [];
   const sites = s.sites || [];
-  return `<div class="page-head"><div><div class="page-title">Домены и SSL</div><div class="page-sub">Сертификаты и сайты Nginx из API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="ssl-deps">${icon('download')}nginx + certbot</button><button class="btn" data-carbon-action="ssl-bind">${icon('lock')}Домен панели</button><button class="btn btn-primary" data-carbon-action="ssl-site">${icon('plus')}Создать сайт</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
-    <div class="mini-grid">${mini('Домен панели', escHtml(panel.domain || '—'), panel.scheme || '—')}${mini('HTTPS', panel.scheme === 'https' ? 'включён' : 'выключен', 'порт ' + (panel.publicPort || '—'))}${mini('Сертификатов', String(certs.length), 'Let\'s Encrypt')}${mini('Сайтов', String(sites.length), 'Nginx')}</div>
-    <div class="grid"><section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Сертификаты</div><div class="card-sub">/api/ssl/status</div></div>${tag(String(certs.length), 'muted')}</div><div class="list">${certs.map(c => {
+  const timer = s.timer || {};
+  const timerTag = timer.active
+    ? tag('включено', 'good')
+    : tag('выключено', 'warn');
+  return `<div class="page-head"><div><div class="page-title">Домены и SSL</div><div class="page-sub">Сертификаты и сайты Nginx из API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="ssl-deps">${icon('download')}nginx + certbot</button><button class="btn" data-carbon-action="ssl-dryrun">${icon('check')}Проверить продление</button><button class="btn" data-carbon-action="ssl-bind">${icon('lock')}Домен панели</button><button class="btn btn-primary" data-carbon-action="ssl-site">${icon('plus')}Создать сайт</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
+    <div class="mini-grid">${mini('Домен панели', escHtml(panel.domain || '—'), panel.scheme || '—')}${mini('HTTPS', panel.scheme === 'https' ? 'включён' : 'выключен', 'порт ' + (panel.publicPort || '—'))}${mini('Сертификатов', String(certs.length), 'Let\'s Encrypt')}${mini('Автопродление', timer.active ? 'включено' : 'выключено', timer.left ? 'через ' + timer.left : (timer.next || 'certbot.timer'))}</div>
+    <div class="grid"><section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Автопродление сертификатов</div><div class="card-sub">Таймер certbot.timer проверяет сроки дважды в сутки</div></div>${timerTag}</div><div class="list"><div class="list-row"><b>Таймер</b><span class="mono">${escHtml(timer.next ? timer.next + (timer.left ? ' · через ' + timer.left : '') : (timer.active ? 'активен' : 'не активен'))}</span></div><div class="list-row"><b>Проверка без выпуска</b><span class="mono">certbot renew --dry-run</span><button class="row-action" data-carbon-action="ssl-dryrun" title="Проверить продление">${icon('check')}</button></div></div>${timer.active ? '' : `<div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="ssl-timer">${icon('refresh')}Включить автопродление</button></div>`}</section>
+    <section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Сертификаты</div><div class="card-sub">/api/ssl/status</div></div>${tag(String(certs.length), 'muted')}</div><div class="list">${certs.map(c => {
       const domains = Array.isArray(c.domains) ? c.domains : [];
       const label = c.domain || domains[0] || c.name || '—';
       const expires = c.validTo || c.notAfter || c.expires;

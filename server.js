@@ -1279,8 +1279,14 @@ function metricsSnapshot() {
     const g = historyData.global && historyData.global.short && historyData.global.short.length
         ? historyData.global.short[historyData.global.short.length - 1]
         : null;
-    const totalRx = clients.reduce((s, c) => s + (Number(c && c.rx) || 0), 0);
-    const totalTx = clients.reduce((s, c) => s + (Number(c && c.tx) || 0), 0);
+    let totalRx = clients.reduce((s, c) => s + (Number(c && c.rx) || 0), 0);
+    let totalTx = clients.reduce((s, c) => s + (Number(c && c.tx) || 0), 0);
+    // Каскад 2 на входе: клиентов нет, трафик виден только в DNAT-счётчиках.
+    if (!totalRx && !totalTx && cascade2Detect().relay) {
+        const cc = cascade2Counters('awg0');
+        totalRx = cc.totalRx;
+        totalTx = cc.totalTx || cc.totalRx;
+    }
     const memPercent = mem.total > 0 ? Number(((mem.used / mem.total) * 100).toFixed(1)) : 0;
     return {
         ok: true,
@@ -9330,6 +9336,10 @@ app.post('/api/create', checkAuth, (req, res) => {
             const r = (response.results || [])[0];
             if (!r || !r.conf) return res.status(500).json({ error: 'Скрипт не вернул путь к конфигу' });
             if (epType === 'domain') replaceEndpointWithDomain(r.conf, epDomain);
+            if (cascade2Detect().relay) {
+                const cep = cascade2ClientEndpoint();
+                if (cep) { try { sh('sudo', ['sed', '-i', '-E', 's/^Endpoint = .*/Endpoint = ' + cep + '/', r.conf]); } catch (e2) { /* ignore */ } }
+            }
             else if (!epType) replaceEndpointWithDomain(r.conf);
             syncClient31Params(name);
             applyStoredClientMtu(name);
@@ -9477,6 +9487,11 @@ app.get('/api/clients/:name/export', checkAuth, requireAdmin, async (req, res) =
         let conf = '';
         try { if (fs.existsSync(confPath)) conf = sh('sudo', ['cat', confPath]); } catch (e) { conf = ''; }
         if (!conf) return res.status(404).json({ error: 'Конфиг клиента не найден' });
+    // Каскад 2: клиент должен подключаться к российскому входу.
+    if (cascade2Detect().relay) {
+        const ep = cascade2ClientEndpoint();
+        if (ep) conf = conf.replace(/^Endpoint\s*=.*$/m, 'Endpoint = ' + ep);
+    }
 
         let uri = '';
         // Сначала собираем ключ из актуального .conf: в нём Endpoint выбран
@@ -10377,8 +10392,17 @@ app.get('/api/stats', checkAuth, (req, res) => {
         try {
             const s = String(stdout || '');
             const i = s.indexOf('[');
-            if (i === -1) return res.status(500).json({ error: 'Скрипт не вернул JSON' });
-            let data = JSON.parse(s.substring(i));
+            let data = null;
+            if (i !== -1) {
+                try { data = JSON.parse(s.substring(i)); } catch (e) { data = null; }
+            }
+            // Скрипт может не отдать JSON (например, когда нет активных сессий).
+            // Тогда показываем хотя бы список клиентов, чтобы дашборд не падал с 500.
+            if (!Array.isArray(data)) {
+                try {
+                    data = JSON.parse(sh('sudo', ['bash', MANAGE, 'list', '--json'], { maxBuffer: 16 * 1024 * 1024 }));
+                } catch (e) { data = []; }
+            }
             data = data.map(client => {
                 let sc = client.status_code;
                 if (!sc) {
@@ -11468,6 +11492,497 @@ app.post('/api/awg/config', checkAuth, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Каскад 2: релей без расшифровки на входе
+// ---------------------------------------------------------------------------
+const CASCADE2_FILE = path.join(DATA_DIR, '.cascade2.json');
+const CASCADE2_SUBNET = '172.16.61.0/24';
+
+function cascade2Read() {
+    const j = readJson(CASCADE2_FILE, null) || {};
+    const ruPort = Math.max(1, Math.min(65535, Number(j.ruPort) || 3977));
+    return {
+        type: j.type === 'relay' ? 'relay' : 'classic',
+        enabled: !!j.enabled,
+        ruPort,
+        ruExitPort: Math.max(1, Math.min(65535, Number(j.ruExitPort) || (ruPort + 1))),
+        ports: Array.isArray(j.ports) && j.ports.length ? j.ports.map(Number).filter(n => n > 0 && n < 65536) : [ruPort],
+        euHost: String(j.euHost || ''),
+        ruIp: String(j.ruIp || ''),
+        ifaces: Array.isArray(j.ifaces) && j.ifaces.length ? j.ifaces : ['awg0'],
+        updatedAt: Number(j.updatedAt) || 0
+    };
+}
+
+function cascade2Write(patch) {
+    const next = { ...cascade2Read(), ...(patch || {}), updatedAt: Date.now() };
+    try { writeJson(CASCADE2_FILE, next, 0o600); } catch (e) { /* ignore */ }
+    return next;
+}
+
+// Определяем тип каскада по факту: правила релея, пир eu_host, пометка ipset.
+function cascade2Detect() {
+    const out = { relay: false, role: '', euHost: '', ruIp: '', ports: [], ruPort: 0, ruExitPort: 0, ifaces: [] };
+
+    // Вход RU: DNAT на UDP-порты в сторону удалённого адреса.
+    try {
+        const nat = String(shTry('sudo', ['iptables', '-t', 'nat', '-S', 'PREROUTING']) || '');
+        const re = /-A PREROUTING(?: -i \S+)?(?: -s \S+)? -p udp(?: -m udp)? --dport (\d+) -j DNAT --to-destination ([\d.]+):(\d+)/g;
+        let m;
+        const byIp = new Map();
+        while ((m = re.exec(nat))) {
+            const port = Number(m[1]), ip = m[2], tport = Number(m[3]);
+            if (port !== tport) continue;
+            if (!byIp.has(ip)) byIp.set(ip, []);
+            byIp.get(ip).push(port);
+        }
+        if (byIp.size) {
+            const ip = [...byIp.keys()][0];
+            out.euHost = ip;
+            out.ports = byIp.get(ip).sort((a, b) => a - b);
+            out.ruPort = out.ports[0];
+            out.role = 'ru';
+        }
+    } catch (e) { /* ignore */ }
+
+    // RU: интерфейс awg1 с пиром eu_host.
+    let ruConf = '';
+    try { ruConf = fs.readFileSync('/etc/amnezia/amneziawg/awg1.conf', 'utf8'); } catch (e) { ruConf = ''; }
+    if (ruConf && !/^Endpoint\s*=/m.test(ruConf) && /#_Name\s*=\s*eu_host/.test(ruConf)) {
+        out.role = out.role || 'ru';
+        out.ruExitPort = Number((ruConf.match(/^ListenPort\s*=\s*(\d+)/m) || [])[1]) || out.ruExitPort;
+    }
+
+    // EU: пометка российских адресов на интерфейсах.
+    try {
+        const mangle = String(shTry('sudo', ['iptables', '-t', 'mangle', '-S', 'PREROUTING']) || '');
+        const re = /-A PREROUTING -i (\S+) -m conntrack --ctstate [A-Z,]+ -m set --match-set ru dst -j MARK/g;
+        let m;
+        const list = [];
+        while ((m = re.exec(mangle))) list.push(m[1]);
+        if (list.length) {
+            out.role = out.role || 'eu';
+            out.ifaces = [...new Set(list)];
+        }
+    } catch (e) { /* ignore */ }
+
+    // EU: клиентский awg1 с Endpoint на RU и таблица 3001 в сторону туннеля.
+    if (ruConf && /^Endpoint\s*=/m.test(ruConf)) {
+        const ep = ruConf.match(/^Endpoint\s*=\s*([\d.]+):(\d+)/m);
+        if (ep) {
+            out.role = out.role || 'eu';
+            out.ruIp = ep[1];
+            out.ruExitPort = Number(ep[2]) || out.ruExitPort;
+        }
+    }
+    // EU: признак релея — клиентский awg1, не-RU локация и правило пометки.
+    const notRu = !cascade2IpInRu(cascade2Ip());
+    out.relay = !!out.euHost || (!!out.ruIp && notRu && out.ifaces.length > 0);
+    return out;
+}
+
+function cascade2Ip() {
+    try {
+        const out = String(shTry('ip', ['-4', 'route', 'get', '1.1.1.1']) || '');
+        return (out.match(/\bsrc\s+(\d+\.\d+\.\d+\.\d+)/) || [])[1] || '';
+    } catch (e) { return ''; }
+}
+
+function cascade2Nets() {
+    try { return Number(String(shTry('sudo', ['bash', '-c', "ipset list ru 2>/dev/null | grep -c '^[0-9]' || true"]) || '').trim()) || 0; }
+    catch (e) { return 0; }
+}
+
+function cascade2Counters(iface) {
+    const out = { ruBytes: 0, ruPackets: 0, totalRx: 0, totalTx: 0, euBytes: 0 };
+    try {
+        const m = String(shTry('sudo', ['iptables', '-t', 'mangle', '-L', 'PREROUTING', '-v', '-n', '-x']) || '');
+        for (const line of m.split('\n')) {
+            if (!line.includes('match-set ru dst') || !line.includes('MARK')) continue;
+            const t = line.trim().split(/\s+/);
+            out.ruPackets = Number(t[0]) || 0;
+            out.ruBytes = Number(t[1]) || 0;
+        }
+    } catch (e) { /* ignore */ }
+    try { out.totalRx = Number(String(shTry('sudo', ['cat', '/sys/class/net/' + iface + '/statistics/rx_bytes']) || '0').trim()) || 0; } catch (e) { /* ignore */ }
+    try { out.totalTx = Number(String(shTry('sudo', ['cat', '/sys/class/net/' + iface + '/statistics/tx_bytes']) || '0').trim()) || 0; } catch (e) { /* ignore */ }
+    // На входе нет клиентского интерфейса: берём DNAT-счётчики входа.
+    if (!out.totalRx) {
+        try {
+            const nat = String(shTry('sudo', ['iptables', '-t', 'nat', '-L', 'PREROUTING', '-v', '-n', '-x']) || '');
+            let bytes = 0, pkts = 0;
+            for (const line of nat.split('\n')) {
+                if (!line.includes('DNAT') || !line.includes('to:')) continue;
+                const t = line.trim().split(/\s+/);
+                pkts += Number(t[0]) || 0;
+                bytes += Number(t[1]) || 0;
+            }
+            out.totalRx = bytes;
+            out.ruBytes = bytes;
+            out.ruPackets = pkts;
+        } catch (e) { /* ignore */ }
+    }
+    // На входе (RU) показатели другие: «На EU» — прошедшее через релей (DNAT),
+    // «Выход с RU» — байты интерфейса российского выхода.
+    if (cascadeRole() !== 'eu') {
+        let dnatBytes = 0, dnatPkts = 0;
+        try {
+            const nat = String(shTry('sudo', ['iptables', '-t', 'nat', '-L', 'PREROUTING', '-v', '-n', '-x']) || '');
+            for (const line of nat.split('\n')) {
+                if (!line.includes('DNAT') || !line.includes('to:')) continue;
+                const t = line.trim().split(/\s+/);
+                dnatPkts += Number(t[0]) || 0;
+                dnatBytes += Number(t[1]) || 0;
+            }
+        } catch (e) { /* ignore */ }
+        const exit = readIfaceBytes('awg1') || readIfaceBytes('awg0') || { rx: 0, tx: 0 };
+        const curExit = (Number(exit.rx) || 0) + (Number(exit.tx) || 0);
+        let exitBase = Number(cascade2Read().exitBase) || 0;
+        if (!exitBase) { cascade2Write({ exitBase: curExit }); exitBase = curExit; }
+        out.euBytes = dnatBytes;
+        out.ruBytes = Math.max(0, curExit - exitBase);
+        out.totalRx = dnatBytes;
+        out.totalTx = out.ruBytes;
+        out.ruPackets = dnatPkts;
+        return out;
+    }
+    out.euBytes = Math.max(0, out.totalRx - out.ruBytes);
+    return out;
+}
+
+function cascade2HandshakeAge(iface) {
+    try {
+        const out = String(shTry('sudo', ['bash', '-c', 'awg show ' + iface + ' latest-handshakes 2>/dev/null || true']) || '');
+        let last = 0;
+        for (const line of out.split('\n')) {
+            const ts = Number((line.trim().split(/\s+/) || [])[1]) || 0;
+            if (ts > last) last = ts;
+        }
+        return last ? Math.max(0, Math.floor(Date.now() / 1000) - last) : -1;
+    } catch (e) { return -1; }
+}
+
+function cascade2IpInRu(ip) {
+    if (!ip) return false;
+    try { return /is in set ru/i.test(String(shTry('sudo', ['ipset', 'test', 'ru', ip]) || '')); }
+    catch (e) { return false; }
+}
+
+function cascade2ClientEndpoint() {
+    const st = cascade2Read();
+    if (st.clientEndpoint) return st.clientEndpoint;
+    const det = cascade2Detect();
+    if (det.role === 'eu' && det.ruIp) return det.ruIp + ':' + (st.ruPort || 3977);
+    if (det.role === 'ru' && det.euHost) return det.euHost + ':' + (det.ruPort || 3977);
+    return '';
+}
+
+function cascade2ObfFrom(text) {
+    const lines = String(text || '').split('\n').filter(l => /^(H[1-4]|S[1-4]|Jc|Jmin|Jmax|I[1-5])\s*=/.test(l.trim()));
+    if (lines.length >= 8) return lines.join('\n');
+    return [
+        'H1 = 548988581-549025541', 'H2 = 1051695478-1051732125',
+        'H3 = 1641923967-1641930321', 'H4 = 1878594145-1878643809',
+        'S1 = 23', 'S2 = 8', 'S3 = 7', 'S4 = 1', 'Jc = 6', 'Jmin = 380', 'Jmax = 628',
+        'I1 = <b 0xc00000000108943869e5><rc 20><r 44>',
+        'I2 = <rc 6><b 0xf2f6ffc3><r 39><rd 4>',
+        'I3 = <rc 16><b 0xc8d3807026><r 30><rd 4>',
+        'I4 = <rc 13><b 0xa05c1e><r 95><rd 6>',
+        'I5 = <rc 12><b 0x1a59915755><r 116><rd 8>'
+    ].join('\n');
+}
+
+function x25519Pair() {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('x25519');
+    return {
+        priv: privateKey.export({ format: 'der', type: 'pkcs8' }).slice(-32).toString('base64'),
+        pub: publicKey.export({ format: 'der', type: 'spki' }).slice(-32).toString('base64')
+    };
+}
+
+async function cascade2Peer(base, user, pass, pathname, body) {
+    const root = base.replace(/\/$/, '');
+    const login = await fetch(root + '/api/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: user, password: pass })
+    });
+    if (!login.ok) throw new Error('EU: логин ' + login.status);
+    const cookie = (login.headers.getSetCookie ? login.headers.getSetCookie() : [login.headers.get('set-cookie')])
+        .filter(Boolean).map(c => c.split(';')[0]).join('; ');
+    const r = await fetch(root + pathname, {
+        method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {})
+    });
+    const t = await r.text();
+    if (!r.ok) throw new Error('EU: ' + r.status + ' ' + t.slice(0, 200));
+    try { return JSON.parse(t); } catch (e) { return { raw: t }; }
+}
+
+app.get('/api/cascade2/status', checkAuth, (req, res) => {
+    const saved = cascade2Read();
+    const det = cascade2Detect();
+    const st = { ...saved };
+    if (det.relay) {
+        st.type = 'relay';
+        st.enabled = true;
+        if (det.ports.length) { st.ports = det.ports; st.ruPort = det.ports[0]; }
+        if (det.euHost) st.euHost = det.euHost;
+        if (det.ruIp) st.ruIp = det.ruIp;
+        if (det.ruExitPort) st.ruExitPort = det.ruExitPort;
+        if (det.ifaces.length) st.ifaces = det.ifaces;
+        if (det.role === 'ru') st.ifaces = [];
+    }
+    const iface = st.ifaces[0] || 'awg0';
+    const role = det.role || cascadeRole();
+    res.json({
+        success: true, state: st, role, detected: det,
+        euIfaces: cascadeRole() === 'eu' ? existingIfaces() : (st.euIfaces || []),
+        clientEndpoint: cascade2ClientEndpoint(),
+        counters: cascade2Counters(iface), nets: cascade2Nets(),
+        tunnel: { iface: 'awg1', age: cascade2HandshakeAge('awg1') }
+    });
+});
+
+// EU: принять клиентов со входа, поднять туннель к RU, фильтровать RU-адреса.
+app.post('/api/cascade2/apply', checkAuth, requireAdmin, (req, res) => {
+    const b = req.body || {};
+    try {
+        const ruHost = String(b.ruHost || '').trim();
+        const ruExitPort = Math.max(1, Math.min(65535, Number(b.ruExitPort) || 3978));
+        const euPriv = String(b.euPrivKey || '').trim();
+        const ruPub = String(b.ruPubKey || '').trim();
+        const obf = cascade2ObfFrom(b.obf);
+        const ifaces = (Array.isArray(b.ifaces) ? b.ifaces : ['awg0']).filter(i => existingIfaces().includes(i));
+        if (!ruHost || !euPriv || !ruPub) throw new Error('Нужны ruHost, euPrivKey, ruPubKey');
+        if (!ifaces.length) throw new Error('Выберите интерфейсы фильтрации');
+
+        // 1. Клиенты со старого каскада: их пиры переезжают на EU как есть.
+        let base = '';
+        try { base = String(shTry('cat', ['/etc/amnezia/amneziawg/awg0.conf']) || ''); } catch (e) { base = ''; }
+        const keepLocal = (base.match(/\[Peer\][\s\S]*?(?=\[Peer\]|$)/g) || [])
+            .filter(p => !/172\.16\.17\./.test(p));
+        const migrated = (Array.isArray(b.clients) ? b.clients : []).join('\n\n');
+        const ifacePart = base.split(/\[Peer\]/)[0].replace(/^ListenPort\s*=.*$/m, 'ListenPort = ' + (Number(b.euPort) || 3977));
+        const newConf = ifacePart.trimEnd() + '\n\n' +
+            (keepLocal.join('\n\n') ? keepLocal.join('\n\n') + '\n\n' : '') + migrated + '\n';
+        writeRootFile('/etc/amnezia/amneziawg/awg0.conf', newConf, '0600');
+        try { sh('sudo', ['systemctl', 'restart', 'awg-quick@awg0'], { timeout: 60000 }); } catch (e) { /* ignore */ }
+
+        // 2. Туннель к RU для российского выхода.
+        const conf = [
+            '[Interface]', obf,
+            'PrivateKey = ' + euPriv,
+            'Address = 172.16.62.2/24',
+            'MTU = 1280',
+            'Table = off',
+            '',
+            '[Peer]',
+            'PublicKey = ' + ruPub,
+            'Endpoint = ' + ruHost + ':' + ruExitPort,
+            'AllowedIPs = 0.0.0.0/0, ::/0',
+            'PersistentKeepalive = 25',
+            ''
+        ].join('\n');
+        writeRootFile('/etc/amnezia/amneziawg/awg1.conf', conf, '0600');
+        try { sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1'], { timeout: 60000 }); } catch (e) { /* ignore */ }
+        try { sh('sudo', ['systemctl', 'restart', 'awg-quick@awg1'], { timeout: 60000 }); } catch (e) { /* ignore */ }
+
+        // 3. Российские сети и пометка (ipset только на новые соединения).
+        const zone = '/root/awg/ru.zone';
+        if (!fs.existsSync(zone) || fs.statSync(zone).size < 2048) throw new Error('Нет списка российских сетей (ru.zone)');
+        const nets = fs.readFileSync(zone, 'utf8').split(/\s+/).filter(x => /^\d+\.\d+\.\d+\.\d+(\/\d+)?$/.test(x));
+        writeRootFile('/root/awg/ru-restore.txt', nets.map(n => 'add ru_tmp ' + n).join('\n') + '\n', '0644');
+        const markIf = ifaces.map(i => '-i ' + i).join(' ');
+        sh('sudo', ['bash', '-c',
+            'ipset create ru hash:net -exist; ipset create ru_tmp hash:net -exist; ipset flush ru_tmp; ' +
+            'ipset restore -exist < /root/awg/ru-restore.txt; ipset swap ru_tmp ru; ipset destroy ru_tmp; ' +
+            'for i in $(seq 1 12); do iptables -t mangle -D PREROUTING -i awg0 -m conntrack --ctstate NEW,INVALID -m set --match-set ru dst -j MARK --set-xmark 0x3001/0xffffffff 2>/dev/null || break; done; ' +
+            'for i in $(seq 1 12); do iptables -t mangle -D PREROUTING -i awg0 -m conntrack --ctstate NEW,INVALID -j CONNMARK --save-mark 2>/dev/null || break; done; ' +
+            'for i in $(seq 1 12); do iptables -t mangle -D PREROUTING -i awg0 -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark 2>/dev/null || break; done; ' +
+            'iptables -t mangle -I PREROUTING 1 ' + markIf + ' -m conntrack --ctstate NEW,INVALID -m set --match-set ru dst -j MARK --set-xmark 0x3001/0xffffffff; ' +
+            'iptables -t mangle -I PREROUTING 2 ' + markIf + ' -m conntrack --ctstate NEW,INVALID -j CONNMARK --save-mark; ' +
+            'iptables -t mangle -I PREROUTING 3 ' + markIf + ' -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark; ' +
+            'ip rule del fwmark 0x3001 table 3001 2>/dev/null || true; ' +
+            'ip rule add fwmark 0x3001 table 3001 priority 9000; ' +
+            'ip route replace default dev awg1 table 3001; ' +
+            'iptables -C FORWARD -i awg1 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i awg1 -j ACCEPT; ' +
+            'iptables -C FORWARD -o awg1 -j ACCEPT 2>/dev/null || iptables -I FORWARD 2 -o awg1 -j ACCEPT; ' +
+            'echo OK'], { timeout: 240000 });
+
+        const st = cascade2Write({ type: 'relay', enabled: true, euHost: cascade2Ip(), ifaces });
+        auditLog(req, 'Каскад 2: EU настроен (' + ifaces.join(', ') + ')');
+        res.json({ success: true, state: st, nets: cascade2Nets(), tunnel: cascade2HandshakeAge('awg1'), available: existingIfaces() });
+    } catch (e) {
+        res.status(500).json({ error: 'Каскад 2 (EU): ' + (e.message || e) });
+    }
+});
+
+// Выключение релея: снимаем правила и возвращаем обычный каскад.
+app.post('/api/cascade2/disable', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const st = cascade2Read();
+        let rules = '';
+        for (const pt of (st.ports || [])) {
+            if (st.euHost) {
+                rules += 'iptables -t nat -D PREROUTING -p udp --dport ' + pt + ' -j DNAT --to-destination ' + st.euHost + ':' + pt + ' 2>/dev/null || true; ' +
+                    'iptables -D FORWARD -d ' + st.euHost + ' -p udp --dport ' + pt + ' -j ACCEPT 2>/dev/null || true; ' +
+                    'iptables -D FORWARD -s ' + st.euHost + ' -p udp --sport ' + pt + ' -j ACCEPT 2>/dev/null || true; ' +
+                    'iptables -t nat -D POSTROUTING -p udp -d ' + st.euHost + ' --dport ' + pt + ' -j MASQUERADE 2>/dev/null || true; ';
+            }
+        }
+        rules +=
+            'for i in $(seq 1 12); do iptables -t mangle -D PREROUTING -i awg0 -m conntrack --ctstate NEW,INVALID -m set --match-set ru dst -j MARK --set-xmark 0x3001/0xffffffff 2>/dev/null || break; done; ' +
+            'for i in $(seq 1 12); do iptables -t mangle -D PREROUTING -i awg0 -m conntrack --ctstate NEW,INVALID -j CONNMARK --save-mark 2>/dev/null || break; done; ' +
+            'for i in $(seq 1 12); do iptables -t mangle -D PREROUTING -i awg0 -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark 2>/dev/null || break; done; ' +
+            'ip rule del fwmark 0x3001 table 3001 2>/dev/null || true; ip route flush table 3001 2>/dev/null || true; ' +
+            'systemctl disable --now awg-quick@awg1 2>/dev/null || true; echo OK';
+        sh('sudo', ['bash', '-c', rules], { timeout: 60000 });
+        const next = cascade2Write({ type: 'classic', enabled: false });
+        auditLog(req, 'Каскад 2 выключен');
+        res.json({ success: true, state: next });
+    } catch (e) {
+        res.status(500).json({ error: 'Каскад 2: ' + (e.message || e) });
+    }
+});
+
+// Ручной конфиг awg1 (туннель релея) с перезапуском интерфейса.
+app.get('/api/cascade2/awg1', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const content = fs.readFileSync('/etc/amnezia/amneziawg/awg1.conf', 'utf8');
+        res.json({ success: true, content });
+    } catch (e) {
+        res.status(500).json({ error: 'awg1: ' + (e.message || e) });
+    }
+});
+
+app.post('/api/cascade2/awg1', checkAuth, requireAdmin, (req, res) => {
+    const content = String((req.body || {}).content || '');
+    if (!/^\s*\[Interface\]/m.test(content)) return res.status(400).json({ error: 'Нет секции [Interface]' });
+    if (!/^\s*\[Peer\]/m.test(content)) return res.status(400).json({ error: 'Нет секции [Peer]' });
+    try {
+        writeRootFile('/etc/amnezia/amneziawg/awg1.conf.bak_' + Date.now(), fs.existsSync('/etc/amnezia/amneziawg/awg1.conf') ? fs.readFileSync('/etc/amnezia/amneziawg/awg1.conf', 'utf8') : '', '0600');
+        writeRootFile('/etc/amnezia/amneziawg/awg1.conf', content, '0600');
+        try { sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1'], { timeout: 60000 }); } catch (e) { /* ignore */ }
+        sh('sudo', ['systemctl', 'restart', 'awg-quick@awg1'], { timeout: 60000 });
+        auditLog(req, 'Каскад 2: обновлён конфиг awg1');
+        res.json({ success: true, running: isActive('awg-quick@awg1') });
+    } catch (e) {
+        res.status(500).json({ error: 'awg1: ' + (e.message || e) });
+    }
+});
+
+// Настройки релея: список портов и интерфейсы фильтрации.
+app.post('/api/cascade2/config', checkAuth, requireAdmin, (req, res) => {
+    const b = req.body || {};
+    try {
+        const st = cascade2Read();
+        const ports = (Array.isArray(b.ports) ? b.ports.map(Number) : st.ports).filter(n => n > 0 && n < 65536);
+        if (!ports.length) throw new Error('Нужен хотя бы один порт');
+        const det = cascade2Detect();
+        const ifaces = (Array.isArray(b.ifaces) ? b.ifaces.filter(Boolean) : st.ifaces);
+        const euHost = String(b.euHost || st.euHost || det.euHost || '').replace(/^https?:\/\//, '');
+        const relayOn = st.enabled || det.relay;
+
+        // Перестраиваем DNAT под новый список портов.
+        if (relayOn && euHost) {
+            let rules = '';
+            for (const old of st.ports) {
+                rules += 'iptables -t nat -D PREROUTING -p udp --dport ' + old + ' -j DNAT --to-destination ' + euHost + ':' + old + ' 2>/dev/null || true; ';
+            }
+            for (const pt of ports) {
+                rules +=
+                    'iptables -t nat -D PREROUTING -p udp --dport ' + pt + ' -j DNAT --to-destination ' + euHost + ':' + pt + ' 2>/dev/null || true; ' +
+                    'iptables -t nat -A PREROUTING -p udp --dport ' + pt + ' -j DNAT --to-destination ' + euHost + ':' + pt + '; ' +
+                    'iptables -C FORWARD -d ' + euHost + ' -p udp --dport ' + pt + ' -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -d ' + euHost + ' -p udp --dport ' + pt + ' -j ACCEPT; ' +
+                    'iptables -C FORWARD -s ' + euHost + ' -p udp --sport ' + pt + ' -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -s ' + euHost + ' -p udp --sport ' + pt + ' -j ACCEPT; ' +
+                    'iptables -t nat -C POSTROUTING -p udp -d ' + euHost + ' --dport ' + pt + ' -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -p udp -d ' + euHost + ' --dport ' + pt + ' -j MASQUERADE; ';
+            }
+            sh('sudo', ['bash', '-c', rules + 'echo OK'], { timeout: 60000 });
+            for (const pt of ports) { try { sh('sudo', ['ufw', 'allow', pt + '/udp']); } catch (e) { /* ignore */ } }
+        }
+
+        const next = cascade2Write({ type: relayOn ? 'relay' : st.type, enabled: relayOn, ports, ifaces, euHost: euHost || st.euHost, clientEndpoint: String(b.clientEndpoint || st.clientEndpoint || '') });
+        auditLog(req, 'Каскад 2: порты ' + ports.join(','));
+        res.json({ success: true, state: next });
+    } catch (e) {
+        res.status(500).json({ error: 'Каскад 2: ' + (e.message || e) });
+    }
+});
+
+// RU: релей на список портов, сервер awg1 для eu_host, перенос клиентов на EU.
+app.post('/api/cascade2/install', checkAuth, requireAdmin, async (req, res) => {
+    const b = req.body || {};
+    try {
+        const ruIp = cascade2Ip();
+        const euHost = String(b.euHost || '').trim().replace(/^https?:\/\//, '');
+        const ruPort = Math.max(1, Math.min(65535, Number(b.ruPort) || 3977));
+        const ruExitPort = Math.max(1, Math.min(65535, Number(b.ruExitPort) || (ruPort + 1)));
+        const ports = (Array.isArray(b.ports) ? b.ports.map(Number) : [ruPort]).filter(n => n > 0 && n < 65536);
+        if (!ports.length) ports.push(ruPort);
+        const ifaces = (Array.isArray(b.ifaces) ? b.ifaces : ['awg0']).filter(Boolean);
+        const user = String(b.panelUser || ''), pass = String(b.panelPass || '');
+        if (!euHost) throw new Error('Нужен адрес EU');
+        if (!user || !pass) throw new Error('Нужны логин и пароль панели EU');
+
+        // Пиры и параметры обфускации со старого каскада.
+        const cur = String(shTry('cat', ['/etc/amnezia/amneziawg/awg0.conf']) || '');
+        const clients = (cur.match(/\[Peer\][\s\S]*?(?=\[Peer\]|$)/g) || [])
+            .map(p => p.trim()).filter(p => /172\.16\.17\./.test(p));
+        const obf = cascade2ObfFrom(cur);
+
+        const ruKeys = x25519Pair();
+        const euKeys = x25519Pair();
+
+        // Сервер awg1 для eu_host.
+        const ruConf = [
+            '[Interface]', obf,
+            'PrivateKey = ' + ruKeys.priv,
+            'Address = 172.16.62.1/24',
+            'MTU = 1280',
+            'ListenPort = ' + ruExitPort,
+            'PostUp = iptables -I FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -s ' + CASCADE2_SUBNET + ' -o ens3 -j MASQUERADE; iptables -t mangle -A FORWARD -o %i -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu',
+            'PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -s ' + CASCADE2_SUBNET + ' -o ens3 -j MASQUERADE',
+            '',
+            '[Peer]',
+            '#_Name = eu_host',
+            'PublicKey = ' + euKeys.pub,
+            'AllowedIPs = ' + CASCADE2_SUBNET,
+            ''
+        ].join('\n');
+        writeRootFile('/etc/amnezia/amneziawg/awg1.conf', ruConf, '0600');
+        try { sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1'], { timeout: 60000 }); } catch (e) { /* ignore */ }
+        try { sh('sudo', ['systemctl', 'restart', 'awg-quick@awg1'], { timeout: 60000 }); } catch (e) { /* ignore */ }
+
+        // Релей: каждый порт — DNAT без расшифровки, плюс обратный NAT.
+        sh('sudo', ['sysctl', '-w', 'net.ipv4.ip_forward=1']);
+        let rules = '';
+        for (const pt of ports) {
+            rules +=
+                'iptables -t nat -D PREROUTING -p udp --dport ' + pt + ' -j DNAT --to-destination ' + euHost + ':' + pt + ' 2>/dev/null || true; ' +
+                'iptables -t nat -A PREROUTING -p udp --dport ' + pt + ' -j DNAT --to-destination ' + euHost + ':' + pt + '; ' +
+                'iptables -C FORWARD -d ' + euHost + ' -p udp --dport ' + pt + ' -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -d ' + euHost + ' -p udp --dport ' + pt + ' -j ACCEPT; ' +
+                'iptables -C FORWARD -s ' + euHost + ' -p udp --sport ' + pt + ' -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -s ' + euHost + ' -p udp --sport ' + pt + ' -j ACCEPT; ' +
+                'iptables -t nat -C POSTROUTING -p udp -d ' + euHost + ' --dport ' + pt + ' -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -p udp -d ' + euHost + ' --dport ' + pt + ' -j MASQUERADE; ';
+        }
+        sh('sudo', ['bash', '-c', rules + 'echo OK'], { timeout: 120000 });
+        for (const pt of ports) { try { sh('sudo', ['ufw', 'allow', pt + '/udp']); } catch (e) { /* ignore */ } }
+        try { sh('sudo', ['ufw', 'allow', ruExitPort + '/udp']); } catch (e) { /* ignore */ }
+
+        // Перенос клиентов на EU.
+        const euRes = await cascade2Peer('https://' + euHost.replace(/:\d+$/, ''), user, pass, '/api/cascade2/apply', {
+            ruHost: ruIp, ruExitPort, ruPort, euPrivKey: euKeys.priv, ruPubKey: ruKeys.pub,
+            ifaces, clients, obf
+        });
+
+        const euIfaces = (euRes && Array.isArray(euRes.available) && euRes.available.length) ? euRes.available : ifaces;
+        const st = cascade2Write({ type: 'relay', enabled: true, ruPort, ruExitPort, ports, euHost, ruIp, ifaces, euIfaces });
+        auditLog(req, 'Каскад 2: установлен, порты ' + ports.join(',') + ' → ' + euHost);
+        res.json({ success: true, state: st, migrated: clients.length, eu: euRes });
+    } catch (e) {
+        res.status(500).json({ error: 'Каскад 2 (RU): ' + (e.message || e) });
+    }
+});
+
+// ---------------------------------------------------------------------------
 // Резервные копии
 // ---------------------------------------------------------------------------
 const BACKUP_PATHS = [
@@ -12168,6 +12683,67 @@ function panelCertificateInfo(domain) {
     } catch (e) { return null; }
 }
 
+let certbotTimerCache = { at: 0, value: { next: '', left: '' } };
+
+function certbotTimerInfo() {
+    // systemctl запускается синхронно и стоит ~0.3 с; кэшируем на 30 с,
+    // чтобы страница «Домены и SSL» открывалась без задержки.
+    if (Date.now() - certbotTimerCache.at < 30000) return certbotTimerCache.value;
+    const value = certbotTimerInfoUncached();
+    certbotTimerCache = { at: Date.now(), value };
+    return value;
+}
+
+function certbotTimerInfoUncached() {
+    const fallback = () => {
+        try {
+            const out = String(shTry('systemctl', ['list-timers', 'certbot.timer', '--no-pager'], { timeout: 8000 }) || '');
+            const line = out.split(/\r?\n/).find(l => l.includes('certbot.timer'));
+            return line ? line.trim().replace(/\s+/g, ' ') : '';
+        } catch (e) { return ''; }
+    };
+    try {
+        const raw = String(shTry('systemctl', ['list-timers', 'certbot.timer', '--output=json', '--no-pager'], { timeout: 8000 }) || '').trim();
+        const item = JSON.parse(raw || '[]')[0];
+        if (!item) return { next: fallback(), left: '' };
+        // systemd 255 отдаёт next/left в микросекундах, старые версии — строкой.
+        const nextUsec = Number(item.next);
+        const leftUsec = Number(item.left);
+        let next = String(item.next || '');
+        let left = String(item.left || '');
+        if (Number.isFinite(nextUsec) && nextUsec > 0) {
+            const d = new Date(nextUsec / 1000);
+            const parts = {};
+            for (const p of new Intl.DateTimeFormat('ru-RU', {
+                timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit',
+                year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false
+            }).formatToParts(d)) parts[p.type] = p.value;
+            next = `${parts.day}.${parts.month}.${parts.year} ${parts.hour}:${parts.minute} MSK`;
+        } else {
+            next = next.replace(/^[A-Za-z]{3}\s+/, '');
+        }
+        if (Number.isFinite(nextUsec) && nextUsec > 0) {
+            const diffSec = Math.round((nextUsec / 1000 - Date.now()) / 1000);
+            if (diffSec > 0) {
+                const h = Math.floor(diffSec / 3600);
+                const m = Math.round((diffSec % 3600) / 60);
+                left = h > 0 ? `${h} ч ${m} мин` : `${m} мин`;
+            } else {
+                left = 'скоро';
+            }
+        } else if (Number.isFinite(leftUsec) && leftUsec > 0 && leftUsec < 1e12) {
+            // В некоторых версиях systemd left — это длительность в микросекундах.
+            const total = Math.round(leftUsec / 1e6);
+            const h = Math.floor(total / 3600);
+            const m = Math.round((total % 3600) / 60);
+            left = h > 0 ? `${h} ч ${m} мин` : `${m} мин`;
+        }
+        return { next, left };
+    } catch (e) {
+        return { next: fallback(), left: '' };
+    }
+}
+
 function sslStatusPayload() {
     const certs = currentCertificates();
     const sites = currentSites();
@@ -12193,10 +12769,10 @@ function sslStatusPayload() {
             openssl: { installed: !!findCommand('openssl') }
         };
     const timer = DEMO_MODE
-        ? { active: true, enabled: true }
+        ? { active: true, enabled: true, next: 'демо', left: '' }
         : NO_SYSTEM()
-            ? { active: false, enabled: false }
-            : { active: isActive('certbot.timer') === 'active', enabled: isEnabled('certbot.timer') === 'enabled' };
+            ? { active: false, enabled: false, next: '', left: '' }
+            : { active: isActive('certbot.timer') === 'active', enabled: isEnabled('certbot.timer') === 'enabled', ...certbotTimerInfo() };
     const warnings = [];
     if (!tools.nginx.installed) warnings.push('Nginx не установлен — привязка домена недоступна.');
     if (!tools.certbot.installed) warnings.push("Certbot не установлен — сертификат Let's Encrypt выпустить нельзя.");
@@ -12289,10 +12865,44 @@ app.post('/api/ssl/install-deps', checkAuth, requireAdmin, async (req, res) => {
             return sslError(res, 500, 'Не удалось установить пакеты.', { output: sslTail(install.stderr || install.stdout) });
         }
         await rootRun('systemctl', ['enable', '--now', 'nginx'], { timeout: 60000 });
-        auditLog(req, 'Установлены nginx и certbot из панели');
-        res.json({ success: true, output: sslTail(install.stdout, 1200) });
+        // Автопродление: без таймера certbot сертификаты не обновляются сами.
+        await rootRun('systemctl', ['enable', '--now', 'certbot.timer'], { timeout: 60000 });
+        const timerState = shTry('systemctl', ['is-active', 'certbot.timer']).trim();
+        const timerNext = shTry('bash', ['-c', "systemctl list-timers --all 2>/dev/null | grep certbot || true"]).trim();
+        auditLog(req, 'Установлены nginx и certbot из панели, certbot.timer: ' + timerState);
+        res.json({ success: true, output: sslTail(install.stdout, 1200), certbot: { timer: timerState, next: timerNext } });
     } catch (e) {
         sslError(res, 500, 'Ошибка установки: ' + sslTail(e.message, 300));
+    }
+});
+
+// Включение автопродления (certbot.timer) без переустановки пакетов.
+app.post('/api/ssl/certbot', checkAuth, requireAdmin, async (req, res) => {
+    const action = String((req.body || {}).action || 'enable');
+    if (action !== 'enable' && action !== 'disable') {
+        return sslError(res, 400, 'Неизвестное действие.');
+    }
+    if (NO_SYSTEM()) {
+        auditLog(req, `[DEMO] certbot.timer: ${action}`);
+        return res.json({ success: true, demo: true, action, timer: { active: true, enabled: true, next: 'демо' } });
+    }
+    if (!findCommand('certbot')) return sslError(res, 409, 'Certbot не установлен.', { needDeps: true });
+    try {
+        const run = await rootRun('systemctl', [action, '--now', 'certbot.timer'], { timeout: 60000 });
+        certbotTimerCache = { at: 0, value: { next: '', left: '' } };
+        const ok = run.ok;
+        const timer = {
+            active: isActive('certbot.timer') === 'active',
+            enabled: isEnabled('certbot.timer') === 'enabled',
+            ...certbotTimerInfo()
+        };
+        auditLog(req, `certbot.timer ${action}: ${timer.active ? 'active' : 'inactive'}`);
+        if (!ok || (action === 'enable' && !timer.active)) {
+            return sslError(res, 500, 'Не удалось включить автопродление: ' + sslTail(run.stderr || run.stdout, 300), { timer });
+        }
+        res.json({ success: true, action, timer });
+    } catch (e) {
+        sslError(res, 500, 'Ошибка certbot.timer: ' + sslTail(e.message, 300));
     }
 });
 
@@ -12466,6 +13076,7 @@ function sslRenewPublic(job) {
     return {
         name: job.name,
         force: job.force,
+        dryRun: !!job.dryRun,
         running: job.running,
         ok: job.ok,
         notDue: job.notDue,
@@ -12477,15 +13088,17 @@ function sslRenewPublic(job) {
     };
 }
 
-function startSslRenew(name, force, auditReq) {
+function startSslRenew(name, force, auditReq, dryRun) {
     const job = {
-        name, force, running: true, ok: false, notDue: false,
+        name: name || 'все сертификаты', force, dryRun: !!dryRun, running: true, ok: false, notDue: false,
         error: '', output: '', startedAt: Date.now(), finishedAt: null, certificate: null
     };
     sslRenewJob = job;
     (async () => {
         try {
-            const args = ['renew', '--cert-name', name, '--non-interactive'];
+            const args = ['renew', '--non-interactive'];
+            if (dryRun) args.push('--dry-run');
+            if (name) args.push('--cert-name', name);
             if (force) args.push('--force-renewal');
             const run = await rootRun(findCommand('certbot') || 'certbot', args, { timeout: 300000 });
             job.output = String(run.stdout || '') + '\n' + String(run.stderr || '');
@@ -12497,8 +13110,9 @@ function startSslRenew(name, force, auditReq) {
                 job.ok = true;
                 job.notDue = /not yet due for renewal|No renewals were attempted/i.test(job.output);
                 await rootRun('systemctl', ['reload', 'nginx'], { timeout: 30000 });
-                job.certificate = currentCertificates().find(c => c.name === name) || null;
-                auditLog(auditReq, `${job.notDue ? 'Проверен' : 'Обновлён'} сертификат ${name}${force ? ' (force)' : ''}`);
+                if (name) job.certificate = currentCertificates().find(c => c.name === name) || null;
+                const what = dryRun ? 'Проверка продления (dry-run)' : (job.notDue ? 'Проверен' : 'Обновлён');
+                auditLog(auditReq, `${what}: ${name || 'все сертификаты'}${force ? ' (force)' : ''}`);
             }
         } catch (e) {
             job.error = 'Ошибка продления: ' + sslTail(e.message, 300);
@@ -12513,13 +13127,18 @@ function startSslRenew(name, force, auditReq) {
 app.post('/api/ssl/renew', checkAuth, requireAdmin, (req, res) => {
     const name = String((req.body || {}).name || '').trim();
     const force = !!(req.body || {}).force;
+    const dryRun = !!(req.body || {}).dryRun;
     const safeName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(name) && !name.includes('..');
-    if (!normalizeDomain(name) && !safeName) {
+    // В dry-run можно не указывать имя: тогда проверяются все сертификаты.
+    if (name && !normalizeDomain(name) && !safeName) {
+        return sslError(res, 400, 'Некорректное имя сертификата.');
+    }
+    if (!name && !dryRun) {
         return sslError(res, 400, 'Некорректное имя сертификата.');
     }
     if (NO_SYSTEM()) {
-        auditLog(req, `[DEMO] Обновление сертификата ${name}`);
-        return res.json({ success: true, demo: true, name, notDue: false, forced: force, running: false });
+        auditLog(req, `[DEMO] Обновление сертификата ${name || 'все'}`);
+        return res.json({ success: true, demo: true, name, notDue: false, forced: force, dryRun, running: false });
     }
     if (!findCommand('certbot')) return sslError(res, 409, 'Certbot не установлен.', { needDeps: true });
     if (sslRenewJob && sslRenewJob.running) {
@@ -12529,9 +13148,9 @@ app.post('/api/ssl/renew', checkAuth, requireAdmin, (req, res) => {
         });
     }
     const auditReq = { headers: req.headers, socket: req.socket, session: req.session };
-    auditLog(req, `Запущено продление сертификата ${name}${force ? ' (force)' : ''}`);
-    const job = startSslRenew(name, force, auditReq);
-    res.status(202).json({ success: true, started: true, running: true, name, force, job: sslRenewPublic(job) });
+    auditLog(req, `${dryRun ? 'Запущена проверка продления (dry-run)' : 'Запущено продление сертификата'} ${name || 'все сертификаты'}${force ? ' (force)' : ''}`);
+    const job = startSslRenew(name, force, auditReq, dryRun);
+    res.status(202).json({ success: true, started: true, running: true, name, force, dryRun, job: sslRenewPublic(job) });
 });
 
 app.get('/api/ssl/renew/status', checkAuth, (req, res) => {
