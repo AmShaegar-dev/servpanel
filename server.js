@@ -25,6 +25,7 @@ const os = require('os');
 const zlib = require('zlib');
 const dns = require('dns');
 const net = require('net');
+const tlsModule = require('tls');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
 const updater = require('./lib/updater');
@@ -12502,6 +12503,31 @@ function existingSslPort(text) {
     return m ? parseInt(m[1], 10) : null;
 }
 
+// Все порты с флагом ssl в конфиге сайта. Панель может стоять на 443, 4444,
+// 8443 или другом порту — фиксировать один нельзя.
+function existingSslPorts(text) {
+    const ports = [];
+    const clean = String(text || '').replace(/#[^\n]*/g, '');
+    const re = /listen\s+([^;]+);/g;
+    let m;
+    while ((m = re.exec(clean)) !== null) {
+        const spec = m[1].trim();
+        if (!/\bssl\b/.test(spec)) continue;
+        const addr = (spec.split(/\s+/)[0] || '');
+        const pm = /^(?:\[[^\]]+\]|[^:]+):(\d{1,5})$/.exec(addr) || /^(\d{1,5})$/.exec(addr);
+        const port = pm ? parseInt(pm[1], 10) : null;
+        if (port && !ports.includes(port)) ports.push(port);
+    }
+    return ports;
+}
+
+// Куда ведёт HTTP-редирект конфига панели (по умолчанию 443).
+function configRedirectPort(text) {
+    const m = /return\s+301\s+https:\/\/\$host(?::(\d+))?/.exec(String(text || ''));
+    if (!m) return null;
+    return m[1] ? parseInt(m[1], 10) : 443;
+}
+
 // Все порты, которые уже слушает конфиг сайта (включая [::]:443).
 function existingListenPorts(text) {
     const ports = [];
@@ -13103,9 +13129,14 @@ function startSslRenew(name, force, auditReq, dryRun) {
             const run = await rootRun(findCommand('certbot') || 'certbot', args, { timeout: 300000 });
             job.output = String(run.stdout || '') + '\n' + String(run.stderr || '');
             if (!run.ok) {
-                job.error = /another instance of certbot|\.certbot\.lock|lock file/i.test(job.output)
+                const portBusy = /Could not bind TCP port 80|already in use|Address already in use/i.test(job.output);
+                const lockBusy = /another instance of certbot|\.certbot-lock|\.certbot\.lock|lock file/i.test(job.output);
+                job.error = lockBusy
                     ? 'Certbot уже выполняется. Подождите и повторите.'
-                    : 'Certbot не смог обновить сертификат.';
+                    : portBusy
+                        ? 'Certbot не смог занять порт 80: там уже работает nginx. Откройте чек-лист и нажмите «Исправить».'
+                        : 'Certbot не смог обновить сертификат.';
+                auditLog(auditReq, `${dryRun ? 'Проверка продления' : 'Продление'} ${name || 'все сертификаты'} не удалось: ${sslTail(job.output, 400) || job.error}`);
             } else {
                 job.ok = true;
                 job.notDue = /not yet due for renewal|No renewals were attempted/i.test(job.output);
@@ -13160,6 +13191,348 @@ app.get('/api/ssl/renew/status', checkAuth, (req, res) => {
         return res.json({ success: true, none: true, running: false, current: sslRenewJob.name });
     }
     res.json({ success: true, running: sslRenewJob.running, job: sslRenewPublic(sslRenewJob) });
+});
+
+// ---------------------------------------------------------------------------
+// Чек-лист выпуска и продления сертификата.
+// Показывает по шагам, что мешает Let's Encrypt: DNS, порт 80, ACME-блок
+// Nginx, способ проверки certbot (standalone/webroot), TLS на 443 и т.д.
+// ---------------------------------------------------------------------------
+function renewalParams(name) {
+    const file = posixJoin(LE_RENEWAL, name + '.conf');
+    const text = readTextMaybeRoot(file);
+    const get = key => {
+        const m = new RegExp('^' + key + '\\s*=\\s*(.*)$', 'm').exec(text || '');
+        return m ? m[1].trim() : '';
+    };
+    return { file, exists: !!text, text, authenticator: get('authenticator'), installer: get('installer'), webroot: get('webroot_path') };
+}
+
+function tlsProbe(host, port, timeout = 5000) {
+    return new Promise(resolve => {
+        let done = false;
+        let sock;
+        const finish = out => {
+            if (done) return;
+            done = true;
+            try { if (sock) sock.destroy(); } catch (e) { /* ignore */ }
+            resolve(out);
+        };
+        try {
+            sock = tlsModule.connect({ host, port, servername: host, rejectUnauthorized: false, timeout }, () => {
+                finish({ ok: true, protocol: sock.getProtocol() });
+            });
+            sock.on('error', e => finish({ ok: false, error: e.code || e.message }));
+            sock.on('timeout', () => finish({ ok: false, error: 'timeout' }));
+        } catch (e) {
+            finish({ ok: false, error: e.message });
+        }
+    });
+}
+
+async function serverPublicIp() {
+    try {
+        const r = await fetch('https://api.ipify.org', { signal: AbortSignal.timeout(5000) });
+        if (r.ok) {
+            const t = (await r.text()).trim();
+            if (/^\d+\.\d+\.\d+\.\d+$/.test(t)) return t;
+        }
+    } catch (e) { /* внешний сервис недоступен */ }
+    try { return String(shTry('bash', ['-c', 'hostname -I 2>/dev/null | awk \'{print $1}\''])).trim(); }
+    catch (e) { return ''; }
+}
+
+function nginxServerBlocks(dump, domain) {
+    const text = String(dump || '');
+    const safe = domain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const blocks = [];
+    const re = /server\s*\{/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        let depth = 1;
+        let j = re.lastIndex;
+        while (j < text.length && depth > 0) {
+            if (text[j] === '{') depth++;
+            else if (text[j] === '}') depth--;
+            j++;
+        }
+        const body = text.slice(m.index, j);
+        if (!new RegExp('server_name\\s+[^;]*' + safe + '\\b', 'i').test(body)) continue;
+        const redirectMatch = /return\s+301\s+([^\s;]+)\s*;/.exec(body);
+        blocks.push({
+            listen: (body.match(/listen\s+[^;]+/g) || []).map(s => s.replace(/^\s*listen\s+/, '').replace(/\s+/g, ' ').trim()),
+            acme: /location\s+[~^=\s]*\/\.well-known\/acme-challenge\//.test(body),
+            redirect: !!redirectMatch,
+            redirectTo: redirectMatch ? redirectMatch[1] : ''
+        });
+    }
+    return blocks;
+}
+
+function certbotLogErrors() {
+    try {
+        const out = String(rootShTry('bash', ['-c', 'tail -n 400 /var/log/letsencrypt/letsencrypt.log 2>/dev/null']) || '');
+        return out.split(/\r?\n/)
+            .filter(l => /^\d{4}-\d{2}-\d{2}/.test(l))
+            .filter(l => !/DEBUG/i.test(l))
+            .filter(l => /Failed|Could not|Problem|error:|ERROR|CRITICAL|Address already in use|timed out|Timeout/i.test(l))
+            .slice(-5)
+            .map(l => l.replace(/\s+/g, ' ').trim().slice(0, 300));
+    } catch (e) { return []; }
+}
+
+async function sslChecklist(name, domainHint) {
+    const certs = currentCertificates();
+    const sites = currentSites();
+    const hintDomain = normalizeDomain(domainHint) || '';
+    const site = sites.find(s => name && (s.name === name || s.domains.includes(name)))
+        || sites.find(s => hintDomain && s.domains.includes(hintDomain))
+        || null;
+    // Домен вычисляем до поиска сертификата: без имени (кнопка в шапке) он
+    // берётся из состояния панели, и сертификат находится по домену.
+    const domain = hintDomain || (site && site.domains && site.domains[0]) || normalizeDomain(name) || panelDomain() || '';
+    const cert = certs.find(c => name && c.name === name) || certs.find(c => c.domains.includes(domain)) || null;
+    const certName = (cert && cert.name) || (normalizeDomain(name) ? name : '') || domain || '';
+    const steps = [];
+    const add = (id, title, status, detail, extra) => steps.push({ id, title, status, detail: detail || '', ...(extra || {}) });
+
+    const certbot = findCommand('certbot');
+    add('certbot', 'Certbot установлен', certbot ? 'ok' : 'fail',
+        certbot ? sslTool('certbot').version : 'Не найден — нажмите «nginx + certbot» на этой странице.', certbot ? {} : { needDeps: true });
+
+    const nginx = findCommand('nginx');
+    const nginxActive = nginx && !NO_SYSTEM() && isActive('nginx') === 'active';
+    add('nginx', 'Nginx запущен', nginxActive ? 'ok' : (nginx ? 'fail' : 'fail'),
+        nginxActive ? (sslTool('nginx', ['-v']).version || 'active') : (nginx ? 'Служба nginx не активна.' : 'Nginx не установлен.'));
+
+    if (nginx && !NO_SYSTEM()) {
+        const test = await rootRun(nginx, ['-t'], { timeout: 20000 });
+        const msg = sslTail((test.stderr || '') + '\n' + (test.stdout || ''), 400).split('\n').filter(Boolean).slice(-2).join(' ');
+        add('nginx-test', 'Конфигурация Nginx', test.ok ? 'ok' : 'fail', msg || (test.ok ? 'nginx -t: успешно' : 'nginx -t завершился с ошибкой.'));
+    }
+
+    if (domain) {
+        const serverIp = await serverPublicIp();
+        let resolved = [];
+        try { resolved = await dns.promises.resolve4(domain); } catch (e) { resolved = []; }
+        const dnsOk = resolved.length > 0 && (!serverIp || resolved.includes(serverIp));
+        add('dns', 'DNS домена', resolved.length === 0 ? 'fail' : (dnsOk ? 'ok' : 'warn'),
+            resolved.length === 0
+                ? 'A-запись не найдена: ' + domain
+                : 'A: ' + resolved.join(', ') + (serverIp ? ' · сервер: ' + serverIp : ''));
+
+        const info80 = portListenerInfo(80);
+        add('port80', 'Порт 80 слушает Nginx', /nginx/i.test(info80) ? 'ok' : (info80.trim() ? 'fail' : 'warn'),
+            info80.trim() ? info80.replace(/\s+/g, ' ').slice(0, 220) : 'Порт 80 свободен — для HTTP-проверки его должен слушать Nginx.');
+
+        const dump = await (async () => {
+            try { const r = await rootRun(nginx || 'nginx', ['-T'], { timeout: 20000 }); return String(r.stdout || '') + '\n' + String(r.stderr || ''); }
+            catch (e) { return ''; }
+        })();
+        const blocks = nginxServerBlocks(dump, domain);
+        const acmeBlock = blocks.find(b => b.acme && b.listen.some(l => /^80\b|:80\b/.test(l)));
+        add('nginx-acme', 'ACME-блок в Nginx на :80', acmeBlock ? 'ok' : (blocks.length ? 'fail' : 'warn'),
+            acmeBlock
+                ? 'Найден: /.well-known/acme-challenge/ → ' + ACME_WEBROOT
+                : (blocks.length
+                    ? 'Для домена есть блоки (' + blocks.map(b => (b.listen[0] || '?')).join(', ') + '), но без ACME-локации на порту 80.'
+                    : 'Блок server_name ' + domain + ' не найден в nginx -T.'),
+            acmeBlock ? {} : { repairable: true });
+
+        let challenge = null;
+        try {
+            const token = 'servpanel-' + crypto.randomBytes(8).toString('hex');
+            const dir = posixJoin(ACME_WEBROOT, '.well-known', 'acme-challenge');
+            fs.mkdirSync(dir, { recursive: true });
+            const file = posixJoin(dir, token);
+            fs.writeFileSync(file, token);
+            try {
+                const r = await fetch('http://' + domain + '/.well-known/acme-challenge/' + token, { redirect: 'manual', signal: AbortSignal.timeout(10000) });
+                const body = await r.text().catch(() => '');
+                challenge = { status: r.status, location: r.headers.get('location') || '', ok: r.status === 200 && body.trim() === token };
+            } finally {
+                try { fs.unlinkSync(file); } catch (e) { /* ignore */ }
+            }
+        } catch (e) {
+            challenge = { ok: false, error: e.message };
+        }
+        add('challenge', 'HTTP-проверка ACME', challenge && challenge.ok ? 'ok' : 'fail',
+            challenge
+                ? (challenge.ok ? 'Файл проверки отдан по http://' + domain : (challenge.status
+                    ? 'Ответ HTTP ' + challenge.status + (challenge.location ? ' → ' + challenge.location : '') + ' вместо файла проверки'
+                    : 'Ошибка: ' + (challenge.error || 'нет ответа')))
+                : 'Не удалось выполнить проверку.',
+            challenge && challenge.ok ? {} : { repairable: true });
+
+        const probe = await tlsProbe(domain, 443, 5000);
+        const has443 = blocks.some(b => b.listen.some(l => /\b443\b/.test(l)));
+        add('tls443', 'TLS на порту 443', probe.ok ? 'ok' : (has443 ? 'warn' : 'skip'),
+            probe.ok
+                ? 'Handshake успешен (' + probe.protocol + ')'
+                : (has443 ? 'Порт 443 указан в конфиге, но TLS не отвечает: ' + (probe.error || 'нет ответа') : 'Порт 443 не используется этим сайтом'));
+
+        const redirectBlock = blocks.find(b => b.redirect && b.listen.some(l => /^80\b|:80\b/.test(l)));
+        if (redirectBlock) {
+            // В шаблоне панели адрес записан как https://$host[:порт]$request_uri.
+            const hm = /\$host(?::(\d+))?/.exec(redirectBlock.redirectTo || '');
+            let targetPort = hm && hm[1] ? parseInt(hm[1], 10) : null;
+            if (targetPort == null) {
+                const gm = /^https:\/\/[^/:\s]+(?::(\d+))?/.exec(redirectBlock.redirectTo || '');
+                targetPort = gm && gm[1] ? parseInt(gm[1], 10) : 443;
+            }
+            const siteCfg = site ? readTextMaybeRoot(site.available) : '';
+            const sslPorts = existingSslPorts(siteCfg);
+            const expected = (site && Number(site.httpsPort)) || sslPorts[0] || PANEL_PUBLIC_PORT;
+            const redirectOk = targetPort === expected || sslPorts.includes(targetPort);
+            const shown = 'https://' + domain + (targetPort === 443 ? '' : ':' + targetPort);
+            add('redirect', 'Редирект HTTP → HTTPS', redirectOk ? 'ok' : 'warn',
+                shown + (redirectOk ? '' : ' · панель слушает: ' + (sslPorts.join(', ') || expected)),
+                redirectOk ? {} : { repairable: !!site });
+        }
+
+        const rp = renewalParams(certName);
+        if (rp.exists) {
+            const standalone = rp.authenticator === 'standalone';
+            add('auth', 'Способ проверки certbot', standalone && nginxActive ? 'fail' : 'ok',
+                (rp.authenticator || 'не указан') + (rp.webroot ? ' · ' + rp.webroot : '') + (rp.installer ? ' · installer: ' + rp.installer : ''),
+                standalone && nginxActive ? { repairable: true } : {});
+        } else {
+            add('auth', 'Настройки продления certbot', 'warn', 'Файл renewal не найден: ' + certName);
+        }
+    }
+
+    if (cert) {
+        const days = cert.daysLeft;
+        add('cert', 'Сертификат', days == null ? 'warn' : (days <= 7 ? 'fail' : (days <= 21 ? 'warn' : 'ok')),
+            (cert.validTo ? 'до ' + new Date(cert.validTo).toLocaleDateString('ru-RU') : '') + (days != null ? ' · осталось ' + days + ' дн.' : ''),
+            days != null && days <= 30 ? { repairable: false } : {});
+    } else {
+        add('cert', 'Сертификат', 'fail', 'Сертификат не найден — нужен выпуск.');
+    }
+
+    const logErrors = certbotLogErrors();
+    add('log', 'Последние ошибки certbot', logErrors.length ? 'warn' : 'ok',
+        logErrors.length ? logErrors[logErrors.length - 1] : 'Ошибок в журнале не найдено');
+
+    const failures = steps.filter(s => s.status === 'fail').length;
+    return {
+        success: true,
+        domain,
+        name: certName,
+        ok: failures === 0,
+        failures,
+        warnings: steps.filter(s => s.status === 'warn').length,
+        repairable: steps.some(s => s.repairable),
+        steps,
+        logTail: logErrors
+    };
+}
+
+function writeTextMaybeRoot(file, text) {
+    try { fs.writeFileSync(file, text); return true; } catch (e) {
+        if (e.code !== 'EACCES' && e.code !== 'EPERM') return false;
+    }
+    try {
+        const r = spawnSync('sudo', ['tee', file], { input: text, encoding: 'utf8', timeout: 20000 });
+        return r.status === 0;
+    } catch (e) { return false; }
+}
+
+function repairRenewalToWebroot(name, domain) {
+    const rp = renewalParams(name);
+    if (!rp.exists) return null;
+    if (rp.authenticator !== 'standalone') return null;
+    try { fs.copyFileSync(rp.file, rp.file + '.servpanel-bak'); }
+    catch (e) { rootShTry('cp', ['-f', rp.file, rp.file + '.servpanel-bak'], { timeout: 15000 }); }
+    let text = rp.text;
+    text = text.replace(/^authenticator\s*=.*$/m, 'authenticator = webroot');
+    if (!/^webroot_path\s*=/m.test(text)) {
+        text = text.replace(/^(authenticator\s*=.*)$/m, '$1\nwebroot_path = ' + ACME_WEBROOT + ',');
+    }
+    if (!/\[\[webroot_map\]\]/.test(text)) {
+        const doms = [];
+        for (const d of [domain, name]) {
+            const nd = normalizeDomain(d);
+            if (nd && !doms.includes(nd)) doms.push(nd);
+        }
+        text = text.replace(/\s*$/, '\n') + '\n[[webroot_map]]\n' + doms.map(d => d + ' = ' + ACME_WEBROOT).join('\n') + '\n';
+    }
+    if (!writeTextMaybeRoot(rp.file, text)) throw new Error('Не удалось записать ' + rp.file);
+    return rp.file;
+}
+
+app.post('/api/ssl/check', checkAuth, requireAdmin, async (req, res) => {
+    const name = String((req.body || {}).name || '').trim();
+    const domain = String((req.body || {}).domain || '').trim();
+    if (NO_SYSTEM()) {
+        return res.json({
+            success: true, demo: true, domain: domain || 'example.com', name: name || 'example.com', ok: true, failures: 0, warnings: 0,
+            repairable: false, logTail: [],
+            steps: [
+                { id: 'certbot', title: 'Certbot установлен', status: 'ok', detail: 'certbot 2.9.0' },
+                { id: 'nginx', title: 'Nginx запущен', status: 'ok', detail: 'active' },
+                { id: 'dns', title: 'DNS домена', status: 'ok', detail: 'A: 203.0.113.10' },
+                { id: 'challenge', title: 'HTTP-проверка ACME', status: 'ok', detail: 'демо' }
+            ]
+        });
+    }
+    try {
+        res.json(await sslChecklist(name, domain));
+    } catch (e) {
+        sslError(res, 500, 'Не удалось выполнить проверку: ' + sslTail(e.message, 300));
+    }
+});
+
+app.post('/api/ssl/repair', checkAuth, requireAdmin, async (req, res) => {
+    const name = String((req.body || {}).name || '').trim();
+    if (NO_SYSTEM()) return res.json({ success: true, demo: true, changes: [] });
+    const changes = [];
+    try {
+        const certs = currentCertificates();
+        const cert = certs.find(c => c.name === name) || certs.find(c => c.domains.includes(normalizeDomain(name))) || null;
+        const certName = (cert && cert.name) || name;
+        const domain = (cert && cert.domains && cert.domains[0]) || panelDomain();
+        if (!normalizeDomain(domain)) return sslError(res, 400, 'Не удалось определить домен сертификата.');
+
+        // 1) Nginx: у управляемого сайта должна быть ACME-локация на :80.
+        const site = currentSites().find(s => s.domains.includes(domain) && s.managedByPanel);
+        if (site) {
+            let cfg = '';
+            try { cfg = fs.readFileSync(site.available, 'utf8'); } catch (e) { cfg = readTextMaybeRoot(site.available); }
+            if (cfg) {
+                const primary = site.domains[0];
+                const sslPorts = existingSslPorts(cfg);
+                // Порт берём из конфига: панели могут стоять на 443, 4444, 8443 и других.
+                const httpsPort = sslPorts.includes(Number(site.httpsPort)) ? Number(site.httpsPort)
+                    : (sslPorts[0] || Number(site.httpsPort) || (site.name === PANEL_SITE_NAME ? PANEL_PUBLIC_PORT : 443));
+                const noAcme = !/acme-challenge/.test(cfg);
+                const redirectPort = configRedirectPort(cfg);
+                const badRedirect = redirectPort !== null && redirectPort !== httpsPort;
+                if (noAcme || badRedirect) {
+                    const content = buildSiteConfig({
+                        domain: primary,
+                        mode: site.name === PANEL_SITE_NAME ? 'panel' : 'site',
+                        www: site.domains.includes('www.' + primary),
+                        httpsPort,
+                        certPath: site.certPath,
+                        keyPath: site.keyPath
+                    });
+                    await applySiteConfig(site.name, content);
+                    if (noAcme) changes.push('Nginx: добавлена ACME-локация на :80 для ' + primary);
+                    if (badRedirect) changes.push('Nginx: редирект HTTP переведён на :' + httpsPort + ' вместо :' + redirectPort);
+                }
+            }
+        }
+
+        // 2) Certbot: standalone не может занять 80 при работающем Nginx.
+        const repaired = repairRenewalToWebroot(certName, domain);
+        if (repaired) changes.push('Certbot: способ проверки переключён на webroot (' + ACME_WEBROOT + ')');
+
+        auditLog(req, 'Исправление выпуска сертификата ' + certName + (changes.length ? ': ' + changes.join('; ') : ': изменений не потребовалось'));
+        res.json({ success: true, name: certName, domain, changes });
+    } catch (e) {
+        sslError(res, 500, 'Не удалось исправить: ' + sslTail(e.message, 300));
+    }
 });
 
 // Удаление сайта, созданного из панели (сертификат при этом сохраняется).

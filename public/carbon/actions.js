@@ -642,11 +642,15 @@ async function carbonSslRenew(name, daysLeft) {
   if (start.demo) { showToast('Демо-режим: продление не выполняется'); return; }
   if (start.job && start.job.running) {
     showToast('Продление запущено, ждём…');
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 300; i++) {
       await carbonSleep(2000);
       const s = await api('/api/ssl/renew/status?name=' + encodeURIComponent(name)).catch(() => null);
       if (s && s.job && !s.job.running) {
-        if (s.job.error) { showToast('Ошибка: ' + s.job.error); return; }
+        if (s.job.error) {
+          showToast('Ошибка: ' + s.job.error);
+          await carbonSslCheck(name);
+          return;
+        }
         if (s.job.notDue) { showToast('Продление не требуется'); return; }
         await carbonRefresh('Сертификат обновлён');
         return;
@@ -654,6 +658,68 @@ async function carbonSslRenew(name, daysLeft) {
     }
   }
   await carbonRefresh('Продление запущено');
+}
+
+function carbonSslCheckStyles(status) {
+  if (status === 'ok') return ['checklist-ok', '✓'];
+  if (status === 'fail') return ['checklist-err', '✗'];
+  if (status === 'warn') return ['checklist-run', '!'];
+  return ['checklist-muted', '—'];
+}
+
+function carbonSslCheckModal(data) {
+  let modal = document.getElementById('carbonSslCheckModal');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.id = 'carbonSslCheckModal';
+  modal.className = 'modal';
+  const steps = (data && data.steps) || [];
+  const rows = steps.map(s => {
+    const [cls, ico] = carbonSslCheckStyles(s.status);
+    return `<div class="checklist-item"><span class="checklist-ico ${cls}">${ico}</span><div><b class="${cls}">${escHtml(s.title)}</b>${s.detail ? `<div class="checklist-desc">${escHtml(s.detail)}</div>` : ''}</div></div>`;
+  }).join('');
+  const log = (data && data.logTail || []).map(x => escHtml(x)).join('\n');
+  const summary = data
+    ? (data.ok ? 'Всё готово к выпуску и продлению' : (data.failures || 0) + ' проблем(ы) — смотрите отметки ✗')
+    : '';
+  modal.innerHTML = `<div class="modal-card modal-wide" role="dialog" aria-modal="true">
+    <div class="modal-head"><div><div class="modal-title">Чек-лист сертификата</div><div class="modal-sub">${escHtml((data && data.domain) || '')} · ${escHtml(summary)}</div></div><button class="icon-btn" data-check-close aria-label="Закрыть">✕</button></div>
+    <div style="max-height:54vh;overflow:auto;padding-right:4px">${rows || '<div class="list-row"><b>Нет данных проверки</b></div>'}</div>
+    ${log ? `<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--muted);font-size:12px">Последние ошибки certbot</summary><pre class="code" style="margin:8px 0 0;max-height:160px;overflow:auto;white-space:pre-wrap;padding:10px">${log}</pre></details>` : ''}
+    <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap">
+      <div class="page-actions"><button class="btn" data-check-rerun>Проверить снова</button>${data && data.repairable ? '<button class="btn btn-primary" data-check-repair>Исправить</button>' : ''}</div>
+      <button class="btn" data-check-close>Закрыть</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.hidden = false;
+  const close = () => modal.remove();
+  modal.querySelectorAll('[data-check-close]').forEach(b => b.addEventListener('click', close));
+  modal.querySelectorAll('[data-check-rerun]').forEach(b => b.addEventListener('click', async () => {
+    const fresh = await api('/api/ssl/check', { method: 'POST', body: { name: (data && data.name) || '', domain: (data && data.domain) || '' } }).catch(() => null);
+    if (fresh) carbonSslCheckModal({ ...fresh, repairable: fresh.repairable });
+  }));
+  modal.querySelectorAll('[data-check-repair]').forEach(b => b.addEventListener('click', async () => {
+    const busy = carbonBusyStart(b);
+    try {
+      const r = await api('/api/ssl/repair', { method: 'POST', body: { name: (data && data.name) || '' } });
+      if (r.demo) { showToast('Демо-режим: исправление не выполняется'); return; }
+      const changes = (r.changes || []);
+      showToast(changes.length ? ('Исправлено: ' + changes.join('; ')) : 'Исправлять нечего — уже настроено');
+      const fresh = await api('/api/ssl/check', { method: 'POST', body: { name: (data && data.name) || '', domain: (data && data.domain) || '' } }).catch(() => null);
+      if (fresh) carbonSslCheckModal({ ...fresh, repairable: fresh.repairable });
+    } finally { busy(); }
+  }));
+}
+
+async function carbonSslCheck(name) {
+  const body = { name: name || '' };
+  if (!name) body.domain = (carbon.ssl && carbon.ssl.panel && carbon.ssl.panel.domain) || '';
+  const data = await api('/api/ssl/check', { method: 'POST', body }).catch(e => {
+    showToast('Проверка не удалась: ' + (e && e.message || e));
+    return null;
+  });
+  if (data) carbonSslCheckModal(data);
 }
 
 async function carbonSslDelete(name) {
@@ -2528,6 +2594,7 @@ document.addEventListener('click', async event => {
     else if (action === 'ssl-bind') await carbonSslSite('panel');
     else if (action === 'ssl-site') await carbonSslSite('site');
     else if (action === 'ssl-renew') await carbonSslRenew(name, btn.dataset.days == null ? null : Number(btn.dataset.days));
+    else if (action === 'ssl-check') await carbonSslCheck(name);
     else if (action === 'ssl-delete') await carbonSslDelete(name);
     else if (action === 'user-add') await carbonUserAdd();
     else if (action === 'user-delete') { if (confirm('Удалить пользователя ' + name + '?')) { await api('/api/users/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Пользователь удалён'); } }
