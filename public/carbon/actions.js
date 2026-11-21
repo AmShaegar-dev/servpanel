@@ -2595,6 +2595,7 @@ document.addEventListener('click', async event => {
     else if (action === 'ssl-site') await carbonSslSite('site');
     else if (action === 'ssl-renew') await carbonSslRenew(name, btn.dataset.days == null ? null : Number(btn.dataset.days));
     else if (action === 'ssl-check') await carbonSslCheck(name);
+    else if (action === 'ssl-copy') await copyText(btn.dataset.path || '');
     else if (action === 'ssl-delete') await carbonSslDelete(name);
     else if (action === 'user-add') await carbonUserAdd();
     else if (action === 'user-delete') { if (confirm('Удалить пользователя ' + name + '?')) { await api('/api/users/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Пользователь удалён'); } }

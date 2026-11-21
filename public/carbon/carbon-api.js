@@ -1317,9 +1317,23 @@ function realDomains() {
   const certs = s.certificates || [];
   const sites = s.sites || [];
   const timer = s.timer || {};
+  const paths = s.paths || {};
   const timerTag = timer.active
     ? tag('включено', 'good')
     : tag('выключено', 'warn');
+  const panelCert = certs.find(c => (c.domains || []).includes(panel.domain)) || certs[0] || null;
+  const pathRow = (label, value) => value
+    ? `<div class="list-row"><b>${escHtml(label)}</b><code class="mono" style="font-size:11px;word-break:break-all;cursor:pointer;text-align:right;color:var(--text-2)" title="Скопировать" data-carbon-action="ssl-copy" data-path="${escHtml(value)}">${escHtml(value)}</code></div>`
+    : '';
+  const certPathRows = [
+    ['Каталог домена', panelCert && panelCert.dir ? panelCert.dir + '/' : (paths.live && panel.domain ? paths.live + '/' + panel.domain + '/' : '')],
+    ['Сертификат + цепочка', panelCert && panelCert.fullchain],
+    ['Приватный ключ', panelCert && panelCert.privkey],
+    ['Только цепочка', panelCert && panelCert.chain],
+    ['Архив (реальные файлы)', panelCert && paths.archive ? paths.archive + '/' + panelCert.name + '/' : ''],
+    ['Настройки автопродления', panelCert && panelCert.renewal],
+    ['Конфиг Nginx панели', paths.panelConfig]
+  ].map(([label, value]) => pathRow(label, value)).join('');
   return `<div class="page-head"><div><div class="page-title">Домены и SSL</div><div class="page-sub">Сертификаты и сайты Nginx из API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="ssl-deps">${icon('download')}nginx + certbot</button><button class="btn" data-carbon-action="ssl-check">${icon('shield')}Чек-лист выпуска</button><button class="btn" data-carbon-action="ssl-dryrun">${icon('check')}Проверить продление</button><button class="btn" data-carbon-action="ssl-bind">${icon('lock')}Домен панели</button><button class="btn btn-primary" data-carbon-action="ssl-site">${icon('plus')}Создать сайт</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Домен панели', escHtml(panel.domain || '—'), panel.scheme || '—')}${mini('HTTPS', panel.scheme === 'https' ? 'включён' : 'выключен', 'порт ' + (panel.publicPort || '—'))}${mini('Сертификатов', String(certs.length), 'Let\'s Encrypt')}${mini('Автопродление', timer.active ? 'включено' : 'выключено', timer.left ? 'через ' + timer.left : (timer.next || 'certbot.timer'))}</div>
     <div class="grid"><section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Автопродление сертификатов</div><div class="card-sub">Таймер certbot.timer проверяет сроки дважды в сутки</div></div>${timerTag}</div><div class="list"><div class="list-row"><b>Таймер</b><span class="mono">${escHtml(timer.next ? timer.next + (timer.left ? ' · через ' + timer.left : '') : (timer.active ? 'активен' : 'не активен'))}</span></div><div class="list-row"><b>Проверка без выпуска</b><span class="mono">certbot renew --dry-run</span><button class="row-action" data-carbon-action="ssl-dryrun" title="Проверить продление">${icon('check')}</button></div></div>${timer.active ? '' : `<div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="ssl-timer">${icon('refresh')}Включить автопродление</button></div>`}</section>
@@ -1328,13 +1342,15 @@ function realDomains() {
       const label = c.domain || domains[0] || c.name || '—';
       const expires = c.validTo || c.notAfter || c.expires;
       const suffix = c.daysLeft != null ? ` · ${c.daysLeft} дн.` : '';
-      return `<div class="list-row"><b>${escHtml(label)}</b><span class="mono">${escHtml(expires ? fmtDate(expires) + suffix : '')}</span><span class="page-actions" style="gap:4px"><button class="row-action" data-carbon-action="ssl-check" data-name="${escHtml(c.name || label)}" title="Чек-лист выпуска">${icon('shield')}</button><button class="row-action" data-carbon-action="ssl-renew" data-name="${escHtml(c.name || label)}" data-days="${c.daysLeft == null ? '' : c.daysLeft}" title="Продлить">${icon('refresh')}</button></span></div>`;
+      const pathLine = (p) => p ? `<div class="mono" style="font-size:11px;word-break:break-all;color:var(--text-3);cursor:pointer" title="Скопировать" data-carbon-action="ssl-copy" data-path="${escHtml(p)}">${escHtml(p)}</div>` : '';
+      return `<div class="list-row" style="align-items:flex-start"><div style="min-width:0;flex:1"><b>${escHtml(label)}</b>${pathLine(c.fullchain)}${pathLine(c.privkey)}${c.keyBytes ? `<div style="font-size:11px;color:var(--text-3)">${escHtml(String(c.keyBytes))} байт · root:root 600</div>` : ''}</div><span class="mono">${escHtml(expires ? fmtDate(expires) + suffix : '')}</span><span class="page-actions" style="gap:4px"><button class="row-action" data-carbon-action="ssl-check" data-name="${escHtml(c.name || label)}" title="Чек-лист выпуска">${icon('shield')}</button><button class="row-action" data-carbon-action="ssl-renew" data-name="${escHtml(c.name || label)}" data-days="${c.daysLeft == null ? '' : c.daysLeft}" title="Продлить">${icon('refresh')}</button></span></div>`;
     }).join('') || '<div class="list-row"><b>Сертификатов нет</b></div>'}</div></section>
     <section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Сайты</div><div class="card-sub">Nginx</div></div>${tag(String(sites.length), 'muted')}</div><div class="list">${sites.map(x => {
       const domains = Array.isArray(x.domains) ? x.domains : [];
       const label = x.domain || domains[0] || x.name || '—';
       return `<div class="list-row"><b>${escHtml(label)}</b><span class="mono">${x.ssl ? 'HTTPS' : 'HTTP'}${x.enabled === false ? ' · выкл' : ''}</span><button class="row-action" data-carbon-action="ssl-delete" data-name="${escHtml(x.name || label)}" title="Удалить сайт">${icon('trash')}</button></div>`;
-    }).join('') || '<div class="list-row"><b>Сайтов нет</b></div>'}</div></section></div>`;
+    }).join('') || '<div class="list-row"><b>Сайтов нет</b></div>'}</div></section>
+    <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Пути на сервере</div><div class="card-sub">Нажмите на путь, чтобы скопировать</div></div>${tag(panelCert ? panelCert.name : '—', 'muted')}</div><div class="list">${certPathRows || '<div class="list-row"><b>Пути появятся после выпуска сертификата</b></div>'}</div></section></div>`;
 }
 
 function realApp() {
