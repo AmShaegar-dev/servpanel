@@ -14177,8 +14177,20 @@ const INSTALL_STEPS = [
     { key: 'finish', title: 'Завершение', re: /INSTALLATION DONE|установка завершена|успешно завершена/i }
 ];
 
+const INSTALL_STEPS_ADGUARD = [
+    { key: 'prepare', title: 'Подготовка', re: /\[1\/6\]|подготов/i },
+    { key: 'download', title: 'Загрузка AdGuard', re: /\[2\/6\]|загруз/i },
+    { key: 'config', title: 'Конфигурация', re: /\[3\/6\]|конфигурац/i },
+    { key: 'tls', title: 'TLS и порт 853', re: /\[4\/6\]|853|сертификат/i },
+    { key: 'service', title: 'Служба systemd', re: /\[5\/6\]|systemd/i },
+    { key: 'ports', title: 'Порты UFW', re: /\[6\/6\]|UFW/i },
+    { key: 'finish', title: 'Готово', re: /AdGuard Home готов/i }
+];
+
 function installProgress(logFile) {
-    const emptySteps = INSTALL_STEPS.map(s => ({ key: s.key, title: s.title, done: false }));
+    const isAdguard = /adguard_install/i.test(String(logFile || ''));
+    const defs = isAdguard ? INSTALL_STEPS_ADGUARD : INSTALL_STEPS;
+    const emptySteps = defs.map(s => ({ key: s.key, title: s.title, done: false }));
     if (!fs.existsSync(logFile)) {
         return { text: 'Ожидание старта установки...', status: 'waiting', steps: emptySteps, done: false, error: false, progress: 0 };
     }
@@ -14187,24 +14199,26 @@ function installProgress(logFile) {
     const tail = lines.slice(-400).join('\n');
     const tailShort = lines.slice(-15).join('\n');
 
-    const steps = INSTALL_STEPS.map((s, i) => ({
+    const steps = defs.map(s => ({
         key: s.key,
         title: s.title,
         done: false
     }));
     let foundUpTo = -1;
-    for (let i = 0; i < INSTALL_STEPS.length; i++) {
-        if (INSTALL_STEPS[i].re.test(tail)) foundUpTo = i;
+    for (let i = 0; i < defs.length; i++) {
+        if (defs[i].re.test(tail)) foundUpTo = i;
     }
     for (let i = 0; i <= foundUpTo; i++) steps[i].done = true;
 
-    const done = /INSTALLATION DONE|установка завершена|успешно завершена/i.test(tail);
+    const done = isAdguard
+        ? /AdGuard Home готов/i.test(tail)
+        : /INSTALLATION DONE|установка завершена|успешно завершена/i.test(tail);
     const error = /(^|\n)\s*(\[?ERROR\]?|ОШИБКА|fatal:|Error:|Failed to install|Failed to start)/i.test(tailShort);
     let status = 'running';
     if (done) status = 'done';
     else if (error) status = 'error';
 
-    return { text, status, steps, done, error, progress: done ? 100 : Math.round(((foundUpTo + 1) / INSTALL_STEPS.length) * 90) };
+    return { text, status, steps, done, error, progress: done ? 100 : Math.round(((foundUpTo + 1) / defs.length) * 90) };
 }
 
 app.get('/api/install/progress', checkAuth, (req, res) => {
@@ -15744,8 +15758,9 @@ function modulePorts(id) {
     const ports = [];
     if (id === 'adguard') {
         const ag = adguardInfo();
-        [ag.httpPort, ag.tlsPort, ag.port, '3000', '3001'].filter(Boolean).forEach(p => ports.push(p));
-        ports.push('853');
+        [ag.httpPort, ag.tlsPort, ag.port].filter(Boolean).forEach(p => ports.push(p));
+        // 853 — DoT, 53 — резервный обычный DNS без сертификата.
+        ports.push('853', '53');
     }
     if (id === 'warp') [warpInfo().port].filter(Boolean).forEach(p => ports.push(p));
     if (id === 'mtproto') [mtprotoInfo().port].filter(Boolean).forEach(p => ports.push(p));

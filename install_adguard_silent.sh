@@ -119,6 +119,52 @@ PUBLIC_IP="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
 [ -n "$PUBLIC_IP" ] || PUBLIC_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
 [ -n "$PUBLIC_IP" ] || PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 PUBLIC_IP="${PUBLIC_IP:-0.0.0.0}"
+
+# --- TLS для DoT: берём сертификат панели (Let's Encrypt) ------------------
+# Без сертификата AdGuard не может отключить обычный DNS: получаем
+# "disabling plain dns requires at least one encrypted protocol" и не стартует.
+CERT_DIR=""
+CERT_DOMAIN=""
+if [ -f /etc/nginx/sites-available/awg-admin ]; then
+    CERT_DOMAIN="$(awk '/^[[:space:]]*server_name/{gsub(/;/,""); print $2; exit}' /etc/nginx/sites-available/awg-admin 2>/dev/null || true)"
+fi
+if [ -z "$CERT_DOMAIN" ] && [ -f /root/awg_domain.txt ]; then
+    CERT_DOMAIN="$(tr -d '[:space:]' < /root/awg_domain.txt)"
+fi
+if [ -n "$CERT_DOMAIN" ] && [ -f "/etc/letsencrypt/live/$CERT_DOMAIN/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/$CERT_DOMAIN/privkey.pem" ]; then
+    CERT_DIR="/etc/letsencrypt/live/$CERT_DOMAIN"
+else
+    for d in /etc/letsencrypt/live/*/; do
+        [ -f "$d/fullchain.pem" ] && [ -f "$d/privkey.pem" ] || continue
+        CERT_DIR="${d%/}"
+        CERT_DOMAIN="$(basename "$CERT_DIR")"
+        break
+    done
+fi
+
+DNS_BIND="    - 0.0.0.0"
+SERVE_PLAIN="false"
+TLS_BLOCK=""
+if [ -n "$CERT_DIR" ]; then
+    say "DNS-over-TLS: сертификат $CERT_DOMAIN"
+    TLS_BLOCK="tls:
+  enabled: true
+  server_name: $CERT_DOMAIN
+  force_https: false
+  port_https: 0
+  port_dns_over_tls: 853
+  port_dns_over_quic: 0
+  certificate_path: $CERT_DIR/fullchain.pem
+  private_key_path: $CERT_DIR/privkey.pem"
+else
+    SERVE_PLAIN="true"
+    case "$PUBLIC_IP" in
+        ''|0.0.0.0) DNS_BIND="    - 0.0.0.0" ;;
+        *) DNS_BIND="    - $PUBLIC_IP" ;;
+    esac
+    say "Сертификат не найден: AdGuard будет отдавать обычный DNS на 53."
+fi
+
 # users: [] — AdGuard при первом входе сам попросит задать логин и пароль.
 # Готовый хэш пароля без bcrypt-утилиты не посчитать, поэтому включение
 # мастера — самый предсказуемый вариант.
@@ -137,10 +183,9 @@ language: "ru"
 theme: auto
 dns:
   bind_hosts:
-    - 0.0.0.0
-  port: 853
-  tls_port: 853
-  serve_plain_dns: false
+$DNS_BIND
+  port: 53
+  serve_plain_dns: $SERVE_PLAIN
   anonymize_client_ip: false
   ratelimit: 20
   refuse_any: true
@@ -163,6 +208,7 @@ dns:
   protection_enabled: true
   safebrowsing_enabled: false
   statistics_interval: 90
+$TLS_BLOCK
 schema_version: 28
 EOF
 chmod 600 "$AG_DIR/AdGuardHome.yaml"
@@ -231,9 +277,25 @@ done
 say "[6/6] Порты в UFW и сохранение параметров..."
 if command -v ufw >/dev/null 2>&1; then
     ufw allow "$chosen/tcp" >/dev/null 2>&1 || true
-    # DNS принимается только по DNS-over-TLS (TCP 853).
-    ufw allow 853/tcp >/dev/null 2>&1 || true
-    say "UFW: открыты $chosen/tcp (веб-интерфейс) и 853/tcp (DNS over TLS)."
+    if [ -n "$CERT_DIR" ]; then
+        # DNS принимается только по DNS-over-TLS (TCP 853).
+        ufw allow 853/tcp >/dev/null 2>&1 || true
+        say "UFW: открыты $chosen/tcp (веб-интерфейс) и 853/tcp (DNS over TLS)."
+    else
+        ufw allow 53/tcp >/dev/null 2>&1 || true
+        ufw allow 53/udp >/dev/null 2>&1 || true
+        say "UFW: открыты $chosen/tcp (веб-интерфейс) и 53/tcp+udp (DNS)."
+    fi
+fi
+
+# После продления сертификата AdGuard нужно перезапустить: он держит cert в памяти.
+if [ -n "$CERT_DIR" ]; then
+    mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+    cat > /etc/letsencrypt/renewal-hooks/deploy/restart-adguard.sh << 'EOF'
+#!/bin/sh
+systemctl is-active --quiet AdGuardHome && systemctl restart AdGuardHome
+EOF
+    chmod +x /etc/letsencrypt/renewal-hooks/deploy/restart-adguard.sh
 fi
 
 mkdir -p /root/awg
@@ -241,11 +303,17 @@ cat > /root/awg/adguard.env << EOF
 ADGUARD_INSTALLED=1
 ADGUARD_PORT=$chosen
 ADGUARD_PUBLIC_IP=$PUBLIC_IP
+ADGUARD_TLS=$([ -n "$CERT_DIR" ] && echo 1 || echo 0)
+ADGUARD_CERT_DOMAIN=$CERT_DOMAIN
 ADGUARD_INSTALLED_AT=$(date -Is)
 EOF
 chmod 600 /root/awg/adguard.env
 
 say "AdGuard Home готов: http://$PUBLIC_IP:$chosen"
-say "DNS: 853/tcp — только DNS-over-TLS (DoT). Порт 53 и systemd-resolved не меняются."
+if [ -n "$CERT_DIR" ]; then
+    say "DNS: 853/tcp — только DNS-over-TLS (DoT), сертификат $CERT_DOMAIN. Порт 53 не используется."
+else
+    say "DNS: 53/tcp+udp — обычный DNS (сертификата для DoT нет)."
+fi
 say "DoT включается в AdGuard: Настройки -> Шифрование -> DNS-over-TLS на порту 853."
 say "=== INSTALLATION DONE ==="

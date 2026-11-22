@@ -2148,6 +2148,28 @@ async function carbonCascadeProxyTest() {
   showCarbonTextModal('Проверка выхода прокси', JSON.stringify(d, null, 2));
 }
 
+async function carbonAdguardInstall() {
+  showCarbonForm({
+    title: 'Установка AdGuard Home',
+    sub: 'Порт веб-интерфейса. Пусто — подобрать автоматически (3000–3050, порт панели пропускается).',
+    fields: [
+      { name: 'port', label: 'Порт веб-интерфейса', placeholder: 'авто', type: 'number', min: 1, max: 65535 }
+    ],
+    submitText: 'Установить',
+    onSubmit: async v => {
+      const body = { module: 'adguard' };
+      if (String(v.port || '').trim()) {
+        const p = Number(v.port);
+        if (!Number.isInteger(p) || p < 1 || p > 65535) throw new Error('Порт: 1–65535');
+        body.agPort = p;
+      }
+      const d = await api('/api/install/module', { method: 'POST', body });
+      await carbonWatchInstall(d && d.logFile, 'Установка AdGuard Home');
+      await carbonRefresh('AdGuard Home установлен');
+    }
+  });
+}
+
 async function carbonAwgInstall() {
   showCarbonForm({
     title: 'Установка AmneziaWG',

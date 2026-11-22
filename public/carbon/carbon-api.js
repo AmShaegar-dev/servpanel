@@ -1019,7 +1019,15 @@ function realInstall() {
   const installed = carbon.modules.filter(m => m.installed).length;
   return `<div class="page-head"><div><div class="page-title">Установка</div><div class="page-sub">Реальные модули сервера. Установка и удаление через API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="awg-install">${icon('download')}AWG</button><button class="btn" data-carbon-action="cascade-build">${icon('cascade')}Каскад</button><button class="btn" data-carbon-action="proxy-install">${icon('download')}Прокси</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Модулей', String(carbon.modules.length), 'всего')}${mini('Установлено', String(installed), 'активно')}${mini('Не установлено', String(carbon.modules.length - installed), 'доступно')}${mini('Версия панели', carbon.update ? escHtml(carbon.update.version) : '—', 'build')}</div>
-    <div class="grid">${carbon.modules.map(m => `<section class="card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">${escHtml(m.title)}</div><div class="card-sub">${escHtml(m.description || '')}</div></div>${tag(m.installed ? (m.running ? 'работает' : 'остановлен') : 'не установлен', m.installed ? (m.running ? 'good' : 'warn') : '')}</div><div class="list"><div class="list-row"><b>Порт</b><span class="mono">${escHtml(m.port || m.httpPort || m.tlsPort || '—')}</span></div><div class="list-row"><b>Служба</b><span class="mono">${escHtml(m.service || '—')}</span></div><div class="list-row"><b>Конфиг</b><span class="mono">${escHtml(m.configPath || '—')}</span></div></div><div class="module-actions"><button class="btn ${m.installed ? '' : 'btn-primary'}" data-api-action="${m.installed ? 'uninstall-module' : 'install-module'}" data-module="${escHtml(m.id)}">${icon(m.installed ? 'trash' : 'download')}${m.installed ? 'Удалить' : 'Установить'}</button><button class="btn" data-api-action="module-logs" data-module="${escHtml(m.id)}">${icon('terminal')}Логи</button></div></section>`).join('') || '<section class="card"><div class="empty-row">Нет данных о модулях</div></section>'}</div>`;
+    <div class="grid">${carbon.modules.map(m => {
+      const installed = !!m.installed;
+      const adguard = m.id === 'adguard';
+      const portText = installed
+        ? (m.port || m.httpPort || m.tlsPort || '—')
+        : (adguard ? 'авто (3000–3050)' : (m.port || '—'));
+      const addr = adguard && installed && m.port ? `http://${location.hostname}:${m.port}` : '';
+      return `<section class="card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">${escHtml(m.title)}</div><div class="card-sub">${escHtml(m.description || '')}</div></div>${tag(installed ? (m.running ? 'работает' : 'остановлен') : 'не установлен', installed ? (m.running ? 'good' : 'warn') : '')}</div><div class="list"><div class="list-row"><b>Порт</b><span class="mono">${escHtml(String(portText))}</span></div>${addr ? `<div class="list-row"><b>Адрес</b><a class="mono" href="${escHtml(addr)}" target="_blank" rel="noopener">${escHtml(addr)}</a></div>` : ''}<div class="list-row"><b>Служба</b><span class="mono">${escHtml(m.service || '—')}</span></div><div class="list-row"><b>Конфиг</b><span class="mono">${escHtml(m.configPath || '—')}</span></div></div><div class="module-actions"><button class="btn ${installed ? '' : 'btn-primary'}" data-api-action="${installed ? 'uninstall-module' : 'install-module'}" data-module="${escHtml(m.id)}">${icon(installed ? 'trash' : 'download')}${installed ? 'Удалить' : 'Установить'}</button>${addr ? `<a class="btn" href="${escHtml(addr)}" target="_blank" rel="noopener">${icon('external')}Открыть</a>` : ''}<button class="btn" data-api-action="module-logs" data-module="${escHtml(m.id)}">${icon('terminal')}Логи</button></div></section>`;
+    }).join('') || '<section class="card"><div class="empty-row">Нет данных о модулях</div></section>'}</div>`;
 }
 
 const SERVICE_STATE_RU = {
@@ -1522,6 +1530,7 @@ document.addEventListener('click', async event => {
       showToast('Клиент удалён');
     } else if (action === 'install-module') {
       const module = btn.dataset.module;
+      if (module === 'adguard') { await carbonAdguardInstall(); return; }
       if (!confirm(`Установить ${module}?`)) return;
       const body = { module };
       if (module === 'mtproto') body.kind = 'telemt';
