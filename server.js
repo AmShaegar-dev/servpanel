@@ -15261,7 +15261,7 @@ function yamlBlock(text, name) {
 }
 
 function adguardPortsFromConfig() {
-    const res = { http: '', tls: '' };
+    const res = { http: '', tls: '', https: '' };
     const text = readTextSafe(AG_CONFIG);
     if (!text) return res;
     const http = yamlBlock(text, 'http');
@@ -15279,6 +15279,8 @@ function adguardPortsFromConfig() {
         m = text.match(/^[ \t]*tls_port[ \t]*:[ \t]*(\d{1,5})/m);
         if (m && isPort(m[1])) res.tls = String(Number(m[1]));
     }
+    m = tls.match(/^[ \t]*port_https[ \t]*:[ \t]*(\d{1,5})/m);
+    if (m && isPort(m[1]) && Number(m[1]) > 0) res.https = String(Number(m[1]));
     return res;
 }
 
@@ -15286,6 +15288,23 @@ function adguardEnvPort() {
     const text = readTextSafe('/root/awg/adguard.env');
     const m = text.match(/^ADGUARD_PORT[ \t]*=[ \t]*(\d{1,5})/m);
     return m && isPort(m[1]) ? String(Number(m[1])) : '';
+}
+
+function adguardUserCount() {
+    const text = readTextSafe(AG_CONFIG);
+    if (!text) return 0;
+    const m = /^users:[ \t]*\r?\n((?:[ \t]+.*\r?\n?)*)/m.exec(text);
+    if (!m) return 0;
+    return (m[1].match(/^[ \t]+-[ \t]+name:/gm) || []).length;
+}
+
+function adguardPublicIp() {
+    try {
+        const envText = fs.readFileSync('/root/awg/adguard.env', 'utf8');
+        const m = /^ADGUARD_PUBLIC_IP=(\S+)/m.exec(envText);
+        if (m && /^\d+\.\d+\.\d+\.\d+$/.test(m[1])) return m[1];
+    } catch (e) { /* файла нет */ }
+    try { return rustdeskPublicIp() || ''; } catch (e) { return ''; }
 }
 
 function adguardInfo() {
@@ -15316,6 +15335,10 @@ function adguardInfo() {
         port: httpPort || tlsPort,
         httpPort,
         tlsPort,
+        httpsPort: ports.https || '',
+        users: adguardUserCount(),
+        needsSetup: installed && adguardUserCount() === 0,
+        url: installed && httpPort ? 'http://' + (adguardPublicIp() || '127.0.0.1') + ':' + httpPort + '/' : '',
         configPath: config || (snap ? AG_SNAP_DIR : (installed ? AG_DIR : ''))
     };
 }
@@ -15468,6 +15491,103 @@ function modulesSnapshot() {
 app.get('/api/modules', checkAuth, (req, res) => {
     try { res.json({ modules: modulesSnapshot() }); }
     catch (e) { res.status(500).json({ error: 'Не удалось прочитать состояние модулей' }); }
+});
+
+// Первый запуск AdGuard Home: панель сама переводит его в режим настройки,
+// создаёт администратора с выбранными логином/паролем и возвращает пресет
+// (DoT 853, фильтры, TLS-сертификат панели).
+function extractUsersYaml(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const i = lines.findIndex(l => /^users:\s*$/.test(l));
+    if (i < 0) return '';
+    let j = i + 1;
+    while (j < lines.length && (/^[ \t]+/.test(lines[j]) || lines[j].trim() === '')) j++;
+    return lines.slice(i, j).join('\n').trimEnd();
+}
+
+app.post('/api/adguard/setup', checkAuth, requireAdmin, async (req, res) => {
+    const username = String((req.body || {}).username || '').trim();
+    const password = String((req.body || {}).password || '');
+    if (!/^[A-Za-z0-9._-]{3,64}$/.test(username)) {
+        return res.status(400).json({ error: 'Логин: 3–64 символа, латиница, цифры, точка, дефис, подчёркивание' });
+    }
+    if (password.length < 8) return res.status(400).json({ error: 'Пароль должен быть не короче 8 символов' });
+    if (NO_SYSTEM()) return res.json({ success: true, demo: true });
+    const info = adguardInfo();
+    if (!info.installed) return res.status(400).json({ error: 'AdGuard Home не установлен' });
+    if (info.users > 0) return res.status(409).json({ error: 'AdGuard Home уже настроен' });
+
+    const port = Number(info.httpPort) || 3000;
+    const backup = AG_CONFIG + '.setup-bak';
+    try {
+        fs.copyFileSync(AG_CONFIG, backup);
+        const preset = fs.readFileSync(AG_CONFIG, 'utf8');
+        rootSh('systemctl', ['stop', 'AdGuardHome']);
+        try { fs.unlinkSync(AG_CONFIG); } catch (e) { /* уже нет */ }
+        rootSh('systemctl', ['start', 'AdGuardHome']);
+
+        // Ждём, пока AdGuard поднимется в режиме первичной настройки.
+        let ready = false;
+        for (let i = 0; i < 20; i++) {
+            try {
+                const r = await fetch('http://127.0.0.1:3000/control/install/get_addresses', { signal: AbortSignal.timeout(2000) });
+                if (r.ok) { ready = true; break; }
+            } catch (e) { /* ещё стартует */ }
+            await new Promise(r => setTimeout(r, 700));
+        }
+        if (!ready) throw new Error('AdGuard не перешёл в режим настройки');
+
+        const conf = await fetch('http://127.0.0.1:3000/control/install/configure', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                web: { ip: '0.0.0.0', port },
+                // Временный DNS-порт: сразу после настройки вернём пресет с DoT.
+                dns: { ip: '0.0.0.0', port: 5353 },
+                language: 'ru',
+                username,
+                password
+            }),
+            signal: AbortSignal.timeout(20000)
+        });
+        if (!conf.ok) throw new Error('configure: HTTP ' + conf.status + ' ' + sslTail(await conf.text(), 300));
+        await new Promise(r => setTimeout(r, 1200));
+
+        rootSh('systemctl', ['stop', 'AdGuardHome']);
+        const generated = fs.readFileSync(AG_CONFIG, 'utf8');
+        const usersBlock = extractUsersYaml(generated);
+        if (!/name:/.test(usersBlock)) throw new Error('AdGuard не сохранил администратора');
+        const merged = preset.replace(/^users:\s*\[\s*\]\s*$/m, usersBlock);
+        fs.writeFileSync(AG_CONFIG, merged, { mode: 0o600 });
+        const chk = spawnSync(AG_DIR + '/AdGuardHome', ['--check-config', '-c', AG_CONFIG], { encoding: 'utf8', timeout: 15000 });
+        if (chk.status !== 0) {
+            throw new Error('check-config: ' + sslTail((chk.stdout || '') + (chk.stderr || ''), 500));
+        }
+        rootSh('systemctl', ['start', 'AdGuardHome']);
+
+        let up = false;
+        for (let i = 0; i < 20; i++) {
+            try {
+                const r = await fetch('http://127.0.0.1:' + port + '/control/status', { signal: AbortSignal.timeout(2000) });
+                // После создания администратора API отвечает 401 без авторизации —
+                // это тоже признак, что веб-сервер поднялся.
+                if (r.ok || r.status === 401 || r.status === 403) { up = true; break; }
+            } catch (e) { /* ещё стартует */ }
+            await new Promise(r => setTimeout(r, 700));
+        }
+        if (!up) {
+            const j = spawnSync('journalctl', ['-u', 'AdGuardHome', '-n', '12', '--no-pager'], { encoding: 'utf8', timeout: 10000 });
+            throw new Error('AdGuard не запустился: ' + sslTail(j.stdout || '', 600));
+        }
+
+        try { fs.unlinkSync(backup); } catch (e) { /* ignore */ }
+        auditLog(req, 'AdGuard Home: создан администратор ' + username);
+        res.json({ success: true, port, url: info.url || ('http://127.0.0.1:' + port + '/') });
+    } catch (e) {
+        try { fs.copyFileSync(backup, AG_CONFIG); } catch (e2) { /* ignore */ }
+        rootSh('systemctl', ['restart', 'AdGuardHome']);
+        sslError(res, 500, 'Не удалось завершить настройку AdGuard: ' + sslTail(e.message, 300));
+    }
 });
 
 const MODULE_UNINSTALL = {

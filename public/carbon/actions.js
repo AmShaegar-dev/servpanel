@@ -2166,6 +2166,30 @@ async function carbonAdguardInstall() {
       const d = await api('/api/install/module', { method: 'POST', body });
       await carbonWatchInstall(d && d.logFile, 'Установка AdGuard Home');
       await carbonRefresh('AdGuard Home установлен');
+      await carbonAdguardSetup();
+    }
+  });
+}
+
+async function carbonAdguardSetup() {
+  showCarbonForm({
+    title: 'Первый вход AdGuard Home',
+    sub: 'Задайте логин и пароль администратора — панель сама завершит настройку AdGuard.',
+    fields: [
+      { name: 'username', label: 'Логин', value: 'admin' },
+      { name: 'password', label: 'Пароль', type: 'password' },
+      { name: 'confirm', label: 'Повторите пароль', type: 'password' }
+    ],
+    submitText: 'Создать администратора',
+    onSubmit: async v => {
+      const username = String(v.username || '').trim();
+      if (!/^[A-Za-z0-9._-]{3,64}$/.test(username)) throw new Error('Логин: 3–64 символа, латиница, цифры, точка, дефис, подчёркивание');
+      if (!v.password || String(v.password).length < 8) throw new Error('Пароль должен быть не короче 8 символов');
+      if (v.password !== v.confirm) throw new Error('Пароли не совпадают');
+      const r = await api('/api/adguard/setup', { method: 'POST', body: { username, password: v.password } });
+      if (r.demo) { showToast('Демо-режим: настройка не выполняется'); return; }
+      await carbonRefresh('AdGuard Home настроен');
+      showToast('Готово. Адрес AdGuard: ' + (r.url || ''));
     }
   });
 }
