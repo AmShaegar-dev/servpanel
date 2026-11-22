@@ -2149,63 +2149,10 @@ async function carbonCascadeProxyTest() {
 }
 
 async function carbonAdguardInstall() {
-  showCarbonForm({
-    title: 'Установка AdGuard Home',
-    sub: 'Порт и администратор задаются сразу: после установки панель сама применит их и откроет порт.',
-    fields: [
-      { name: 'port', label: 'Порт веб-интерфейса', placeholder: 'авто (3000–3050)', type: 'number', min: 1, max: 65535 },
-      { name: 'username', label: 'Логин администратора', value: 'admin' },
-      { name: 'password', label: 'Пароль', type: 'password' },
-      { name: 'confirm', label: 'Повторите пароль', type: 'password' }
-    ],
-    submitText: 'Установить и настроить',
-    onSubmit: async v => {
-      const username = String(v.username || '').trim();
-      if (!/^[A-Za-z0-9._-]{3,64}$/.test(username)) throw new Error('Логин: 3–64 символа, латиница, цифры, точка, дефис, подчёркивание');
-      if (!v.password || String(v.password).length < 8) throw new Error('Пароль должен быть не короче 8 символов');
-      if (v.password !== v.confirm) throw new Error('Пароли не совпадают');
-      const body = { module: 'adguard' };
-      if (String(v.port || '').trim()) {
-        const p = Number(v.port);
-        if (!Number.isInteger(p) || p < 1 || p > 65535) throw new Error('Порт: 1–65535');
-        body.agPort = p;
-      }
-      const d = await api('/api/install/module', { method: 'POST', body });
-      await carbonWatchInstall(d && d.logFile, 'Установка AdGuard Home');
-      try {
-        const r = await api('/api/adguard/setup', { method: 'POST', body: { username, password: v.password } });
-        await carbonRefresh('AdGuard Home установлен и настроен');
-        showToast('Готово. Адрес AdGuard: ' + (r.url || ''));
-      } catch (e) {
-        await carbonRefresh('AdGuard установлен, нужно завершить настройку');
-        showToast('Установлен, но настройка не завершилась: ' + (e && e.message || e));
-        await carbonAdguardSetup();
-      }
-    }
-  });
-}
-
-async function carbonAdguardSetup() {
-  showCarbonForm({
-    title: 'Первый вход AdGuard Home',
-    sub: 'Задайте логин и пароль администратора — панель сама завершит настройку AdGuard.',
-    fields: [
-      { name: 'username', label: 'Логин', value: 'admin' },
-      { name: 'password', label: 'Пароль', type: 'password' },
-      { name: 'confirm', label: 'Повторите пароль', type: 'password' }
-    ],
-    submitText: 'Создать администратора',
-    onSubmit: async v => {
-      const username = String(v.username || '').trim();
-      if (!/^[A-Za-z0-9._-]{3,64}$/.test(username)) throw new Error('Логин: 3–64 символа, латиница, цифры, точка, дефис, подчёркивание');
-      if (!v.password || String(v.password).length < 8) throw new Error('Пароль должен быть не короче 8 символов');
-      if (v.password !== v.confirm) throw new Error('Пароли не совпадают');
-      const r = await api('/api/adguard/setup', { method: 'POST', body: { username, password: v.password } });
-      if (r.demo) { showToast('Демо-режим: настройка не выполняется'); return; }
-      await carbonRefresh('AdGuard Home настроен');
-      showToast('Готово. Адрес AdGuard: ' + (r.url || ''));
-    }
-  });
+  if (!confirm('Установить AdGuard Home? Панель только установит его и откроет порт. Дальше — мастер настройки самого AdGuard.')) return;
+  const d = await api('/api/install/module', { method: 'POST', body: { module: 'adguard' } });
+  await carbonWatchInstall(d && d.logFile, 'Установка AdGuard Home');
+  await carbonRefresh('AdGuard Home установлен');
 }
 
 async function carbonAwgInstall() {

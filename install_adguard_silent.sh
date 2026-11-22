@@ -1,20 +1,13 @@
 #!/bin/bash
-# Servpanel — тихая установка AdGuard Home.
+# Servpanel — чистая установка AdGuard Home.
 #
-# Раньше скрипт писал в /opt/AdGuardHome/AdGuardHome.yaml только bind_host и
-# bind_port и запускал официальный установщик. Тот при непустом каталоге
-# считал AdGuard не настроенным, поднимал мастер на 3000 и не укладывался в
-# ожидания панели: установка «зависала» или AdGuard оставался не настроенным.
-#
-# Теперь скрипт готовит полноценный конфиг и только потом ставит службу.
-#
-# DNS работает только по DNS-over-TLS (TCP 853) — plain DNS на 53 не
-# включается, systemd-resolved и /etc/resolv.conf остаются как есть.
-#
-# Переменные:
-#   ADGUARD_PORT=<порт>   веб-интерфейс и API (по умолчанию 3000 или первый
-#                         свободный, если 3000 занят панелью/другим сервисом)
-#   PANEL_PORT=<порт>     порт самой панели — не занимаем его
+# Панель НЕ настраивает AdGuard: не пишет конфиг, не задаёт логин/пароль,
+# DNS, фильтры и шифрование. Скрипт только:
+#   1) скачивает бинарник;
+#   2) ставит и запускает systemd-службу;
+#   3) открывает порты (веб 3000, DNS 53/tcp+udp, DoT 853/tcp).
+# Дальше открывается штатный мастер AdGuard на http://IP:3000 — все настройки
+# пользователь делает сам с самого начала.
 set -uo pipefail
 
 LOG_FILE="${ADGUARD_LOG:-/var/log/adguard_install.log}"
@@ -23,12 +16,13 @@ LOG_FILE="${ADGUARD_LOG:-/var/log/adguard_install.log}"
 say() { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$LOG_FILE"; }
 fail() { say "ERROR: $*"; exit 1; }
 
-WANTED_PORT="${ADGUARD_PORT:-}"
-PANEL_PORT="${PANEL_PORT:-}"
+AG_DIR=/opt/AdGuardHome
+AG_CONFIG="$AG_DIR/AdGuardHome.yaml"
+# Чистая установка всегда стартует с штатного порта мастера AdGuard.
+PORT=3000
 
 port_free() {
     local p="$1"
-    [ -z "$p" ] && return 1
     if command -v ss >/dev/null 2>&1; then
         ! ss -lntH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${p}\$"
     else
@@ -36,9 +30,7 @@ port_free() {
     fi
 }
 
-is_port() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
-
-say "=== УСТАНОВКА ADGUARD HOME ==="
+say "=== УСТАНОВКА ADGUARD HOME (чистая) ==="
 say "Дата: $(date -Is)"
 
 case "$(uname -m)" in
@@ -58,36 +50,8 @@ else
     say "[1/6] apt-get не найден — пропускаем установку пакетов."
 fi
 
-# --- порт ---------------------------------------------------------------
-chosen=""
-if is_port "$WANTED_PORT" && [ "$WANTED_PORT" != "$PANEL_PORT" ]; then
-    if ! port_free "$WANTED_PORT"; then
-        # Порт мог занимать сам AdGuard при прошлой установке — это не ошибка.
-        if systemctl is-active --quiet AdGuardHome 2>/dev/null; then
-            say "Порт $WANTED_PORT уже слушает AdGuard — продолжаем с ним."
-            chosen="$WANTED_PORT"
-        else
-            # Не валим установку из-за занятого порта: берём следующий свободный
-            # и сообщаем об этом. Иначе на сервере, где 3000 занят, установка
-            # обрывалась ещё до старта.
-            say "Порт $WANTED_PORT занят другим процессом — подберу свободный."
-        fi
-    else
-        chosen="$WANTED_PORT"
-    fi
-fi
-if [ -z "$chosen" ]; then
-    for p in $(seq 3000 3050) 8080 8888; do
-        [ "$p" = "$PANEL_PORT" ] && continue
-        if port_free "$p"; then chosen="$p"; break; fi
-    done
-fi
-[ -n "$chosen" ] || fail "Не нашёл свободный порт для веб-интерфейса AdGuard."
-say "Веб-интерфейс и API AdGuard: порт $chosen"
-
 # --- бинарник -----------------------------------------------------------
 say "[2/6] Загрузка AdGuard Home..."
-AG_DIR=/opt/AdGuardHome
 mkdir -p "$AG_DIR"
 if [ ! -x "$AG_DIR/AdGuardHome" ]; then
     latest=$(curl -fsS --max-time 25 "https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest" 2>/dev/null \
@@ -108,130 +72,16 @@ else
 fi
 mkdir -p "$AG_DIR/data"
 
-# --- конфиг -------------------------------------------------------------
-say "[3/6] Конфигурация..."
-mkdir -p "$AG_DIR/data"
-if [ -f "$AG_DIR/AdGuardHome.yaml" ]; then
-    cp -a "$AG_DIR/AdGuardHome.yaml" "$AG_DIR/AdGuardHome.yaml.bak.$(date +%Y%m%d-%H%M%S)"
-fi
-
-PUBLIC_IP="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
-[ -n "$PUBLIC_IP" ] || PUBLIC_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
-[ -n "$PUBLIC_IP" ] || PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-PUBLIC_IP="${PUBLIC_IP:-0.0.0.0}"
-
-# --- TLS для DoT: берём сертификат панели (Let's Encrypt) ------------------
-# Без сертификата AdGuard не может отключить обычный DNS: получаем
-# "disabling plain dns requires at least one encrypted protocol" и не стартует.
-CERT_DIR=""
-CERT_DOMAIN=""
-if [ -f /etc/nginx/sites-available/awg-admin ]; then
-    CERT_DOMAIN="$(awk '/^[[:space:]]*server_name/{gsub(/;/,""); print $2; exit}' /etc/nginx/sites-available/awg-admin 2>/dev/null || true)"
-fi
-if [ -z "$CERT_DOMAIN" ] && [ -f /root/awg_domain.txt ]; then
-    CERT_DOMAIN="$(tr -d '[:space:]' < /root/awg_domain.txt)"
-fi
-if [ -n "$CERT_DOMAIN" ] && [ -f "/etc/letsencrypt/live/$CERT_DOMAIN/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/$CERT_DOMAIN/privkey.pem" ]; then
-    CERT_DIR="/etc/letsencrypt/live/$CERT_DOMAIN"
+# Если конфиг остался от прошлой установки — не трогаем его, чтобы не потерять
+# настройки пользователя. Чистая установка начинается только без конфига.
+if [ -f "$AG_CONFIG" ]; then
+    say "[3/6] Найден существующий конфиг — оставляем без изменений."
 else
-    for d in /etc/letsencrypt/live/*/; do
-        [ -f "$d/fullchain.pem" ] && [ -f "$d/privkey.pem" ] || continue
-        CERT_DIR="${d%/}"
-        CERT_DOMAIN="$(basename "$CERT_DIR")"
-        break
-    done
+    say "[3/6] Конфига нет — AdGuard покажет мастер первичной настройки."
 fi
-
-DNS_BIND="    - 0.0.0.0"
-SERVE_PLAIN="false"
-TLS_BLOCK=""
-if [ -n "$CERT_DIR" ]; then
-    say "DNS-over-TLS: сертификат $CERT_DOMAIN"
-    TLS_BLOCK="tls:
-  enabled: true
-  server_name: $CERT_DOMAIN
-  force_https: false
-  port_https: 0
-  port_dns_over_tls: 853
-  port_dns_over_quic: 0
-  certificate_path: $CERT_DIR/fullchain.pem
-  private_key_path: $CERT_DIR/privkey.pem"
-else
-    SERVE_PLAIN="true"
-    case "$PUBLIC_IP" in
-        ''|0.0.0.0) DNS_BIND="    - 0.0.0.0" ;;
-        *) DNS_BIND="    - $PUBLIC_IP" ;;
-    esac
-    say "Сертификат не найден: AdGuard будет отдавать обычный DNS на 53."
-fi
-
-# users: [] — AdGuard при первом входе сам попросит задать логин и пароль.
-# Готовый хэш пароля без bcrypt-утилиты не посчитать, поэтому включение
-# мастера — самый предсказуемый вариант.
-cat > "$AG_DIR/AdGuardHome.yaml" << EOF
-http:
-  bind_hosts:
-    - 127.0.0.1
-  bind_port: $chosen
-  address: 127.0.0.1:$chosen
-  session_ttl: 720h
-users: []
-auth_attempts: 5
-block_auth_min: 15
-http_proxy: ""
-language: "ru"
-theme: auto
-dns:
-  bind_hosts:
-$DNS_BIND
-  port: 53
-  serve_plain_dns: $SERVE_PLAIN
-  anonymize_client_ip: false
-  ratelimit: 20
-  refuse_any: true
-  upstream_dns:
-    - https://dns.quad9.net/dns-query
-    - https://dns.google/dns-query
-  bootstrap_dns:
-    - 9.9.9.10
-    - 1.1.1.1
-  fallback_dns:
-    - https://dns.cloudflare.com/dns-query
-  filter_servers:
-    - url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
-      name: AdGuard DNS filter
-      enabled: true
-    - url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt
-      name: AdAway
-      enabled: true
-  filtering_enabled: true
-  protection_enabled: true
-  safebrowsing_enabled: false
-  statistics_interval: 90
-$TLS_BLOCK
-schema_version: 28
-EOF
-chmod 600 "$AG_DIR/AdGuardHome.yaml"
-
-# --- порт 853: освобождаем только его ----------------------------------
-if systemctl list-unit-files 2>/dev/null | grep -q '^systemd-resolved.service'; then
-    # systemd-resolved может сам слушать 853 (DNS over TLS). Останавливаем его
-    # только если порт занят, и только stub-режим — 53 и resolv.conf не трогаем.
-    if command -v ss >/dev/null 2>&1 && ss -lntH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]853\$"; then
-        say "Порт 853 занят systemd-resolved — отключаем его DNS-over-TLS."
-        mkdir -p /etc/systemd/resolved.conf.d
-        cat > /etc/systemd/resolved.conf.d/servpanel-adguard.conf << 'EOF'
-[Resolve]
-DNSOverTLS=no
-EOF
-        systemctl restart systemd-resolved >/dev/null 2>&1 || true
-    fi
-fi
-# dnsmasq, bind9 и named не трогаем: на 853 они не слушают, а чужой
-# DNS-сервер может быть нужен другим сервисам.
 
 # --- служба -------------------------------------------------------------
-say "[5/6] Служба systemd..."
+say "[4/6] Служба systemd..."
 cat > /etc/systemd/system/AdGuardHome.service << EOF
 [Unit]
 Description=AdGuard Home: Network-level ads blocking DNS server
@@ -241,7 +91,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$AG_DIR
-ExecStart=$AG_DIR/AdGuardHome --no-check-update -c $AG_DIR/AdGuardHome.yaml -w $AG_DIR/data
+ExecStart=$AG_DIR/AdGuardHome --no-check-update -c $AG_CONFIG -w $AG_DIR/data
 ExecReload=/bin/kill -HUP \$MAINPID
 Restart=on-failure
 RestartSec=5
@@ -251,13 +101,14 @@ SyslogIdentifier=AdGuardHome
 [Install]
 WantedBy=multi-user.target
 EOF
-if ! "$AG_DIR/AdGuardHome" --check-config -c "$AG_DIR/AdGuardHome.yaml" >> "$LOG_FILE" 2>&1; then
-    say "ERROR: конфиг AdGuard не прошёл проверку, служба не запущена."
-    exit 1
+
+if [ ! -f "$AG_CONFIG" ] && ! port_free "$PORT"; then
+    fail "Порт $PORT занят. Освободите его или смените внутренний порт панели (например, на 2999)."
 fi
 
 systemctl daemon-reload
-systemctl enable --now AdGuardHome >/dev/null 2>&1 || true
+systemctl enable AdGuardHome >/dev/null 2>&1 || true
+systemctl restart AdGuardHome
 sleep 3
 if ! systemctl is-active --quiet AdGuardHome; then
     say "ERROR: AdGuard Home не запустился. Журнал:"
@@ -265,56 +116,42 @@ if ! systemctl is-active --quiet AdGuardHome; then
     exit 1
 fi
 
-# Ждём, пока API ответит — панель сразу после этого попробует подключиться.
+# --- проверка ответа ----------------------------------------------------
+say "[5/6] Ожидание веб-интерфейса на порту $PORT..."
 ready=0
-for _ in $(seq 1 20); do
-    if curl -fsS --max-time 3 "http://127.0.0.1:$chosen/control/status" >/dev/null 2>&1; then ready=1; break; fi
+for _ in $(seq 1 30); do
+    if curl -fsS --max-time 3 "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then ready=1; break; fi
     sleep 1
 done
-[ "$ready" = "1" ] || say "WARNING: API AdGuard не ответил за 20 секунд — проверьте журнал службы."
+[ "$ready" = "1" ] || say "WARNING: AdGuard не ответил за 30 секунд — откройте журнал службы."
 
 # --- UFW ----------------------------------------------------------------
-say "[6/6] Порты в UFW и сохранение параметров..."
+say "[6/6] Порты в UFW..."
 if command -v ufw >/dev/null 2>&1; then
-    ufw allow "$chosen/tcp" >/dev/null 2>&1 || true
-    if [ -n "$CERT_DIR" ]; then
-        # DNS принимается только по DNS-over-TLS (TCP 853).
-        ufw allow 853/tcp >/dev/null 2>&1 || true
-        say "UFW: открыты $chosen/tcp (веб-интерфейс) и 853/tcp (DNS over TLS)."
-    else
-        ufw allow 53/tcp >/dev/null 2>&1 || true
-        ufw allow 53/udp >/dev/null 2>&1 || true
-        say "UFW: открыты $chosen/tcp (веб-интерфейс) и 53/tcp+udp (DNS)."
-    fi
+    ufw allow "$PORT/tcp" >/dev/null 2>&1 || true
+    # DNS: обычный и DoT — откроем заранее, чтобы мастер сразу работал.
+    ufw allow 53/tcp >/dev/null 2>&1 || true
+    ufw allow 53/udp >/dev/null 2>&1 || true
+    ufw allow 853/tcp >/dev/null 2>&1 || true
+    say "UFW: открыты $PORT/tcp (веб), 53/tcp+udp (DNS), 853/tcp (DoT)."
+else
+    say "UFW не установлен — порты не открывались."
 fi
 
-# После продления сертификата AdGuard нужно перезапустить: он держит cert в памяти.
-if [ -n "$CERT_DIR" ]; then
-    mkdir -p /etc/letsencrypt/renewal-hooks/deploy
-    cat > /etc/letsencrypt/renewal-hooks/deploy/restart-adguard.sh << 'EOF'
-#!/bin/sh
-systemctl is-active --quiet AdGuardHome && systemctl restart AdGuardHome
-EOF
-    chmod +x /etc/letsencrypt/renewal-hooks/deploy/restart-adguard.sh
-fi
+PUBLIC_IP="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
+[ -n "$PUBLIC_IP" ] || PUBLIC_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
+[ -n "$PUBLIC_IP" ] || PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+PUBLIC_IP="${PUBLIC_IP:-0.0.0.0}"
 
 mkdir -p /root/awg
 cat > /root/awg/adguard.env << EOF
 ADGUARD_INSTALLED=1
-ADGUARD_PORT=$chosen
+ADGUARD_PORT=$PORT
 ADGUARD_PUBLIC_IP=$PUBLIC_IP
-ADGUARD_TLS=$([ -n "$CERT_DIR" ] && echo 1 || echo 0)
-ADGUARD_CERT_DOMAIN=$CERT_DOMAIN
 ADGUARD_INSTALLED_AT=$(date -Is)
 EOF
 chmod 600 /root/awg/adguard.env
 
-say "AdGuard Home готов: http://$PUBLIC_IP:$chosen"
-say "Доступ к вебу откроется после создания администратора в панели «Установка → AdGuard → Завершить настройку»."
-if [ -n "$CERT_DIR" ]; then
-    say "DNS: 853/tcp — только DNS-over-TLS (DoT), сертификат $CERT_DOMAIN. Порт 53 не используется."
-else
-    say "DNS: 53/tcp+udp — обычный DNS (сертификата для DoT нет)."
-fi
-say "DoT включается в AdGuard: Настройки -> Шифрование -> DNS-over-TLS на порту 853."
+say "AdGuard Home готов: http://$PUBLIC_IP:$PORT"
+say "Откройте адрес и пройдите мастер настройки: логин, пароль, DNS и шифрование задаёте сами."
 say "=== INSTALLATION DONE ==="

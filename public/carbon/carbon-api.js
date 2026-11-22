@@ -1019,20 +1019,12 @@ function realInstall() {
   const installed = carbon.modules.filter(m => m.installed).length;
   return `<div class="page-head"><div><div class="page-title">Установка</div><div class="page-sub">Реальные модули сервера. Установка и удаление через API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="awg-install">${icon('download')}AWG</button><button class="btn" data-carbon-action="cascade-build">${icon('cascade')}Каскад</button><button class="btn" data-carbon-action="proxy-install">${icon('download')}Прокси</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Модулей', String(carbon.modules.length), 'всего')}${mini('Установлено', String(installed), 'активно')}${mini('Не установлено', String(carbon.modules.length - installed), 'доступно')}${mini('Версия панели', carbon.update ? escHtml(carbon.update.version) : '—', 'build')}</div>
-    ${carbon.modules.some(m => m.id === 'adguard' && m.needsSetup) ? `<section class="card" style="grid-column:span 12;margin-bottom:16px"><div class="card-top"><div><div class="card-title">AdGuard Home: нужна настройка</div><div class="card-sub">Задайте логин и пароль администратора. До этого веб-интерфейс снаружи закрыт.</div></div><button class="btn btn-primary" data-api-action="adguard-setup">${icon('key')}Завершить настройку</button></div></section>` : ''}
     <div class="grid">${carbon.modules.map(m => {
-      const installed = !!m.installed;
+      const on = !!m.installed;
       const adguard = m.id === 'adguard';
-      const needsSetup = adguard && !!m.needsSetup;
-      const portText = installed
-        ? (m.port || m.httpPort || m.tlsPort || '—')
-        : (adguard ? 'авто (3000–3050)' : (m.port || '—'));
-      const addr = adguard && installed && !needsSetup ? (m.url || '') : '';
-      const stateTag = needsSetup ? tag('нужна настройка', 'warn') : tag(installed ? (m.running ? 'работает' : 'остановлен') : 'не установлен', installed ? (m.running ? 'good' : 'warn') : '');
-      const action = needsSetup ? 'adguard-setup' : (installed ? 'uninstall-module' : 'install-module');
-      const actionLabel = needsSetup ? 'Завершить настройку' : (installed ? 'Удалить' : 'Установить');
-      const actionIcon = needsSetup ? 'key' : (installed ? 'trash' : 'download');
-      return `<section class="card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">${escHtml(m.title)}</div><div class="card-sub">${escHtml(m.description || '')}</div></div>${stateTag}</div><div class="list"><div class="list-row"><b>Порт</b><span class="mono">${escHtml(String(portText))}</span></div>${addr ? `<div class="list-row"><b>Адрес</b><a class="mono" href="${escHtml(addr)}" target="_blank" rel="noopener">${escHtml(addr)}</a></div>` : ''}${needsSetup ? '<div class="list-row"><b>Первый вход</b><span class="mono">задайте логин и пароль в панели</span></div>' : ''}<div class="list-row"><b>Служба</b><span class="mono">${escHtml(m.service || '—')}</span></div><div class="list-row"><b>Конфиг</b><span class="mono">${escHtml(m.configPath || '—')}</span></div></div><div class="module-actions"><button class="btn ${installed && !needsSetup ? '' : 'btn-primary'}" data-api-action="${action}" data-module="${escHtml(m.id)}">${icon(actionIcon)}${actionLabel}</button>${addr ? `<a class="btn" href="${escHtml(addr)}" target="_blank" rel="noopener">${icon('external')}Открыть</a>` : ''}<button class="btn" data-api-action="module-logs" data-module="${escHtml(m.id)}">${icon('terminal')}Логи</button></div></section>`;
+      const portText = on ? (m.port || m.httpPort || m.tlsPort || '—') : (adguard ? '3000 (мастер AdGuard)' : (m.port || '—'));
+      const addr = adguard && on ? (m.url || '') : '';
+      return `<section class="card" style="grid-column:span 4"><div class="card-top"><div><div class="card-title">${escHtml(m.title)}</div><div class="card-sub">${escHtml(m.description || '')}</div></div>${tag(on ? (m.running ? 'работает' : 'остановлен') : 'не установлен', on ? (m.running ? 'good' : 'warn') : '')}</div><div class="list"><div class="list-row"><b>Порт</b><span class="mono">${escHtml(String(portText))}</span></div>${addr ? `<div class="list-row"><b>Адрес</b><a class="mono" href="${escHtml(addr)}" target="_blank" rel="noopener">${escHtml(addr)}</a></div>` : ''}<div class="list-row"><b>Служба</b><span class="mono">${escHtml(m.service || '—')}</span></div><div class="list-row"><b>Конфиг</b><span class="mono">${escHtml(m.configPath || '—')}</span></div></div><div class="module-actions"><button class="btn ${on ? '' : 'btn-primary'}" data-api-action="${on ? 'uninstall-module' : 'install-module'}" data-module="${escHtml(m.id)}">${icon(on ? 'trash' : 'download')}${on ? 'Удалить' : 'Установить'}</button>${addr ? `<a class="btn" href="${escHtml(addr)}" target="_blank" rel="noopener">${icon('external')}Открыть</a>` : ''}<button class="btn" data-api-action="module-logs" data-module="${escHtml(m.id)}">${icon('terminal')}Логи</button></div></section>`;
     }).join('') || '<section class="card"><div class="empty-row">Нет данных о модулях</div></section>'}</div>`;
 }
 
@@ -1543,10 +1535,6 @@ document.addEventListener('click', async event => {
       const d = await api('/api/install/module', { method: 'POST', body });
       if (typeof carbonWatchInstall === 'function') await carbonWatchInstall(d && d.logFile, 'Установка ' + module);
       else showToast('Установка запущена: ' + module);
-    } else if (action === 'adguard-setup') {
-      await carbonAdguardSetup();
-      await loadCarbonData();
-      render();
     } else if (action === 'uninstall-module') {
       const module = btn.dataset.module;
       const check = prompt(`Удалить ${module}? Введите DELETE`);
