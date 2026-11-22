@@ -15272,6 +15272,10 @@ function adguardPortsFromConfig() {
     m = tls.match(/^[ \t]*port[ \t]*:[ \t]*(\d{1,5})/m);
     if (m && isPort(m[1])) res.tls = String(Number(m[1]));
     if (!res.tls) {
+        m = tls.match(/^[ \t]*port_dns_over_tls[ \t]*:[ \t]*(\d{1,5})/m);
+        if (m && isPort(m[1])) res.tls = String(Number(m[1]));
+    }
+    if (!res.tls) {
         m = text.match(/^[ \t]*tls_port[ \t]*:[ \t]*(\d{1,5})/m);
         if (m && isPort(m[1])) res.tls = String(Number(m[1]));
     }
@@ -15501,7 +15505,7 @@ systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl reset-failed >/dev/null 2>&1 || true
 
 if command -v ufw >/dev/null 2>&1; then
-  for port in "\${PORTS[@]}"; do
+  for port in $PORTS_LIST; do
     ufw delete allow "$port/tcp" >/dev/null 2>&1 || true
     ufw delete allow "$port/udp" >/dev/null 2>&1 || true
   done
@@ -15669,7 +15673,7 @@ systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl reset-failed >/dev/null 2>&1 || true
 
 if command -v ufw >/dev/null 2>&1; then
-  for port in "\${PORTS[@]}"; do
+  for port in $PORTS_LIST; do
     ufw delete allow "$port/tcp" >/dev/null 2>&1 || true
   done
 fi
@@ -15777,8 +15781,8 @@ app.post('/api/modules/uninstall', checkAuth, requireAdmin, (req, res) => {
         }
         const mod = MODULE_UNINSTALL[id];
         if (!mod) return res.status(400).json({ error: 'Неизвестный модуль' });
-        const list = modulePorts(id).map(p => `'${p}'`).join(' ');
-        const result = runDetached(mod.title, mod.log, `PORTS=(${list})\n${mod.script}`);
+        const list = modulePorts(id).join(' ');
+        const result = runDetached(mod.title, mod.log, `PORTS_LIST="${list}"\n${mod.script}`);
         auditLog(req, `Запущено удаление модуля ${mod.title}`);
         res.json(result);
     } catch (e) {
