@@ -171,9 +171,9 @@ fi
 cat > "$AG_DIR/AdGuardHome.yaml" << EOF
 http:
   bind_hosts:
-    - 0.0.0.0
+    - 127.0.0.1
   bind_port: $chosen
-  address: 0.0.0.0:$chosen
+  address: 127.0.0.1:$chosen
   session_ttl: 720h
 users: []
 auth_attempts: 5
@@ -310,6 +310,7 @@ EOF
 chmod 600 /root/awg/adguard.env
 
 say "AdGuard Home готов: http://$PUBLIC_IP:$chosen"
+say "Доступ к вебу откроется после создания администратора в панели «Установка → AdGuard → Завершить настройку»."
 if [ -n "$CERT_DIR" ]; then
     say "DNS: 853/tcp — только DNS-over-TLS (DoT), сертификат $CERT_DOMAIN. Порт 53 не используется."
 else

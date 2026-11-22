@@ -15557,7 +15557,10 @@ app.post('/api/adguard/setup', checkAuth, requireAdmin, async (req, res) => {
         const generated = fs.readFileSync(AG_CONFIG, 'utf8');
         const usersBlock = extractUsersYaml(generated);
         if (!/name:/.test(usersBlock)) throw new Error('AdGuard не сохранил администратора');
-        const merged = preset.replace(/^users:\s*\[\s*\]\s*$/m, usersBlock);
+        let merged = preset.replace(/^users:\s*\[\s*\]\s*$/m, usersBlock);
+        // До настройки веб слушал только 127.0.0.1, чтобы не пускать без пароля.
+        merged = merged.replace(/^([ \t]+)-[ \t]+127\.0\.0\.1[ \t]*$/m, '$1- 0.0.0.0');
+        merged = merged.replace(/^([ \t]*)address:[ \t]*127\.0\.0\.1:/m, '$1address: 0.0.0.0:');
         fs.writeFileSync(AG_CONFIG, merged, { mode: 0o600 });
         const chk = spawnSync(AG_DIR + '/AdGuardHome', ['--check-config', '-c', AG_CONFIG], { encoding: 'utf8', timeout: 15000 });
         if (chk.status !== 0) {
@@ -15619,7 +15622,8 @@ fi
 rm -f /usr/lib/systemd/system/AdGuardHome.service /lib/systemd/system/AdGuardHome.service \
       /etc/systemd/system/AdGuardHome.service /usr/lib/systemd/system/adguard-home.service \
       /etc/systemd/system/adguard-home.service
-rm -rf "$AG_DIR" "$SNAP_DIR" /etc/AdGuardHome
+rm -rf "$AG_DIR" "$SNAP_DIR" /etc/AdGuardHome /etc/adguardhome \
+       /root/AdGuardHome /usr/local/AdGuardHome /opt/adguardhome
 rm -f /usr/bin/AdGuardHome /usr/local/bin/AdGuardHome
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl reset-failed >/dev/null 2>&1 || true

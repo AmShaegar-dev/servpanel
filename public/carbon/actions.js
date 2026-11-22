@@ -2151,12 +2151,19 @@ async function carbonCascadeProxyTest() {
 async function carbonAdguardInstall() {
   showCarbonForm({
     title: 'Установка AdGuard Home',
-    sub: 'Порт веб-интерфейса. Пусто — подобрать автоматически (3000–3050, порт панели пропускается).',
+    sub: 'Порт и администратор задаются сразу: после установки панель сама применит их и откроет порт.',
     fields: [
-      { name: 'port', label: 'Порт веб-интерфейса', placeholder: 'авто', type: 'number', min: 1, max: 65535 }
+      { name: 'port', label: 'Порт веб-интерфейса', placeholder: 'авто (3000–3050)', type: 'number', min: 1, max: 65535 },
+      { name: 'username', label: 'Логин администратора', value: 'admin' },
+      { name: 'password', label: 'Пароль', type: 'password' },
+      { name: 'confirm', label: 'Повторите пароль', type: 'password' }
     ],
-    submitText: 'Установить',
+    submitText: 'Установить и настроить',
     onSubmit: async v => {
+      const username = String(v.username || '').trim();
+      if (!/^[A-Za-z0-9._-]{3,64}$/.test(username)) throw new Error('Логин: 3–64 символа, латиница, цифры, точка, дефис, подчёркивание');
+      if (!v.password || String(v.password).length < 8) throw new Error('Пароль должен быть не короче 8 символов');
+      if (v.password !== v.confirm) throw new Error('Пароли не совпадают');
       const body = { module: 'adguard' };
       if (String(v.port || '').trim()) {
         const p = Number(v.port);
@@ -2165,8 +2172,15 @@ async function carbonAdguardInstall() {
       }
       const d = await api('/api/install/module', { method: 'POST', body });
       await carbonWatchInstall(d && d.logFile, 'Установка AdGuard Home');
-      await carbonRefresh('AdGuard Home установлен');
-      await carbonAdguardSetup();
+      try {
+        const r = await api('/api/adguard/setup', { method: 'POST', body: { username, password: v.password } });
+        await carbonRefresh('AdGuard Home установлен и настроен');
+        showToast('Готово. Адрес AdGuard: ' + (r.url || ''));
+      } catch (e) {
+        await carbonRefresh('AdGuard установлен, нужно завершить настройку');
+        showToast('Установлен, но настройка не завершилась: ' + (e && e.message || e));
+        await carbonAdguardSetup();
+      }
     }
   });
 }

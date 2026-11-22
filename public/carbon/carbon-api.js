@@ -1019,6 +1019,7 @@ function realInstall() {
   const installed = carbon.modules.filter(m => m.installed).length;
   return `<div class="page-head"><div><div class="page-title">Установка</div><div class="page-sub">Реальные модули сервера. Установка и удаление через API.</div></div><div class="page-actions"><button class="btn" data-carbon-action="awg-install">${icon('download')}AWG</button><button class="btn" data-carbon-action="cascade-build">${icon('cascade')}Каскад</button><button class="btn" data-carbon-action="proxy-install">${icon('download')}Прокси</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Модулей', String(carbon.modules.length), 'всего')}${mini('Установлено', String(installed), 'активно')}${mini('Не установлено', String(carbon.modules.length - installed), 'доступно')}${mini('Версия панели', carbon.update ? escHtml(carbon.update.version) : '—', 'build')}</div>
+    ${carbon.modules.some(m => m.id === 'adguard' && m.needsSetup) ? `<section class="card" style="grid-column:span 12;margin-bottom:16px"><div class="card-top"><div><div class="card-title">AdGuard Home: нужна настройка</div><div class="card-sub">Задайте логин и пароль администратора. До этого веб-интерфейс снаружи закрыт.</div></div><button class="btn btn-primary" data-api-action="adguard-setup">${icon('key')}Завершить настройку</button></div></section>` : ''}
     <div class="grid">${carbon.modules.map(m => {
       const installed = !!m.installed;
       const adguard = m.id === 'adguard';
