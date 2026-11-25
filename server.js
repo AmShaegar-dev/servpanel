@@ -9307,6 +9307,28 @@ function replaceEndpointWithDomain(confPath, domain) {
     } catch (e) { /* ignore */ }
 }
 
+// Endpoint для клиентского конфига: явный домен, вход каскада (RU) или домен панели.
+// Вход каскада важнее домена панели: на EU клиент должен идти на RU, а не на EU.
+function patchClientEndpoint(confPath, epType, epDomain) {
+    if (epType === 'domain') {
+        replaceEndpointWithDomain(confPath, epDomain);
+        return;
+    }
+    const cep = cascade2ClientEndpoint();
+    if (cep) {
+        try { sh('sudo', ['sed', '-i', '-E', 's/^Endpoint = .*/Endpoint = ' + cep + '/', confPath]); } catch (e) { /* ignore */ }
+        return;
+    }
+    if (!epType) replaceEndpointWithDomain(confPath);
+}
+
+// Подмена Endpoint в тексте конфига при выдаче (скачивание/ZIP/экспорт).
+function withCascadeEndpoint(text) {
+    const cep = cascade2ClientEndpoint();
+    const src = String(text == null ? '' : text);
+    return cep ? src.replace(/^Endpoint\s*=.*$/m, 'Endpoint = ' + cep) : src;
+}
+
 // Домен для endpoint клиента: из настроек AmneziaWG или из «Домен и SSL».
 app.get('/api/clients/domain', checkAuth, (req, res) => {
     try { res.json(domainInfo()); }
@@ -9336,12 +9358,7 @@ app.post('/api/create', checkAuth, (req, res) => {
             if (!response.ok) return res.status(500).json({ error: response.error || 'Ошибка создания' });
             const r = (response.results || [])[0];
             if (!r || !r.conf) return res.status(500).json({ error: 'Скрипт не вернул путь к конфигу' });
-            if (epType === 'domain') replaceEndpointWithDomain(r.conf, epDomain);
-            if (cascade2Detect().relay) {
-                const cep = cascade2ClientEndpoint();
-                if (cep) { try { sh('sudo', ['sed', '-i', '-E', 's/^Endpoint = .*/Endpoint = ' + cep + '/', r.conf]); } catch (e2) { /* ignore */ } }
-            }
-            else if (!epType) replaceEndpointWithDomain(r.conf);
+            patchClientEndpoint(r.conf, epType, epDomain);
             syncClient31Params(name);
             applyStoredClientMtu(name);
             auditLog(req, `Создан клиент ${name}`);
@@ -9371,8 +9388,7 @@ app.post('/api/create-bulk', checkAuth, (req, res) => {
             const response = JSON.parse(result);
             const r = (response.results || [])[0];
             if (response.ok && r && r.conf) {
-                if (epType === 'domain') replaceEndpointWithDomain(r.conf, epDomain);
-                else if (!epType) replaceEndpointWithDomain(r.conf);
+                patchClientEndpoint(r.conf, epType, epDomain);
                 syncClient31Params(clientName);
                 applyStoredClientMtu(clientName);
                 generated.push({ name: clientName, content: sh('sudo', ['cat', r.conf]) });
@@ -9489,10 +9505,9 @@ app.get('/api/clients/:name/export', checkAuth, requireAdmin, async (req, res) =
         try { if (fs.existsSync(confPath)) conf = sh('sudo', ['cat', confPath]); } catch (e) { conf = ''; }
         if (!conf) return res.status(404).json({ error: 'Конфиг клиента не найден' });
     // Каскад 2: клиент должен подключаться к российскому входу.
-    if (cascade2Detect().relay) {
-        const ep = cascade2ClientEndpoint();
-        if (ep) conf = conf.replace(/^Endpoint\s*=.*$/m, 'Endpoint = ' + ep);
-    }
+    // Конфиг клиента всегда отдаём с endpoint входа каскада (RU), если он есть.
+    const cep = cascade2ClientEndpoint();
+    if (cep) conf = conf.replace(/^Endpoint\s*=.*$/m, 'Endpoint = ' + cep);
 
         let uri = '';
         // Сначала собираем ключ из актуального .conf: в нём Endpoint выбран
@@ -9635,8 +9650,8 @@ app.get('/api/download/:name', checkAuth, (req, res) => {
     const filePath = path.join(AWG_DIR, `${name}.conf`);
     if (fs.existsSync(filePath)) {
         try { syncClient31Params(name); } catch (e) { /* ignore */ }
-        // Отдаём конфиг как есть: Endpoint (IP или домен) выбран при создании.
-        const content = fs.readFileSync(filePath, 'utf8');
+        // Отдаём конфиг с endpoint входа каскада (RU), если релей настроен.
+        const content = withCascadeEndpoint(fs.readFileSync(filePath, 'utf8'));
         res.attachment(`${serverFileBase()}_${name}.conf`).type('text/plain').send(content);
     } else res.status(404).send('Конфиг не найден');
 });
@@ -9734,7 +9749,7 @@ app.post('/api/download-bulk', checkAuth, (req, res) => {
         if (!fs.existsSync(filePath)) continue;
         try { syncClient31Params(name); } catch (e) { /* ignore */ }
         try {
-            entries.push({ name: `${base}_${name}.conf`, data: fs.readFileSync(filePath) });
+            entries.push({ name: `${base}_${name}.conf`, data: Buffer.from(withCascadeEndpoint(fs.readFileSync(filePath, 'utf8')), 'utf8') });
         } catch (e) { /* пропускаем недоступный файл */ }
     }
     if (!entries.length) return res.status(404).json({ error: 'Конфиги не найдены' });
@@ -11672,8 +11687,9 @@ function cascade2ClientEndpoint() {
     const st = cascade2Read();
     if (st.clientEndpoint) return st.clientEndpoint;
     const det = cascade2Detect();
-    if (det.role === 'eu' && det.ruIp) return det.ruIp + ':' + (st.ruPort || 3977);
-    if (det.role === 'ru' && det.euHost) return det.euHost + ':' + (det.ruPort || 3977);
+    if (det.role === 'eu' && det.ruIp) return det.ruIp + ':' + (st.ruPort || det.ruPort || 3977);
+    // На RU клиенты входят в релей по адресу самого RU, а не EU.
+    if (det.role === 'ru' && (det.euHost || det.relay)) return cascade2Ip() + ':' + (st.ruPort || det.ruPort || 3977);
     return '';
 }
 
