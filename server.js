@@ -2255,8 +2255,67 @@ function ensureSplitAccounting(clients, force) {
     }
 }
 
-function readSplitCounters() {
-    const ru = {}, eu = {}, marks = {};
+// EU: учёт по клиентам для каскада 2 — сколько ушло через RU (mark 0x3001),
+// сколько напрямую с EU. Считаем только, маршрутизацию не меняем.
+let euSplitSig = '';
+function ensureEuSplitAccounting(clients) {
+    if (TEST_MODE) return;
+    if (!fileExists('/etc/amnezia/amneziawg/awg1.conf')) return;
+    const ips = [...new Set((clients || []).map(c => String(c.ip || '').trim())
+        .filter(ip => /^(?:\d{1,3}\.){3}\d{1,3}$/.test(ip)))].sort();
+    if (!ips.length) return;
+    try {
+        rootShTry('iptables', ['-t', 'mangle', '-N', 'AWG_SPLIT_EU']);
+        if (!iptablesHas(['-t', 'mangle', '-C', 'FORWARD', '-j', 'AWG_SPLIT_EU'])) {
+            rootSh('iptables', ['-t', 'mangle', '-I', 'FORWARD', '1', '-j', 'AWG_SPLIT_EU']);
+        }
+        const chainNow = String(rootShTry('iptables', ['-t', 'mangle', '-S', 'AWG_SPLIT_EU']) || '');
+        const sig = ips.join(',');
+        if (sig === euSplitSig && chainNow.trim()) return;
+        const add = rule => {
+            if (!iptablesHas(['-t', 'mangle', '-C', 'AWG_SPLIT_EU', ...rule])) {
+                rootSh('iptables', ['-t', 'mangle', '-A', 'AWG_SPLIT_EU', ...rule]);
+            }
+        };
+        for (const ip of ips) {
+            add(['-s', ip, '-m', 'connmark', '--mark', '0x3001/0xffffffff', '-j', 'RETURN']);
+            add(['-d', ip, '-m', 'connmark', '--mark', '0x3001/0xffffffff', '-j', 'RETURN']);
+            add(['-s', ip, '-j', 'RETURN']);
+            add(['-d', ip, '-j', 'RETURN']);
+        }
+        const current = new Set(ips);
+        for (const raw of chainNow.split('\n')) {
+            const line = raw.trim();
+            const m = /^-A\s+AWG_SPLIT_EU\s+-(?:s|d)\s+((?:\d{1,3}\.){3}\d{1,3})\b/.exec(line);
+            if (!m || current.has(m[1])) continue;
+            const spec = line.replace(/^-A\s+AWG_SPLIT_EU\s+/, '');
+            try { rootSh('iptables', ['-t', 'mangle', '-D', 'AWG_SPLIT_EU', ...iptablesSpecTokens(spec)]); } catch (e) { /* ignore */ }
+        }
+        euSplitSig = sig;
+    } catch (e) { /* ignore */ }
+}
+
+function readEuSplitCounters() {
+    const ru = {}, eu = {};
+    if (TEST_MODE) return { ru, eu };
+    try {
+        const out = rootShTry('bash', ['-c',
+            'iptables-save -c -t mangle 2>/dev/null || /usr/sbin/iptables-save -c -t mangle 2>/dev/null || true'
+        ], { maxBuffer: 8 * 1024 * 1024 });
+        for (const raw of String(out || '').split('\n')) {
+            const line = raw.trim();
+            const m = /^\[(\d+):(\d+)\]\s+-A\s+AWG_SPLIT_EU\s+-(?:s|d)\s+((?:\d{1,3}\.){3}\d{1,3})\b/.exec(line);
+            if (!m) continue;
+            const bytes = Number(m[2]) || 0;
+            const ip = m[3];
+            const map = line.includes('--mark 0x3001') ? ru : eu;
+            map[ip] = (map[ip] || 0) + bytes;
+        }
+    } catch (e) { /* ignore */ }
+    return { ru, eu };
+}
+
+function readSplitCounters() {    const ru = {}, eu = {}, marks = {};
     if (TEST_MODE) return { ru, eu, marks };
     try {
         const out = rootShTry('bash', ['-c',
@@ -2293,7 +2352,18 @@ function readSplitCounters() {
 }
 
 function attachClientSplit(clients) {
-    if (TEST_MODE || cascadeRole() !== 'ru' || !existingCascadeConf()) return clients;
+    if (TEST_MODE) return clients;
+    if (cascadeRole() === 'eu' && fileExists('/etc/amnezia/amneziawg/awg1.conf')) {
+        try {
+            ensureEuSplitAccounting(clients);
+            const s = readEuSplitCounters();
+            return clients.map(c => {
+                const ip = String(c.ip || '');
+                return { ...c, split_cascade: s.ru[ip] || 0, split_direct: s.eu[ip] || 0 };
+            });
+        } catch (e) { return clients; }
+    }
+    if (cascadeRole() !== 'ru' || !existingCascadeConf()) return clients;
     try {
         const balance = cascadeBalanceEnabled();
         if (!balance) ensureSplitAccounting(clients);
@@ -11748,7 +11818,8 @@ app.get('/api/cascade2/rules', checkAuth, requireAdmin, (req, res) => {
             table3001: sh('ip', ['route', 'show', 'table', '3001']),
             ipforward: sh('sysctl', ['-n', 'net.ipv4.ip_forward']).trim(),
             awg0Listen: sh('awg', ['show', 'awg0', 'listen-port']).trim(),
-            awg1Listen: sh('awg', ['show', 'awg1', 'listen-port']).trim()
+            awg1Listen: sh('awg', ['show', 'awg1', 'listen-port']).trim(),
+            splitEu: sh('iptables', ['-t', 'mangle', '-S', 'AWG_SPLIT_EU'])
         });
     } catch (e) {
         res.status(500).json({ error: 'rules: ' + (e.message || e) });
