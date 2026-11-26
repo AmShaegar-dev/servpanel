@@ -9380,12 +9380,37 @@ function replaceEndpointWithDomain(confPath, domain) {
 
 // Endpoint для клиентского конфига: явный домен, вход каскада (RU) или домен панели.
 // Вход каскада важнее домена панели: на EU клиент должен идти на RU, а не на EU.
+// Endpoint, который должен стоять в клиентском конфиге.
+// Каскад 2: вход RU. Каскад 1 на RU: собственный публичный IP и порт awg0.
+function effectiveClientEndpoint() {
+    try {
+        // На RU клиент всегда входит на сам RU — и в каскаде 1, и в каскаде 2.
+        if (cascadeRole() === 'ru') {
+            let port = Number((cascade2Read() || {}).ruPort) || 0;
+            if (!port) {
+                try {
+                    const t = fs.readFileSync('/etc/amnezia/amneziawg/awg0.conf', 'utf8');
+                    port = Number((t.match(/^ListenPort\s*=\s*(\d+)/m) || [])[1]) || 0;
+                } catch (e) { /* default */ }
+            }
+            const ip = cascade2Ip();
+            if (ip) return ip + ':' + (port || 3977);
+            return '';
+        }
+        const det = cascade2Detect();
+        const hasRu = !!String(shTry('sudo', ['ipset', 'list', 'ru']) || '').trim();
+        const relay = det.relay || (det.role === 'eu' && det.ruIp && hasRu);
+        if (relay) return cascade2ClientEndpoint();
+    } catch (e) { /* ignore */ }
+    return '';
+}
+
 function patchClientEndpoint(confPath, epType, epDomain) {
     if (epType === 'domain') {
         replaceEndpointWithDomain(confPath, epDomain);
         return;
     }
-    const cep = cascade2ClientEndpoint();
+    const cep = effectiveClientEndpoint();
     if (cep) {
         try { sh('sudo', ['sed', '-i', '-E', 's/^Endpoint = .*/Endpoint = ' + cep + '/', confPath]); } catch (e) { /* ignore */ }
         return;
@@ -9395,7 +9420,7 @@ function patchClientEndpoint(confPath, epType, epDomain) {
 
 // Подмена Endpoint в тексте конфига при выдаче (скачивание/ZIP/экспорт).
 function withCascadeEndpoint(text) {
-    const cep = cascade2ClientEndpoint();
+    const cep = effectiveClientEndpoint();
     const src = String(text == null ? '' : text);
     return cep ? src.replace(/^Endpoint\s*=.*$/m, 'Endpoint = ' + cep) : src;
 }
@@ -9577,7 +9602,7 @@ app.get('/api/clients/:name/export', checkAuth, requireAdmin, async (req, res) =
         if (!conf) return res.status(404).json({ error: 'Конфиг клиента не найден' });
     // Каскад 2: клиент должен подключаться к российскому входу.
     // Конфиг клиента всегда отдаём с endpoint входа каскада (RU), если он есть.
-    const cep = cascade2ClientEndpoint();
+    const cep = effectiveClientEndpoint();
     if (cep) conf = conf.replace(/^Endpoint\s*=.*$/m, 'Endpoint = ' + cep);
 
         let uri = '';
