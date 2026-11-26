@@ -11838,6 +11838,7 @@ app.post('/api/cascade2/repair', checkAuth, requireAdmin, (req, res) => {
         const ports = [...new Set([...(st.ports || []), ...(det.ports || [])])]
             .map(Number).filter(p => p > 0 && p < 65536);
         if (!ports.length) throw new Error('Нет портов релея');
+        const targetPort = Number((req.body || {}).targetPort) || ports[0];
 
         const ipt = (args, table) => {
             const full = table ? ['-t', table, ...args] : args;
@@ -11861,7 +11862,7 @@ app.post('/api/cascade2/repair', checkAuth, requireAdmin, (req, res) => {
 
         // 2. Ставим корректные DNAT/FORWARD/MASQUERADE.
         for (const pt of ports) {
-            ensure('nat', ['PREROUTING', '-p', 'udp', '--dport', String(pt), '-j', 'DNAT', '--to-destination', euHost + ':' + pt]);
+            ensure('nat', ['PREROUTING', '-p', 'udp', '--dport', String(pt), '-j', 'DNAT', '--to-destination', euHost + ':' + targetPort]);
             ensure(null, ['FORWARD', '-d', euHost, '-p', 'udp', '--dport', String(pt), '-j', 'ACCEPT']);
             ensure(null, ['FORWARD', '-s', euHost, '-p', 'udp', '--sport', String(pt), '-j', 'ACCEPT']);
             ensure('nat', ['POSTROUTING', '-p', 'udp', '-d', euHost, '--dport', String(pt), '-j', 'MASQUERADE']);
