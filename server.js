@@ -7508,7 +7508,7 @@ async function runCascadeBuild(job, remote, opts) {
     log('RU', 'туннель awg1 поднят');
 
     // 7. Маршруты и фильтрация.
-    const subnet = sshBuild.clientSubnet(local.address) || '10.9.9.0/24';
+    const subnet = sshBuild.clientSubnet(local.address) || '172.16.17.0/24';
     const ifaces = Array.isArray(opts.ifaces) && opts.ifaces.length ? opts.ifaces : ['awg0'];
     const extraRuNets = Array.isArray(opts.extraRuNets) ? opts.extraRuNets : [];
     const script = sshBuild.routingScript(euHost, subnet, ifaces, extraRuNets);
@@ -14127,7 +14127,7 @@ function installEnv(data) {
     if (isPort(data.port)) env.AWG_PORT = String(data.port);
     // Подсеть туннеля для каскада: RU — 172.16.17.0/24, EU — 172.16.61.0/24.
     if (data.subnet && /^(\d{1,3}\.){3}\d{1,3}\/(1[6-9]|2\d|30)$/.test(String(data.subnet))) {
-        env.AWG_TUNNEL_SUBNET = String(data.subnet);
+        env.AWG_TUNNEL_SUBNET = String(data.subnet || '172.16.17.0/24');
     }
     env.AWG_ISOLATION = data.isolation === false ? 'off' : 'on';
     env.AWG_KEEP_PACKAGES = data.keepPackages === false ? '0' : '1';
