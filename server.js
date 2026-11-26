@@ -6109,20 +6109,45 @@ function cascadeRoleFrom(confText) {
 // Роль сервера определяем по awg0.conf: у входа клиенты с 0.0.0.0/0, у выхода
 // awg0 либо нет, либо это переставленный конфиг входа.
 function cascadeRole() {
-    if (TEST_MODE) return "ru";
-    // Настоящий вход — сервер с клиентами: awg0 с ListenPort и подсетью /24.
-    for (const name of ["awg0.conf", "amn0.conf"]) {
+    if (TEST_MODE) return 'ru';
+    // 1. Каскад 2, RU: есть DNAT на EU.
+    try {
+        const det = cascade2Detect();
+        if (det.euHost) return 'ru';
+    } catch (e) { /* ignore */ }
+    // 2. Есть awg1 с Endpoint: клиентская сторона туннеля.
+    let awg1 = '';
+    try { awg1 = fs.readFileSync('/etc/amnezia/amneziawg/awg1.conf', 'utf8'); } catch (e) { awg1 = ''; }
+    if (/^Endpoint\s*=/m.test(awg1)) {
+        // Каскад 2 EU: пометка российских адресов именно меткой 0x3001.
+        // У каскада 1 на RU используется метка 0x1/таблица 100 — это не EU.
+        try {
+            const mangle = String(shTry('sudo', ['iptables', '-t', 'mangle', '-S', 'PREROUTING']) || '');
+            if (/--match-set ru dst/.test(mangle) && /0x3001/.test(mangle)) return 'eu';
+        } catch (e) { /* ignore */ }
+        return 'ru';
+    }
+    // 3. Нет awg1: EU каскада 1 создаёт клиента ru_host в awg0, у RU awg1 всегда есть.
+    let awg0 = '';
+    try { awg0 = fs.readFileSync('/etc/amnezia/amneziawg/awg0.conf', 'utf8'); } catch (e) { awg0 = ''; }
+    if (/#_Name\s*=\s*ru_host\b/.test(awg0)) return 'eu';
+    // 4. Каскад 2 EU без туннеля: ipset ru + публичный IP не российский.
+    try {
+        if (String(shTry('sudo', ['ipset', 'list', 'ru']) || '').trim() && !cascade2IpInRu(cascade2Ip())) return 'eu';
+    } catch (e) { /* ignore */ }
+    // 5. Запасной вариант по подсетям.
+    for (const name of ['awg0.conf', 'amn0.conf']) {
         const file = path.join(AWG_CONF_DIR, name);
         if (!fileExists(file)) continue;
         const ini = parseIni(readTextSafe(file));
         const iface = ini.Interface || {};
         const addr = String(iface.Address || '');
-        if (/^172\.16\.61\./.test(addr)) return "eu";
-        if (/^172\.16\.17\./.test(addr) || /^10\.9\.9\./.test(addr)) return "ru";
+        if (/^172\.16\.61\./.test(addr)) return 'eu';
+        if (/^172\.16\.17\./.test(addr) || /^10\.9\.9\./.test(addr)) return 'ru';
         const clientPeers = (readTextSafe(file).match(/^\[Peer\]/gm) || []).length;
-        if (iface.ListenPort && clientPeers > 0) return "ru";
+        if (iface.ListenPort && clientPeers > 0) return 'ru';
     }
-    return "eu";
+    return 'eu';
 }
 
 
