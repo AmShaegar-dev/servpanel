@@ -11734,6 +11734,73 @@ async function cascade2Peer(base, user, pass, pathname, body) {
     try { return JSON.parse(t); } catch (e) { return { raw: t }; }
 }
 
+// Диагностика правил каскада 2: nat/mangle/ip rule без изменения состояния.
+app.get('/api/cascade2/rules', checkAuth, requireAdmin, (req, res) => {
+    const sh = (cmd, args) => String(shTry('sudo', [cmd, ...args]) || '');
+    try {
+        res.json({
+            success: true,
+            natPrerouting: sh('iptables', ['-t', 'nat', '-S', 'PREROUTING']),
+            natPostrouting: sh('iptables', ['-t', 'nat', '-S', 'POSTROUTING']),
+            forward: sh('iptables', ['-S', 'FORWARD']),
+            mangle: sh('iptables', ['-t', 'mangle', '-S', 'PREROUTING']),
+            iprule: sh('ip', ['rule', 'show']),
+            table3001: sh('ip', ['route', 'show', 'table', '3001']),
+            ipforward: sh('sysctl', ['-n', 'net.ipv4.ip_forward']).trim(),
+            awg0Listen: sh('awg', ['show', 'awg0', 'listen-port']).trim(),
+            awg1Listen: sh('awg', ['show', 'awg1', 'listen-port']).trim()
+        });
+    } catch (e) {
+        res.status(500).json({ error: 'rules: ' + (e.message || e) });
+    }
+});
+
+// Ремонт правил релея на RU: убираем устаревшие DNAT на те же порты
+// (например, 3977 -> EU:443) и заново ставим корректные DNAT/FORWARD/MASQUERADE.
+app.post('/api/cascade2/repair', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const st = cascade2Read();
+        const det = cascade2Detect();
+        if (det.role !== 'ru' || !det.euHost) throw new Error('Это не RU-сторона релея');
+        const euHost = det.euHost;
+        const ports = [...new Set([...(st.ports || []), ...(det.ports || [])])]
+            .map(Number).filter(p => p > 0 && p < 65536);
+        if (!ports.length) throw new Error('Нет портов релея');
+
+        const ipt = (args, table) => {
+            const full = table ? ['-t', table, ...args] : args;
+            try { sh('sudo', ['iptables', ...full]); return true; } catch (e) { return false; }
+        };
+        const ensure = (table, spec) => {
+            const del = ['-C', ...spec];
+            if (!ipt(del, table)) ipt(['-A', ...spec], table);
+        };
+
+        // 1. Удаляем все DNAT/REDIRECT на порты релея (включая старые 3977 -> EU:443).
+        const listed = String(shTry('sudo', ['iptables', '-t', 'nat', '-S', 'PREROUTING']) || '').split(/\r?\n/);
+        let removed = 0;
+        for (const line of listed) {
+            const m = /--dport (\d+)\b/.exec(line);
+            if (!m || !/ -j (DNAT|REDIRECT)\b/.test(line)) continue;
+            if (!ports.includes(Number(m[1]))) continue;
+            const tail = line.replace(/^-A PREROUTING\s+/, '').split(/\s+/).filter(Boolean);
+            if (ipt(['-D', 'PREROUTING', ...tail], 'nat')) removed++;
+        }
+
+        // 2. Ставим корректные DNAT/FORWARD/MASQUERADE.
+        for (const pt of ports) {
+            ensure('nat', ['PREROUTING', '-p', 'udp', '--dport', String(pt), '-j', 'DNAT', '--to-destination', euHost + ':' + pt]);
+            ensure(null, ['FORWARD', '-d', euHost, '-p', 'udp', '--dport', String(pt), '-j', 'ACCEPT']);
+            ensure(null, ['FORWARD', '-s', euHost, '-p', 'udp', '--sport', String(pt), '-j', 'ACCEPT']);
+            ensure('nat', ['POSTROUTING', '-p', 'udp', '-d', euHost, '--dport', String(pt), '-j', 'MASQUERADE']);
+        }
+        auditLog(req, 'Каскад 2: правила релея пересобраны (' + ports.join(',') + '), удалено старых: ' + removed);
+        res.json({ success: true, ports, euHost, removed });
+    } catch (e) {
+        res.status(500).json({ error: 'Ремонт релея: ' + (e.message || e) });
+    }
+});
+
 app.get('/api/cascade2/status', checkAuth, (req, res) => {
     const saved = cascade2Read();
     const det = cascade2Detect();
