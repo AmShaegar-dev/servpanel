@@ -744,20 +744,20 @@ function realClientRows() {
       const value = Number(bytes) || 0;
       if (value > 0) splitParts.push({ id, label: exitLabels[id] || ('EU-' + (i + 1)), value, color: exitColors[i % exitColors.length] });
     });
-    if (!splitParts.length && cascade > 0) splitParts.push({ id: 'cascade', label: 'EU', value: cascade, color: exitColors[0] });
+    if (!splitParts.length && cascade > 0) splitParts.push({ id: 'cascade', label: isEu ? 'Через RU' : 'EU', value: cascade, color: exitColors[0] });
     const splitTotal = splitParts.reduce((a, p) => a + p.value, 0) + direct;
     const hasSplit = splitTotal > 0;
     const directPct = hasSplit ? direct / splitTotal * 100 : 0;
+    const directLabel = isEu ? 'Напрямую' : 'RU';
+    const cascadeLabel = isEu ? 'Через RU' : 'EU';
     const title = hasSplit
-      ? splitParts.map(p => `${p.label}: ${fmtBytes(p.value)}`).concat(['RU: ' + fmtBytes(direct)]).join(' · ')
+      ? splitParts.map(p => `${p.label}: ${fmtBytes(p.value)}`).concat([directLabel + ': ' + fmtBytes(direct)]).join(' · ')
       : 'Нет данных по клиенту';
     const segments = splitParts.map(p => `<span style="width:${(p.value / splitTotal * 100).toFixed(1)}%;background:${p.color}"></span>`).join('')
       + (direct > 0 ? `<span style="width:${directPct.toFixed(1)}%;background:var(--accent)"></span>` : '');
-    const splitCell = isEu
-      ? '<span class="muted">—</span>'
-      : hasSplit
-        ? `<div class="split-bar" title="${escHtml(title)}">${segments}</div><span class="share-pct">${escHtml(splitParts.map(p => p.label).join(' / ') || 'EU')} · RU ${pctText(directPct)}</span>`
-        : `<div class="split-bar" title="Нет данных"><span style="width:100%;background:var(--surface-3)"></span></div><span class="share-pct">нет данных</span>`;
+    const splitCell = hasSplit
+      ? `<div class="split-bar" title="${escHtml(title)}">${segments}</div><span class="share-pct">${escHtml(splitParts.map(p => p.label).join(' / ') || cascadeLabel)} · ${escHtml(directLabel)} ${pctText(directPct)}</span>`
+      : `<div class="split-bar" title="Нет данных"><span style="width:100%;background:var(--surface-3)"></span></div><span class="share-pct">нет данных</span>`;
     const isoMode = c.isolation_mode || 'default';
     const isoPeers = Array.isArray(c.isolation_peers) ? c.isolation_peers : [];
     const isoPeerNames = isoPeers.map(ip => {
@@ -911,20 +911,25 @@ function realTrafficDistribution() {
   }
   let d = carbon.distribution || {};
   const c2d = carbon.cascade2 || {};
-  if (c2d.state && c2d.state.type === 'relay' && c2d.counters) {
+  const c2role = c2d.role || '';
+  const c2blocked = Number(d.blocked) || 0;
+  if (c2role === 'eu' && c2d.counters) {
+    d = { role: 'eu2', tunnel: Number(c2d.counters.ruBytes) || 0, direct: Number(c2d.counters.euBytes) || 0, blocked: c2blocked, source: 'cascade2' };
+  } else if (c2role === 'ru' && c2d.state && c2d.state.type === 'relay' && c2d.counters) {
     const ru = Number(c2d.counters.ruBytes) || 0;
     const eu = Number(c2d.counters.euBytes) || 0;
-    d = { role: 'relay', tunnel: ru, direct: eu, blocked: 0, source: 'cascade2' };
+    d = { role: 'relay', tunnel: ru, direct: eu, blocked: c2blocked, source: 'cascade2' };
   }
   const role = d.role || 'ru';
   const isEu = role === 'eu';
+  const isEu2 = role === 'eu2';
   const tunnel = Number(d.tunnel) || 0;
   const direct = Number(d.direct) || 0;
   const passed = Number(d.passed) || 0;
   const blocked = Number(d.blocked) || 0;
   const source = d.source || 'unavailable';
-  const total = role === 'relay' ? tunnel + direct : (isEu ? passed + blocked : tunnel + direct + blocked);
-  const exits = !isEu && Array.isArray(d.exits) && d.exits.length ? d.exits : null;
+  const total = role === 'relay' ? tunnel + direct : isEu ? passed + blocked : isEu2 ? tunnel + direct : tunnel + direct + blocked;
+  const exits = !isEu && !isEu2 && Array.isArray(d.exits) && d.exits.length ? d.exits : null;
   const exitColors = ['#5b8cff', '#8b5cf6', '#2dd4a7', '#f5b84b', '#ff6b6b', '#4dd0e1'];
   const parts = role === 'relay'
     ? [
@@ -936,6 +941,11 @@ function realTrafficDistribution() {
         { key: 'passed', label: 'Прошло через EU', short: 'прошло', value: passed, color: '#5b8cff' },
         { key: 'blocked', label: 'GeoIP blocked', short: 'заблокировано', value: blocked, color: '#d29922' }
       ]
+    : isEu2
+    ? [
+        { key: 'direct', label: 'Выход в EU', short: 'в EU', value: direct, color: '#5b8cff' },
+        { key: 'tunnel', label: 'Ушло в RU', short: 'в RU', value: tunnel, color: 'var(--accent)' }
+      ]
     : exits
       ? exits.map((e, i) => ({ key: e.id, label: e.iface || e.name || ('awg' + (i + 1)), short: e.iface || e.name || 'EU', value: Number(e.bytes) || 0, color: exitColors[i % exitColors.length] }))
         .concat([{ key: 'direct', label: 'RU выход', short: 'в RU-выходе', value: direct, color: 'var(--accent)' }])
@@ -943,7 +953,7 @@ function realTrafficDistribution() {
         { key: 'tunnel', label: 'В EU-туннель', short: 'в EU-туннеле', value: tunnel, color: '#5b8cff' },
         { key: 'direct', label: 'RU выход', short: 'в RU-выходе', value: direct, color: 'var(--accent)' }
       ];
-  if (!isEu && blocked > 0) parts.push({ key: 'blocked', label: 'GeoIP blocked', short: 'заблокировано', value: blocked, color: '#d29922' });
+  if (!isEu && !isEu2 && blocked > 0) parts.push({ key: 'blocked', label: 'GeoIP blocked', short: 'заблокировано', value: blocked, color: '#d29922' });
   const C = 2 * Math.PI * 46;
   let offset = 0;
   const rings = parts.map(p => {
@@ -959,9 +969,9 @@ function realTrafficDistribution() {
   const tagText = total ? (source === 'cached' ? 'последние' : 'live') : 'нет данных';
   const tagTone = total ? (source === 'cached' ? 'warn' : 'good') : 'warn';
   const note = total
-    ? (isEu ? 'Данные из интерфейса awg0 и правил GeoIP.' : exits ? 'Данные по каждому выходу каскада и RU-направлению.' : (source === 'mangle' ? 'Данные из счётчиков mangle (ipset ru) и awg0/awg1.' : source === 'cached' ? 'Счётчики маршрутизации пересозданы — показаны последние известные доли.' : 'Данные из счётчиков маршрутизации.'))
+    ? (isEu ? 'Данные из интерфейса awg0 и правил GeoIP.' : isEu2 ? 'Данные из интерфейсов EU и туннеля в RU.' : exits ? 'Данные по каждому выходу каскада и RU-направлению.' : (source === 'mangle' ? 'Данные из счётчиков mangle (ipset ru) и awg0/awg1.' : source === 'cached' ? 'Счётчики маршрутизации пересозданы — показаны последние известные доли.' : 'Данные из счётчиков маршрутизации.'))
     : 'Нет данных: счётчики маршрутизации ещё не накоплены.';
-  return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">${role === 'relay' ? 'НА EU · ВЫХОД С RU' : isEu ? 'EU-выход · прошло / GeoIP blocked' : exits ? 'RU-вход · выходы / RU' : 'RU-вход · туннель / RU выход'}${!isEu && blocked > 0 ? ' / GeoIP' : ''}</div></div>${tag(tagText, tagTone)}</div>
+  return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">${role === 'relay' ? 'НА EU · ВЫХОД С RU' : isEu ? 'EU-выход · прошло / GeoIP blocked' : isEu2 ? 'EU · напрямую / через RU' : exits ? 'RU-вход · выходы / RU' : 'RU-вход · туннель / RU выход'}${!isEu && !isEu2 && blocked > 0 ? ' / GeoIP' : ''}</div></div>${tag(tagText, tagTone)}</div>
     <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
       <div style="position:relative;width:196px;height:196px;flex:0 0 auto">
         <svg viewBox="0 0 120 120" style="width:100%;height:100%"><circle cx="60" cy="60" r="46" fill="none" stroke="var(--surface-3)" stroke-width="12"/>${rings}</svg>
@@ -1118,8 +1128,8 @@ function realNetwork() {
 
 function cascade2Switch(relay) {
   return relay
-    ? `<button class="btn btn-primary" data-carbon-action="cascade2-install">${icon('cascade')}Каскад 2 · релей</button><button class="btn" data-carbon-action="cascade2-classic">${icon('cascade')}Обычный каскад</button>`
-    : `<button class="btn" data-carbon-action="cascade2-install">${icon('cascade')}Каскад 2 · релей</button>`;
+    ? `<button class="btn btn-primary" data-carbon-action="cascade2-migrate">${icon('cascade')}Мастер установки 2.0</button><button class="btn" data-carbon-action="cascade2-install">${icon('cascade')}Каскад 2 · релей</button><button class="btn" data-carbon-action="cascade2-classic">${icon('cascade')}Обычный каскад</button>`
+    : `<button class="btn btn-primary" data-carbon-action="cascade2-migrate">${icon('cascade')}Мастер установки 2.0</button><button class="btn" data-carbon-action="cascade2-install">${icon('cascade')}Каскад 2 · релей</button>`;
 }
 
 function realCascadeRelay() {

@@ -34,6 +34,7 @@ const { Panel } = require('./lib/cascade-setup');
 const sshBuild = require('./lib/cascade-ssh-build');
 const awgArchitect = require('./lib/awg-architect');
 const sshRunner = require('./lib/cascade-ssh');
+const cascade2Migrate = require('./lib/cascade2-migrate');
 const sshAccess = require('./lib/ssh-access');
 const { createKeenetic } = require('./lib/keenetic');
 const { ensureAwg } = require('./lib/cascade-remote');
@@ -11870,6 +11871,62 @@ app.post('/api/cascade2/repair', checkAuth, requireAdmin, (req, res) => {
     } catch (e) {
         res.status(500).json({ error: 'Ремонт релея: ' + (e.message || e) });
     }
+});
+
+// Мягкий перенос каскада 1 → 2 по SSH (вариант 2).
+let c2MigrateJob = null;
+app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
+    if (c2MigrateJob && c2MigrateJob.running) return res.status(409).json({ error: 'Миграция уже выполняется' });
+    const b = req.body || {};
+    const job = { running: true, ok: false, error: '', steps: [], log: '', startedAt: Date.now(), finishedAt: null, result: null };
+    c2MigrateJob = job;
+    const push = (title, text) => {
+        job.steps.push({ at: Date.now(), title, text: String(text || '') });
+        job.log += '[' + new Date().toISOString().slice(11, 19) + '] ' + title + ': ' + text + '\n';
+    };
+    (async () => {
+        try {
+            const role = b.role === 'eu' ? 'eu' : 'ru';
+            const result = await cascade2Migrate.migrate({
+                role,
+                peerHost: b.peerHost,
+                peerPort: b.peerPort,
+                peerUser: b.peerUser,
+                peerPass: b.peerPass,
+                relayPorts: b.relayPorts,
+                tunnelPort: b.tunnelPort,
+                ifaces: b.ifaces,
+                localIp: cascade2Ip(),
+                ruTunnelKeys: x25519Pair(),
+                euTunnelKeys: x25519Pair()
+            }, push);
+            cascade2Write({ ...result.state });
+            job.ok = true;
+            job.result = result;
+            push('Итог', 'Перенос завершён: клиентов ' + result.peers + ', порты ' + result.ports.join(','));
+            auditLog(req, 'Каскад 2: мягкий перенос выполнен, порты ' + result.ports.join(','));
+        } catch (e) {
+            job.ok = false;
+            job.error = String((e && e.message) || e);
+            push('Ошибка', job.error);
+        } finally {
+            job.running = false;
+            job.finishedAt = Date.now();
+        }
+    })();
+    res.json({ success: true, running: true });
+});
+
+app.get('/api/cascade2/migrate-ssh/status', checkAuth, (req, res) => {
+    const j = c2MigrateJob;
+    res.json({
+        success: true,
+        job: j ? {
+            running: j.running, ok: j.ok, error: j.error, steps: j.steps,
+            log: String(j.log || '').slice(-8000),
+            startedAt: j.startedAt, finishedAt: j.finishedAt, result: j.result
+        } : null
+    });
 });
 
 app.get('/api/cascade2/status', checkAuth, (req, res) => {

@@ -1238,6 +1238,71 @@ async function carbonCascade2Install() {
   });
 }
 
+async function carbonCascade2Migrate() {
+  const st = (carbon.cascade2 && carbon.cascade2.state) || {};
+  showCarbonForm({
+    title: 'Каскад 2 · установка (мягкий перенос)',
+    sub: 'Переносит клиентов с RU на EU без замены конфигов: ключи, обфускация и порты остаются прежними. Нужен SSH root второй стороны.',
+    fields: [
+      { name: 'role', label: 'Роль этой панели', type: 'select', options: [{ value: 'ru', label: 'Вход (RU)' }, { value: 'eu', label: 'Выход (EU)' }], value: (carbon.cascade2 && carbon.cascade2.role) || 'ru' },
+      { name: 'peerHost', label: 'IP второй стороны', placeholder: '194.124.250.127' },
+      { name: 'peerPort', label: 'SSH-порт', value: '22' },
+      { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
+      { name: 'peerPass', label: 'Пароль root', type: 'password' },
+      { name: 'relayPorts', label: 'Порты релея (через запятую)', value: ((st.ports && st.ports.length ? st.ports : [st.ruPort || 3977])).join(', ') },
+      { name: 'tunnelPort', label: 'Порт туннеля awg1', type: 'number', value: st.ruExitPort || 4600, min: 1, max: 65535 },
+      { name: 'ifaces', label: 'Интерфейсы фильтрации на EU', value: ((st.ifaces && st.ifaces.length ? st.ifaces : ['awg0'])).join(', ') }
+    ],
+    submitText: 'Начать перенос',
+    danger: true,
+    onSubmit: async v => {
+      const peerHost = String(v.peerHost || '').trim();
+      if (!peerHost) throw new Error('Укажите IP второй стороны');
+      if (!v.peerPass) throw new Error('Укажите пароль root второй стороны');
+      const relayPorts = String(v.relayPorts || '').split(',').map(x => Number(x.trim())).filter(n => n > 0 && n < 65536);
+      if (!relayPorts.length) throw new Error('Укажите хотя бы один порт релея');
+      const ifaces = String(v.ifaces || '').split(',').map(x => x.trim()).filter(Boolean);
+      const d = await api('/api/cascade2/migrate-ssh', { method: 'POST', body: {
+        role: v.role, peerHost, peerPort: v.peerPort || '22', peerUser: v.peerUser || 'root',
+        peerPass: v.peerPass, relayPorts, tunnelPort: Number(v.tunnelPort) || 4600, ifaces
+      } });
+      if (d.success) await carbonWatchC2Migrate();
+    }
+  });
+}
+
+async function carbonWatchC2Migrate() {
+  let modal = document.getElementById('c2MigrateModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'c2MigrateModal';
+    modal.className = 'modal';
+    modal.innerHTML = `<div class="modal-card modal-wide"><div class="modal-head"><div><div class="modal-title">Каскад 2 · перенос</div><div class="modal-sub">Шаги установки и журнал</div></div><button class="icon-btn" data-c2m-close>✕</button></div><div class="checklist" style="max-height:38vh;overflow:auto"></div><pre class="code" style="margin:10px 0 0;max-height:30vh;overflow:auto;white-space:pre-wrap;padding:10px"></pre><div class="modal-actions"><button class="btn" data-c2m-close>Закрыть</button></div></div>`;
+    document.body.appendChild(modal);
+    modal.querySelectorAll('[data-c2m-close]').forEach(b => b.addEventListener('click', () => modal.remove()));
+  }
+  modal.hidden = false;
+  const list = modal.querySelector('.checklist');
+  const pre = modal.querySelector('pre');
+  const paint = job => {
+    const steps = (job && job.steps) || [];
+    list.innerHTML = steps.map(s => `<div class="checklist-item"><span class="checklist-ico checklist-ok">✓</span><div><b class="checklist-ok">${escHtml(s.title)}</b><div class="checklist-desc">${escHtml(s.text)}</div></div></div>`).join('') || '<div class="checklist-item"><span class="checklist-ico checklist-run">◌</span><div><b>Ожидание…</b></div></div>';
+    pre.textContent = (job && job.log) || 'Журнал пуст';
+  };
+  for (let i = 0; i < 600; i++) {
+    await carbonSleep(1500);
+    const d = await api('/api/cascade2/migrate-ssh/status').catch(() => null);
+    const job = d && d.job;
+    if (!job) continue;
+    paint(job);
+    if (!job.running) {
+      if (job.ok) { showToast('Перенос завершён'); await carbonRefresh(); }
+      else showToast('Ошибка переноса: ' + (job.error || 'см. журнал'));
+      return;
+    }
+  }
+}
+
 async function carbonCascade2Refresh() {
   try {
     const d = await api('/api/cascade2/status');
@@ -2645,6 +2710,7 @@ document.addEventListener('click', async event => {
     else if (action === 'cascade-build') await carbonCascadeBuild();
     else if (action === 'cascade-mode') await carbonCascadeMode(btn.dataset.mode || 'classic');
     else if (action === 'cascade2-install') await carbonCascade2Install();
+    else if (action === 'cascade2-migrate') await carbonCascade2Migrate();
     else if (action === 'cascade2-refresh') await carbonCascade2Refresh();
     else if (action === 'cascade2-port-add') await carbonCascade2PortAdd();
     else if (action === 'cascade2-ifaces-save') await carbonCascade2IfacesSave();
