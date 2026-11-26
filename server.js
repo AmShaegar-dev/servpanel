@@ -7151,13 +7151,18 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
             'systemctl stop awg-routing.timer awg-routing.service awg-quick@awg1 2>/dev/null || true',
             'systemctl disable awg-routing.timer awg-quick@awg1 2>/dev/null || true',
             'ip rule del fwmark 0x1 table 100 2>/dev/null || true',
+            'ip rule del fwmark 0x3001 table 3001 2>/dev/null || true',
             "ip route flush table 100 2>/dev/null || true",
+            "ip route flush table 3001 2>/dev/null || true",
             "ipset destroy ru 2>/dev/null || true",
-            "iptables -t mangle -S PREROUTING 2>/dev/null | grep -E 'set-mark 0x1|match-set ru dst' | sed 's/^-A /-D /' | xargs -r -L1 iptables -t mangle 2>/dev/null || true",
-            "iptables -t nat -S POSTROUTING 2>/dev/null | grep -- '-o awg1' | grep MASQUERADE | sed 's/^-A /-D /' | xargs -r -L1 iptables -t nat 2>/dev/null || true",
+            "ipset destroy ru_tmp 2>/dev/null || true",
+            "iptables -t mangle -S PREROUTING 2>/dev/null | grep -E 'set-mark 0x1|set-mark 0x3001|set-xmark 0x3001|match-set ru dst' | sed 's/^-A /-D /' | xargs -r -L1 iptables -t mangle 2>/dev/null || true",
+            "iptables -t nat -S POSTROUTING 2>/dev/null | grep -E -- '-o awg1 .*MASQUERADE|-p udp( -m udp)? --dport [0-9]+ -j MASQUERADE' | sed 's/^-A /-D /' | xargs -r -L1 iptables -t nat 2>/dev/null || true",
+            "iptables -t nat -S PREROUTING 2>/dev/null | grep -E -- '-p udp( -m udp)? --dport [0-9]+ -j DNAT --to-destination [0-9.]+:[0-9]+' | sed 's/^-A /-D /' | xargs -r -L1 iptables -t nat 2>/dev/null || true",
             `if [ -f /root/awg/manage_amneziawg.sh ]; then bash /root/awg/manage_amneziawg.sh remove ${peerClient} --yes --json >/dev/null 2>&1 || true; fi`,
-            'rm -f /etc/amnezia/amneziawg/awg1.conf /root/awg/awg-routing.sh /etc/systemd/system/awg-routing.service /etc/systemd/system/awg-routing.timer',
+            'rm -f /etc/amnezia/amneziawg/awg1.conf /root/awg/awg-routing.sh /root/awg/ru.zone /root/awg/ru-restore.txt /etc/systemd/system/awg-routing.service /etc/systemd/system/awg-routing.timer',
             `rm -f /root/awg/${peerClient}.conf /root/awg/${peerClient}.png /root/awg/${peerClient}.vpnuri /root/awg/${peerClient}.vpnuri.png`,
+            'APP=$(systemctl show -p WorkingDirectory --value servpanel 2>/dev/null); [ -n "$APP" ] && rm -f "$APP/.cascade2.json" || true',
             'systemctl daemon-reload',
             'echo cleaned'
         ].join('; ');
@@ -8099,8 +8104,35 @@ app.post('/api/cascade/teardown', checkAuth, requireAdmin, async (req, res) => {
     };
     strip('mangle', 'PREROUTING', r => /--set-xmark 0x1|--set-mark 0x1|match-set ru dst/.test(r));
     strip('nat', 'POSTROUTING', r => /-o awg1 .*MASQUERADE/.test(r));
-    removed.push('удалены правила fwmark, ipset и iptables');
-    for (const f of [ROUTING_SCRIPT, '/etc/systemd/system/awg-routing.service', '/etc/systemd/system/awg-routing.timer', CASCADE_MARKER]) {
+
+    // Каскад 2: DNAT релея, пометки 0x3001 и таблица 3001. Собираем адреса
+    // и порты ДО удаления DNAT, чтобы вычистить связанные FORWARD/MASQUERADE.
+    const c2Hosts = new Set();
+    const c2Ports = new Set();
+    try {
+        const c2nat = String(rootShTry('iptables', ['-t', 'nat', '-S', 'PREROUTING']) || '');
+        const c2re = /-A PREROUTING\b.*?-p udp(?: -m udp)? --dport (\d+) -j DNAT --to-destination ([\d.]+):(\d+)/g;
+        let m;
+        while ((m = c2re.exec(c2nat))) {
+            if (m[1] === m[3]) { c2Hosts.add(m[2]); c2Ports.add(Number(m[1])); }
+        }
+    } catch (e) { /* ignore */ }
+    const c2state = cascade2Read();
+    if (c2state.euHost) c2Hosts.add(c2state.euHost);
+    for (const p of (c2state.ports || [])) c2Ports.add(Number(p));
+    strip('nat', 'PREROUTING', r => {
+        const m = /-p udp(?: -m udp)? --dport (\d+) -j DNAT --to-destination ([\d.]+):(\d+)/.exec(r);
+        return !!m && m[1] === m[3];
+    });
+    strip('filter', 'FORWARD', r => [...c2Hosts].some(h => r.includes('-d ' + h + ' ') || r.includes('-s ' + h + ' ')));
+    strip('nat', 'POSTROUTING', r => /MASQUERADE/.test(r) && /-p udp(?: -m udp)? --dport \d+/.test(r) && [...c2Hosts].some(h => r.includes('-d ' + h + ' ')));
+    strip('mangle', 'PREROUTING', r => /--set-xmark 0x3001|--set-mark 0x3001/.test(r));
+    safe(['ip', 'rule', 'del', 'fwmark', '0x3001', 'table', '3001']);
+    safe(['ip', 'route', 'flush', 'table', '3001']);
+    safe(['ipset', 'destroy', 'ru_tmp']);
+    cascade2Write({ type: 'classic', enabled: false, ports: [], euHost: '', ifaces: ['awg0'] });
+    removed.push('удалены правила каскада 2 (DNAT, пометки, ipset)');
+    for (const f of [ROUTING_SCRIPT, '/etc/systemd/system/awg-routing.service', '/etc/systemd/system/awg-routing.timer', CASCADE_MARKER, path.join(AWG_DIR, 'ru.zone'), path.join(AWG_DIR, 'ru-restore.txt')]) {
         try { fs.unlinkSync(f); } catch (e) { /* нет файла */ }
     }
     removed.push('удалены скрипт маршрутов и юниты');

@@ -1743,11 +1743,53 @@ async function carbonCascadeManual() {
 }
 
 async function carbonCascadeCleanup() {
-  if (!confirm('Удалить каскад на этом сервере? Клиенты VPN не пострадают.')) return;
-  const d = await api('/api/cascade/cleanup', { method: 'POST', body: {} });
-  const text = (d.steps || []).map(s => s.title + ': ' + s.text).join('\n') || 'Готово';
-  showCarbonTextModal('Удаление каскада', text);
-  await carbonRefresh('Каскад удалён');
+  let c2 = carbon.cascade2 || {};
+  let st = c2.state || {};
+  let det = c2.detected || {};
+  const pickPeer = () => {
+    const own = String((carbon.server && carbon.server.ip) || '').trim();
+    const pick = (...xs) => xs.map(x => String(x || '').trim()).find(x => x && x !== own) || '';
+    const role = c2.role || det.role || '';
+    return role === 'eu' ? pick(st.ruIp, det.ruIp) : pick(st.euHost, det.euHost, det.ruIp, st.ruIp);
+  };
+  let host = pickPeer();
+  if (!host) {
+    try {
+      const d = await api('/api/cascade2/status');
+      carbon.cascade2 = d || c2;
+      c2 = carbon.cascade2 || {};
+      st = c2.state || {};
+      det = c2.detected || {};
+      host = pickPeer();
+    } catch (e) { /* подскажем вручную */ }
+  }
+  showCarbonForm({
+    title: 'Удалить каскад',
+    sub: 'Полностью удаляет и каскад 1, и каскад 2: правила DNAT, пометки, ipset, туннель awg1, скрипты маршрутов и сохранённое состояние. Если указать SSH второй стороны, она тоже будет очищена. Клиентские файлы на устройствах не меняются.',
+    fields: [
+      { name: 'peerHost', label: 'IP второй стороны', value: host, placeholder: 'Необязательно' },
+      { name: 'peerPort', label: 'SSH-порт', value: '22' },
+      { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
+      { name: 'peerPass', label: 'Пароль root второй стороны', type: 'password' },
+      { name: 'peerClient', label: 'Имя клиента каскада', value: 'ru_host' }
+    ],
+    submitText: 'Удалить каскад',
+    danger: true,
+    onSubmit: async v => {
+      const peerHost = String(v.peerHost || '').trim();
+      if (peerHost && !v.peerPass) throw new Error('Укажите пароль root второй стороны или очистите поле IP');
+      const d = await api('/api/cascade/cleanup', {
+        method: 'POST',
+        body: {
+          peerHost, peerPort: v.peerPort || '22', peerUser: v.peerUser || 'root',
+          peerPass: v.peerPass || '', peerClient: v.peerClient || 'ru_host'
+        }
+      });
+      const text = (d.steps || []).map(s => s.title + ': ' + s.text).join('\n') || 'Готово';
+      showCarbonTextModal('Удаление каскада', text);
+      await carbonRefresh('Каскад удалён');
+    }
+  });
 }
 
 async function carbonAdguardConfig() {
