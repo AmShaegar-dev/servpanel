@@ -2798,7 +2798,15 @@ document.addEventListener('click', async event => {
     else if (action === 'proxy-log') await carbonProxyLog();
     else if (action === 'ufw-add') await carbonUfwAdd();
     else if (action === 'ipv6-toggle') await carbonIpv6Toggle();
-    else if (action === 'ufw-delete') { if (confirm('Удалить правило №' + name + '?')) { await api('/api/ufw/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Правило удалено'); } }
+    else if (action === 'ufw-delete') {
+      const to = btn.dataset.to || '';
+      const ruleAction = btn.dataset.ruleAction || '';
+      if (confirm('Удалить правило №' + name + '?')) {
+        const q = '?to=' + encodeURIComponent(to) + '&action=' + encodeURIComponent(ruleAction);
+        await api('/api/ufw/' + encodeURIComponent(name) + q, { method: 'DELETE' });
+        await carbonRefresh('Правило удалено');
+      }
+    }
     else if (action === 'iptables-add') await carbonIptablesAdd();
     else if (action === 'iptables-delete') { if (confirm('Удалить правило iptables?')) { await api('/api/iptables/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Правило iptables удалено'); } }
     else if (action === 'awg-edit') await carbonAwgEdit();

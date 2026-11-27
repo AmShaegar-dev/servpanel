@@ -5642,9 +5642,18 @@ app.get('/api/ufw', checkAuth, (req, res) => {
         const ports = ssOut.filter(l => l).map(line => {
             const parts = line.trim().split(/\s+/);
             if (parts.length < 6) return null;
-            const procMatch = (parts[6] || '').match(/"([^"]+)"/);
-            return { proto: parts[0], addr: parts[4], proc: procMatch ? procMatch[1] : 'Система' };
-        }).filter(Boolean);
+            const local = parts[4] || '';
+            const port = Number((local.match(/:(\d+)$/) || [])[1]) || 0;
+            const pm = line.match(/users:\(\("([^"]+)",pid=(\d+)/);
+            return {
+                proto: parts[0],
+                state: parts[1],
+                addr: local,
+                port,
+                proc: pm ? pm[1] : '',
+                pid: pm ? Number(pm[2]) : 0
+            };
+        }).filter(Boolean).sort((a, b) => (a.port - b.port) || String(a.proto).localeCompare(String(b.proto)));
         res.json({ rules, ports });
     } catch (e) { res.status(500).json({ error: 'Ошибка' }); }
 });
@@ -5671,10 +5680,35 @@ app.post('/api/ufw', checkAuth, (req, res) => {
 app.delete('/api/ufw/:id', checkAuth, (req, res) => {
     const id = String(req.params.id);
     if (!/^\d{1,5}$/.test(id)) return res.status(400).json({ error: 'Неверный номер правила' });
+    const wantTo = String(req.query.to || '').trim();
+    const wantAction = String(req.query.action || '').trim();
     try {
-        sh('sudo', ['ufw', '--force', 'delete', id]);
-        auditLog(req, `UFW: удалено правило ${id}`);
-        res.json({ success: true });
+        const parse = line => {
+            const m = String(line).match(/^\[\s*(\d+)\]\s+(.*?)\s+(ALLOW IN|DENY IN|REJECT IN|ALLOW|DENY|REJECT)\s+(.*)$/);
+            return m ? { id: m[1], to: m[2].trim(), action: m[3], from: m[4].trim() } : null;
+        };
+        const rows = sh('sudo', ['ufw', 'status', 'numbered']).split('\n').map(parse).filter(Boolean);
+        const norm = s => String(s || '').replace(/\s*\(v6\)\s*/gi, '').trim();
+        let target = rows.find(r => r.id === id);
+        // Номер правила мог сместиться после добавления/удаления другого правила.
+        // Если панель передала сам порт и действие — ищем по ним, а не по номеру.
+        if (wantTo) {
+            const bySpec = rows.find(r => norm(r.to) === norm(wantTo) && (!wantAction || r.action === wantAction));
+            if (!bySpec) return res.status(404).json({ error: 'Правило уже удалено или изменилось' });
+            target = bySpec;
+        }
+        if (!target) return res.status(404).json({ error: 'Правило не найдено (список UFW изменился)' });
+        // Удаляем и IPv4, и IPv6-двойник: ufw status numbered показывает их
+        // отдельными строками, а ufw delete по номеру убирает только одну.
+        const toMatch = norm(target.to);
+        const actionMatch = target.action;
+        const matches = rows.filter(r => norm(r.to) === toMatch && r.action === actionMatch);
+        for (const r of matches.sort((a, b) => Number(b.id) - Number(a.id))) {
+            sh('sudo', ['ufw', '--force', 'delete', r.id]);
+        }
+        try { sh('sudo', ['ufw', 'reload'], { timeout: 60000 }); } catch (e) { /* ignore */ }
+        auditLog(req, `UFW: удалено правило ${target.to} (${matches.length} шт., включая IPv6-двойники)`);
+        res.json({ success: true, deleted: matches.map(r => r.id), rule: target.to });
     } catch (e) { res.status(500).json({ error: 'Ошибка удаления' }); }
 });
 
