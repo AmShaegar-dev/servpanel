@@ -8893,7 +8893,7 @@ app.post('/api/cascade/teardown', checkAuth, requireAdmin, async (req, res) => {
     try { if (cascadeBalanceEnabled()) cascadeBalanceCleanup(); } catch (e) { /* ignore */ }
     cascadeBalanceWrite({ mode: 'classic', assignments: {} });
     try { removeSplitAccounting(); } catch (e) { /* ignore */ }
-    for (const unit of ['awg-routing.timer', 'awg-routing.service', C2_ROUTING_UNIT, C2_EU_ROUTING_UNIT, 'awg-quick@awg1']) {
+    for (const unit of ['awg-routing.timer', 'awg-routing.service', C2_ROUTING_UNIT, C2_EU_ROUTING_UNIT, C2_LIST_UNIT, C2_EU_LIST_UNIT, C2_LIST_TIMER, C2_EU_LIST_TIMER, 'awg-quick@awg1']) {
         try { sh('sudo', ['systemctl', 'stop', unit]); } catch (e) { /* не запущена */ }
         try { sh('sudo', ['systemctl', 'disable', unit]); } catch (e) { /* ignore */ }
     }
@@ -8956,6 +8956,10 @@ app.post('/api/cascade/teardown', checkAuth, requireAdmin, async (req, res) => {
         '/etc/systemd/system/awg-routing.timer',
         path.join(C2_UNIT_DIR, C2_ROUTING_UNIT),
         path.join(C2_UNIT_DIR, C2_EU_ROUTING_UNIT),
+        path.join(C2_UNIT_DIR, C2_LIST_UNIT),
+        path.join(C2_UNIT_DIR, C2_EU_LIST_UNIT),
+        path.join(C2_UNIT_DIR, C2_LIST_TIMER),
+        path.join(C2_UNIT_DIR, C2_EU_LIST_TIMER),
         CASCADE_MARKER,
         path.join(AWG_DIR, 'ru.zone'),
         path.join(AWG_DIR, 'ru-restore.txt')
@@ -12596,6 +12600,10 @@ function cascade2Nets() {
 
 const C2_ROUTING_UNIT = 'cascade2-routing.service';
 const C2_EU_ROUTING_UNIT = 'cascade2-routing-eu.service';
+const C2_LIST_UNIT = 'cascade2-list.service';
+const C2_EU_LIST_UNIT = 'cascade2-list-eu.service';
+const C2_LIST_TIMER = 'cascade2-list.timer';
+const C2_EU_LIST_TIMER = 'cascade2-list-eu.timer';
 const C2_UNIT_DIR = '/etc/systemd/system';
 
 // Роль каскада 2 по конфигу туннеля. Не зависит от iptables: после
@@ -12631,6 +12639,35 @@ function c2RemoveUnit(name) {
     try { fs.unlinkSync(path.join(C2_UNIT_DIR, name)); } catch (e) { /* ignore */ }
 }
 
+function c2TimerSeconds(name) {
+    try {
+        const text = fs.readFileSync(path.join(C2_UNIT_DIR, name), 'utf8');
+        const m = /OnUnitActiveSec=(\d+)s/.exec(text);
+        return m ? Number(m[1]) || 0 : 0;
+    } catch (e) { return 0; }
+}
+
+function c2ScheduleInfo() {
+    const role = cascade2LocalRole() || cascadeRole();
+    const isEu = role === 'eu';
+    const timer = isEu ? C2_EU_LIST_TIMER : C2_LIST_TIMER;
+    const service = isEu ? C2_EU_LIST_UNIT : C2_LIST_UNIT;
+    const applicable = !!role && fs.existsSync(path.join(C2_UNIT_DIR, service));
+    const active = applicable && String(rootShTry('systemctl', ['is-active', timer]) || '').trim() === 'active';
+    return {
+        applicable, role, timer, service,
+        seconds: applicable ? c2TimerSeconds(timer) : 0,
+        active
+    };
+}
+
+function c2ZoneLines() {
+    try {
+        const text = fs.readFileSync('/root/awg/ru.zone', 'utf8');
+        return text.split(/\s+/).filter(x => /^\d+\.\d+\.\d+\.\d+(\/\d+)?$/.test(x)).length;
+    } catch (e) { return 0; }
+}
+
 function c2ProxyDropIns() {
     // Прокси должен стартовать после туннеля и после восстановления маршрутов,
     // иначе первые upstream-соединения уйдут напрямую с RU.
@@ -12646,8 +12683,9 @@ function c2ProxyDropIns() {
 function ensureCascade2Persistence() {
     const st = cascade2Read();
     if (!st || !st.enabled) {
-        c2RemoveUnit(C2_ROUTING_UNIT);
-        c2RemoveUnit(C2_EU_ROUTING_UNIT);
+        for (const unit of [C2_ROUTING_UNIT, C2_EU_ROUTING_UNIT, C2_LIST_UNIT, C2_EU_LIST_UNIT, C2_LIST_TIMER, C2_EU_LIST_TIMER]) {
+            c2RemoveUnit(unit);
+        }
         try { fs.unlinkSync('/root/awg/cascade2-relay.sh'); } catch (e) { /* ignore */ }
         try { fs.unlinkSync('/root/awg/awg-routing-eu.sh'); } catch (e) { /* ignore */ }
         try { rootSh('systemctl', ['daemon-reload'], { timeout: 20000 }); } catch (e) { /* ignore */ }
@@ -12661,6 +12699,8 @@ function ensureCascade2Persistence() {
     const det = cascade2Detect();
     if (role === 'ru') {
         c2RemoveUnit(C2_EU_ROUTING_UNIT);
+        c2RemoveUnit(C2_EU_LIST_UNIT);
+        c2RemoveUnit(C2_EU_LIST_TIMER);
         const ports = [...new Set([...(st.ports || []), ...(det.ports || [])]
             .map(Number).filter(n => n > 0 && n < 65536))];
         const euHost = String(st.euHost || det.euHost || '').trim();
@@ -12676,6 +12716,7 @@ function ensureCascade2Persistence() {
         }
         c2ProxyDropIns();
         writeRootFile(path.join(C2_UNIT_DIR, C2_ROUTING_UNIT), cascade2Migrate.routingUnit('ru'), '0644');
+        writeRootFile(path.join(C2_UNIT_DIR, C2_LIST_UNIT), cascade2Migrate.listRefreshUnit('ru'), '0644');
         try {
             rootSh('systemctl', ['daemon-reload'], { timeout: 20000 });
             rootSh('systemctl', ['enable', C2_ROUTING_UNIT], { timeout: 20000 });
@@ -12693,12 +12734,15 @@ function ensureCascade2Persistence() {
     }
 
     c2RemoveUnit(C2_ROUTING_UNIT);
+    c2RemoveUnit(C2_LIST_UNIT);
+    c2RemoveUnit(C2_LIST_TIMER);
     const ifaces = [...new Set([...(st.ifaces || []), ...(det.ifaces || [])].filter(Boolean))];
     const euScript = cascade2Migrate.euRoutingScript(ifaces);
     let changed = true;
     try { changed = fs.readFileSync('/root/awg/awg-routing-eu.sh', 'utf8') !== euScript; } catch (e) { changed = true; }
     writeRootFile('/root/awg/awg-routing-eu.sh', euScript, '0755');
     writeRootFile(path.join(C2_UNIT_DIR, C2_EU_ROUTING_UNIT), cascade2Migrate.routingUnit('eu'), '0644');
+    writeRootFile(path.join(C2_UNIT_DIR, C2_EU_LIST_UNIT), cascade2Migrate.listRefreshUnit('eu'), '0644');
     try {
         rootSh('systemctl', ['daemon-reload'], { timeout: 20000 });
         rootSh('systemctl', ['enable', C2_EU_ROUTING_UNIT], { timeout: 20000 });
@@ -13107,6 +13151,85 @@ app.post('/api/cascade2/persist', checkAuth, requireAdmin, (req, res) => {
     }
 });
 
+app.get('/api/cascade2/schedule', checkAuth, requireAdmin, (req, res) => {
+    try {
+        res.json({ success: true, ...c2ScheduleInfo() });
+    } catch (e) {
+        res.status(500).json({ error: 'Расписание каскада 2: ' + (e.message || e) });
+    }
+});
+
+app.post('/api/cascade2/schedule', checkAuth, requireAdmin, (req, res) => {
+    const intervals = { '5m': 300, '1h': 3600, '6h': 21600, '24h': 86400, off: 0 };
+    const key = String((req.body && req.body.interval) || '24h');
+    if (!Object.prototype.hasOwnProperty.call(intervals, key)) {
+        return res.status(400).json({ error: 'Недопустимый интервал' });
+    }
+    try {
+        let info = c2ScheduleInfo();
+        if (!info.applicable) {
+            try { ensureCascade2Persistence(); } catch (e) { /* ignore */ }
+            info = c2ScheduleInfo();
+        }
+        if (!info.applicable) return res.status(400).json({ error: 'Автозапуск каскада 2 не настроен' });
+        const seconds = intervals[key];
+        if (!seconds) {
+            rootShTry('systemctl', ['disable', '--now', info.timer], { timeout: 20000 });
+            try { fs.unlinkSync(path.join(C2_UNIT_DIR, info.timer)); } catch (e) { /* ignore */ }
+            try { rootSh('systemctl', ['daemon-reload'], { timeout: 20000 }); } catch (e) { /* ignore */ }
+            auditLog(req, 'Каскад 2: автообновление списка RU выключено');
+            return res.json({ success: true, ...c2ScheduleInfo() });
+        }
+        const timerText = [
+            '[Unit]',
+            'Description=Servpanel cascade 2 list refresh (' + (info.role === 'eu' ? 'EU' : 'RU') + ')',
+            '',
+            '[Timer]',
+            'OnBootSec=300s',
+            'OnUnitActiveSec=' + seconds + 's',
+            'Unit=' + info.service,
+            '',
+            '[Install]',
+            'WantedBy=timers.target',
+            ''
+        ].join('\n');
+        writeRootFile(path.join(C2_UNIT_DIR, info.timer), timerText, '0644');
+        rootSh('systemctl', ['daemon-reload'], { timeout: 20000 });
+        rootSh('systemctl', ['enable', '--now', info.timer], { timeout: 20000 });
+        // Перезапуск применяет новый интервал, если таймер уже был активен.
+        rootSh('systemctl', ['restart', info.timer], { timeout: 20000 });
+        // Сразу обновляем список, не дожидаясь первого срабатывания таймера.
+        rootSh('systemctl', ['start', '--no-block', info.service], { timeout: 20000 });
+        auditLog(req, 'Каскад 2: автообновление списка RU — ' + key);
+        res.json({ success: true, ...c2ScheduleInfo() });
+    } catch (e) {
+        res.status(500).json({ error: 'Расписание каскада 2: ' + (e.message || e) });
+    }
+});
+
+app.post('/api/cascade2/refresh', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const info = c2ScheduleInfo();
+        if (!info.applicable) return res.status(400).json({ error: 'Автозапуск каскада 2 не настроен' });
+        const before = cascade2Nets();
+        try {
+            rootSh('systemctl', ['restart', info.service], { timeout: 240000 });
+        } catch (e) {
+            return res.status(500).json({ error: 'Не удалось обновить список RU: ' + (e.message || e) });
+        }
+        const count = cascade2Nets();
+        const zoneLines = c2ZoneLines();
+        res.json({
+            success: true, role: info.role, count, zoneLines,
+            added: Math.max(0, count - before),
+            removed: Math.max(0, before - count),
+            before
+        });
+    } catch (e) {
+        res.status(500).json({ error: 'Обновление списка RU: ' + (e.message || e) });
+    }
+});
+
 // EU: принять клиентов со входа, поднять туннель к RU, фильтровать RU-адреса.
 app.post('/api/cascade2/apply', checkAuth, requireAdmin, (req, res) => {
     const b = req.body || {};
@@ -13200,8 +13323,8 @@ app.post('/api/cascade2/disable', checkAuth, requireAdmin, (req, res) => {
             'for i in $(seq 1 12); do iptables -t mangle -D PREROUTING -i awg0 -m conntrack --ctstate NEW,INVALID -j CONNMARK --save-mark 2>/dev/null || break; done; ' +
             'for i in $(seq 1 12); do iptables -t mangle -D PREROUTING -i awg0 -m conntrack --ctstate ESTABLISHED,RELATED -j CONNMARK --restore-mark 2>/dev/null || break; done; ' +
             'ip rule del fwmark 0x3001 table 3001 2>/dev/null || true; ip route flush table 3001 2>/dev/null || true; ' +
-            'systemctl disable --now cascade2-routing.service cascade2-routing-eu.service 2>/dev/null || true; ' +
-            'rm -f /etc/systemd/system/cascade2-routing.service /etc/systemd/system/cascade2-routing-eu.service /root/awg/cascade2-relay.sh /root/awg/awg-routing-eu.sh; systemctl daemon-reload 2>/dev/null || true; ' +
+            'systemctl disable --now cascade2-routing.service cascade2-routing-eu.service cascade2-list.service cascade2-list-eu.service cascade2-list.timer cascade2-list-eu.timer 2>/dev/null || true; ' +
+            'rm -f /etc/systemd/system/cascade2-routing.service /etc/systemd/system/cascade2-routing-eu.service /etc/systemd/system/cascade2-list.service /etc/systemd/system/cascade2-list-eu.service /etc/systemd/system/cascade2-list.timer /etc/systemd/system/cascade2-list-eu.timer /root/awg/cascade2-relay.sh /root/awg/awg-routing-eu.sh; systemctl daemon-reload 2>/dev/null || true; ' +
             'systemctl disable --now awg-quick@awg1 2>/dev/null || true; echo OK';
         sh('sudo', ['bash', '-c', rules], { timeout: 60000 });
         const next = cascade2Write({ type: 'classic', enabled: false });

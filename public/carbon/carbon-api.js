@@ -534,6 +534,7 @@ function assignCarbonPath(path, data) {
   else if (p === '/api/traffic/distribution') carbon.distribution = data;
   else if (p === '/api/cascade/interfaces') { if (!data.error) carbon.cascadeInterfaces = data; else return false; }
   else if (p === '/api/cascade/schedule') { if (!data.error) carbon.cascadeSchedule = data; else return false; }
+  else if (p === '/api/cascade2/schedule') { if (!data.error) carbon.cascade2Schedule = data; else return false; }
   else return false;
   return true;
 }
@@ -583,7 +584,7 @@ const TAB_DATA = {
   clients: ['/api/clients'],
   install: ['/api/modules'],
   network: ['/api/interfaces', '/api/ufw', '/api/iptables', '/api/awg/config', '/api/ipv6/status'],
-  cascade: ['/api/cascade/status', '/api/cascade/proxy', '/api/cascade/interfaces', '/api/cascade/schedule', '/api/cascade2/status', '/api/traffic/distribution', '/api/clients', '/api/tools/status'],
+  cascade: ['/api/cascade/status', '/api/cascade/proxy', '/api/cascade/interfaces', '/api/cascade/schedule', '/api/cascade2/status', '/api/cascade2/schedule', '/api/traffic/distribution', '/api/clients', '/api/tools/status'],
   obfuscation: ['/api/obf/current', '/api/obf/profiles'],
   services: ['/api/services', '/api/warp/status'],
   domains: ['/api/ssl/status'],
@@ -1197,6 +1198,14 @@ function realCascadeRelay() {
   const isEu = c2.role === 'eu';
   const p = c2.persistence || {};
   const persistText = !p.file ? 'не создан' : p.enabled ? (p.active ? 'включён' : 'включён, не активен') : 'выключен';
+  const sch = carbon.cascade2Schedule || {};
+  const schSeconds = Number(sch.seconds) || 0;
+  const schOptions = [[300, '5m', 'Каждые 5 минут'], [3600, '1h', 'Каждый час'], [21600, '6h', 'Каждые 6 часов'], [86400, '24h', 'Раз в сутки'], [0, 'off', 'Выключено']]
+    .map(([sec, val, label]) => `<option value="${val}" ${schSeconds === sec ? 'selected' : ''}>${label}</option>`).join('');
+  const schCard = sch.applicable === false ? '' : `<section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Обновление списка фильтров</div><div class="card-sub">Ручное обновление и автообновление ipset ru на этой стороне</div></div>${tag(sch.active ? 'авто' : 'выкл', sch.active ? 'good' : 'warn')}</div>
+    <div class="form-grid" style="grid-template-columns:minmax(220px,320px)"><label class="field"><span>Автообновление</span><select id="carbonC2Schedule">${schOptions}</select></label></div>
+    <div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="cascade2-list-refresh">${icon('refresh')}Обновить список RU</button><button class="btn" data-carbon-action="cascade2-schedule-save">${icon('check')}Сохранить расписание</button></div>
+    <div class="donut-note">Скрипт скачивает свежий список RU и пересобирает ipset и маршруты. На RU это список для прокси, на EU — для фильтрации российских адресов.</div></section>`;
   const ports = (s.ports || [s.ruPort || 3977]).slice().sort((a, b) => a - b);
   const mb = b => ((Number(b) || 0) / 1048576).toFixed(1);
   const total = (Number(c.ruBytes) || 0) + (Number(c.euBytes) || 0);
@@ -1217,6 +1226,7 @@ function realCascadeRelay() {
       ${(carbon.cascade2 && carbon.cascade2.role === 'eu') ? `<section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Интерфейсы фильтрации на EU</div><div class="card-sub">На этих интерфейсах российские адреса помечаются и уходят через RU</div></div>${tag(String((s.ifaces || []).length), 'muted')}</div>
         <div class="switch-grid">${ifaceList.map(i => `<label class="switch"><input type="checkbox" data-c2-iface value="${escHtml(i)}" ${(s.ifaces || []).includes(i) ? 'checked' : ''}> ${escHtml(i)}</label>`).join('')}</div>
         <div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="cascade2-ifaces-save">${icon('check')}Сохранить интерфейсы</button></div></section>` : ''}
+      ${schCard}
       <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Конфиги клиентов</div><div class="card-sub">На EU клиентские профили отдаются с endpoint российского входа</div></div>${tag(c2.clientEndpoint || 'авто', 'muted')}</div>
         <div class="page-actions" style="margin-top:8px"><label class="field" style="min-width:260px"><span>Endpoint для клиентов (пусто — автоматически)</span><input id="carbonC2Endpoint" value="${escHtml(s.clientEndpoint || '')}" placeholder="${escHtml(c2.clientEndpoint || '45.0.0.1:3977')}"></label><button class="btn" data-carbon-action="cascade2-endpoint-save">${icon('check')}Сохранить</button><button class="btn" data-carbon-action="cascade2-awg1">${icon('wrench')}Конфиг awg1</button></div></section>
       <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">Сколько ушло через российский выход и сколько напрямую с EU</div></div></div>

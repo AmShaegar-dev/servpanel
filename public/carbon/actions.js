@@ -2794,6 +2794,30 @@ async function carbonCascadeScheduleSave() {
   await carbonRefresh('Расписание обновления списков сохранено');
 }
 
+async function carbonCascade2ScheduleSave() {
+  const sel = document.getElementById('carbonC2Schedule');
+  const interval = sel ? sel.value : '24h';
+  const d = await api('/api/cascade2/schedule', { method: 'POST', body: { interval } });
+  await carbonRefresh(d && d.active ? 'Автообновление списка каскада 2 включено' : 'Автообновление списка каскада 2 выключено');
+}
+
+async function carbonCascade2ListRefresh() {
+  const d = await api('/api/cascade2/refresh', { method: 'POST', body: {} });
+  const count = Number(d && d.count) || 0;
+  const added = Number(d && d.added) || 0;
+  const removed = Number(d && d.removed) || 0;
+  const zoneLines = Number(d && d.zoneLines) || 0;
+  const lines = [
+    count > 0 ? 'Список RU обновлён.' : 'Список RU не обновлён: в ipset ru 0 правил.',
+    `Правил в списке сейчас: ${count}`,
+    `Добавлено: ${added}`,
+    removed > 0 ? `Удалено: ${removed}` : '',
+    zoneLines > 0 ? `Строк в загруженном списке: ${zoneLines}` : ''
+  ].filter(Boolean).join('\n');
+  showCarbonTextModal(count > 0 ? 'Обновление списка RU' : 'Список RU не обновлён', lines);
+  await carbonRefresh(`Список RU: ${count} правил (+${added})`);
+}
+
 async function carbonRuDropRefresh() {
   const box = document.getElementById('carbonGeoIfaces');
   const ifaces = box ? [...box.querySelectorAll('input[type=checkbox]:checked')].map(x => x.value) : [];
@@ -2956,6 +2980,8 @@ document.addEventListener('click', async event => {
     else if (action === 'cascade-ifaces-save') await carbonCascadeIfacesSave();
     else if (action === 'cascade-list-refresh') await carbonCascadeListRefresh();
     else if (action === 'cascade-schedule-save') await carbonCascadeScheduleSave();
+    else if (action === 'cascade2-schedule-save') await carbonCascade2ScheduleSave();
+    else if (action === 'cascade2-list-refresh') await carbonCascade2ListRefresh();
     else if (action === 'cascade-repair') await carbonCascadeRepair();
     else if (action === 'cascade-proxy') await carbonCascadeProxy();
     else if (action === 'cascade-proxy-test') await carbonCascadeProxyTest();
