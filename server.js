@@ -18867,20 +18867,34 @@ function revertInternalPortPlan(plan) {
     try { spawnSync('systemctl', ['reload', 'nginx'], { encoding: 'utf8', timeout: 20000 }); } catch (e) { /* ignore */ }
 }
 
-// Порт меняем сразу при обычном старте. Если прямо сейчас идёт обновление,
-// старый воркер ждёт панель на прежнем порту — тогда мигрируем после него.
+// Порт меняем при обычном старте, но не во время обновления: старые воркеры
+// (до 3.3.129) ждут панель на прежнем порту 3000 и не знают про 2999.
+// После завершения обновления переезд выполняется и панель перезапускается.
+function updateInProgress() {
+    if (fs.existsSync(path.join(DATA_DIR, '.update.lock'))) return true;
+    const statusFile = path.join(DATA_DIR, '.update_status.json');
+    try {
+        const st = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+        if (st && st.running) {
+            const age = Date.now() - fs.statSync(statusFile).mtimeMs;
+            // Воркер мог умереть, не сняв running: через 2 минуты не ждём.
+            if (age < 2 * 60 * 1000) return true;
+        }
+    } catch (e) { /* статуса нет */ }
+    return false;
+}
+
 (function scheduleInternalPortMigration() {
     const plan = internalPortPlan();
     if (!plan) return;
-    const lock = path.join(DATA_DIR, '.update.lock');
-    if (!fs.existsSync(lock)) {
+    if (!updateInProgress()) {
         applyInternalPortPlan(plan);
         return;
     }
     let tries = 0;
     const timer = setInterval(() => {
         tries++;
-        if (fs.existsSync(lock)) {
+        if (updateInProgress()) {
             if (tries > 120) clearInterval(timer);
             return;
         }

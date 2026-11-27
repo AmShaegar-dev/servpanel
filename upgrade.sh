@@ -115,9 +115,12 @@ health_generic() {
 }
 
 health_ok() {
-    local body
+    local body p
     for _ in $(seq 1 60); do
-        if body=$("$CURL" -fsS --max-time 2 "http://127.0.0.1:${PORT}/" 2>/dev/null); then
+        # Панель могла сама переехать 3000 -> 2999 при старте.
+        p="$(cat "$APP_DIR/.panel_port" 2>/dev/null | tr -dc '0-9' || true)"
+        [ -n "$p" ] || p="$PORT"
+        if body=$("$CURL" -fsS --max-time 2 "http://127.0.0.1:${p}/" 2>/dev/null); then
             case "$body" in
                 *panel-version*) return 0 ;;
             esac
