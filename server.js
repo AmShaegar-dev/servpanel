@@ -5677,39 +5677,64 @@ app.post('/api/ufw', checkAuth, (req, res) => {
     } catch (e) { res.status(500).json({ error: 'Ошибка добавления' }); }
 });
 
+function ufwNormSpec(s) {
+    return String(s || '').replace(/\s*\(v6\)\s*/gi, '').trim();
+}
+function ufwStatusRows() {
+    const parse = line => {
+        const m = String(line).match(/^\[\s*(\d+)\]\s+(.*?)\s+(ALLOW IN|DENY IN|REJECT IN|ALLOW|DENY|REJECT)\s+(.*)$/);
+        return m ? { id: m[1], to: m[2].trim(), action: m[3], from: m[4].trim() } : null;
+    };
+    return sh('sudo', ['ufw', 'status', 'numbered']).split('\n').map(parse).filter(Boolean);
+}
+// Удаляет правило по порту/действию (вместе с IPv6-двойником) или по номеру.
+// Возвращает список реально удалённых номеров.
+function deleteUfwSpecs(specs) {
+    const rows = ufwStatusRows();
+    const ids = new Set();
+    for (const spec of (Array.isArray(specs) ? specs : [])) {
+        let target = null;
+        if (spec && spec.to) {
+            target = rows.find(r => ufwNormSpec(r.to) === ufwNormSpec(spec.to) && (!spec.action || r.action === spec.action));
+        } else if (spec && spec.id) {
+            target = rows.find(r => r.id === String(spec.id));
+        }
+        if (!target) continue;
+        for (const r of rows) {
+            if (ufwNormSpec(r.to) === ufwNormSpec(target.to) && r.action === target.action) ids.add(r.id);
+        }
+    }
+    for (const id of [...ids].sort((a, b) => Number(b) - Number(a))) {
+        sh('sudo', ['ufw', '--force', 'delete', id]);
+    }
+    if (ids.size) {
+        try { sh('sudo', ['ufw', 'reload'], { timeout: 60000 }); } catch (e) { /* ignore */ }
+    }
+    return [...ids];
+}
+
 app.delete('/api/ufw/:id', checkAuth, (req, res) => {
     const id = String(req.params.id);
     if (!/^\d{1,5}$/.test(id)) return res.status(400).json({ error: 'Неверный номер правила' });
     const wantTo = String(req.query.to || '').trim();
     const wantAction = String(req.query.action || '').trim();
     try {
-        const parse = line => {
-            const m = String(line).match(/^\[\s*(\d+)\]\s+(.*?)\s+(ALLOW IN|DENY IN|REJECT IN|ALLOW|DENY|REJECT)\s+(.*)$/);
-            return m ? { id: m[1], to: m[2].trim(), action: m[3], from: m[4].trim() } : null;
-        };
-        const rows = sh('sudo', ['ufw', 'status', 'numbered']).split('\n').map(parse).filter(Boolean);
-        const norm = s => String(s || '').replace(/\s*\(v6\)\s*/gi, '').trim();
-        let target = rows.find(r => r.id === id);
-        // Номер правила мог сместиться после добавления/удаления другого правила.
-        // Если панель передала сам порт и действие — ищем по ним, а не по номеру.
-        if (wantTo) {
-            const bySpec = rows.find(r => norm(r.to) === norm(wantTo) && (!wantAction || r.action === wantAction));
-            if (!bySpec) return res.status(404).json({ error: 'Правило уже удалено или изменилось' });
-            target = bySpec;
-        }
-        if (!target) return res.status(404).json({ error: 'Правило не найдено (список UFW изменился)' });
-        // Удаляем и IPv4, и IPv6-двойник: ufw status numbered показывает их
-        // отдельными строками, а ufw delete по номеру убирает только одну.
-        const toMatch = norm(target.to);
-        const actionMatch = target.action;
-        const matches = rows.filter(r => norm(r.to) === toMatch && r.action === actionMatch);
-        for (const r of matches.sort((a, b) => Number(b.id) - Number(a.id))) {
-            sh('sudo', ['ufw', '--force', 'delete', r.id]);
-        }
-        try { sh('sudo', ['ufw', 'reload'], { timeout: 60000 }); } catch (e) { /* ignore */ }
-        auditLog(req, `UFW: удалено правило ${target.to} (${matches.length} шт., включая IPv6-двойники)`);
-        res.json({ success: true, deleted: matches.map(r => r.id), rule: target.to });
+        const deleted = deleteUfwSpecs([{ id, to: wantTo, action: wantAction }]);
+        if (!deleted.length) return res.status(404).json({ error: 'Правило уже удалено или изменилось' });
+        auditLog(req, `UFW: удалено правило ${wantTo || ('#' + id)} (${deleted.length} шт., включая IPv6-двойники)`);
+        res.json({ success: true, deleted, rule: wantTo || id });
     } catch (e) { res.status(500).json({ error: 'Ошибка удаления' }); }
+});
+
+app.post('/api/ufw/bulk-delete', checkAuth, (req, res) => {
+    const rules = Array.isArray((req.body || {}).rules) ? req.body.rules : [];
+    if (!rules.length) return res.status(400).json({ error: 'Не выбраны правила' });
+    if (rules.length > 500) return res.status(400).json({ error: 'Слишком много правил за один раз' });
+    try {
+        const deleted = deleteUfwSpecs(rules);
+        auditLog(req, `UFW: массово удалено правил: ${deleted.length}`);
+        res.json({ success: true, deleted });
+    } catch (e) { res.status(500).json({ error: 'Ошибка массового удаления' }); }
 });
 
 // ---------------------------------------------------------------------------

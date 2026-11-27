@@ -1150,6 +1150,101 @@ async function carbonIpv6Toggle() {
   await carbonRefresh(blocked ? 'IPv6 разрешён' : 'IPv6 запрещён');
 }
 
+function carbonUfwSelectChange(el) {
+  if (!carbon.ufwSelected) carbon.ufwSelected = new Map();
+  const key = carbonUfwKey(el.dataset.to, el.dataset.ruleAction);
+  if (el.checked) carbon.ufwSelected.set(key, { to: el.dataset.to, action: el.dataset.ruleAction });
+  else carbon.ufwSelected.delete(key);
+  carbonUfwUpdateBulkBar();
+}
+
+function carbonUfwSelectAll(el) {
+  if (!carbon.ufwSelected) carbon.ufwSelected = new Map();
+  document.querySelectorAll('[data-ufw-select]').forEach(box => {
+    box.checked = !!el.checked;
+    const key = carbonUfwKey(box.dataset.to, box.dataset.ruleAction);
+    if (el.checked) carbon.ufwSelected.set(key, { to: box.dataset.to, action: box.dataset.ruleAction });
+    else carbon.ufwSelected.delete(key);
+  });
+  carbonUfwUpdateBulkBar();
+}
+
+function carbonUfwUpdateBulkBar() {
+  const bar = document.querySelector('[data-ufw-bulk-bar]');
+  if (!bar) return;
+  const n = carbon.ufwSelected ? carbon.ufwSelected.size : 0;
+  const count = bar.querySelector('[data-ufw-count]');
+  if (count) count.textContent = String(n);
+  const del = bar.querySelector('[data-carbon-action="ufw-bulk-delete"]');
+  if (del) { del.disabled = n === 0; del.style.display = ''; }
+  const conf = bar.querySelector('[data-ufw-bulk-confirm]');
+  if (conf && n === 0) conf.style.display = 'none';
+}
+
+function carbonUfwShowBulkConfirm() {
+  const bar = document.querySelector('[data-ufw-bulk-bar]');
+  if (!bar) return;
+  const del = bar.querySelector('[data-carbon-action="ufw-bulk-delete"]');
+  const conf = bar.querySelector('[data-ufw-bulk-confirm]');
+  if (del) del.style.display = 'none';
+  if (conf) conf.style.display = 'inline-flex';
+}
+
+function carbonUfwHideBulkConfirm() {
+  const bar = document.querySelector('[data-ufw-bulk-bar]');
+  if (!bar) return;
+  const del = bar.querySelector('[data-carbon-action="ufw-bulk-delete"]');
+  const conf = bar.querySelector('[data-ufw-bulk-confirm]');
+  if (conf) conf.style.display = 'none';
+  if (del) { del.style.display = ''; del.disabled = !(carbon.ufwSelected && carbon.ufwSelected.size); }
+}
+
+function carbonUfwShowConfirm(btn) {
+  const td = btn.closest('td');
+  if (!td) return;
+  td.querySelectorAll('[data-ufw-inline-confirm]').forEach(x => x.remove());
+  btn.disabled = true;
+  const span = document.createElement('span');
+  span.setAttribute('data-ufw-inline-confirm', '');
+  span.style.cssText = 'display:inline-flex;gap:6px;align-items:center;margin-left:6px';
+  span.innerHTML = `<button class="btn btn-sm btn-danger" data-carbon-action="ufw-delete-confirm" data-name="${escHtml(btn.dataset.name || '')}" data-to="${escHtml(btn.dataset.to || '')}" data-rule-action="${escHtml(btn.dataset.ruleAction || '')}">${icon('check')}Подтвердить</button><button class="btn btn-sm" data-carbon-action="ufw-delete-cancel">Отмена</button>`;
+  btn.insertAdjacentElement('afterend', span);
+}
+
+function carbonUfwCancelConfirm(btn) {
+  const td = btn.closest('td');
+  if (!td) return;
+  const span = td.querySelector('[data-ufw-inline-confirm]');
+  if (span) span.remove();
+  const trash = td.querySelector('[data-carbon-action="ufw-delete"]');
+  if (trash) trash.disabled = false;
+}
+
+async function carbonUfwDeleteConfirm(btn) {
+  const to = btn.dataset.to || '';
+  const ruleAction = btn.dataset.ruleAction || '';
+  const id = btn.dataset.name || '';
+  const q = '?to=' + encodeURIComponent(to) + '&action=' + encodeURIComponent(ruleAction);
+  try {
+    await api('/api/ufw/' + encodeURIComponent(id) + q, { method: 'DELETE' });
+  } catch (e) {
+    showToast((e && e.message) || 'Правило уже удалено');
+  }
+  await carbonRefresh('Правило удалено');
+}
+
+async function carbonUfwBulkDelete() {
+  const rules = carbon.ufwSelected ? [...carbon.ufwSelected.values()] : [];
+  if (!rules.length) return;
+  try {
+    await api('/api/ufw/bulk-delete', { method: 'POST', body: { rules } });
+  } catch (e) {
+    showToast((e && e.message) || 'Не удалось удалить правила');
+  }
+  carbon.ufwSelected = new Map();
+  await carbonRefresh('Выбранные правила удалены');
+}
+
 async function carbonUfwAdd() {
   showCarbonForm({
     title: 'Открыть порт UFW',
@@ -2801,19 +2896,12 @@ document.addEventListener('click', async event => {
     else if (action === 'proxy-log') await carbonProxyLog();
     else if (action === 'ufw-add') await carbonUfwAdd();
     else if (action === 'ipv6-toggle') await carbonIpv6Toggle();
-    else if (action === 'ufw-delete') {
-      const to = btn.dataset.to || '';
-      const ruleAction = btn.dataset.ruleAction || '';
-      if (confirm('Удалить правило №' + name + '?')) {
-        const q = '?to=' + encodeURIComponent(to) + '&action=' + encodeURIComponent(ruleAction);
-        try {
-          await api('/api/ufw/' + encodeURIComponent(name) + q, { method: 'DELETE' });
-        } catch (e) {
-          showToast((e && e.message) || 'Правило уже удалено');
-        }
-        await carbonRefresh('Список UFW обновлён');
-      }
-    }
+    else if (action === 'ufw-delete') carbonUfwShowConfirm(btn);
+    else if (action === 'ufw-delete-cancel') carbonUfwCancelConfirm(btn);
+    else if (action === 'ufw-delete-confirm') await carbonUfwDeleteConfirm(btn);
+    else if (action === 'ufw-bulk-delete') carbonUfwShowBulkConfirm();
+    else if (action === 'ufw-bulk-cancel') carbonUfwHideBulkConfirm();
+    else if (action === 'ufw-bulk-confirm') await carbonUfwBulkDelete();
     else if (action === 'iptables-add') await carbonIptablesAdd();
     else if (action === 'iptables-delete') { if (confirm('Удалить правило iptables?')) { await api('/api/iptables/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Правило iptables удалено'); } }
     else if (action === 'awg-edit') await carbonAwgEdit();
