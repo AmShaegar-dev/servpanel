@@ -1244,7 +1244,7 @@ async function carbonCascade2Migrate() {
   const defRole = classicRole === 'eu' ? 'eu' : classicRole === 'ru' ? 'ru' : 'ru';
   showCarbonForm({
     title: 'Каскад 2 · установка',
-    sub: 'Мягкий перенос сохраняет клиентов и их файлы. Полная установка стирает AWG и правила на обоих серверах, ставит AWG заново с выбранными параметрами и создаёт новый каскад.',
+    sub: 'Мягкий перенос сохраняет клиентов и их файлы. Порты входа и туннеля панель подбирает сама: входные порты сохраняются, на EU выбираются свободные UDP-порты, старые AWG-порты закрываются. Полная установка стирает AWG и правила на обоих серверах и ставит AWG заново.',
     fields: [
       { name: 'mode', label: 'Режим', type: 'select', value: 'soft', options: [
         { value: 'soft', label: 'Мягкий перенос (клиенты сохраняются)' },
@@ -1255,8 +1255,6 @@ async function carbonCascade2Migrate() {
       { name: 'peerPort', label: 'SSH-порт', value: '22' },
       { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
       { name: 'peerPass', label: 'Пароль root', type: 'password' },
-      { name: 'relayPorts', label: 'Порты входа (через запятую)', value: ((st.ports && st.ports.length ? st.ports : [st.ruPort || 3977])).join(', ') },
-      { name: 'tunnelPort', label: 'Порт туннеля RU → EU', type: 'number', value: st.ruExitPort || 4600, min: 1, max: 65535 },
       { name: 'ifaces', label: 'Интерфейсы фильтрации на EU', value: ((st.ifaces && st.ifaces.length ? st.ifaces : ['awg0'])).join(', ') },
       { name: 'version', label: 'Версия AWG (полная установка)', type: 'select', value: '3.1', options: ['3.1', '2.0', '1.5'] },
       { name: 'port', label: 'UDP-порт AWG на EU (полная установка)', type: 'number', value: '3977', min: 1, max: 65535 },
@@ -1275,13 +1273,11 @@ async function carbonCascade2Migrate() {
       const peerHost = String(v.peerHost || '').trim();
       if (!peerHost) throw new Error('Укажите IP второй стороны');
       if (!v.peerPass) throw new Error('Укажите пароль root второй стороны');
-      const relayPorts = String(v.relayPorts || '').split(',').map(x => Number(x.trim())).filter(n => n > 0 && n < 65536);
-      if (!relayPorts.length) throw new Error('Укажите хотя бы один порт входа');
       const mode = v.mode === 'clean' ? 'clean' : 'soft';
       if (mode === 'clean' && !confirm('Полная установка удалит AWG, правила и клиентов на ОБОИХ серверах, затем поставит AWG заново. Продолжить?')) return;
       const d = await api('/api/cascade2/migrate-ssh', { method: 'POST', body: {
         mode, role: v.role, peerHost, peerPort: v.peerPort || '22', peerUser: v.peerUser || 'root',
-        peerPass: v.peerPass, relayPorts, tunnelPort: Number(v.tunnelPort) || 4600,
+        peerPass: v.peerPass,
         ifaces: String(v.ifaces || '').split(',').map(x => x.trim()).filter(Boolean),
         version: v.version, port: Number(v.port) || 3977,
         obfMode: v.obfMode, obfProfile: v.obfProfile, obfIntensity: v.obfIntensity || 'medium',

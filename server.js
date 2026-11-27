@@ -7157,8 +7157,8 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
             "ipset destroy ru 2>/dev/null || true",
             "ipset destroy ru_tmp 2>/dev/null || true",
             "iptables -t mangle -S PREROUTING 2>/dev/null | grep -E 'set-mark 0x1|set-mark 0x3001|set-xmark 0x3001|match-set ru dst' | sed 's/^-A /-D /' | xargs -r -L1 iptables -t mangle 2>/dev/null || true",
-            "iptables -t nat -S POSTROUTING 2>/dev/null | grep -E -- '-o awg1 .*MASQUERADE|-p udp( -m udp)? --dport [0-9]+ -j MASQUERADE' | sed 's/^-A /-D /' | xargs -r -L1 iptables -t nat 2>/dev/null || true",
-            "iptables -t nat -S PREROUTING 2>/dev/null | grep -E -- '-p udp( -m udp)? --dport [0-9]+ -j DNAT --to-destination [0-9.]+:[0-9]+' | sed 's/^-A /-D /' | xargs -r -L1 iptables -t nat 2>/dev/null || true",
+            "iptables -t nat -S POSTROUTING 2>/dev/null | grep -E -- '-o awg1 .*MASQUERADE|-p udp( -m udp)? --dport [0-9]+ .*MASQUERADE' | sed 's/^-A /-D /' | xargs -r -L1 iptables -t nat 2>/dev/null || true",
+            "iptables -t nat -S PREROUTING 2>/dev/null | grep -E -- '-p udp( -m udp)? --dport [0-9]+ .*DNAT --to-destination [0-9.]+:[0-9]+' | sed 's/^-A /-D /' | xargs -r -L1 iptables -t nat 2>/dev/null || true",
             `if [ -f /root/awg/manage_amneziawg.sh ]; then bash /root/awg/manage_amneziawg.sh remove ${peerClient} --yes --json >/dev/null 2>&1 || true; fi`,
             'rm -f /etc/amnezia/amneziawg/awg1.conf /root/awg/awg-routing.sh /root/awg/ru.zone /root/awg/ru-restore.txt /etc/systemd/system/awg-routing.service /etc/systemd/system/awg-routing.timer',
             `rm -f /root/awg/${peerClient}.conf /root/awg/${peerClient}.png /root/awg/${peerClient}.vpnuri /root/awg/${peerClient}.vpnuri.png`,
@@ -12099,10 +12099,17 @@ app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
     const version = ['3.1', '2.0', '1.5'].includes(String(b.version)) ? String(b.version) : '3.1';
     const awgPortNum = Number(b.port);
     const awgPort = Number.isInteger(awgPortNum) && awgPortNum >= 1 && awgPortNum <= 65535 ? awgPortNum : 3977;
-    const relayPorts = (Array.isArray(b.relayPorts) ? b.relayPorts : [])
-        .map(Number).filter(n => n > 0 && n < 65536);
-    if (!relayPorts.length) relayPorts.push(3977);
-    const tunnelPort = Number(b.tunnelPort) || 4600;
+    const savedC2 = cascade2Read();
+    const relayPorts = [...new Set((Array.isArray(b.relayPorts) ? b.relayPorts : [])
+        .map(Number).filter(n => n > 0 && n < 65536))];
+    if (!relayPorts.length && savedC2.type === 'relay' && savedC2.enabled) {
+        for (const p of (savedC2.ports || [])) if (!relayPorts.includes(Number(p))) relayPorts.push(Number(p));
+    }
+    const tunnelPort = Number(b.tunnelPort) || 0;
+    const oldPorts = [...new Set([
+        ...(savedC2.ports || []).map(Number),
+        Number(savedC2.ruExitPort) || 0
+    ].filter(n => n > 0 && n < 65536))];
     const ifaces = Array.isArray(b.ifaces) ? b.ifaces.filter(Boolean) : ['awg0'];
     const host = String(b.peerHost || '').replace(/^https?:\/\//i, '').replace(/[:/].*$/, '').trim();
     const port = Number(b.peerPort) || 22;
@@ -12124,6 +12131,8 @@ app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
             c2MigrateJob = null;
             return res.status(400).json({ error: 'Полную установку запускайте с панели RU-входа' });
         }
+        // После полной очистки порты берём из свежего awg0, а не из старого состояния.
+        relayPorts.length = 0;
         let obf = null;
         try {
             obf = cascadeObfParams(b, version);
@@ -12142,7 +12151,7 @@ app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
             },
             migrate: {
                 role, peerHost: host, peerPort: port, peerUser: user, peerPass: pass,
-                relayPorts, tunnelPort, ifaces,
+                relayPorts, tunnelPort, ifaces, oldPorts,
                 createClient: String(b.createClient || '').trim(),
                 cleanRu: true
             }
@@ -12153,6 +12162,7 @@ app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
                 await sshRunner.run({ host, port, user, pass }, cascade2Migrate.PURGE_AWG, 600000);
                 push('Очистка', 'AWG удалён на ' + host + '. Удаляю на этом сервере…');
                 rootSh('bash', ['-c', cascade2Migrate.PURGE_AWG], { timeout: 600000 });
+                cascade2Write({ type: 'classic', enabled: false, ports: [], euHost: '', ruIp: '' });
                 push('Установка', 'Ставлю AWG ' + version + ' и собираю каскад 1 на обоих серверах…');
                 saveC2Clean(pending);
                 startC2CleanBuild(pending);
@@ -12176,10 +12186,11 @@ app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
                 peerPort: b.peerPort,
                 peerUser: b.peerUser,
                 peerPass: b.peerPass,
-                relayPorts: b.relayPorts,
-                tunnelPort: b.tunnelPort,
+                relayPorts: relayPorts,
+                tunnelPort: tunnelPort,
+                oldPorts: oldPorts,
                 ifaces: b.ifaces,
-                allowEmpty: b.allowEmpty === true,
+                allowEmpty: b.allowEmpty === true || (savedC2.type === 'relay' && savedC2.enabled),
                 createClient: String(b.createClient || '').trim(),
                 cleanRu: b.cleanRu === true,
                 localIp: cascade2Ip(),
