@@ -1144,7 +1144,7 @@ function realCascadeRelay() {
   const ruPct = total ? Math.round((Number(c.ruBytes) || 0) * 100 / total) : 0;
   const euPct = total ? 100 - ruPct : 0;
   const ifaceList = (s.euIfaces && s.euIfaces.length) ? s.euIfaces : ['awg0', 'awg1'];
-  return `<div class="page-head"><div><div class="page-title">Каскад 2 · релей</div><div class="page-sub">Вход RU ничего не расшифровывает. Клиенты терминируются на EU, российские адреса выходят с RU.</div></div><div class="page-actions">${cascade2Switch(true)}<button class="btn" data-carbon-action="cascade2-refresh">${icon('refresh')}Обновить</button></div></div>
+  return `<div class="page-head"><div><div class="page-title">Каскад 2 · релей</div><div class="page-sub">Вход RU ничего не расшифровывает. Клиенты терминируются на EU, российские адреса выходят с RU.</div></div><div class="page-actions">${cascade2Switch(true)}<button class="btn" data-carbon-action="cascade-cleanup">${icon('trash')}Удалить каскад</button><button class="btn" data-carbon-action="cascade2-refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Вход RU', String(s.ruPort || '—') + '/udp', 'портов: ' + ports.length)}${mini('Выход с RU', mb(c.ruBytes) + ' МБ', ruPct + '% трафика')}${mini('На EU', mb(c.euBytes) + ' МБ', euPct + '% трафика')}${mini('Туннель EU↔RU', t.age >= 0 ? (t.age + ' с назад') : 'нет связи', t.iface || 'awg1')}${mini('Сетей в ipset ru', String(c2.nets || 0), (s.ifaces || []).join(', ') || '—')}</div>
     <div class="grid">
       <section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Порты входа</div><div class="card-sub">Каждый порт пробрасывается на EU без расшифровки</div></div>${tag(String(ports.length), 'muted')}</div>
@@ -1171,7 +1171,7 @@ function realCascadeEu(c) {
   const blocked = Number(d.blocked) || 0;
   const clients = carbon.clients || [];
   const online = clients.filter(x => clientStatus(x)).length;
-  return `<div class="page-head"><div><div class="page-title">Каскад RU → EU</div><div class="page-sub">Этот сервер — EU-выход каскада. RU-трафик возвращается на RU, остальное выходит здесь.</div></div><div class="page-actions">${cascade2Switch(false)}<button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
+  return `<div class="page-head"><div><div class="page-title">Каскад RU → EU</div><div class="page-sub">Этот сервер — EU-выход каскада. RU-трафик возвращается на RU, остальное выходит здесь.</div></div><div class="page-actions">${cascade2Switch(false)}<button class="btn" data-carbon-action="cascade-cleanup">${icon('trash')}Удалить каскад</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Роль', 'EU-выход', c.mode || 'exit')}${mini('Выход', c.active ? 'активен' : 'не активен', 'awg0')}${mini('Прошло через EU', fmtBytes(passed), 'трафик')}${mini('GeoIP blocked', fmtBytes(blocked), 'фильтры')}${mini('Клиентов', String(clients.length), online + ' онлайн')}</div>
     <div class="grid">
       <section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Состояние выхода</div><div class="card-sub">/api/cascade/status</div></div>${tag(c.active ? 'активен' : 'не активен', c.active ? 'good' : 'warn')}</div>
