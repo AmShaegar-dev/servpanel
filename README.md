@@ -134,7 +134,7 @@ curl -4 -fsSL --connect-timeout 10 --max-time 60 \
 1. Установит системные зависимости панели (`Node.js 20`, `npm`, `pm2`, `ufw`, `ipset`, `fail2ban`, `sshpass`, `zip`). `nginx` и `certbot` ставятся только при доступе по домену.
 2. Развернёт код панели в `/root/servpanel`, установит npm-пакеты и **сгенерирует случайный пароль администратора** (сохраняется в `/root/servpanel/admin_pass.txt`, права `600`).
 3. Для домена настроит **Nginx + Let's Encrypt** и обратный прокси на локальный `2999`. Для IP-режима панель слушает выбранный порт напрямую, без Nginx.
-4. Добавит в **UFW** разрешения для SSH, порта панели и портов уже установленного AmneziaWG. Сам UFW принудительно не включается — чтобы не оборвать форвардинг существующего VPN.
+4. Добавит в **UFW** разрешения для SSH, порта панели, `80/443` и портов уже установленного AmneziaWG и **включит UFW**. Если на сервере уже есть AWG, для его интерфейсов заранее разрешается форвардинг — чтобы не оборвать клиентов.
 5. Запустит панель через `PM2` и добавит её в автозагрузку (`pm2 startup` / `pm2 save`).
 
 ---
@@ -155,7 +155,7 @@ sudo bash /tmp/servpanel-*/install.sh
 
 ```bash
 cd /tmp
-VER=3.3.127
+VER=3.3.128
 curl -4 -fL --connect-timeout 10 --max-time 180 \
   -o servpanel-${VER}.tar.gz \
   https://github.com/AmShaegar-dev/servpanel/releases/download/v${VER}/servpanel-${VER}.tar.gz
@@ -1061,7 +1061,7 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-VER=3.3.127
+VER=3.3.128
 curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v${VER}/servpanel-${VER}.tar.gz
 curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v${VER}/servpanel-${VER}.tar.gz.sha256
 sha256sum -c servpanel-${VER}.tar.gz.sha256
@@ -1070,7 +1070,7 @@ bash /root/servpanel-${VER}/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.3.127`. Хеш архива лежит рядом в файле `servpanel-3.3.127.tar.gz.sha256` — `sha256sum -c` проверит его автоматически. Если `curl` не установлен:
+Должно вывести `3.3.128`. Хеш архива лежит рядом в файле `servpanel-3.3.128.tar.gz.sha256` — `sha256sum -c` проверит его автоматически. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Если панель ставилась через git, можно дополнительно проверить локальные изменения:

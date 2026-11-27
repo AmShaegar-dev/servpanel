@@ -340,13 +340,26 @@ if [ -n "${PANEL_METRICS_PUBLIC_PORT:-}" ]; then
     ufw allow "$PANEL_METRICS_PUBLIC_PORT"/tcp >/dev/null 2>&1 || true
 fi
 
-# Не включаем UFW принудительно: на сервере с уже настроенным AWG это может
-# оборвать форвардинг. Если UFW уже активен — правила выше уже применились;
-# если нет — включите его из панели, когда проверите доступ.
+# Включаем UFW. Перед включением уже открыты SSH, порт панели, 80/443 (для
+# домена) и порты существующего AWG. Если на сервере уже есть AWG, разрешаем
+# форвардинг — иначе UFW вырежет клиентский трафик.
+ufw_has_awg=0
+for conf in /etc/amnezia/amneziawg/*.conf /etc/wireguard/*.conf; do
+    [ -f "$conf" ] || continue
+    ufw_has_awg=1
+    iface="$(basename "$conf" .conf)"
+    ufw route allow in on "$iface" >/dev/null 2>&1 || true
+    ufw route allow out on "$iface" >/dev/null 2>&1 || true
+done
+if [ "$ufw_has_awg" = "1" ] && [ -f /etc/default/ufw ]; then
+    sed -i 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw 2>/dev/null || true
+fi
+
+ufw --force enable >/dev/null 2>&1 || true
 if ufw status 2>/dev/null | grep -q "Status: active"; then
-    echo "UFW активен: SSH, панель и порты AWG разрешены."
+    echo "UFW включён: SSH, панель и порты AWG разрешены."
 else
-    echo -e "${YELLOW}UFW не включён. Включите его в панели после проверки доступа.${NC}"
+    echo -e "${YELLOW}UFW не удалось включить автоматически. Включите вручную: ufw enable${NC}"
 fi
 
 # ==================== ИТОГ ====================

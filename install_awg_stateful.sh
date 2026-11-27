@@ -91,6 +91,26 @@ ufw_open() {
     fi
 }
 
+# Если UFW уже включён (например, установщиком панели), разрешаем форвардинг
+# до установки AWG. Иначе UFW отбросит клиентский трафик, а NAT-правила AWG
+# окажутся за его цепочками.
+ufw_prepare_forward() {
+    command -v ufw >/dev/null 2>&1 || return 0
+    ufw status 2>/dev/null | grep -q "Status: active" || return 0
+    if [ -f /etc/default/ufw ]; then
+        sed -i 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw 2>/dev/null || true
+    fi
+    for conf in /etc/amnezia/amneziawg/*.conf /etc/wireguard/*.conf; do
+        [ -f "$conf" ] || continue
+        local iface
+        iface="$(basename "$conf" .conf)"
+        ufw route allow in on "$iface" >/dev/null 2>&1 || true
+        ufw route allow out on "$iface" >/dev/null 2>&1 || true
+    done
+    ufw reload >/dev/null 2>&1 || true
+    echo "UFW активен: форвардинг для AWG разрешён."
+}
+
 # Действующий порт(ы) SSH: из конфига sshd, иначе по слушающему процессу.
 detect_ssh_ports() {
     local ports=""
@@ -112,6 +132,7 @@ for ssh_port in $(detect_ssh_ports); do
 done
 [ -n "$PORT_TO_OPEN" ] && ufw_open "$PORT_TO_OPEN" tcp
 [ -n "${AWG_PORT:-}" ] && ufw_open "$AWG_PORT" udp
+ufw_prepare_forward
 
 
 # --- Каскад: проверка и починка -------------------------------------------
