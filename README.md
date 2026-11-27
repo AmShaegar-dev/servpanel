@@ -85,9 +85,12 @@ KPI, CPU/RAM, uptime, график и распределение трафика 
 
 ```bash
 curl -fsSL --connect-timeout 10 --max-time 60 \
-  https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install.sh \
-  | sudo bash
+  -o /tmp/servpanel-install.sh \
+  https://github.com/AmShaegar-dev/servpanel/releases/latest/download/install.sh \
+  && sudo bash /tmp/servpanel-install.sh
 ```
+
+Этот вариант не использует `raw.githubusercontent.com`: скрипт берётся из последнего GitHub Release, а установщик сам скачивает архив релиза. Поэтому установка не зависит от блокировок raw и от `git clone`.
 
 ```
 1) Установить панель
@@ -101,7 +104,7 @@ curl -fsSL --connect-timeout 10 --max-time 60 \
 
 Всё остальное — AmneziaWG, AdGuard Home, каскад и MTProto — настраивается уже из веб-панели.
 
-Если `raw.githubusercontent.com` недоступен, тот же скрипт с CDN:
+Если GitHub Releases недоступен, тот же скрипт с CDN jsDelivr:
 
 ```bash
 curl -fsSL --connect-timeout 10 --max-time 60 \
@@ -112,15 +115,17 @@ curl -fsSL --connect-timeout 10 --max-time 60 \
 Без `curl` (через `wget`):
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install.sh | sudo bash
+wget -qO- https://cdn.jsdelivr.net/gh/AmShaegar-dev/servpanel@main/install.sh | sudo bash
 ```
 
 Установка без вопросов, для скриптов и автоматизации:
 
 ```bash
 curl -fsSL --connect-timeout 10 --max-time 60 \
-  https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install.sh \
-  | sudo env ACTION=install ACCESS_TYPE=1 PANEL_PORT=2999 bash
+  -o /tmp/servpanel-install.sh \
+  https://github.com/AmShaegar-dev/servpanel/releases/latest/download/install.sh \
+  && sudo env ACTION=install ACCESS_TYPE=1 PANEL_PORT=2999 \
+       bash /tmp/servpanel-install.sh
 ```
 
 **Что сделает установщик автоматически:**
@@ -175,15 +180,25 @@ curl -fsSL https://cdn.jsdelivr.net/gh/AmShaegar-dev/servpanel@main/install.sh \
 ---
 
 ### Способ 2: Установка из релизного архива
-Если `raw.githubusercontent.com` недоступен или нужен зафиксированный релиз, скачайте архив с GitHub Releases и запустите установщик локально:
+Если `raw.githubusercontent.com` и CDN недоступны, скачайте последний релиз напрямую с GitHub Releases и запустите установщик локально:
 
 ```bash
 cd /tmp
-VER=3.3.125
+curl -fL --connect-timeout 10 --max-time 180 \
+  -o servpanel-latest.tar.gz \
+  https://github.com/AmShaegar-dev/servpanel/releases/latest/download/servpanel-latest.tar.gz
+tar -xzf servpanel-latest.tar.gz
+sudo bash /tmp/servpanel-*/install.sh
+```
+
+Можно зафиксировать конкретную версию:
+
+```bash
+cd /tmp
+VER=3.3.126
 curl -fL --connect-timeout 10 --max-time 180 \
   -o servpanel-${VER}.tar.gz \
   https://github.com/AmShaegar-dev/servpanel/releases/download/v${VER}/servpanel-${VER}.tar.gz
-
 tar -xzf servpanel-${VER}.tar.gz
 sudo bash /tmp/servpanel-${VER}/install.sh
 ```
@@ -1034,7 +1049,7 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-VER=3.3.125
+VER=3.3.126
 curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v${VER}/servpanel-${VER}.tar.gz
 curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v${VER}/servpanel-${VER}.tar.gz.sha256
 sha256sum -c servpanel-${VER}.tar.gz.sha256
@@ -1043,7 +1058,7 @@ bash /root/servpanel-${VER}/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.3.125`. Хеш архива лежит рядом в файле `servpanel-3.3.125.tar.gz.sha256` — `sha256sum -c` проверит его автоматически. Если `curl` не установлен:
+Должно вывести `3.3.126`. Хеш архива лежит рядом в файле `servpanel-3.3.126.tar.gz.sha256` — `sha256sum -c` проверит его автоматически. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Если панель ставилась через git, можно дополнительно проверить локальные изменения:

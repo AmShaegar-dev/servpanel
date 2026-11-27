@@ -40,14 +40,54 @@ fi
 
 RAW_BASE="${SERVEPANEL_RAW_BASE:-https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main}"
 CDN_BASE="${SERVEPANEL_CDN_BASE:-https://cdn.jsdelivr.net/gh/AmShaegar-dev/servpanel@main}"
+RELEASE_REPO="${SERVEPANEL_RELEASE_REPO:-https://github.com/AmShaegar-dev/servpanel}"
 TMP_FILE="$(mktemp /tmp/servpanel-admin-XXXXXX.sh)"
-trap 'rm -f "$TMP_FILE"' EXIT
+SRC_TMP_DIR=""
+
+cleanup() {
+    rm -f "$TMP_FILE"
+    [ -n "$SRC_TMP_DIR" ] && rm -rf "$SRC_TMP_DIR"
+}
+trap cleanup EXIT
 
 download_part() {
-    # Явные таймауты: иначе curl на «полуживом» IPv6/блокировке GitHub
-    # висит минутами, и установка выглядит зависшей после первого вопроса.
-    curl -4 -fsSL --connect-timeout 6 --max-time 20 --retry 1 --retry-delay 1 \
+    # Явные и короткие таймауты: raw.githubusercontent.com периодически
+    # блокируется, и без них установка выглядит зависшей.
+    curl -4 -fsSL --connect-timeout 4 --max-time 12 \
         -o "$TMP_FILE" "$1" >/dev/null 2>&1 && [ -s "$TMP_FILE" ]
+}
+
+fetch_release_source() {
+    # Резервный источник: готовый архив последнего GitHub Release.
+    # Внутри уже лежат lib/*.sh, поэтому отдельные запросы к raw не нужны.
+    [ -n "$SRC_DIR" ] && [ -f "$SRC_DIR/lib/server-install.sh" ] && return 0
+
+    local archive url top
+    SRC_TMP_DIR="$(mktemp -d /tmp/servpanel-src-XXXXXX)" || return 1
+    archive="$SRC_TMP_DIR/servpanel.tar.gz"
+    url="${RELEASE_REPO}/releases/latest/download/servpanel-latest.tar.gz"
+
+    echo -e "${YELLOW}Загрузка архива последнего релиза с GitHub...${NC}" >&2
+    if ! curl -4 -fL --connect-timeout 10 --max-time 180 --retry 1 --retry-delay 1 \
+        -o "$archive" "$url" >/dev/null 2>&1 || [ ! -s "$archive" ]; then
+        rm -rf "$SRC_TMP_DIR"
+        SRC_TMP_DIR=""
+        return 1
+    fi
+    if ! tar -xzf "$archive" -C "$SRC_TMP_DIR" >/dev/null 2>&1; then
+        rm -rf "$SRC_TMP_DIR"
+        SRC_TMP_DIR=""
+        return 1
+    fi
+    top="$(find "$SRC_TMP_DIR" -maxdepth 1 -mindepth 1 -type d -print -quit 2>/dev/null)"
+    if [ -z "$top" ] || [ ! -f "$top/lib/server-install.sh" ]; then
+        rm -rf "$SRC_TMP_DIR"
+        SRC_TMP_DIR=""
+        return 1
+    fi
+    SRC_DIR="$top"
+    echo -e "${GREEN}Архив релиза загружен.${NC}" >&2
+    return 0
 }
 
 load_part() {
@@ -57,18 +97,25 @@ load_part() {
         cat "$local_file"
         return 0
     fi
+
     echo -e "${YELLOW}Загрузка ${name}...${NC}" >&2
-    if download_part "${RAW_BASE}/lib/${name}"; then
+    # Сначала CDN: он доступен там, где raw.githubusercontent.com заблокирован.
+    if download_part "${CDN_BASE}/lib/${name}"; then
         cat "$TMP_FILE"
         return 0
     fi
-    if [[ "$RAW_BASE" == *"AmShaegar-dev/servpanel"* ]] && download_part "${CDN_BASE}/lib/${name}"; then
-        echo -e "${YELLOW}Основной источник недоступен — использован CDN jsDelivr.${NC}" >&2
+    if [[ "$RAW_BASE" != "$CDN_BASE" ]] && download_part "${RAW_BASE}/lib/${name}"; then
         cat "$TMP_FILE"
         return 0
     fi
+    # Последний шанс — целиком архив последнего релиза.
+    if fetch_release_source && [ -f "$SRC_DIR/lib/$name" ]; then
+        cat "$SRC_DIR/lib/$name"
+        return 0
+    fi
+
     echo -e "${RED}Не удалось скачать ${name}.${NC}" >&2
-    echo -e "Проверьте доступ к raw.githubusercontent.com или скачайте архив релиза" >&2
+    echo -e "Проверьте доступ к GitHub Releases или скачайте архив релиза" >&2
     echo -e "и запустите install.sh из распакованного каталога." >&2
     exit 1
 }
@@ -144,6 +191,12 @@ if [ -z "$ACTION" ]; then
         # Нет терминала (curl | bash без tty) — по умолчанию установка.
         ACTION=install
     fi
+fi
+
+# Если install.sh запущен из curl (рядом нет lib/), сразу берём полный
+# архив последнего релиза: так установка не зависит от raw и git clone.
+if [ -z "$SRC_DIR" ] || [ ! -f "$SRC_DIR/lib/server-install.sh" ]; then
+    fetch_release_source || true
 fi
 
 case "$ACTION" in
