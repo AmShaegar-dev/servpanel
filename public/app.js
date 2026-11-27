@@ -3654,7 +3654,7 @@ function wizardDefaults(scenario) {
     if (scenario === 'client') return { name: suggestClientName(), expires: '', count: 1, device: 'phone', endpointType: 'ip', endpointDomain: '' };
     if (scenario === 'obf') return { preset: 'balanced', regen: true, sni: '' };
     if (scenario === 'cascade') return { role: 'ru', mode: 'install', remoteIp: '', remotePort: '22', remotePass: '' };
-    if (scenario === 'adguard') return { action: 'auto', url: '', probe: 'loading', detected: null, enable: true, refresh: true, port: '3000' };
+    if (scenario === 'adguard') return { action: 'auto', url: '', probe: 'loading', detected: null, enable: true, refresh: true, port: '3001' };
     if (scenario === 'mtproto') return {
         kind: 'telemt', domain: 'ozon.ru', port: '443', version: '',
         fix: true, fixType: 'v3', fixPort: '',
@@ -3976,7 +3976,7 @@ function renderAdGuardOptions() {
             <label class="field"><span>Персональный порт AdGuard</span>
                 <input id="wizAgPort" type="number" min="1" max="65535" value="${esc(d.port || '3001')}" placeholder="3001" oninput="wizardState.data.port=this.value">
             </label>
-            <div class="wizard-note info" style="margin-top:0;">Веб-интерфейс и API AdGuard: <code>http://IP:порт</code>. Если порт занят (например, панелью на 3000), укажите другой — например 3001 или 8080. Порт откроется в UFW после установки.</div>
+            <div class="wizard-note info" style="margin-top:0;">Веб-интерфейс и API AdGuard: <code>http://IP:порт</code>. Если порт занят (например, панелью на 2999), укажите другой — например 3001 или 8080. Порт откроется в UFW после установки.</div>
         </div>
         ${d.action === 'manual' ? `<label class="field" style="margin-top:14px;"><span>URL API AdGuard</span><input id="wizAgUrl" placeholder="http://127.0.0.1:8090" value="${esc(d.url || '')}" oninput="wizardState.data.url=this.value"></label>` : ''}
         <div class="wizard-section-title">После подключения</div>

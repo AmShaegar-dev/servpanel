@@ -59,9 +59,9 @@ if [ "$ACCESS_TYPE" == "2" ]; then
     PANEL_PORT=${PANEL_PORT:-443}
 else
     if [ -z "$PANEL_PORT" ]; then
-        PANEL_PORT="$(ask 'Порт панели' '3000')"
+        PANEL_PORT="$(ask 'Порт панели' '2999')"
     fi
-    PANEL_PORT=${PANEL_PORT:-3000}
+    PANEL_PORT=${PANEL_PORT:-2999}
 fi
 
 if ! [[ "$PANEL_PORT" =~ ^[0-9]+$ ]]; then
@@ -154,7 +154,7 @@ rm -f .users.json .secrets.json .backup.json .backup_pass .notify.json \
     .obf_profiles.json .install_state.json admin_pass.txt
 
 if [ "$ACCESS_TYPE" == "2" ]; then
-    PANEL_INTERNAL_PORT=3000
+    PANEL_INTERNAL_PORT=2999
     PANEL_PUBLIC_PORT=$PANEL_PORT
     PANEL_BIND_HOST=127.0.0.1
 else

@@ -13906,7 +13906,7 @@ function demoVirtualSite() {
         ssl: true,
         certPath: p.fullchain,
         keyPath: p.privkey,
-        proxyPort: 3000,
+        proxyPort: 2999,
         root: '',
         httpsPort: 443,
         managedByPanel: true,
@@ -18675,7 +18675,7 @@ function readInternalPortNow() {
         const p = parseInt(fs.readFileSync(path.join(APP_DIR, '.panel_port'), 'utf8').trim(), 10);
         if (Number.isInteger(p) && p > 0 && p < 65536) return p;
     } catch (e) { /* файла нет */ }
-    return parseInt(process.env.PANEL_PORT, 10) || 3000;
+    return parseInt(process.env.PANEL_PORT, 10) || 2999;
 }
 
 function internalPortPlan() {
@@ -18770,7 +18770,7 @@ function readPublicPortFile() {
 }
 // Внутренний порт, который слушает Node. Файл важнее переменной окружения:
 // так обновление панели не сбрасывает кастомный порт.
-const PANEL_PORT = readPortFile() || parseInt(process.env.PANEL_PORT, 10) || 3000;
+const PANEL_PORT = readPortFile() || parseInt(process.env.PANEL_PORT, 10) || 2999;
 // Прямой HTTPS без Nginx: PANEL_TLS_PORT + PANEL_TLS_CERT/PANEL_TLS_KEY.
 // При включённом TLS обычный HTTP по умолчанию не поднимается (PANEL_HTTP=1 вернёт его).
 const PANEL_TLS_PORT = parseInt(process.env.PANEL_TLS_PORT, 10) || 0;
