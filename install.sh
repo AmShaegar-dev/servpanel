@@ -39,8 +39,16 @@ if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
 fi
 
 RAW_BASE="${SERVEPANEL_RAW_BASE:-https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main}"
+CDN_BASE="${SERVEPANEL_CDN_BASE:-https://cdn.jsdelivr.net/gh/AmShaegar-dev/servpanel@main}"
 TMP_FILE="$(mktemp /tmp/servpanel-admin-XXXXXX.sh)"
 trap 'rm -f "$TMP_FILE"' EXIT
+
+download_part() {
+    # Явные таймауты: иначе curl на «полуживом» IPv6/блокировке GitHub
+    # висит минутами, и установка выглядит зависшей после первого вопроса.
+    curl -4 -fsSL --connect-timeout 6 --max-time 20 --retry 1 --retry-delay 1 \
+        -o "$TMP_FILE" "$1" >/dev/null 2>&1 && [ -s "$TMP_FILE" ]
+}
 
 load_part() {
     local name="$1"
@@ -49,12 +57,20 @@ load_part() {
         cat "$local_file"
         return 0
     fi
-    echo -e "${YELLOW}Скачивание ${name}...${NC}" >&2
-    if ! curl -fsSL --max-time 60 "${RAW_BASE}/lib/${name}" -o "$TMP_FILE" || [ ! -s "$TMP_FILE" ]; then
-        echo -e "${RED}Не удалось скачать ${name}. Проверьте доступ к GitHub.${NC}" >&2
-        exit 1
+    echo -e "${YELLOW}Загрузка ${name}...${NC}" >&2
+    if download_part "${RAW_BASE}/lib/${name}"; then
+        cat "$TMP_FILE"
+        return 0
     fi
-    cat "$TMP_FILE"
+    if [[ "$RAW_BASE" == *"AmShaegar-dev/servpanel"* ]] && download_part "${CDN_BASE}/lib/${name}"; then
+        echo -e "${YELLOW}Основной источник недоступен — использован CDN jsDelivr.${NC}" >&2
+        cat "$TMP_FILE"
+        return 0
+    fi
+    echo -e "${RED}Не удалось скачать ${name}.${NC}" >&2
+    echo -e "Проверьте доступ к raw.githubusercontent.com или скачайте архив релиза" >&2
+    echo -e "и запустите install.sh из распакованного каталога." >&2
+    exit 1
 }
 
 ask() {

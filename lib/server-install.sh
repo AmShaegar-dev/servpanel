@@ -79,7 +79,7 @@ if [ "$PANEL_PORT" == "80" ]; then
     exit 1
 fi
 
-SERVER_IP="$(curl -fsS --max-time 10 https://ifconfig.me 2>/dev/null || true)"
+SERVER_IP="$(curl -4 -fsS --connect-timeout 5 --max-time 8 https://ifconfig.me 2>/dev/null || true)"
 if [ -z "$SERVER_IP" ]; then
     SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 fi
@@ -97,20 +97,23 @@ fi
 # ==================== 2. ПАКЕТЫ ====================
 echo -e "\n${CYAN}[1/4] Обновление списка пакетов и установка зависимостей...${NC}"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
+# Не даём apt зависнуть на недоступном зеркале или прокси.
+APT_OPTS=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3)
+apt-get "${APT_OPTS[@]}" update
 
 # Nginx и certbot нужны только для доступа по домену. В режиме IP панель
 # слушает порт напрямую, и лишний веб-сервер на 80 не запускается.
 BASE_PACKAGES="curl wget git ufw zip unzip tar sshpass ipset fail2ban openssl ca-certificates"
 if [ "$ACCESS_TYPE" == "2" ]; then
-    apt-get install -y $BASE_PACKAGES nginx certbot python3-certbot-nginx
+    apt-get "${APT_OPTS[@]}" install -y $BASE_PACKAGES nginx certbot python3-certbot-nginx
 else
-    apt-get install -y $BASE_PACKAGES
+    apt-get "${APT_OPTS[@]}" install -y $BASE_PACKAGES
 fi
 
 echo -e "${CYAN}[2/4] Установка Node.js 20...${NC}"
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt-get install -y nodejs
+curl -4 -fsSL --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 1 \
+    https://deb.nodesource.com/setup_20.x | bash -
+apt-get "${APT_OPTS[@]}" install -y nodejs
 
 # ==================== 3. ПАНЕЛЬ ====================
 echo -e "\n${CYAN}[3/4] Развёртывание Servpanel...${NC}"
@@ -140,7 +143,7 @@ if [ -n "$SRC_DIR" ] && [ -f "$SRC_DIR/server.js" ] && [ -f "$SRC_DIR/package.js
     cp -a "$SRC_DIR/." /root/servpanel/
 else
     echo "Источник: $GITHUB_REPO"
-    git clone --depth 1 "$GITHUB_REPO" servpanel
+    timeout 300 git clone --depth 1 "$GITHUB_REPO" servpanel
 fi
 cd /root/servpanel
 
@@ -169,8 +172,8 @@ printf '%s\n' "$ADMIN_PASS" > admin_pass.txt
 chmod 600 admin_pass.txt
 
 echo "Установка Node.js зависимостей..."
-npm install --omit=dev
-npm install -g pm2
+npm install --omit=dev --fetch-timeout=60000 --fetch-retries=2
+npm install -g pm2 --fetch-timeout=60000 --fetch-retries=2
 
 # --- Fail2ban: журнал входов панели и готовый jail -------------------------
 mkdir -p /var/log /root/backups
