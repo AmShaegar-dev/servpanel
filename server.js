@@ -7777,6 +7777,53 @@ function resumeCascadeJob() {
         .catch((e) => finishCascadeJob(job, null, e && e.message ? e.message : String(e)));
 }
 
+// Принудительно выставляет UDP-порт awg0 на указанной стороне. Нужно, когда
+// AWG уже установлен с другим портом: установщик в этом случае не перезапускается.
+async function ensureAwg0Port(conn, port, updateClients, label) {
+    const p = Number(port);
+    if (!(p > 0 && p < 65536)) return 0;
+    const conf = '/etc/amnezia/amneziawg/awg0.conf';
+    const cur = await sshRunner.run(conn,
+        `awk -F= '/^[[:space:]]*ListenPort/{gsub(/[^0-9]/,"",$2); print $2; exit}' ${conf}`, 20000);
+    const old = Number(String(cur.out || '').trim()) || 0;
+    if (!old) return 0;
+    const applyClients = async () => {
+        if (!updateClients) {
+            // На выходе это конфиг туннельного клиента ru_host — его Endpoint
+            // должен указывать на новый порт awg0.
+            const ruf = '/root/awg/ru_host.conf';
+            await sshRunner.run(conn, `[ -f ${ruf} ] && sed -i -E 's#^(Endpoint[[:space:]]*=[[:space:]]*[^:]+):[0-9]+#\\1:${p}#' ${ruf} || true`, 20000);
+            return;
+        }
+        const upd = `for f in /root/awg/*.conf; do [ -f "$f" ] || continue; case "$f" in */ru_host.conf) continue;; esac; sed -i -E 's#^(Endpoint[[:space:]]*=[[:space:]]*[^:]+):[0-9]+#\\1:${p}#' "$f"; done`;
+        await sshRunner.run(conn, upd, 30000);
+    };
+    if (old === p) {
+        // Порт уже верный, но клиентские конфиги могли остаться со старым.
+        await sshRunner.run(conn, `ufw allow ${p}/udp >/dev/null 2>&1 || true`, 30000);
+        await applyClients();
+        return old;
+    }
+    const script = [
+        `cp -a ${conf} ${conf}.portbak.$(date +%s) 2>/dev/null || true`,
+        `sed -i -E 's/^[[:space:]]*ListenPort[[:space:]]*=.*/ListenPort = ${p}/' ${conf}`,
+        'systemctl restart awg-quick@awg0',
+        `ufw allow ${p}/udp >/dev/null 2>&1 || true`
+    ].join('; ');
+    await sshRunner.run(conn, script, 90000);
+    // Старый порт закрываем, только если его больше никто не слушает.
+    const close = [
+        `if ! ss -lunH 2>/dev/null | awk '{print $4}' | grep -qE '[:.]${old}$'; then`,
+        `ufw delete allow ${old}/udp >/dev/null 2>&1 || true;`,
+        `num=$(ufw status numbered 2>/dev/null | grep -E "^\\[ *[0-9]+\\] ${old}( |$)" | sed -n 's/^\\[ *\\([0-9]*\\)\\].*/\\1/p' | head -1);`,
+        `[ -n "$num" ] && yes | ufw delete "$num" >/dev/null 2>&1 || true;`,
+        'fi'
+    ].join(' ');
+    await sshRunner.run(conn, close, 30000);
+    await applyClients();
+    return old;
+}
+
 // Сборка каскада 1 с панели EU: этот сервер — выход, вторая сторона по SSH — вход RU.
 async function runCascadeBuildEu(job, remote, opts) {
     const log = (title, text) => {
@@ -7853,6 +7900,11 @@ async function runCascadeBuildEu(job, remote, opts) {
     }
     if (!entry.installed) throw new Error('На ' + remote.host + ' не установился AmneziaWG');
     log('RU', 'AmneziaWG готов: ' + (entry.address || '') + ', порт ' + (entry.listenPort || '—'));
+    const oldEntryPort = await ensureAwg0Port(remote, port, true, 'RU');
+    if (oldEntryPort && oldEntryPort !== port) {
+        entry.listenPort = String(port);
+        log('RU', 'порт AWG изменён с ' + oldEntryPort + ' на ' + port + ', клиентские конфиги обновлены');
+    }
 
     // 3. AmneziaWG на выходе (этот сервер, EU).
     let exit = await sshBuild.awgInfo(local);
@@ -7887,6 +7939,11 @@ async function runCascadeBuildEu(job, remote, opts) {
     }
     await sshBuild.openUdp(local, exit.listenPort);
     log('EU', 'AmneziaWG готов: ' + (exit.address || '') + ', порт ' + (exit.listenPort || '—'));
+    const oldExitPort = await ensureAwg0Port(local, port, false, 'EU');
+    if (oldExitPort && oldExitPort !== port) {
+        exit.listenPort = String(port);
+        log('EU', 'порт AWG изменён с ' + oldExitPort + ' на ' + port);
+    }
 
     // 4. Обфускация выхода — до создания ru_host.
     if (opts.obf && Object.keys(opts.obf).length) {
@@ -8067,6 +8124,11 @@ async function runCascadeBuild(job, remote, opts) {
     }
     if (!info.installed) throw new Error('На ' + remote.host + ' не установился AmneziaWG');
     log('EU', 'AmneziaWG готов: ' + (info.address || '') + ', порт ' + (info.listenPort || '—'));
+    const oldEuPort = await ensureAwg0Port(remote, opts.port || 3977, false, 'EU');
+    if (oldEuPort && oldEuPort !== Number(opts.port || 3977)) {
+        info.listenPort = String(opts.port);
+        log('EU', 'порт AWG изменён с ' + oldEuPort + ' на ' + opts.port);
+    }
 
     // 2b. Обфускация на второй стороне — до создания ru_host, чтобы клиент
     // получил те же H/S/HeaderProtectionKey, что и сервер.
@@ -8077,6 +8139,9 @@ async function runCascadeBuild(job, remote, opts) {
 
     // 3. Клиент ru_host на второй стороне.
     const ruHost = await sshBuild.createRuHost(remote, (m) => log('EU', m));
+    // Порт EU мог быть только что изменён — жёстко ставим его в Endpoint.
+    const euListenPort = info.listenPort || opts.port || 3977;
+    ruHost.conf = String(ruHost.conf || '').replace(/^(Endpoint\s*=\s*[^:]+):\d+/m, '$1:' + euListenPort);
     const innerMatch = String(ruHost.conf).match(/^\s*Address\s*=\s*([0-9.]+)/m);
     const peerInner = (String(ruHost.conf).match(/^\s*AllowedIPs\s*=\s*([0-9.]+)/m) || [])[1] || '';
     log('EU', 'Клиент ru_host: ' + (innerMatch ? innerMatch[1] : 'адрес неизвестен'));
@@ -8130,6 +8195,11 @@ async function runCascadeBuild(job, remote, opts) {
     }
     await sshBuild.openUdp({ host: '127.0.0.1' }, local.listenPort);
     log('RU', 'AmneziaWG готов: ' + (local.address || '') + ', порт ' + (local.listenPort || '—'));
+    const oldRuPort = await ensureAwg0Port({ host: '127.0.0.1' }, opts.port || 3977, true, 'RU');
+    if (oldRuPort && oldRuPort !== Number(opts.port || 3977)) {
+        local.listenPort = String(opts.port);
+        log('RU', 'порт AWG изменён с ' + oldRuPort + ' на ' + opts.port + ', клиентские конфиги обновлены');
+    }
 
     // 4b. Обфускация на входе. Клиенты входа получат новые параметры,
     // поэтому перегенерируем их конфиги (manage regen внутри applyObf).
@@ -8147,7 +8217,10 @@ async function runCascadeBuild(job, remote, opts) {
 
     // 6. Поднимаем туннель ДО маршрутизации: скрипт маршрутов обращается
     // к интерфейсу awg1, и без него падает с «Cannot find device awg1».
-    sh('sudo', ['systemctl', 'enable', '--now', 'awg-quick@awg1']);
+    // restart, а не enable --now: при повторной сборке конфиг уже изменился,
+    // и активный интерфейс нужно перечитать.
+    sh('sudo', ['systemctl', 'enable', 'awg-quick@awg1']);
+    sh('sudo', ['systemctl', 'restart', 'awg-quick@awg1']);
     try { sh('sleep', ['3']); } catch (e) { /* ignore */ }
     const up = await sshRunner.run({ host: '127.0.0.1' }, 'systemctl is-active awg-quick@awg1', 20000);
     if (!/active/.test(String(up.out || ''))) {

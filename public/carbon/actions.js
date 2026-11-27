@@ -1206,7 +1206,7 @@ function carbonUfwShowConfirm(btn) {
   btn.disabled = true;
   const span = document.createElement('span');
   span.setAttribute('data-ufw-inline-confirm', '');
-  span.style.cssText = 'display:inline-flex;gap:6px;align-items:center;margin-left:6px';
+  span.className = 'ufw-confirm-pop';
   span.innerHTML = `<button class="btn btn-sm btn-danger" data-carbon-action="ufw-delete-confirm" data-name="${escHtml(btn.dataset.name || '')}" data-to="${escHtml(btn.dataset.to || '')}" data-rule-action="${escHtml(btn.dataset.ruleAction || '')}">${icon('check')}Подтвердить</button><button class="btn btn-sm" data-carbon-action="ufw-delete-cancel">Отмена</button>`;
   btn.insertAdjacentElement('afterend', span);
 }
