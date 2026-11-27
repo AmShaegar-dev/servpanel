@@ -1133,6 +1133,20 @@ async function carbonProxyLog() {
   showCarbonTextModal('Журнал прокси', text);
 }
 
+async function carbonIpv6Toggle() {
+  let st = null;
+  try { st = await api('/api/ipv6/status'); carbon.ipv6 = st; } catch (e) { st = carbon.ipv6 || {}; }
+  const blocked = !!st.blocked;
+  const msg = blocked
+    ? 'Разрешить IPv6? Вернутся IPv6-правила UFW, sysctl снова включит IPv6.'
+    : 'Запретить IPv6? Будут удалены все правила ip6tables, UFW перейдёт в IPv4-only и новые порты не будут открываться для IPv6.';
+  if (!confirm(msg)) return;
+  showToast(blocked ? 'Разрешаю IPv6…' : 'Запрещаю IPv6…');
+  const d = await api(blocked ? '/api/ipv6/unblock' : '/api/ipv6/block', { method: 'POST', body: {} });
+  if (d && d.error) throw new Error(d.error);
+  await carbonRefresh(blocked ? 'IPv6 разрешён' : 'IPv6 запрещён');
+}
+
 async function carbonUfwAdd() {
   showCarbonForm({
     title: 'Открыть порт UFW',
@@ -1762,7 +1776,7 @@ async function carbonCascadeManual() {
   });
 }
 
-function showCarbonCleanupChecklist(host) {
+function showCarbonCleanupChecklist(host, full) {
   const modal = document.createElement('div');
   modal.className = 'modal';
   const peerLabel = host ? 'Вторая сторона ' + host : 'Вторая сторона';
@@ -1779,9 +1793,9 @@ function showCarbonCleanupChecklist(host) {
     }).join('');
   };
   paint([
-    { title: 'Этот сервер', text: 'Останавливаю службы и удаляю правила', run: true },
+    { title: 'Этот сервер', text: full ? 'Останавливаю службы, удаляю правила, клиентов и AWG' : 'Останавливаю службы и удаляю правила', run: true },
     host
-      ? { title: peerLabel, text: 'Подключаюсь по SSH и очищаю', run: true }
+      ? { title: peerLabel, text: full ? 'Подключаюсь по SSH, удаляю каскад, клиентов и AWG' : 'Подключаюсь по SSH и очищаю каскад', run: true }
       : { title: peerLabel, text: 'Не указана — очистится только этот сервер', ok: false }
   ]);
   return {
@@ -1790,7 +1804,7 @@ function showCarbonCleanupChecklist(host) {
       const failed = items.some(s => s.ok === false);
       paint(items.map(s => ({ title: s.title, text: s.text, ok: s.ok !== false })));
       if (failed) {
-        list.insertAdjacentHTML('beforeend', '<div class="notice warn" style="margin-top:10px">Локальная часть очищена. Вторую сторону можно почистить с её панели.</div>');
+        list.insertAdjacentHTML('beforeend', '<div class="notice warn" style="margin-top:10px">Где-то очистка не завершилась. Проверьте красный пункт; локальная часть уже очищена.</div>');
       }
     },
     fail(msg) {
@@ -1802,8 +1816,9 @@ function showCarbonCleanupChecklist(host) {
 async function carbonCascadeCleanup() {
   showCarbonForm({
     title: 'Удалить каскад',
-    sub: 'Полностью удаляет и каскад 1, и каскад 2: правила DNAT, пометки, ipset, туннель awg1, скрипты маршрутов и сохранённое состояние. Если указать SSH второй стороны, она тоже будет очищена. Клиентские файлы на устройствах не меняются.',
+    sub: 'Удаляет каскад 1 и 2: правила DNAT, пометки, ipset, туннель awg1, скрипты, состояние. При полной очистке также удаляются все клиенты и сам AWG на обоих серверах.',
     fields: [
+      { name: 'wipeAwg', label: 'Удалить AWG и всех клиентов на обоих серверах', type: 'checkbox', value: true },
       { name: 'peerHost', label: 'IP второй стороны', placeholder: 'Необязательно' },
       { name: 'peerPort', label: 'SSH-порт', value: '22' },
       { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
@@ -1814,13 +1829,14 @@ async function carbonCascadeCleanup() {
     onSubmit: async v => {
       const peerHost = String(v.peerHost || '').trim();
       if (peerHost && !v.peerPass) throw new Error('Укажите пароль root второй стороны или очистите поле IP');
-      const progress = showCarbonCleanupChecklist(peerHost);
+      const full = v.wipeAwg !== false;
+      const progress = showCarbonCleanupChecklist(peerHost, full);
       try {
         const d = await api('/api/cascade/cleanup', {
           method: 'POST',
           body: {
             peerHost, peerPort: v.peerPort || '22', peerUser: v.peerUser || 'root',
-            peerPass: v.peerPass || '', peerClient: 'ru_host'
+            peerPass: v.peerPass || '', peerClient: 'ru_host', full
           }
         });
         progress.done(d.steps || []);
@@ -2781,6 +2797,7 @@ document.addEventListener('click', async event => {
     else if (action === 'proxy-diag') await carbonProxyDiag();
     else if (action === 'proxy-log') await carbonProxyLog();
     else if (action === 'ufw-add') await carbonUfwAdd();
+    else if (action === 'ipv6-toggle') await carbonIpv6Toggle();
     else if (action === 'ufw-delete') { if (confirm('Удалить правило №' + name + '?')) { await api('/api/ufw/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Правило удалено'); } }
     else if (action === 'iptables-add') await carbonIptablesAdd();
     else if (action === 'iptables-delete') { if (confirm('Удалить правило iptables?')) { await api('/api/iptables/' + encodeURIComponent(name), { method: 'DELETE' }); await carbonRefresh('Правило iptables удалено'); } }

@@ -510,6 +510,7 @@ function assignCarbonPath(path, data) {
   else if (p === '/api/update/info') carbon.update = data;
   else if (p === '/api/clients') { if (Array.isArray(data)) carbon.clients = mergeClientData(carbon.clients, data); else return false; }
   else if (p === '/api/ufw') carbon.ufw = data;
+  else if (p === '/api/ipv6/status') carbon.ipv6 = data;
   else if (p === '/api/iptables') carbon.iptables = data;
   else if (p === '/api/tools/status') carbon.toolsStatus = data;
   else if (p === '/api/fail2ban/status') carbon.fail2ban = data;
@@ -580,7 +581,7 @@ const TAB_DATA = {
   keenetic: ['/api/keenetic/overview', '/api/keenetic/events'],
   clients: ['/api/clients'],
   install: ['/api/modules'],
-  network: ['/api/interfaces', '/api/ufw', '/api/iptables', '/api/awg/config'],
+  network: ['/api/interfaces', '/api/ufw', '/api/iptables', '/api/awg/config', '/api/ipv6/status'],
   cascade: ['/api/cascade/status', '/api/cascade/proxy', '/api/cascade/interfaces', '/api/cascade/schedule', '/api/cascade2/status', '/api/traffic/distribution', '/api/clients'],
   obfuscation: ['/api/obf/current', '/api/obf/profiles'],
   services: ['/api/services', '/api/warp/status'],
@@ -1118,9 +1119,15 @@ function realNetwork() {
   const ufwRows = rules.map(r => `<tr><td><span class="tag good">UFW</span></td><td class="mono">${escHtml(r.to || r.rule || r.port || (typeof r === 'string' ? r : ''))}</td><td>${escHtml(r.action || r.status || '')}</td><td class="mono">${escHtml(r.from || '')}</td><td>${r.id != null ? `<button class="row-action" data-carbon-action="ufw-delete" data-name="${escHtml(String(r.id))}" title="Удалить">${icon('trash')}</button>` : ''}</td></tr>`).join('');
   const ipRows = ipRules.map(r => `<tr><td><span class="tag warn">iptables</span></td><td class="mono" style="white-space:normal;word-break:break-word">${escHtml(r.spec || '')}</td><td>${escHtml(r.target || '-')}</td><td class="mono">${escHtml(r.chain || '')}</td><td>${r.deletable ? `<button class="row-action" data-carbon-action="iptables-delete" data-name="${escHtml(r.id || '')}" title="Удалить">${icon('trash')}</button>` : '<span class="tag" title="Правило управляется UFW">UFW</span>'}</td></tr>`).join('');
   const ruleRows = ufwRows + ipRows;
-  return `<div class="page-head"><div><div class="page-title">Сеть и порты</div><div class="page-sub">Интерфейсы, UFW, iptables и конфиг AWG.</div></div><div class="page-actions"><button class="btn" data-carbon-action="ufw-add">${icon('plus')}Добавить UFW</button><button class="btn" data-carbon-action="iptables-add">${icon('plus')}Добавить iptables</button><button class="btn" data-carbon-action="awg-edit">${icon('edit')}Редактор AWG</button><button class="btn" data-carbon-action="server-name">${icon('server')}Имя сервера</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
-    <div class="mini-grid">${mini('Интерфейсов', String(ifaces.length), 'системных')}${mini('UFW', rules.length ? String(rules.length) + ' правил' : 'нет правил', 'firewall')}${mini('iptables', ipRules.length ? String(ipRules.length) + ' правил' : 'нет правил', 'filter')}${mini('Публичный IP', escHtml((carbon.server && carbon.server.ip) || '-'), (carbon.server && carbon.server.country) || '')}</div>
+  const ipv6 = carbon.ipv6 || {};
+  const ipv6Blocked = !!ipv6.blocked;
+  return `<div class="page-head"><div><div class="page-title">Сеть и порты</div><div class="page-sub">Интерфейсы, UFW, iptables и конфиг AWG.</div></div><div class="page-actions"><button class="btn ${ipv6Blocked ? '' : 'btn-danger'}" data-carbon-action="ipv6-toggle">${icon('shield')}${ipv6Blocked ? 'Разрешить IPv6' : 'Запретить IPv6'}</button><button class="btn" data-carbon-action="ufw-add">${icon('plus')}Добавить UFW</button><button class="btn" data-carbon-action="iptables-add">${icon('plus')}Добавить iptables</button><button class="btn" data-carbon-action="awg-edit">${icon('edit')}Редактор AWG</button><button class="btn" data-carbon-action="server-name">${icon('server')}Имя сервера</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
+    <div class="mini-grid">${mini('Интерфейсов', String(ifaces.length), 'системных')}${mini('UFW', rules.length ? String(rules.length) + ' правил' : 'нет правил', 'firewall')}${mini('iptables', ipRules.length ? String(ipRules.length) + ' правил' : 'нет правил', 'filter')}${mini('IPv6', ipv6Blocked ? 'запрещён' : 'разрешён', ipv6Blocked ? 'UFW IPv4-only' : 'UFW IPv6 ' + (ipv6.ufwIpv6 || '—'))}</div>
     <div class="grid">
+      <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">IPv6</div><div class="card-sub">Полный запрет: правила ip6tables, UFW и sysctl</div></div>${tag(ipv6Blocked ? 'запрещён' : 'разрешён', ipv6Blocked ? 'good' : 'warn')}</div>
+        <div class="list"><div class="list-row"><b>Состояние</b><span class="mono">${ipv6Blocked ? 'IPv6 отключён в sysctl' : 'IPv6 работает'}</span></div><div class="list-row"><b>UFW IPv6</b><span class="mono">${escHtml(ipv6.ufwIpv6 || '—')}</span></div><div class="list-row"><b>Новые порты</b><span class="mono">${ipv6Blocked ? 'открываются только для IPv4' : 'открываются для IPv4 и IPv6'}</span></div></div>
+        <div class="page-actions" style="margin-top:12px"><button class="btn ${ipv6Blocked ? 'btn-primary' : 'btn-danger'}" data-carbon-action="ipv6-toggle">${icon('shield')}${ipv6Blocked ? 'Разрешить IPv6' : 'Запретить IPv6'}</button></div>
+        <div class="donut-note">Запрет удаляет все правила ip6tables, ставит политики DROP и переводит UFW в IPv4-only. Новые порты при этом не получают IPv6-правил. Кнопка переключает состояние обратно.</div></section>
       <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Интерфейсы</div><div class="card-sub">/api/interfaces</div></div>${tag(String(ifaces.length), 'good')}</div><div class="iface-list">${ifaces.map(i => `<div class="iface-row"><span class="dot"></span><b>${escHtml(i)}</b><span class="mono">up</span></div>`).join('') || '<div class="empty-row">Интерфейсов нет</div>'}</div></section>
       <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Правила firewall</div><div class="card-sub">UFW и iptables · базовые цепочки INPUT / FORWARD / OUTPUT</div></div>${tag(String(rules.length + ipRules.length), rules.length + ipRules.length ? 'good' : 'warn')}</div><div class="table-scroll"><table class="table" style="min-width:0"><thead><tr><th>Источник</th><th>Правило</th><th>Действие</th><th>Цепочка / откуда</th><th></th></tr></thead><tbody>${ruleRows || '<tr><td colspan="5">Правил нет</td></tr>'}</tbody></table></div><div class="donut-note" style="margin-top:12px">Правила UFW защищены от удаления. Правила iptables применяются сразу; для сохранения после перезагрузки используйте netfilter-persistent.</div></section>
       <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">AmneziaWG</div><div class="card-sub">/api/awg/config</div></div><div class="page-actions">${tag('advanced', 'muted')}<button class="btn btn-sm" data-carbon-action="awg-edit">${icon('edit')}Редактировать</button></div></div><pre class="code" style="margin:0;max-height:280px;overflow:auto;padding:12px;white-space:pre-wrap">${escHtml(awgText || 'Конфиг не загружен или отсутствует')}</pre></section>
@@ -1183,12 +1190,20 @@ function realCascadeEu(c) {
     </div>`;
 }
 
+function realCascadeEmpty() {
+  return `<div class="page-head"><div><div class="page-title">Каскад RU → EU</div><div class="page-sub">Каскад не настроен. Выберите схему установки.</div></div><div class="page-actions"><button class="btn btn-primary" data-carbon-action="cascade-build">${icon('cascade')}Каскад 1</button><button class="btn" data-carbon-action="cascade2-migrate">${icon('cascade')}Каскад 2</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
+    <div class="mini-grid">${mini('Роль сервера', 'не определена', 'каскад не настроен')}${mini('AWG', 'проверьте раздел «Установка»', 'клиенты и пакеты')}</div>
+    <div class="grid"><section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">С чего начать</div><div class="card-sub">Обе схемы настраиваются с любой панели по SSH</div></div></div>
+      <div class="list"><div class="list-row"><b>Каскад 1</b><span>Клиенты входят на RU, трафик уходит через EU. Вторая сторона настраивается по SSH.</span></div><div class="list-row"><b>Каскад 2</b><span>Клиенты терминируются на EU, российские адреса выходят с RU. Мягкий перенос или полная установка.</span></div></div></section></div>`;
+}
+
 function realCascade() {
   const c2det = carbon.cascade2 && carbon.cascade2.detected;
   const _c2 = c2det && c2det.relay ? carbon.cascade2.state : null;
   const s = _c2 || {};
   if (_c2 && _c2.type === 'relay') return realCascadeRelay();
   const c = carbon.cascade || {};
+  if (!c.configured) return realCascadeEmpty();
   if (c.role === 'eu') return realCascadeEu(c);
   const p = carbon.cascadeProxy || {};
   const ci = carbon.cascadeInterfaces || {};

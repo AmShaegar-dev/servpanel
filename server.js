@@ -5518,6 +5518,113 @@ app.get('/api/cascade/status', checkAuth, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// IPv6: полный запрет с удалением правил и без новых v6-правил при открытии портов
+// ---------------------------------------------------------------------------
+const IPV6_STATE_FILE = path.join(DATA_DIR, '.ipv6_block.json');
+function ipv6StateRead() {
+    const j = readJson(IPV6_STATE_FILE, null);
+    return j && typeof j === 'object' ? j : {};
+}
+function ipv6StateWrite(v) {
+    try { writeJson(IPV6_STATE_FILE, v, 0o600); } catch (e) { /* ignore */ }
+}
+function ipv6IsBlocked() {
+    try {
+        return String(fs.readFileSync('/proc/sys/net/ipv6/conf/all/disable_ipv6', 'utf8')).trim() === '1';
+    } catch (e) {
+        return !!ipv6StateRead().blocked;
+    }
+}
+function ufwIpv6Setting() {
+    return /^\s*IPV6\s*=\s*yes\s*$/mi.test(readTextSafe('/etc/default/ufw')) ? 'yes' : 'no';
+}
+function setUfwIpv6(value) {
+    let text = readTextSafe('/etc/default/ufw');
+    if (/^\s*IPV6\s*=/mi.test(text)) text = text.replace(/^\s*IPV6\s*=.*$/mi, 'IPV6=' + value);
+    else text += (text.endsWith('\n') ? '' : '\n') + 'IPV6=' + value + '\n';
+    writeRootFile('/etc/default/ufw', text, '0644');
+}
+function ip6Cleanup() {
+    try {
+        sh('sudo', ['bash', '-c',
+            'ip6tables -P INPUT DROP 2>/dev/null || true; ' +
+            'ip6tables -P FORWARD DROP 2>/dev/null || true; ' +
+            'ip6tables -P OUTPUT DROP 2>/dev/null || true; ' +
+            'ip6tables -F 2>/dev/null || true; ip6tables -X 2>/dev/null || true; ' +
+            'ip -6 route flush table all 2>/dev/null || true'
+        ], { timeout: 60000 });
+    } catch (e) { /* ignore */ }
+}
+
+app.get('/api/ipv6/status', checkAuth, (req, res) => {
+    const st = ipv6StateRead();
+    res.json({
+        success: true,
+        blocked: ipv6IsBlocked(),
+        ufwIpv6: ufwIpv6Setting(),
+        blockedAt: st.blockedAt || null,
+        originalUfwIpv6: st.ufwIpv6 || null
+    });
+});
+
+app.post('/api/ipv6/block', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const st = ipv6StateRead();
+        if (!ipv6IsBlocked()) {
+            ipv6StateWrite({
+                blocked: true,
+                blockedAt: Date.now(),
+                ufwIpv6: ufwIpv6Setting(),
+                ufwActive: isActive('ufw') === 'active'
+            });
+        }
+        writeRootFile('/etc/sysctl.d/99-servpanel-ipv6.conf',
+            'net.ipv6.conf.all.disable_ipv6 = 1\nnet.ipv6.conf.default.disable_ipv6 = 1\n', '0644');
+        // UFW больше не должен добавлять v6-правила при ufw allow.
+        setUfwIpv6('no');
+        if (isActive('ufw') === 'active') {
+            try { sh('sudo', ['ufw', 'reload'], { timeout: 60000 }); } catch (e) { /* ignore */ }
+        }
+        try { sh('sudo', ['sysctl', '-w', 'net.ipv6.conf.all.disable_ipv6=1'], { timeout: 30000 }); } catch (e) { /* ignore */ }
+        try { sh('sudo', ['sysctl', '-w', 'net.ipv6.conf.default.disable_ipv6=1'], { timeout: 30000 }); } catch (e) { /* ignore */ }
+        try { sh('sudo', ['sysctl', '--system'], { timeout: 60000 }); } catch (e) { /* ignore */ }
+        ip6Cleanup();
+        auditLog(req, 'IPv6 запрещён: правила ip6tables удалены, UFW без IPv6');
+        res.json({ success: true, blocked: true, ufwIpv6: 'no' });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось запретить IPv6: ' + (e.message || e) });
+    }
+});
+
+app.post('/api/ipv6/unblock', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const st = ipv6StateRead();
+        const restoreUfw = st.ufwIpv6 === 'yes' ? 'yes' : st.ufwIpv6 === 'no' ? 'no' : 'yes';
+        try { fs.unlinkSync('/etc/sysctl.d/99-servpanel-ipv6.conf'); } catch (e) { /* нет файла */ }
+        try { sh('sudo', ['sysctl', '-w', 'net.ipv6.conf.all.disable_ipv6=0'], { timeout: 30000 }); } catch (e) { /* ignore */ }
+        try { sh('sudo', ['sysctl', '-w', 'net.ipv6.conf.default.disable_ipv6=0'], { timeout: 30000 }); } catch (e) { /* ignore */ }
+        setUfwIpv6(restoreUfw);
+        // Снимаем DROP-политики и старые цепочки; UFW вернёт разрешённые v6-правила.
+        try {
+            sh('sudo', ['bash', '-c',
+                'ip6tables -P INPUT ACCEPT 2>/dev/null || true; ' +
+                'ip6tables -P FORWARD ACCEPT 2>/dev/null || true; ' +
+                'ip6tables -P OUTPUT ACCEPT 2>/dev/null || true; ' +
+                'ip6tables -F 2>/dev/null || true; ip6tables -X 2>/dev/null || true'
+            ], { timeout: 60000 });
+        } catch (e) { /* ignore */ }
+        if (isActive('ufw') === 'active') {
+            try { sh('sudo', ['ufw', 'reload'], { timeout: 60000 }); } catch (e) { /* ignore */ }
+        }
+        try { fs.unlinkSync(IPV6_STATE_FILE); } catch (e) { /* нет файла */ }
+        auditLog(req, 'IPv6 разрешён: правила UFW восстановлены');
+        res.json({ success: true, blocked: false, ufwIpv6: restoreUfw });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось разрешить IPv6: ' + (e.message || e) });
+    }
+});
+
+// ---------------------------------------------------------------------------
 // UFW
 // ---------------------------------------------------------------------------
 app.get('/api/ufw', checkAuth, (req, res) => {
@@ -6148,9 +6255,11 @@ function cascadeRole() {
     let awg0 = '';
     try { awg0 = fs.readFileSync('/etc/amnezia/amneziawg/awg0.conf', 'utf8'); } catch (e) { awg0 = ''; }
     if (/#_Name\s*=\s*ru_host\b/.test(awg0)) return 'eu';
-    // 4. Каскад 2 EU без туннеля: ipset ru + публичный IP не российский.
+    // 4. Каскад 2 EU: признак — правила пометки на интерфейсах (0x3001).
+    // Только ipset ru/public IP недостаточно: ipset остаётся и после удаления.
     try {
-        if (String(shTry('sudo', ['ipset', 'list', 'ru']) || '').trim() && !cascade2IpInRu(cascade2Ip())) return 'eu';
+        const det2 = cascade2Detect();
+        if (det2.role === 'eu' && det2.ifaces.length) return 'eu';
     } catch (e) { /* ignore */ }
     // 5. Запасной вариант по подсетям.
     for (const name of ['awg0.conf', 'amn0.conf']) {
@@ -7152,6 +7261,7 @@ app.post('/api/cascade/peer-info', checkAuth, requireAdmin, async (req, res) => 
 // Удаление каскада на ОБЕИХ сторонах из панели: правила, скрипты, туннель.
 app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
     const data = req.body || {};
+    const full = data.full === true;
     const peerClient = String(data.peerClient || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '') || 'ru_host';
     const steps = [];
     const log = (title, text, ok = true) => steps.push({ title, text: String(text || ''), ok: !!ok });
@@ -7163,6 +7273,43 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
         for (const t of local.removed) log('Этот сервер', t, true);
     } else {
         log('Этот сервер', (local && local.error) || 'готово', !(local && local.error));
+    }
+    const fullPorts = new Set();
+    if (full) {
+        // Собираем все порты AWG и каскада ДО удаления конфигов, чтобы после
+        // очистки закрыть их в UFW на обеих сторонах.
+        try {
+            const localAwg = await cascade2Migrate.awgListenPorts({ host: '127.0.0.1' });
+            for (const p of localAwg) fullPorts.add(p);
+        } catch (e) { /* ignore */ }
+        try {
+            const st = cascade2Read();
+            for (const p of (st.ports || [])) fullPorts.add(Number(p));
+            for (const p of [st.ruPort, st.ruExitPort, st.euPort]) if (Number(p) > 0) fullPorts.add(Number(p));
+            const raw = readJson(CASCADE2_FILE, null) || {};
+            for (const p of [raw.euPort, raw.ruPort, raw.ruExitPort]) if (Number(p) > 0) fullPorts.add(Number(p));
+        } catch (e) { /* ignore */ }
+        try {
+            const remoteAwg = await cascade2Migrate.awgListenPorts({ host, port: Number(data.peerPort) || 22, user: String(data.peerUser || 'root'), pass });
+            for (const p of remoteAwg) fullPorts.add(p);
+            const stOut = await sshRunner.run({ host, port: Number(data.peerPort) || 22, user: String(data.peerUser || 'root'), pass },
+                'for f in /root/servpanel/.cascade2.json /root/awg-admin/.cascade2.json; do [ -f "$f" ] && cat "$f"; echo; done', 20000);
+            for (const line of String(stOut.out || '').split(/\r?\n/)) {
+                const t = line.trim();
+                if (!t.startsWith('{')) continue;
+                try {
+                    const j = JSON.parse(t);
+                    for (const p of (Array.isArray(j.ports) ? j.ports : [])) fullPorts.add(Number(p));
+                    for (const p of [j.ruPort, j.ruExitPort, j.euPort]) if (Number(p) > 0) fullPorts.add(Number(p));
+                } catch (e) { /* ignore */ }
+            }
+        } catch (e) { /* SSH недоступен — закроем хотя бы локальные */ }
+        try {
+            rootSh('bash', ['-c', cascade2Migrate.PURGE_AWG], { timeout: 600000 });
+            log('Этот сервер', 'удалены AWG и все клиентские конфиги', true);
+        } catch (e) {
+            log('Этот сервер', 'AWG: ' + ((e && e.message) || String(e)), false);
+        }
     }
 
     // 2. Вторая сторона по SSH: те же действия + удаление клиента ru_host.
@@ -7189,11 +7336,13 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
             'systemctl daemon-reload',
             'echo cleaned'
         ].join('; ');
+        let remoteOk = false;
         try {
             const r = await sshRunner.run(remote, cmd, 120000);
             const out = String(r.out || '').trim();
             const authFail = /Permission denied|Authentication failed|Access denied/i.test(out);
             const ok = r.code === 0 && !authFail;
+            remoteOk = ok;
             log('Вторая сторона ' + host,
                 ok ? 'каскад и клиент ' + peerClient + ' удалены'
                     : authFail ? 'неверный логин или пароль SSH (Permission denied). Локальная часть очищена, вторую сторону почистите с её панели.'
@@ -7202,8 +7351,48 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
         } catch (e) {
             log('Вторая сторона ' + host, (e && e.message) || String(e), false);
         }
+        if (full && remoteOk) {
+            try {
+                const pr = await sshRunner.run(remote, cascade2Migrate.PURGE_AWG, 600000);
+                const pout = String(pr.out || '').trim();
+                const pauth = /Permission denied|Authentication failed|Access denied/i.test(pout);
+                const pok = pr.code === 0 && !pauth;
+                log('Вторая сторона ' + host,
+                    pok ? 'удалены AWG и все клиентские конфиги'
+                        : pauth ? 'AWG: неверный логин или пароль SSH'
+                            : pout.slice(0, 300) || 'ошибка удаления AWG',
+                    pok);
+            } catch (e) {
+                log('Вторая сторона ' + host, 'AWG: ' + ((e && e.message) || String(e)), false);
+            }
+        }
     } else {
         log('Вторая сторона', 'не указана — почистите её так же из своей панели', false);
+    }
+    // 3. Полная очистка: закрываем порты, которые использовал AWG/каскад.
+    if (full && fullPorts.size) {
+        const protectedPorts = new Set([22, 80, 443, 4444, 4446, 2999, 53]);
+        const localConn = { host: '127.0.0.1' };
+        const remoteConn = { host, port: Number(data.peerPort) || 22, user: String(data.peerUser || 'root'), pass };
+        let localUsed = new Set();
+        let remoteUsed = new Set();
+        try { localUsed = await cascade2Migrate.usedUdpPorts(localConn); } catch (e) { /* ignore */ }
+        if (host && pass) {
+            try { remoteUsed = await cascade2Migrate.usedUdpPorts(remoteConn); } catch (e) { /* ignore */ }
+        }
+        for (const p of [...fullPorts].sort((a, b) => a - b)) {
+            if (protectedPorts.has(p)) continue;
+            if (!localUsed.has(p)) {
+                try {
+                    if (await cascade2Migrate.closeUfwPort(localConn, p)) log('Этот сервер', 'закрыт порт ' + p + '/udp', true);
+                } catch (e) { /* ignore */ }
+            }
+            if (host && pass && !remoteUsed.has(p)) {
+                try {
+                    if (await cascade2Migrate.closeUfwPort(remoteConn, p)) log('Вторая сторона ' + host, 'закрыт порт ' + p + '/udp', true);
+                } catch (e) { /* ignore */ }
+            }
+        }
     }
     auditLog(req, 'Каскад удалён' + (host ? ' (и на ' + host + ')' : ''));
     res.json({ success: true, steps });
