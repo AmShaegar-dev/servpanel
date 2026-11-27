@@ -578,12 +578,12 @@ function loadDashboardExtras() {
 }
 
 const TAB_DATA = {
-  dashboard: ['/api/stats', '/api/sysinfo', '/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global', '/api/traffic/distribution', '/api/cascade2/status'],
+  dashboard: ['/api/stats', '/api/sysinfo', '/api/history?range=' + encodeURIComponent(carbon.chartRange) + '&view=global', '/api/traffic/distribution', '/api/cascade2/status', '/api/tools/status'],
   keenetic: ['/api/keenetic/overview', '/api/keenetic/events'],
   clients: ['/api/clients'],
   install: ['/api/modules'],
   network: ['/api/interfaces', '/api/ufw', '/api/iptables', '/api/awg/config', '/api/ipv6/status'],
-  cascade: ['/api/cascade/status', '/api/cascade/proxy', '/api/cascade/interfaces', '/api/cascade/schedule', '/api/cascade2/status', '/api/traffic/distribution', '/api/clients'],
+  cascade: ['/api/cascade/status', '/api/cascade/proxy', '/api/cascade/interfaces', '/api/cascade/schedule', '/api/cascade2/status', '/api/traffic/distribution', '/api/clients', '/api/tools/status'],
   obfuscation: ['/api/obf/current', '/api/obf/profiles'],
   services: ['/api/services', '/api/warp/status'],
   domains: ['/api/ssl/status'],
@@ -943,19 +943,18 @@ function realTrafficDistribution() {
   const passed = Number(d.passed) || 0;
   const blocked = Number(d.blocked) || 0;
   const source = d.source || 'unavailable';
-  const total = role === 'relay' ? tunnel + blocked : isEu ? passed + blocked : isEu2 ? tunnel + direct : tunnel + direct + blocked;
+  const tools = carbon.toolsStatus || {};
+  const ruDrop = tools.ruDrop || {};
+  const geoOn = !!(ruDrop.active);
+  const showBlocked = geoOn || blocked > 0;
+  const total = role === 'relay' ? tunnel + (showBlocked ? blocked : 0) : isEu ? passed + (showBlocked ? blocked : 0) : isEu2 ? tunnel + direct : tunnel + direct + blocked;
   const exits = !isEu && !isEu2 && Array.isArray(d.exits) && d.exits.length ? d.exits : null;
   const exitColors = ['#5b8cff', '#8b5cf6', '#2dd4a7', '#f5b84b', '#ff6b6b', '#4dd0e1'];
+  const blockedPart = { key: 'blocked', label: 'Заблокировано GeoIP', short: 'GeoIP', value: blocked, color: '#d29922' };
   const parts = role === 'relay'
-    ? [
-        { key: 'tunnel', label: 'Выход с RU', short: 'с RU', value: tunnel, color: 'var(--accent)' },
-        { key: 'blocked', label: 'Заблокировано GeoIP', short: 'GeoIP', value: blocked, color: '#d29922' }
-      ]
+    ? [{ key: 'tunnel', label: 'Вышло', short: 'вышло', value: tunnel, color: 'var(--accent)' }].concat(showBlocked ? [blockedPart] : [])
     : isEu
-    ? [
-        { key: 'passed', label: 'Прошло через EU', short: 'прошло', value: passed, color: '#5b8cff' },
-        { key: 'blocked', label: 'GeoIP blocked', short: 'заблокировано', value: blocked, color: '#d29922' }
-      ]
+    ? [{ key: 'passed', label: 'Вышло', short: 'вышло', value: passed, color: '#5b8cff' }].concat(showBlocked ? [blockedPart] : [])
     : isEu2
     ? [
         { key: 'direct', label: 'Выход в EU', short: 'в EU', value: direct, color: '#5b8cff' },
@@ -968,7 +967,7 @@ function realTrafficDistribution() {
         { key: 'tunnel', label: 'В EU-туннель', short: 'в EU-туннеле', value: tunnel, color: '#5b8cff' },
         { key: 'direct', label: 'RU выход', short: 'в RU-выходе', value: direct, color: 'var(--accent)' }
       ];
-  if (role !== 'relay' && !isEu && !isEu2 && blocked > 0) parts.push({ key: 'blocked', label: 'Заблокировано GeoIP', short: 'заблокировано', value: blocked, color: '#d29922' });
+  if (role !== 'relay' && !isEu && !isEu2 && showBlocked) parts.push(blockedPart);
   const C = 2 * Math.PI * 46;
   let offset = 0;
   const rings = parts.map(p => {
@@ -986,7 +985,7 @@ function realTrafficDistribution() {
   const note = total
     ? (isEu ? 'Данные из интерфейса awg0 и правил GeoIP.' : isEu2 ? 'Данные из интерфейсов EU и туннеля в RU.' : exits ? 'Данные по каждому выходу каскада и RU-направлению.' : (source === 'mangle' ? 'Данные из счётчиков mangle (ipset ru) и awg0/awg1.' : source === 'cached' ? 'Счётчики маршрутизации пересозданы — показаны последние известные доли.' : 'Данные из счётчиков маршрутизации.'))
     : 'Нет данных: счётчики маршрутизации ещё не накоплены.';
-  return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">${role === 'relay' ? 'ВЫХОД С RU · GEOIP BLOCKED' : isEu ? 'EU-выход · прошло / GeoIP blocked' : isEu2 ? 'EU · напрямую / через RU' : exits ? 'RU-вход · выходы / RU' : 'RU-вход · туннель / RU выход'}${role !== 'relay' && !isEu && !isEu2 && blocked > 0 ? ' / GeoIP' : ''}</div></div>${tag(tagText, tagTone)}</div>
+  return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">${role === 'relay' ? (showBlocked ? 'ВЫШЛО · GEOIP BLOCKED' : 'ВЫШЛО') : isEu ? (showBlocked ? 'ВЫШЛО · GEOIP BLOCKED' : 'ВЫШЛО') : isEu2 ? 'EU · напрямую / через RU' : exits ? 'RU-вход · выходы / RU' : 'RU-вход · туннель / RU выход'}${role !== 'relay' && !isEu && !isEu2 && showBlocked ? ' / GeoIP' : ''}</div></div>${tag(tagText, tagTone)}</div>
     <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
       <div style="position:relative;width:196px;height:196px;flex:0 0 auto">
         <svg viewBox="0 0 120 120" style="width:100%;height:100%"><circle cx="60" cy="60" r="46" fill="none" stroke="var(--surface-3)" stroke-width="12"/>${rings}</svg>
@@ -1079,6 +1078,24 @@ function realServices() {
     <section class="card" style="margin-top:16px"><div class="card-top"><div><div class="card-title">WARP + Xray: маршруты</div><div class="card-sub">Маршруты: WARP / напрямую / отключено</div></div><div class="page-actions">${tag(wst.connected ? 'WARP подключён' : (wst.installed ? 'WARP не подключён' : 'WARP не установлен'), wst.connected ? 'good' : 'warn')}<button class="btn btn-sm" data-carbon-action="warp-panel">Настроить</button></div></div><div class="table-scroll"><table class="table"><thead><tr><th>Сервис</th><th>В WARP</th><th>Напрямую</th><th>Отключено</th></tr></thead><tbody>${routeRows || '<tr><td colspan="4">Сервисы не найдены</td></tr>'}</tbody></table></div><div class="donut-note" style="margin-top:10px">Gemini сейчас напрямую с IP сервера. Маршруты и свои сервисы — в окне «Настроить».</div></section>`;
 }
 
+function geoipCard() {
+  const tools = carbon.toolsStatus || {};
+  const ru = tools.ruDrop || {};
+  const ifaces = carbon.interfaces || [];
+  const activeIfaces = Array.isArray(ru.ifaces) ? ru.ifaces : [];
+  const ifaceChips = ifaces.map(i => `<label class="chip ${activeIfaces.includes(i) ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" value="${escHtml(i)}" ${activeIfaces.includes(i) ? 'checked' : ''}> ${escHtml(i)}</label>`).join('') || '<span class="muted">Интерфейсы не найдены</span>';
+  const geoActive = !!ru.active;
+  return `<section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">GeoIP: блокировка RU</div><div class="card-sub">Правила применяются к выбранным интерфейсам целиком</div></div>${tag(geoActive ? 'активна' : 'выключена', geoActive ? 'good' : 'warn')}</div>
+    <div class="form-grid"><div class="field" style="grid-column:1/-1"><span>Интерфейсы</span><div class="chips" id="carbonGeoIfaces">${ifaceChips}</div></div>
+      <label class="field"><span>Расписание</span><select id="carbonGeoSchedule"><option value="weekly">Раз в неделю</option><option value="daily">Каждый день</option><option value="none">Не обновлять</option></select></label>
+      <label class="field"><span>Источник списка</span><select id="carbonGeoListMode"><option value="antifilter">Antifilter / ipdeny</option><option value="opencck">OpenCCK</option><option value="custom">Свой URL</option></select></label>
+      <label class="field"><span>Свой URL списка</span><input id="carbonGeoCustomUrl" placeholder="https://example.com/ru.txt"></label>
+      <label class="field"><span>Порты (пусто — все)</span><input id="carbonGeoPorts" placeholder="443, 80"></label></div>
+    <div class="file-row"><input id="carbonRuDropFile" type="file" accept=".txt,.list,.cidr" style="display:none" onchange="carbonFilePicked(this)"><label class="btn" for="carbonRuDropFile">${icon('upload')}Выбрать файл</label><span id="carbonRuDropFileName" class="mono file-picked">Файл не выбран</span><button class="btn" data-carbon-action="rudrop-upload">${icon('upload')}Загрузить список</button></div>
+    <div class="page-actions" style="margin-top:14px"><button class="btn btn-primary" data-api-action="geoip-enable">${icon('shield')}Включить</button><button class="btn btn-danger" data-api-action="geoip-disable">${icon('stop')}Отключить</button><button class="btn" data-carbon-action="rudrop-refresh">${icon('refresh')}Обновить правила</button></div>
+    <div class="donut-note">Порты не используются — блокировка только по интерфейсам, если поле портов пустое.${ru.count ? ' Сейчас в ipset: ' + ru.count + ' IP.' : ''}</div></section>`;
+}
+
 function realSecurity() {
   const sec = carbon.security || {};
   const ifaces = carbon.interfaces || [];
@@ -1090,19 +1107,11 @@ function realSecurity() {
   const ifaceChips = ifaces.map(i => `<label class="chip ${activeIfaces.includes(i) ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" value="${escHtml(i)}" ${activeIfaces.includes(i) ? 'checked' : ''}> ${escHtml(i)}</label>`).join('') || '<span class="muted">Интерфейсы не найдены</span>';
   const bannedRows = banned.map(ip => `<tr><td class="mono">${escHtml(ip)}</td><td><button class="row-action" data-carbon-action="fail2ban-unban" data-name="${escHtml(ip)}" title="Разблокировать">${icon('play')}</button></td></tr>`).join('');
   const geoActive = !!ru.active;
+  const hasCascade = !!(carbon.cascade && carbon.cascade.configured) || !!(carbon.cascade2 && carbon.cascade2.detected && carbon.cascade2.detected.relay);
   return `<div class="page-head"><div><div class="page-title">Защита и GeoIP</div><div class="page-sub">Блокировка RU, GeoIP и Fail2Ban.</div></div><div class="page-actions"><button class="btn" data-carbon-action="fail2ban">${icon('shield')}Fail2Ban</button><button class="btn" data-carbon-action="fail2ban-refresh">${icon('refresh')}Обновить список IP</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Панель', sec.https ? 'HTTPS' : 'HTTP', 'порт ' + (sec.panelPublicPort || '—'))}${mini('2FA', sec.totpEnabled ? 'включена' : 'выключена', 'TOTP')}${mini('GeoIP', geoActive ? 'активна' : 'выключена', ru.count ? ru.count + ' IP' : 'правила')}${mini('Fail2Ban', f2b.installed ? (f2b.jail ? 'активен' : 'jail нет') : 'не установлен', banned.length + ' забанено')}</div>
     <div class="grid">
-      <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">GeoIP: блокировка RU</div><div class="card-sub">Правила применяются к выбранным интерфейсам целиком</div></div>${tag(geoActive ? 'активна' : 'выключена', geoActive ? 'good' : 'warn')}</div>
-        <div class="form-grid"><div class="field" style="grid-column:1/-1"><span>Интерфейсы</span><div class="chips" id="carbonGeoIfaces">${ifaceChips}</div></div>
-          <label class="field"><span>Расписание</span><select id="carbonGeoSchedule"><option value="weekly">Раз в неделю</option><option value="daily">Каждый день</option><option value="none">Не обновлять</option></select></label>
-          <label class="field"><span>Источник списка</span><select id="carbonGeoListMode"><option value="antifilter">Antifilter / ipdeny</option><option value="opencck">OpenCCK</option><option value="custom">Свой URL</option></select></label>
-          <label class="field"><span>Свой URL списка</span><input id="carbonGeoCustomUrl" placeholder="https://example.com/ru.txt"></label>
-          <label class="field"><span>Порты (пусто — все)</span><input id="carbonGeoPorts" placeholder="443, 80"></label></div>
-        <div class="file-row"><input id="carbonRuDropFile" type="file" accept=".txt,.list,.cidr" style="display:none" onchange="carbonFilePicked(this)"><label class="btn" for="carbonRuDropFile">${icon('upload')}Выбрать файл</label><span id="carbonRuDropFileName" class="mono file-picked">Файл не выбран</span><button class="btn" data-carbon-action="rudrop-upload">${icon('upload')}Загрузить список</button></div>
-        <div class="page-actions" style="margin-top:14px"><button class="btn btn-primary" data-api-action="geoip-enable">${icon('shield')}Включить</button><button class="btn btn-danger" data-api-action="geoip-disable">${icon('stop')}Отключить</button><button class="btn" data-carbon-action="rudrop-refresh">${icon('refresh')}Обновить правила</button></div>
-        <div class="donut-note">Порты не используются — блокировка только по интерфейсам, если поле портов пустое.${ru.count ? ' Сейчас в ipset: ' + ru.count + ' IP.' : ''}</div>
-      </section>
+      ${hasCascade ? '' : geoipCard()}
       <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Fail2Ban</div><div class="card-sub">Заблокированные IP и статус jail servpanel</div></div><div class="page-actions"><button class="btn btn-sm" data-carbon-action="fail2ban-refresh">${icon('refresh')}Обновить список</button>${tag(f2b.installed ? (f2b.jail ? 'активен' : 'jail нет') : 'не установлен', f2b.installed && f2b.jail ? 'good' : 'warn')}</div></div>
         <div class="mini-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:12px">${mini('Jail', f2b.jail ? 'активен' : 'не найден', 'servpanel')}${mini('Сейчас', String(f2b.currentlyFailed || 0), 'неудачных')}${mini('Забанено', String(banned.length), 'IP')}</div>
         <div class="table-scroll"><table class="table"><thead><tr><th>IP</th><th></th></tr></thead><tbody>${bannedRows || '<tr><td colspan="2">Заблокированных IP нет</td></tr>'}</tbody></table></div>
@@ -1210,6 +1219,7 @@ function realCascadeRelay() {
         <div class="page-actions" style="margin-top:8px"><label class="field" style="min-width:260px"><span>Endpoint для клиентов (пусто — автоматически)</span><input id="carbonC2Endpoint" value="${escHtml(s.clientEndpoint || '')}" placeholder="${escHtml(c2.clientEndpoint || '45.0.0.1:3977')}"></label><button class="btn" data-carbon-action="cascade2-endpoint-save">${icon('check')}Сохранить</button><button class="btn" data-carbon-action="cascade2-awg1">${icon('wrench')}Конфиг awg1</button></div></section>
       <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">Сколько ушло через российский выход и сколько напрямую с EU</div></div></div>
         <div class="list"><div class="list-row"><b>Выход с RU</b><span class="mono">${mb(c.ruBytes)} МБ · ${ruPct}%</span></div><div class="list-row"><b>На EU</b><span class="mono">${mb(c.euBytes)} МБ · ${euPct}%</span></div><div class="list-row"><b>Всего принято</b><span class="mono">${mb(c.totalRx)} МБ</span></div></div></section>
+      ${isEu ? '' : geoipCard()}
     </div>`;
 }
 
@@ -1228,6 +1238,7 @@ function realCascadeEu(c) {
         <div class="list"><div class="list-row"><b>Прошло через EU</b><span class="mono">${fmtBytes(passed)}</span></div><div class="list-row"><b>Заблокировано</b><span class="mono">${fmtBytes(blocked)}</span></div><div class="list-row"><b>Клиентов</b><span class="mono">${clients.length} · ${online} онлайн</span></div></div></section>
       <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Клиенты EU-выхода</div><div class="card-sub">Терминируются на этом сервере</div></div>${tag(String(clients.length), 'muted')}</div>
         <div class="list">${clients.slice(0, 20).map(x => `<div class="list-row"><b>${escHtml(x.name)}</b><span class="mono">${escHtml(x.ip || '—')}</span><span class="mono">${clientStatus(x) ? 'в сети' : 'не в сети'}</span></div>`).join('') || '<div class="list-row"><b>Клиентов нет</b></div>'}</div></section>
+      ${geoipCard()}
     </div>`;
 }
 
