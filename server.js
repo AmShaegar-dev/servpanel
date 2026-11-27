@@ -6894,9 +6894,11 @@ for IFACE in "\${CASC_IFACES[@]}"; do
     iptables -w 5 -t mangle -D PREROUTING -i "$IFACE" -s "$SUBNET" -m set --match-set ru dst -j RETURN 2>/dev/null || true
     iptables -w 5 -t mangle -D PREROUTING -i "$IFACE" -s "$SUBNET" -j MARK --set-xmark "$FWMARK" 2>/dev/null || true
     iptables -w 5 -t nat -D POSTROUTING -s "$SUBNET" -o "$AWG1_IF" -j MASQUERADE 2>/dev/null || true
+    iptables -w 5 -t nat -D POSTROUTING -s "$SUBNET" -o "$WAN_IF" -j MASQUERADE 2>/dev/null || true
     iptables -w 5 -t mangle -I PREROUTING 1 -i "$IFACE" -s "$SUBNET" -m set --match-set ru dst -j RETURN
     iptables -w 5 -t mangle -A PREROUTING -i "$IFACE" -s "$SUBNET" -j MARK --set-xmark "$FWMARK"
     iptables -w 5 -t nat -A POSTROUTING -s "$SUBNET" -o "$AWG1_IF" -j MASQUERADE
+    iptables -w 5 -t nat -A POSTROUTING -s "$SUBNET" -o "$WAN_IF" -j MASQUERADE
 done
 if [ "$COUNT" -eq 0 ]; then
     echo "ERROR: ни у одного интерфейса (\${CASC_IFACES[*]}) нет IPv4."
