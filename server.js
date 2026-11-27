@@ -1952,6 +1952,11 @@ const requireAdmin = (req, res, next) => {
     if (req.session && req.session.loggedIn && req.session.role === 'admin') return next();
     res.status(403).json({ error: 'Недостаточно прав: нужно войти как администратор' });
 };
+const isAdminSession = (req) => ((req.session && req.session.role) || 'admin') === 'admin';
+// Скрываем публичные IP каскада от пользователей с ролью «только просмотр».
+function redactIps(value) {
+    return typeof value === 'string' ? value.replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, '•••') : value;
+}
 
 // Пользователи с ролью viewer могут только смотреть: любые изменения и
 // скачивание ключей/конфигов/бэкапов для них закрыты.
@@ -5479,12 +5484,18 @@ app.get('/api/cascade/status', checkAuth, (req, res) => {
                 else if (d.handshakeAgo < 180) { text = `Каскад: вход RU подключён (обмен ${d.handshakeAgo} сек. назад)`; color = '#4caf50'; }
                 else { text = `Каскад: вход RU потерян (${d.handshakeAgo} сек. назад)`; color = '#ff4c4c'; }
             }
-            return res.json({
+            const payload = {
                 ...d,
                 active: d.configured && d.handshakeAgo !== null && d.handshakeAgo < 180,
                 text,
                 color
-            });
+            };
+            if (!isAdminSession(req)) {
+                for (const k of ['endpoint', 'effectiveEndpoint', 'entryEndpoint', 'endpointSource', 'tunnelError', 'text']) {
+                    if (typeof payload[k] === 'string') payload[k] = redactIps(payload[k]);
+                }
+            }
+            return res.json(payload);
         }
         let text = 'Туннель EU не настроен';
         let color = '#ff4c4c';
@@ -5494,7 +5505,13 @@ app.get('/api/cascade/status', checkAuth, (req, res) => {
             else if (d.handshakeAgo < 150) { text = `Каскад работает (обмен ${d.handshakeAgo} сек. назад)`; color = '#4caf50'; }
             else { text = `Туннель awg1 поднят, рукопожатие ${d.handshakeAgo} сек. назад`; color = '#ffa500'; }
         }
-        res.json({ ...d, active: d.configured && d.tunnelActive, text, color });
+        const payload = { ...d, active: d.configured && d.tunnelActive, text, color };
+        if (!isAdminSession(req)) {
+            for (const k of ['endpoint', 'effectiveEndpoint', 'entryEndpoint', 'endpointSource', 'tunnelError', 'text']) {
+                if (typeof payload[k] === 'string') payload[k] = redactIps(payload[k]);
+            }
+        }
+        res.json(payload);
     } catch (e) {
         res.json({ active: false, text: 'Ошибка проверки', color: '#ff4c4c' });
     }
@@ -7492,7 +7509,233 @@ function resumeCascadeJob() {
         .catch((e) => finishCascadeJob(job, null, e && e.message ? e.message : String(e)));
 }
 
+// Сборка каскада 1 с панели EU: этот сервер — выход, вторая сторона по SSH — вход RU.
+async function runCascadeBuildEu(job, remote, opts) {
+    const log = (title, text) => {
+        job.steps.push({ title, text: String(text || ''), at: new Date().toISOString() });
+        if (job.steps.length > 400) job.steps.splice(0, job.steps.length - 400);
+        saveCascadeJob(job);
+        if (job.c2Mirror) {
+            job.c2Mirror.steps.push({ at: Date.now(), title, text: String(text || '') });
+            if (job.c2Mirror.steps.length > 400) job.c2Mirror.steps.splice(0, job.c2Mirror.steps.length - 400);
+            job.c2Mirror.log = String(job.c2Mirror.log || '') +
+                '[' + new Date().toISOString().slice(11, 19) + '] ' + title + ': ' + text + '\n';
+        }
+    };
+    const local = { host: '127.0.0.1' };
+    const { version } = opts;
+    const exitSubnet = opts.euSubnet || '172.16.61.0/24';
+    const entrySubnet = '172.16.17.0/24';
+    const port = Number(opts.port) || 3977;
+    const run = async (conn, cmd, timeout = 60000, label = '') => {
+        const r = await sshRunner.run(conn, cmd, timeout);
+        if (r.code !== 0) throw new Error((label ? label + ': ' : '') + String(r.out || '').trim().slice(-500));
+        return String(r.out || '');
+    };
+    const write = async (conn, file, text, mode = '0600') => {
+        const data = Buffer.from(String(text || ''), 'utf8').toString('base64');
+        await run(conn, 'mkdir -p $(dirname ' + file + ') && : > ' + file, 20000, 'подготовка ' + file);
+        for (let i = 0; i < data.length; i += 8000) {
+            await run(conn, "printf '%s' '" + data.slice(i, i + 8000) + "' | base64 -d >> " + file, 30000, 'запись ' + file);
+        }
+        await run(conn, 'chmod ' + mode + ' ' + file, 15000);
+    };
+
+    // 1. Вторая сторона (RU): SSH и внешний IP.
+    log('SSH', 'Подключаюсь к ' + remote.host + '...');
+    const ping = await sshRunner.run(remote, 'hostname; ip -4 route get 1.1.1.1 2>/dev/null | grep -oP "src \\K\\S+" | head -1', 40000);
+    if (ping.code !== 0) {
+        const online = await sshRunner.waitOnline(remote, 5 * 60 * 1000);
+        if (!online) throw new Error('SSH до ' + remote.host + ' не работает: ' + String(ping.out || '').trim().slice(0, 300));
+    }
+    const ruHost = (String(ping.out).match(/^\s*(\d{1,3}(?:\.\d{1,3}){3})\s*$/m) || [])[1] || remote.host;
+    const euHost = cascade2Ip() || '';
+    log('SSH', 'Вход RU: ' + ruHost + ', выход EU: ' + (euHost || 'этот сервер'));
+    if (!euHost) throw new Error('Не удалось определить публичный IP EU');
+
+    let resumeRunning = false;
+    for (let i = 0; i < 3; i++) {
+        const st = await sshBuild.stopResume(remote, (m) => log('RU', m));
+        if (st.running) { resumeRunning = true; break; }
+        if (st.stopped) break;
+        const back = await sshRunner.waitOnline(remote, 3 * 60 * 1000);
+        if (!back) break;
+    }
+
+    // 2. AmneziaWG на входе (RU).
+    let entry = await sshBuild.awgInfo(remote);
+    if (!entry.installed) {
+        const waited = await sshBuild.waitForAwg(remote, (resumeRunning ? 50 : 5) * 60 * 1000, (m) => log('RU', m));
+        if (waited) {
+            entry = waited;
+            log('RU', 'AmneziaWG уже установлен — продолжаю после перезагрузки');
+        } else {
+            entry = await sshBuild.installAwg(remote, {
+                version, subnetNet: entrySubnet, port,
+                keepPackages: opts.keepPackages !== false,
+                onLog: (m) => log('RU', m)
+            });
+        }
+    } else {
+        log('RU', 'AmneziaWG уже установлен, UDP-порт ' + (entry.listenPort || '—'));
+        await sshBuild.openUdp(remote, entry.listenPort);
+        await sshRunner.run(remote,
+            'rm -f /etc/cron.d/awg_resume /root/awg_installer_wrapper.sh /root/awg_install_params.env /root/awg/.resume_count',
+            30000);
+    }
+    if (!entry.installed) throw new Error('На ' + remote.host + ' не установился AmneziaWG');
+    log('RU', 'AmneziaWG готов: ' + (entry.address || '') + ', порт ' + (entry.listenPort || '—'));
+
+    // 3. AmneziaWG на выходе (этот сервер, EU).
+    let exit = await sshBuild.awgInfo(local);
+    if (!exit.installed) {
+        log('EU', 'AmneziaWG на выходе не установлен — ставлю (UDP-порт ' + port + ')');
+        const started = await localPost('/api/install/module', {
+            module: 'awg', version, route: 'all', ipv6: 'disallow', port: String(port), awgMode: 'single',
+            subnet: exitSubnet, keepPackages: opts.keepPackages !== false
+        });
+        if (!started || started.error) {
+            throw new Error('Установка AWG на выходе не запустилась: ' + ((started && started.error) || 'ошибка'));
+        }
+        let lastStage = '';
+        for (let i = 0; i < 180; i++) {
+            await new Promise(r => setTimeout(r, 5000));
+            exit = await sshBuild.awgInfo(local);
+            if (exit.installed) break;
+            let st = { step: '', progress: 0 };
+            try {
+                const li = installProgress(sshBuild.INSTALL_LOG);
+                const done = (li.steps || []).filter(s => s.done).map(s => s.title);
+                st = { step: done[done.length - 1] || '', progress: li.progress || 0 };
+            } catch (e) { /* ignore */ }
+            if (st.step && st.step !== lastStage) {
+                lastStage = st.step;
+                log('EU', 'Этап: ' + st.step + ' · ' + st.progress + '%');
+            } else if (i > 0 && i % 24 === 0) {
+                log('EU', 'Установка AmneziaWG на выходе продолжается' + (st.progress ? ' (' + st.progress + '%)' : '') + '...');
+            }
+        }
+        if (!exit.installed) throw new Error('AmneziaWG на выходе не установился за 15 минут');
+    }
+    await sshBuild.openUdp(local, exit.listenPort);
+    log('EU', 'AmneziaWG готов: ' + (exit.address || '') + ', порт ' + (exit.listenPort || '—'));
+
+    // 4. Обфускация выхода — до создания ru_host.
+    if (opts.obf && Object.keys(opts.obf).length) {
+        log('EU', 'Применяю параметры обфускации...');
+        await sshBuild.applyObf(local, opts.obf, (m) => log('EU', m));
+    }
+
+    // 5. Клиент ru_host на выходе.
+    let ruHostConf = '';
+    try { ruHostConf = String(sh('sudo', ['cat', '/root/awg/ru_host.conf']) || ''); } catch (e) { ruHostConf = ''; }
+    if (!/\[Interface\]/i.test(ruHostConf)) {
+        // Старые ключи ru_host без клиента/пира (например, после переноса на EU)
+        // не дают менеджеру создать клиента заново.
+        const peers = await run(local, "grep -c '^#_Name = ru_host' /etc/amnezia/amneziawg/awg0.conf 2>/dev/null || true", 15000);
+        if (!Number(String(peers).trim() || 0)) {
+            await run(local, 'rm -f /root/awg/keys/ru_host.private /root/awg/keys/ru_host.public', 15000);
+        }
+        const created = await localPost('/api/cascade/peer', { name: 'ru_host' }).catch(() => null);
+        if (created && created.conf) ruHostConf = created.conf;
+    }
+    if (!/\[Interface\]/i.test(ruHostConf)) {
+        const p = createPeerClient('ru_host');
+        if (p && p.conf) ruHostConf = p.conf;
+    }
+    if (!/\[Interface\]/i.test(ruHostConf)) throw new Error('Не удалось создать клиента ru_host на EU');
+    // Менеджер мог собрать конфиг по ещё не перезапущенному интерфейсу.
+    // Принудительно ставим ключ текущего awg0.conf и адрес этого EU.
+    let exitConfText = '';
+    try { exitConfText = String(sh('sudo', ['cat', '/etc/amnezia/amneziawg/awg0.conf']) || ''); } catch (e) { exitConfText = ''; }
+    const exitPriv = (exitConfText.match(/^\s*PrivateKey\s*=\s*(.+)$/m) || [])[1] || '';
+    const exitPub = exitPriv ? x25519PubFromPriv(exitPriv) : '';
+    if (exitPub) ruHostConf = ruHostConf.replace(/^\s*PublicKey\s*=.*$/m, 'PublicKey = ' + exitPub);
+    if (euHost) ruHostConf = ruHostConf.replace(/^\s*Endpoint\s*=.*$/m, 'Endpoint = ' + euHost + ':' + (exit.listenPort || port));
+    await run(local, 'systemctl restart awg-quick@awg0', 60000, 'awg0 EU');
+    const innerMatch = String(ruHostConf).match(/^\s*Address\s*=\s*([0-9.]+)/m);
+    const peerInner = (String(ruHostConf).match(/^\s*AllowedIPs\s*=\s*([0-9.]+)/m) || [])[1] || '';
+    log('EU', 'Клиент ru_host: ' + (innerMatch ? innerMatch[1] : 'адрес неизвестен'));
+
+    // 6. Обфускация входа (не влияет на туннель, но нужна клиентам RU).
+    if (opts.obf && Object.keys(opts.obf).length) {
+        log('RU', 'Применяю параметры обфускации...');
+        await sshBuild.applyObf(remote, opts.obf, (m) => log('RU', m));
+    }
+
+    // 7. awg1 на входе: клиент к этому EU.
+    const conf = sshBuild.cascadeConfig(ruHostConf);
+    const fixed = euHost
+        ? conf.replace(/^Endpoint\s*=.*$/m, 'Endpoint = ' + euHost + ':' + (exit.listenPort || port))
+        : conf;
+    await write(remote, sshBuild.AWG_CONF, fixed, '0600');
+    await write(remote, CASCADE_MARKER, String(Date.now()), '0600');
+    log('RU', 'awg1.conf: ' + ((fixed.match(/^Address\s*=.*$/m) || [])[0] || '').trim() +
+        ' / ' + ((fixed.match(/^Endpoint\s*=.*$/m) || [])[0] || '').trim());
+    await run(remote, 'systemctl enable awg-quick@awg1 >/dev/null 2>&1 || true; systemctl restart awg-quick@awg1', 60000, 'awg1 RU');
+    await new Promise(r => setTimeout(r, 3000));
+    const up = await run(remote, 'systemctl is-active awg-quick@awg1', 20000);
+    if (!/active/.test(up)) {
+        const why = await run(remote, 'systemctl status awg-quick@awg1 --no-pager -l 2>&1 | tail -n 8', 30000);
+        throw new Error('awg-quick@awg1 на RU не запустился: ' + why.trim().slice(0, 500));
+    }
+    log('RU', 'туннель awg1 поднят');
+
+    // 8. Маршруты и фильтрация на входе.
+    const subnet = sshBuild.clientSubnet(entry.address) || entrySubnet;
+    const ifaces = Array.isArray(opts.ifaces) && opts.ifaces.length ? opts.ifaces : ['awg0'];
+    const extraRuNets = Array.isArray(opts.extraRuNets) ? opts.extraRuNets : [];
+    const script = sshBuild.routingScript(euHost, subnet, ifaces, extraRuNets);
+    await write(remote, sshBuild.ROUTING_SCRIPT, script, '0755');
+    await write(remote, '/etc/systemd/system/awg-routing.service', sshBuild.ROUTING_SERVICE, '0644');
+    await write(remote, '/etc/systemd/system/awg-routing.timer', sshBuild.ROUTING_TIMER, '0644');
+    await run(remote, 'systemctl daemon-reload', 30000);
+    await run(remote, 'bash ' + sshBuild.ROUTING_SCRIPT, 180000, 'маршруты RU');
+    log('RU', 'маршруты и фильтрация применены (клиентская подсеть ' + subnet + ')');
+    await run(remote, 'systemctl enable awg-routing >/dev/null 2>&1 || true; systemctl enable --now awg-routing.timer', 60000);
+
+    // 9. Рукопожатия и трафик.
+    let euHs = null;
+    let ruHs = null;
+    for (let i = 0; i < 20; i++) {
+        const hsEu = await sshRunner.run(local, "awg show awg0 latest-handshakes 2>/dev/null | awk '{print $2}' | sort -nr | head -1", 20000);
+        const tsEu = parseInt(String(hsEu.out || '').trim(), 10) || 0;
+        const hsRu = await sshRunner.run(remote, "awg show awg1 latest-handshakes 2>/dev/null | awk '{print $2}' | sort -nr | head -1", 20000);
+        const tsRu = parseInt(String(hsRu.out || '').trim(), 10) || 0;
+        const now = Math.floor(Date.now() / 1000);
+        euHs = tsEu ? now - tsEu : null;
+        ruHs = tsRu ? now - tsRu : null;
+        if (euHs !== null && ruHs !== null) break;
+        if (i === 5) log('Проверка', 'жду рукопожатие (до 100 секунд)...');
+        await new Promise(r => setTimeout(r, 5000));
+    }
+    log('Проверка', 'EU: ' + (euHs === null ? 'нет рукопожатия' : euHs + ' сек. назад') +
+        ', RU: ' + (ruHs === null ? 'нет рукопожатия' : ruHs + ' сек. назад'));
+    if (euHs === null || ruHs === null) {
+        throw new Error('Туннель поднят, но рукопожатия нет. Проверьте UDP ' +
+            (exit.listenPort || port) + ' на этом сервере (UFW и firewall провайдера).');
+    }
+
+    const before = Number((await run(remote, "awg show awg1 transfer 2>/dev/null | awk '{s+=$2+$3} END {print s+0}'", 20000)).trim()) || 0;
+    try { if (peerInner) await run(remote, 'ping -c 2 -W 2 ' + peerInner + ' >/dev/null 2>&1 || true', 15000); } catch (e) { /* ignore */ }
+    await new Promise(r => setTimeout(r, 4000));
+    const after = Number((await run(remote, "awg show awg1 transfer 2>/dev/null | awk '{s+=$2+$3} END {print s+0}'", 20000)).trim()) || 0;
+    const traffic = after > before ? after - before : after;
+    log('Трафик', 'через awg1 прошло ' + traffic + ' байт');
+
+    return {
+        success: true,
+        role: 'eu',
+        endpoint: (euHost || '') + ':' + (exit.listenPort || ''),
+        euHandshakeAgo: euHs,
+        ruHandshakeAgo: ruHs,
+        traffic,
+        details: cascadeDetails()
+    };
+}
+
 async function runCascadeBuild(job, remote, opts) {
+    if (opts.role === 'eu') return runCascadeBuildEu(job, remote, opts);
     const log = (title, text) => {
         job.steps.push({ title, text: String(text || ''), at: new Date().toISOString() });
         if (job.steps.length > 400) job.steps.splice(0, job.steps.length - 400);
@@ -12002,6 +12245,16 @@ function x25519Pair() {
     };
 }
 
+function x25519PubFromPriv(priv) {
+    try {
+        const raw = Buffer.from(String(priv || '').trim(), 'base64');
+        if (raw.length !== 32) return '';
+        const der = Buffer.concat([Buffer.from('302e020100300506032b656e04220420', 'hex'), raw]);
+        const key = crypto.createPrivateKey({ key: der, format: 'der', type: 'pkcs8' });
+        return crypto.createPublicKey(key).export({ format: 'der', type: 'spki' }).slice(-32).toString('base64');
+    } catch (e) { return ''; }
+}
+
 async function cascade2Peer(base, user, pass, pathname, body) {
     const root = base.replace(/\/$/, '');
     const login = await fetch(root + '/api/login', {
@@ -12215,7 +12468,7 @@ app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
     res.json({ success: true, running: true });
 });
 
-app.get('/api/cascade2/migrate-ssh/status', checkAuth, (req, res) => {
+app.get('/api/cascade2/migrate-ssh/status', checkAuth, requireAdmin, (req, res) => {
     const j = c2MigrateJob;
     res.json({
         success: true,
@@ -12243,13 +12496,22 @@ app.get('/api/cascade2/status', checkAuth, (req, res) => {
     }
     const iface = st.ifaces[0] || 'awg0';
     const role = det.role || cascadeRole();
-    res.json({
+    const payload = {
         success: true, state: st, role, detected: det,
         euIfaces: cascadeRole() === 'eu' ? existingIfaces() : (st.euIfaces || []),
         clientEndpoint: cascade2ClientEndpoint(),
         counters: cascade2Counters(iface), nets: cascade2Nets(),
         tunnel: { iface: 'awg1', age: cascade2HandshakeAge('awg1') }
-    });
+    };
+    if (!isAdminSession(req)) {
+        st.euHost = '';
+        st.ruIp = '';
+        st.clientEndpoint = '';
+        det.euHost = '';
+        det.ruIp = '';
+        payload.clientEndpoint = '';
+    }
+    res.json(payload);
 });
 
 // EU: принять клиентов со входа, поднять туннель к RU, фильтровать RU-адреса.

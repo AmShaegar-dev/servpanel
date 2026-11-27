@@ -1251,7 +1251,7 @@ async function carbonCascade2Migrate() {
         { value: 'clean', label: 'Полная очистка и установка AWG заново' }
       ] },
       { name: 'role', label: 'Роль этой панели', type: 'select', options: [{ value: 'ru', label: 'Вход (RU)' }, { value: 'eu', label: 'Выход (EU)' }], value: defRole },
-      { name: 'peerHost', label: 'IP второй стороны', placeholder: '194.124.250.127' },
+      { name: 'peerHost', label: 'IP второй стороны', placeholder: 'IP второй стороны' },
       { name: 'peerPort', label: 'SSH-порт', value: '22' },
       { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
       { name: 'peerPass', label: 'Пароль root', type: 'password' },
@@ -1670,11 +1670,14 @@ async function carbonCascadeIfacesSave() {
 }
 
 async function carbonCascadeBuild() {
+  const localRole = (carbon.cascade && carbon.cascade.role)
+    || (carbon.cascade2 && carbon.cascade2.role)
+    || 'ru';
   showCarbonForm({
     title: 'Построить каскад RU → EU',
-    sub: 'Панель по SSH настроит вторую сторону. Это может занять 5–15 минут. Профиль мимикрии и SNI используются в режиме «Архитектор».',
+    sub: 'Панель по SSH настроит вторую сторону. На панели EU мастер сам настроит RU-вход. Это может занять 5–15 минут. Профиль мимикрии и SNI используются в режиме «Архитектор».',
     fields: [
-      { name: 'role', label: 'Роль этого сервера', type: 'select', options: [{ value: 'ru', label: 'Вход (RU)' }, { value: 'eu', label: 'Выход (EU)' }] },
+      { name: 'role', label: 'Роль этого сервера', type: 'select', options: [{ value: 'ru', label: 'Вход (RU)' }, { value: 'eu', label: 'Выход (EU)' }], value: localRole === 'eu' ? 'eu' : 'ru' },
       { name: 'version', label: 'Версия AWG', type: 'select', options: ['3.1', '2.0', '1.5'] },
       { name: 'port', label: 'UDP-порт AWG (обе стороны)', value: '3977', type: 'number', min: 1, max: 65535 },
       { name: 'peerHost', label: 'IP второй стороны', placeholder: '203.0.113.20' },
@@ -1760,35 +1763,14 @@ async function carbonCascadeManual() {
 }
 
 async function carbonCascadeCleanup() {
-  let c2 = carbon.cascade2 || {};
-  let st = c2.state || {};
-  let det = c2.detected || {};
-  const pickPeer = () => {
-    const own = String((carbon.server && carbon.server.ip) || '').trim();
-    const pick = (...xs) => xs.map(x => String(x || '').trim()).find(x => x && x !== own) || '';
-    const role = c2.role || det.role || '';
-    return role === 'eu' ? pick(st.ruIp, det.ruIp) : pick(st.euHost, det.euHost, det.ruIp, st.ruIp);
-  };
-  let host = pickPeer();
-  if (!host) {
-    try {
-      const d = await api('/api/cascade2/status');
-      carbon.cascade2 = d || c2;
-      c2 = carbon.cascade2 || {};
-      st = c2.state || {};
-      det = c2.detected || {};
-      host = pickPeer();
-    } catch (e) { /* подскажем вручную */ }
-  }
   showCarbonForm({
     title: 'Удалить каскад',
     sub: 'Полностью удаляет и каскад 1, и каскад 2: правила DNAT, пометки, ipset, туннель awg1, скрипты маршрутов и сохранённое состояние. Если указать SSH второй стороны, она тоже будет очищена. Клиентские файлы на устройствах не меняются.',
     fields: [
-      { name: 'peerHost', label: 'IP второй стороны', value: host, placeholder: 'Необязательно' },
+      { name: 'peerHost', label: 'IP второй стороны', placeholder: 'Необязательно' },
       { name: 'peerPort', label: 'SSH-порт', value: '22' },
       { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
-      { name: 'peerPass', label: 'Пароль root второй стороны', type: 'password' },
-      { name: 'peerClient', label: 'Имя клиента каскада', value: 'ru_host' }
+      { name: 'peerPass', label: 'Пароль root второй стороны', type: 'password' }
     ],
     submitText: 'Удалить каскад',
     danger: true,
@@ -1799,7 +1781,7 @@ async function carbonCascadeCleanup() {
         method: 'POST',
         body: {
           peerHost, peerPort: v.peerPort || '22', peerUser: v.peerUser || 'root',
-          peerPass: v.peerPass || '', peerClient: v.peerClient || 'ru_host'
+          peerPass: v.peerPass || '', peerClient: 'ru_host'
         }
       });
       const text = (d.steps || []).map(s => s.title + ': ' + s.text).join('\n') || 'Готово';
