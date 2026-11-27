@@ -15112,6 +15112,84 @@ app.delete('/api/ssl/site/:name', checkAuth, requireAdmin, async (req, res) => {
 // ---------------------------------------------------------------------------
 const UPDATE_BACKUP_DIR = BACKUP_DIR;
 const UPDATE_TMP_PREFIX = '.update-upload-';
+const PANEL_RELEASE_REPO = 'AmShaegar-dev/servpanel';
+
+// Установка из архива не содержит .git. Для таких панелей GitHub-кнопка
+// должна не падать на git fetch, а обновляться из последнего Release.
+async function panelReleaseInfo() {
+    const r = await fetchWithTimeout(
+        `https://api.github.com/repos/${PANEL_RELEASE_REPO}/releases/latest`,
+        { headers: { 'User-Agent': 'Servpanel' } },
+        15000
+    );
+    if (!r.ok) throw new Error('GitHub API: HTTP ' + r.status);
+    const j = await r.json();
+    const assets = Array.isArray(j.assets) ? j.assets : [];
+    const tar = assets.find(a => /\.tar\.gz$/i.test(String(a.name || '')) && !/\.sha256$/i.test(String(a.name || '')));
+    const sha = assets.find(a => /\.tar\.gz\.sha256$/i.test(String(a.name || '')));
+    return {
+        tag: String(j.tag_name || ''),
+        name: String(j.name || j.tag_name || ''),
+        version: String(j.tag_name || '').replace(/^v/i, ''),
+        htmlUrl: String(j.html_url || ''),
+        assetUrl: tar ? String(tar.browser_download_url || '') : '',
+        assetName: tar ? String(tar.name || '') : '',
+        shaUrl: sha ? String(sha.browser_download_url || '') : ''
+    };
+}
+
+async function panelReleaseCheck() {
+    const rel = await panelReleaseInfo();
+    const current = updater.version(APP_DIR);
+    const upToDate = !!current && current === rel.version;
+    return {
+        ok: true,
+        mode: 'release',
+        current,
+        latest: rel.version,
+        behind: upToDate ? 0 : 1,
+        upToDate,
+        commit: (rel.tag + ' ' + rel.name).trim(),
+        dirty: [],
+        releaseUrl: rel.htmlUrl,
+        assetUrl: rel.assetUrl,
+        assetName: rel.assetName,
+        shaUrl: rel.shaUrl
+    };
+}
+
+async function startReleaseUpdate(req, res, auditText) {
+    try {
+        const rel = await panelReleaseInfo();
+        if (!rel.assetUrl) throw new Error('В последнем релизе нет .tar.gz');
+        const r = await fetchWithTimeout(rel.assetUrl, {}, 120000);
+        if (!r.ok) throw new Error('Скачивание релиза: HTTP ' + r.status);
+        const len = parseInt(r.headers.get('content-length') || '0', 10);
+        if (len > 10 * 1024 * 1024) throw new Error('Архив релиза больше 10 МБ');
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length > 10 * 1024 * 1024) throw new Error('Архив релиза больше 10 МБ');
+        let sha256 = '';
+        if (rel.shaUrl) {
+            try {
+                const sr = await fetchWithTimeout(rel.shaUrl, {}, 20000);
+                if (sr.ok) sha256 = String(await sr.text()).trim().split(/\s+/)[0] || '';
+            } catch (e) { /* проверка архива пройдёт без sha */ }
+        }
+        const archive = path.join(DATA_DIR, UPDATE_TMP_PREFIX + Date.now() + '-' + (rel.assetName || 'release.tar.gz').replace(/[^A-Za-z0-9._-]/g, '_').slice(-80));
+        fs.writeFileSync(archive, buf, { mode: 0o600 });
+        const started = startUpdateWorker(res, req, {
+            mode: 'apply',
+            archive,
+            sha256,
+            cleanupArchive: true
+        }, auditText || ('Обновление из релиза ' + (rel.tag || '')));
+        if (!started) {
+            try { fs.unlinkSync(archive); } catch (e) { /* ignore */ }
+        }
+    } catch (e) {
+        safeUpdateError(res, e);
+    }
+}
 
 function updateConfig() {
     return {
@@ -15185,9 +15263,15 @@ app.get('/api/update/status', checkAuth, requireAdmin, (req, res) => {
     catch (e) { safeUpdateError(res, e); }
 });
 
-app.get('/api/update/check-git', checkAuth, requireAdmin, (req, res) => {
+app.get('/api/update/check-git', checkAuth, requireAdmin, async (req, res) => {
     try {
+        if (!fs.existsSync(path.join(APP_DIR, '.git'))) {
+            return res.json(await panelReleaseCheck());
+        }
         const g = updater.gitCheck(APP_DIR, 'origin', 'main');
+        if (!g.ok && /not a git repository|does not appear to be a git repository/i.test(String(g.error || ''))) {
+            return res.json(await panelReleaseCheck());
+        }
         res.json(g);
     } catch (e) {
         safeUpdateError(res, e);
@@ -15283,20 +15367,29 @@ app.post('/api/update/url', checkAuth, requireAdmin, async (req, res) => {
 });
 
 // GitHub-обновление: только fast-forward, без reset --hard.
-app.post('/api/update/git', checkAuth, requireAdmin, (req, res) => {
+app.post('/api/update/git', checkAuth, requireAdmin, async (req, res) => {
+    if (!fs.existsSync(path.join(APP_DIR, '.git'))) {
+        return startReleaseUpdate(req, res, 'Запущено обновление панели из последнего релиза GitHub');
+    }
     startUpdateWorker(res, req, { mode: 'git', branch: 'main', remote: 'origin' },
         'Запущено обновление панели с GitHub');
 });
 
 // Принудительное GitHub-обновление: сбрасывает только отслеживаемые файлы кода
-// к origin/main. Данные панели и конфиги AWG не входят в git и не затрагиваются.
-app.post('/api/update/git-force', checkAuth, requireAdmin, (req, res) => {
+// к origin/main. Для установки из архива обновляем из последнего релиза.
+app.post('/api/update/git-force', checkAuth, requireAdmin, async (req, res) => {
+    if (!fs.existsSync(path.join(APP_DIR, '.git'))) {
+        return startReleaseUpdate(req, res, 'Запущено обновление панели из последнего релиза GitHub');
+    }
     startUpdateWorker(res, req, { mode: 'git-force', branch: 'main', remote: 'origin' },
         'Запущено принудительное обновление панели с GitHub (сброс локальных изменений кода)');
 });
 
 // Старый вызов оставлен совместимым, но теперь он тоже безопасный.
-app.post('/api/update', checkAuth, requireAdmin, (req, res) => {
+app.post('/api/update', checkAuth, requireAdmin, async (req, res) => {
+    if (!fs.existsSync(path.join(APP_DIR, '.git'))) {
+        return startReleaseUpdate(req, res, 'Запущено обновление панели из последнего релиза GitHub');
+    }
     startUpdateWorker(res, req, { mode: 'git', branch: 'main', remote: 'origin' },
         'Запущено обновление панели с GitHub (совместимый вызов)');
 });
