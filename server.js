@@ -5337,8 +5337,39 @@ async function cascadeCapacityTick(force) {
 }
 setInterval(cascadeCapacityTick, 10 * 60 * 1000).unref();
 
-function cascadeDetailsEu() {
-    const confPath = path.join(AWG_CONF_DIR, 'awg0.conf');
+function cascade2EuDetails(det) {
+    const out = {
+        configured: true, mode: 'exit', confPath: '/etc/amnezia/amneziawg/awg1.conf',
+        role: 'eu', entryPeer: null, entryEndpoint: '', traffic: 0,
+        tunnelActive: false, timerActive: false, endpoint: '', endpointSource: 'awg1',
+        ifaces: det && det.ifaces ? det.ifaces : [], ipsetCount: 0, ruleExists: false,
+        tableRoute: '', handshakeAgo: null, lastRun: null
+    };
+    try {
+        const ts = Number(shTry('sudo', ['bash', '-c', "awg show awg1 latest-handshakes 2>/dev/null | awk '{print $2}' | sort -nr | head -1"]).trim()) || 0;
+        if (ts > 0) out.handshakeAgo = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+    } catch (e) { /* ignore */ }
+    try {
+        out.entryEndpoint = String(shTry('sudo', ['bash', '-c', "awg show awg1 endpoints 2>/dev/null | awk '{print $2}' | head -1"]) || '').trim();
+        out.endpoint = out.entryEndpoint;
+    } catch (e) { /* ignore */ }
+    try {
+        out.traffic = Number(shTry('sudo', ['bash', '-c', "awg show awg1 transfer 2>/dev/null | awk '{s+=$2+$3} END {print s+0}'"]).trim()) || 0;
+    } catch (e) { /* ignore */ }
+    try {
+        const cnt = shTry('sudo', ['bash', '-c', "ipset list ru 2>/dev/null | grep -c '^[0-9]' || true"]).trim();
+        out.ipsetCount = parseInt(cnt, 10) || 0;
+    } catch (e) { /* ignore */ }
+    try {
+        out.ruleExists = String(shTry('ip', ['rule', 'show']) || '').includes('fwmark 0x3001');
+        out.tableRoute = String(shTry('ip', ['route', 'show', 'table', '3001']) || '').trim().split('\n')[0] || '';
+    } catch (e) { /* ignore */ }
+    out.tunnelActive = out.handshakeAgo !== null && out.handshakeAgo < 180;
+    out.failover = { applicable: false, reason: 'Резервирование настраивается на RU-входе' };
+    return out;
+}
+
+function cascadeDetailsEu() {    const confPath = path.join(AWG_CONF_DIR, 'awg0.conf');
     const text = readTextSafe(confPath);
     const peer = text ? euCascadePeer(text) : null;
     const out = {
@@ -5388,7 +5419,11 @@ function cascadeDetailsEu() {
 }
 
 function cascadeDetails() {
-    if (cascadeRole() === 'eu') return cascadeDetailsEu();
+    if (cascadeRole() === 'eu') {
+        const d2 = cascade2Detect();
+        if (d2.relay && d2.role === 'eu') return cascade2EuDetails(d2);
+        return cascadeDetailsEu();
+    }
     const conf = existingCascadeConf();
     if (TEST_MODE) {
         // В тестах не трогаем systemd/iptables и не шумим ошибками sudo
@@ -12527,7 +12562,7 @@ function cascade2Detect() {
     }
     // EU: признак релея — клиентский awg1, не-RU локация и правило пометки.
     const notRu = !cascade2IpInRu(cascade2Ip());
-    out.relay = !!out.euHost || (!!out.ruIp && notRu && out.ifaces.length > 0);
+    out.relay = !!out.euHost || (out.role === 'eu' && out.ifaces.length > 0) || (!!out.ruIp && notRu && out.ifaces.length > 0);
     return out;
 }
 
