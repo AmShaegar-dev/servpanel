@@ -7154,10 +7154,16 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
     const data = req.body || {};
     const peerClient = String(data.peerClient || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '') || 'ru_host';
     const steps = [];
-    const log = (title, text) => steps.push({ title, text });
+    const log = (title, text, ok = true) => steps.push({ title, text: String(text || ''), ok: !!ok });
     // 1. Своя сторона: службы, правила, туннель, клиент.
-    const local = await localPost('/api/cascade/teardown', { peerClient, removeTunnel: true, removeClient: true });
-    log('Этот сервер', (local && local.removed ? local.removed.join('; ') : (local && local.error) || 'готово'));
+    let local = null;
+    try { local = await localPost('/api/cascade/teardown', { peerClient, removeTunnel: true, removeClient: true }); }
+    catch (e) { local = { error: (e && e.message) || String(e) }; }
+    if (local && Array.isArray(local.removed) && local.removed.length) {
+        for (const t of local.removed) log('Этот сервер', t, true);
+    } else {
+        log('Этот сервер', (local && local.error) || 'готово', !(local && local.error));
+    }
 
     // 2. Вторая сторона по SSH: те же действия + удаление клиента ru_host.
     const host = String(data.peerHost || '').replace(/^https?:\/\//i, '').replace(/[:/].*$/, '').trim();
@@ -7183,10 +7189,21 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
             'systemctl daemon-reload',
             'echo cleaned'
         ].join('; ');
-        const r = await sshRunner.run(remote, cmd, 120000);
-        log('Вторая сторона ' + host, r.code === 0 ? 'каскад и клиент ' + peerClient + ' удалены' : String(r.out).trim().slice(0, 300));
+        try {
+            const r = await sshRunner.run(remote, cmd, 120000);
+            const out = String(r.out || '').trim();
+            const authFail = /Permission denied|Authentication failed|Access denied/i.test(out);
+            const ok = r.code === 0 && !authFail;
+            log('Вторая сторона ' + host,
+                ok ? 'каскад и клиент ' + peerClient + ' удалены'
+                    : authFail ? 'неверный логин или пароль SSH (Permission denied). Локальная часть очищена, вторую сторону почистите с её панели.'
+                        : out.slice(0, 300) || 'SSH вернул ошибку',
+                ok);
+        } catch (e) {
+            log('Вторая сторона ' + host, (e && e.message) || String(e), false);
+        }
     } else {
-        log('Вторая сторона', 'не указана — почистите её так же из своей панели');
+        log('Вторая сторона', 'не указана — почистите её так же из своей панели', false);
     }
     auditLog(req, 'Каскад удалён' + (host ? ' (и на ' + host + ')' : ''));
     res.json({ success: true, steps });

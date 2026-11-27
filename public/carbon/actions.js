@@ -1762,6 +1762,43 @@ async function carbonCascadeManual() {
   });
 }
 
+function showCarbonCleanupChecklist(host) {
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  const peerLabel = host ? 'Вторая сторона ' + host : 'Вторая сторона';
+  modal.innerHTML = `<div class="modal-card modal-wide"><div class="modal-head"><div><div class="modal-title">Удаление каскада</div><div class="modal-sub">${host ? 'Очищаю этот сервер и ' + escHtml(host) : 'Очищаю этот сервер'}</div></div><button class="icon-btn" data-cleanup-close aria-label="Закрыть">✕</button></div><div class="checklist" data-cleanup-list style="max-height:45vh;overflow:auto"></div><div class="modal-actions"><button class="btn" data-cleanup-close>Закрыть</button></div></div>`;
+  document.body.appendChild(modal);
+  modal.hidden = false;
+  modal.querySelectorAll('[data-cleanup-close]').forEach(b => b.addEventListener('click', () => modal.remove()));
+  const list = modal.querySelector('[data-cleanup-list]');
+  const paint = items => {
+    list.innerHTML = items.map(s => {
+      const ico = s.run ? '◌' : s.ok ? '✓' : '✕';
+      const cls = s.run ? 'checklist-run' : s.ok ? 'checklist-ok' : 'checklist-err';
+      return `<div class="checklist-item"><span class="checklist-ico ${cls}">${ico}</span><div><b class="${cls}">${escHtml(s.title)}</b><div class="checklist-desc">${escHtml(s.text)}</div></div></div>`;
+    }).join('');
+  };
+  paint([
+    { title: 'Этот сервер', text: 'Останавливаю службы и удаляю правила', run: true },
+    host
+      ? { title: peerLabel, text: 'Подключаюсь по SSH и очищаю', run: true }
+      : { title: peerLabel, text: 'Не указана — очистится только этот сервер', ok: false }
+  ]);
+  return {
+    done(steps) {
+      const items = steps && steps.length ? steps : [{ title: 'Готово', text: 'Каскад удалён', ok: true }];
+      const failed = items.some(s => s.ok === false);
+      paint(items.map(s => ({ title: s.title, text: s.text, ok: s.ok !== false })));
+      if (failed) {
+        list.insertAdjacentHTML('beforeend', '<div class="notice warn" style="margin-top:10px">Локальная часть очищена. Вторую сторону можно почистить с её панели.</div>');
+      }
+    },
+    fail(msg) {
+      paint([{ title: 'Ошибка удаления', text: String(msg || 'неизвестно'), ok: false }]);
+    }
+  };
+}
+
 async function carbonCascadeCleanup() {
   showCarbonForm({
     title: 'Удалить каскад',
@@ -1777,16 +1814,20 @@ async function carbonCascadeCleanup() {
     onSubmit: async v => {
       const peerHost = String(v.peerHost || '').trim();
       if (peerHost && !v.peerPass) throw new Error('Укажите пароль root второй стороны или очистите поле IP');
-      const d = await api('/api/cascade/cleanup', {
-        method: 'POST',
-        body: {
-          peerHost, peerPort: v.peerPort || '22', peerUser: v.peerUser || 'root',
-          peerPass: v.peerPass || '', peerClient: 'ru_host'
-        }
-      });
-      const text = (d.steps || []).map(s => s.title + ': ' + s.text).join('\n') || 'Готово';
-      showCarbonTextModal('Удаление каскада', text);
-      await carbonRefresh('Каскад удалён');
+      const progress = showCarbonCleanupChecklist(peerHost);
+      try {
+        const d = await api('/api/cascade/cleanup', {
+          method: 'POST',
+          body: {
+            peerHost, peerPort: v.peerPort || '22', peerUser: v.peerUser || 'root',
+            peerPass: v.peerPass || '', peerClient: 'ru_host'
+          }
+        });
+        progress.done(d.steps || []);
+        await carbonRefresh('Каскад удалён');
+      } catch (e) {
+        progress.fail((e && e.message) || 'Не удалось удалить каскад');
+      }
     }
   });
 }
