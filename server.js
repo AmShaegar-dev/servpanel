@@ -5558,10 +5558,13 @@ function ip6Cleanup() {
 
 app.get('/api/ipv6/status', checkAuth, (req, res) => {
     const st = ipv6StateRead();
+    const sysctlBlocked = ipv6IsBlocked();
+    const ufwIpv6 = ufwIpv6Setting();
     res.json({
         success: true,
-        blocked: ipv6IsBlocked(),
-        ufwIpv6: ufwIpv6Setting(),
+        blocked: sysctlBlocked && ufwIpv6 === 'no',
+        sysctlBlocked,
+        ufwIpv6,
         blockedAt: st.blockedAt || null,
         originalUfwIpv6: st.ufwIpv6 || null
     });
@@ -5570,7 +5573,7 @@ app.get('/api/ipv6/status', checkAuth, (req, res) => {
 app.post('/api/ipv6/block', checkAuth, requireAdmin, (req, res) => {
     try {
         const st = ipv6StateRead();
-        if (!ipv6IsBlocked()) {
+        if (!st.blocked) {
             ipv6StateWrite({
                 blocked: true,
                 blockedAt: Date.now(),
