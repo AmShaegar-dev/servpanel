@@ -80,39 +80,46 @@ KPI, CPU/RAM, uptime, график и распределение трафика 
 
 ## ⚡ Быстрый старт (Установка только панели)
 
-### Способ 1: Установка из релизного архива (рекомендуется)
-Скачайте последний релиз с GitHub Releases и запустите локальный установщик. Так установка не зависит от `raw.githubusercontent.com` и не требует git:
+### Способ 1: Установка через `curl` с меню (рекомендуется)
+Подключитесь к серверу по SSH и выполните одну команду. Скрипт покажет меню — выберите нужный пункт цифрой:
 
 ```bash
-cd /tmp
-VER=3.3.125
-curl -fL --connect-timeout 10 --max-time 180 \
-  -o servpanel-${VER}.tar.gz \
-  https://github.com/AmShaegar-dev/servpanel/releases/download/v${VER}/servpanel-${VER}.tar.gz
-
-tar -xzf servpanel-${VER}.tar.gz
-sudo env ACTION=install ACCESS_TYPE=1 PANEL_PORT=2999 \
-  bash /tmp/servpanel-${VER}/install.sh
+curl -fsSL --connect-timeout 10 --max-time 60 \
+  https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install.sh \
+  | sudo bash
 ```
 
-Для установки по домену:
-
-```bash
-sudo env ACTION=install ACCESS_TYPE=2 DOMAIN_NAME=panel.example.com PANEL_PORT=443 \
-  bash /tmp/servpanel-${VER}/install.sh
+```
+1) Установить панель
+2) Удалить панель
+3) Выход
 ```
 
-Порт панели по умолчанию — **2999**. Если нужен интерактивный мастер, запустите без `ACTION`:
+При выборе **1** установщик спросит только:
+* способ доступа — `1` (IP) или `2` (домен);
+* порт панели — по умолчанию **2999**.
+
+Всё остальное — AmneziaWG, AdGuard Home, каскад и MTProto — настраивается уже из веб-панели.
+
+Если `raw.githubusercontent.com` недоступен, тот же скрипт с CDN:
 
 ```bash
-sudo bash /tmp/servpanel-${VER}/install.sh
-```
-
-Если нужен один `curl`-скрипт, используйте CDN вместо raw GitHub:
-
-```bash
-curl -fsSL --connect-timeout 10 --max-time 30 \
+curl -fsSL --connect-timeout 10 --max-time 60 \
   https://cdn.jsdelivr.net/gh/AmShaegar-dev/servpanel@main/install.sh \
+  | sudo bash
+```
+
+Без `curl` (через `wget`):
+
+```bash
+wget -qO- https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install.sh | sudo bash
+```
+
+Установка без вопросов, для скриптов и автоматизации:
+
+```bash
+curl -fsSL --connect-timeout 10 --max-time 60 \
+  https://raw.githubusercontent.com/AmShaegar-dev/servpanel/main/install.sh \
   | sudo env ACTION=install ACCESS_TYPE=1 PANEL_PORT=2999 bash
 ```
 
@@ -167,7 +174,37 @@ curl -fsSL https://cdn.jsdelivr.net/gh/AmShaegar-dev/servpanel@main/install.sh \
 
 ---
 
-### Способ 2: Ручная установка (через Git)
+### Способ 2: Установка из релизного архива
+Если `raw.githubusercontent.com` недоступен или нужен зафиксированный релиз, скачайте архив с GitHub Releases и запустите установщик локально:
+
+```bash
+cd /tmp
+VER=3.3.125
+curl -fL --connect-timeout 10 --max-time 180 \
+  -o servpanel-${VER}.tar.gz \
+  https://github.com/AmShaegar-dev/servpanel/releases/download/v${VER}/servpanel-${VER}.tar.gz
+
+tar -xzf servpanel-${VER}.tar.gz
+sudo bash /tmp/servpanel-${VER}/install.sh
+```
+
+Установщик из архива показывает то же меню с выбором цифрами. Без вопросов:
+
+```bash
+sudo env ACTION=install ACCESS_TYPE=1 PANEL_PORT=2999 \
+  bash /tmp/servpanel-${VER}/install.sh
+```
+
+Для установки по домену:
+
+```bash
+sudo env ACTION=install ACCESS_TYPE=2 DOMAIN_NAME=panel.example.com PANEL_PORT=443 \
+  bash /tmp/servpanel-${VER}/install.sh
+```
+
+---
+
+### Способ 3: Ручная установка (через Git)
 Если вы хотите развернуть только код панели вручную:
 ```bash
 apt update && apt install -y curl git nodejs npm nginx ufw zip ipset sshpass
