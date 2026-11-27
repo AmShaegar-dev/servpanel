@@ -932,9 +932,11 @@ function realTrafficDistribution() {
   if (c2relay && c2role === 'eu' && c2d.counters) {
     d = { role: 'eu2', tunnel: Number(c2d.counters.ruBytes) || 0, direct: Number(c2d.counters.euBytes) || 0, blocked: c2blocked, source: 'cascade2' };
   } else if (c2relay && c2role === 'ru' && c2d.counters) {
-    const ru = Number(c2d.counters.ruBytes) || 0;
-    const eu = Number(c2d.counters.euBytes) || 0;
-    d = { role: 'relay', tunnel: ru, direct: eu, blocked: c2blocked, source: 'cascade2' };
+    // На RU-релее локальных клиентов нет, поэтому counters.ruBytes = 0.
+    // Берём реальный объём awg1 (tunnelRaw) и RU-выход из mangle.
+    const tunnel = Number(d.tunnelRaw) || Number(c2d.counters.euBytes) || 0;
+    const direct = Number(d.mangle && d.mangle.direct) || Number(c2d.counters.ruBytes) || 0;
+    d = { role: 'relay', tunnel, direct, blocked: c2blocked, source: 'cascade2' };
   }
   const role = d.role || 'ru';
   const isEu = role === 'eu';
@@ -1082,8 +1084,14 @@ function realServices() {
 function geoipCard() {
   const tools = carbon.toolsStatus || {};
   const ru = tools.ruDrop || {};
-  const ifaces = carbon.interfaces || [];
+  const c2 = carbon.cascade2 || {};
   const activeIfaces = Array.isArray(ru.ifaces) ? ru.ifaces : [];
+  const extra = [];
+  // На RU-релее фильтрация применяется к туннелю awg1, которого нет
+  // в /api/interfaces (он исключён как CASCADE_IFACE). На EU — awg0.
+  if (c2.role === 'ru') extra.push('awg1');
+  if (c2.role === 'eu') extra.push('awg0');
+  const ifaces = [...new Set([...(carbon.interfaces || []), ...activeIfaces, ...extra].filter(Boolean))];
   const ifaceChips = ifaces.map(i => `<label class="chip ${activeIfaces.includes(i) ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" value="${escHtml(i)}" ${activeIfaces.includes(i) ? 'checked' : ''}> ${escHtml(i)}</label>`).join('') || '<span class="muted">Интерфейсы не найдены</span>';
   const geoActive = !!ru.active;
   return `<section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">GeoIP: блокировка RU</div><div class="card-sub">Правила применяются к выбранным интерфейсам целиком</div></div>${tag(geoActive ? 'активна' : 'выключена', geoActive ? 'good' : 'warn')}</div>
@@ -1208,12 +1216,22 @@ function realCascadeRelay() {
     <div class="donut-note">Скрипт скачивает свежий список RU и пересобирает ipset и маршруты. На RU это список для прокси, на EU — для фильтрации российских адресов.</div></section>`;
   const ports = (s.ports || [s.ruPort || 3977]).slice().sort((a, b) => a - b);
   const mb = b => ((Number(b) || 0) / 1048576).toFixed(1);
-  const total = (Number(c.ruBytes) || 0) + (Number(c.euBytes) || 0);
-  const ruPct = total ? Math.round((Number(c.ruBytes) || 0) * 100 / total) : 0;
+  const dist = carbon.distribution || {};
+  // На RU-релее локальных клиентов нет: c2.counters почти нулевые.
+  // Для страницы берём реальные счётчики awg1/mangle из distribution.
+  const ruBytesView = isEu
+    ? (Number(c.ruBytes) || 0)
+    : (Number(dist.mangle && dist.mangle.direct) || Number(c.ruBytes) || 0);
+  const euBytesView = isEu
+    ? (Number(c.euBytes) || 0)
+    : (Number(dist.tunnelRaw) || Number(c.euBytes) || 0);
+  const totalView = isEu ? (Number(c.totalRx) || ruBytesView + euBytesView) : (ruBytesView + euBytesView);
+  const total = ruBytesView + euBytesView;
+  const ruPct = total ? Math.round(ruBytesView * 100 / total) : 0;
   const euPct = total ? 100 - ruPct : 0;
   const ifaceList = (s.euIfaces && s.euIfaces.length) ? s.euIfaces : ['awg0', 'awg1'];
   return `<div class="page-head"><div><div class="page-title">${isEu ? 'Каскад v2 · EU-выход' : 'Каскад v2 · релей'}</div><div class="page-sub">${isEu ? 'Клиенты терминируются здесь, российские адреса уходят через RU.' : 'Вход RU ничего не расшифровывает. Клиенты терминируются на EU, российские адреса выходят с RU.'}</div></div><div class="page-actions">${cascade2Switch(true)}<button class="btn" data-carbon-action="cascade-cleanup">${icon('trash')}Удалить каскад</button><button class="btn" data-carbon-action="cascade2-refresh">${icon('refresh')}Обновить</button></div></div>
-    <div class="mini-grid">${mini('Вход RU', String(s.ruPort || '—') + '/udp', 'портов: ' + ports.length)}${isEu ? mini('Прошло через EU', mb(c.euBytes) + ' МБ', euPct + '% трафика') : mini('Выход с RU', mb(c.ruBytes) + ' МБ', ruPct + '% трафика')}${isEu ? mini('Ушло в RU', mb(c.ruBytes) + ' МБ', ruPct + '% трафика') : mini('На EU', mb(c.euBytes) + ' МБ', euPct + '% трафика')}${mini('Туннель EU↔RU', t.age >= 0 ? (t.age + ' с назад') : 'нет связи', t.iface || 'awg1')}${mini('Сетей в ipset ru', String(c2.nets || 0), (s.ifaces || []).join(', ') || '—')}</div>
+    <div class="mini-grid">${mini('Вход RU', String(s.ruPort || '—') + '/udp', 'портов: ' + ports.length)}${isEu ? mini('Прошло через EU', mb(euBytesView) + ' МБ', euPct + '% трафика') : mini('Выход с RU', mb(ruBytesView) + ' МБ', ruPct + '% трафика')}${isEu ? mini('Ушло в RU', mb(ruBytesView) + ' МБ', ruPct + '% трафика') : mini('На EU', mb(euBytesView) + ' МБ', euPct + '% трафика')}${mini('Туннель EU↔RU', t.age >= 0 ? (t.age + ' с назад') : 'нет связи', t.iface || 'awg1')}${mini('Сетей в ipset ru', String(c2.nets || 0), (s.ifaces || []).join(', ') || '—')}</div>
     <div class="grid">
       <section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Порты входа</div><div class="card-sub">Каждый порт пробрасывается на EU без расшифровки</div></div>${tag(String(ports.length), 'muted')}</div>
         <div class="list">${ports.map(p => `<div class="list-row"><b>${p}/udp</b><span class="mono">→ ${escHtml(s.euHost || s.ruIp || '—')}:${p}</span>${ports.length > 1 ? `<button class="row-action" data-carbon-action="cascade2-port-del" data-port="${p}" title="Убрать">${icon('trash')}</button>` : ''}</div>`).join('')}</div>
@@ -1231,7 +1249,7 @@ function realCascadeRelay() {
       <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Конфиги клиентов</div><div class="card-sub">На EU клиентские профили отдаются с endpoint российского входа</div></div>${tag(c2.clientEndpoint || 'авто', 'muted')}</div>
         <div class="page-actions" style="margin-top:8px"><label class="field" style="min-width:260px"><span>Endpoint для клиентов (пусто — автоматически)</span><input id="carbonC2Endpoint" value="${escHtml(s.clientEndpoint || '')}" placeholder="${escHtml(c2.clientEndpoint || '45.0.0.1:3977')}"></label><button class="btn" data-carbon-action="cascade2-endpoint-save">${icon('check')}Сохранить</button><button class="btn" data-carbon-action="cascade2-awg1">${icon('wrench')}Конфиг awg1</button></div></section>
       <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">Сколько ушло через российский выход и сколько напрямую с EU</div></div></div>
-        <div class="list"><div class="list-row"><b>Выход с RU</b><span class="mono">${mb(c.ruBytes)} МБ · ${ruPct}%</span></div><div class="list-row"><b>На EU</b><span class="mono">${mb(c.euBytes)} МБ · ${euPct}%</span></div><div class="list-row"><b>Всего принято</b><span class="mono">${mb(c.totalRx)} МБ</span></div></div></section>
+        <div class="list"><div class="list-row"><b>Выход с RU</b><span class="mono">${mb(ruBytesView)} МБ · ${ruPct}%</span></div><div class="list-row"><b>На EU</b><span class="mono">${mb(euBytesView)} МБ · ${euPct}%</span></div><div class="list-row"><b>Всего принято</b><span class="mono">${mb(totalView)} МБ</span></div></div></section>
       ${isEu ? '' : geoipCard()}
     </div>`;
 }

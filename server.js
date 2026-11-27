@@ -481,6 +481,14 @@ function validIfaces(arr) {
         arr.every(i => typeof i === 'string' && IFACE_RE.test(i) && existingIfaces().includes(i));
 }
 
+// Для GeoIP разрешаем и туннельные awg/amn-интерфейсы: на RU-релее
+// фильтровать нужно awg1, которого нет в existingIfaces().
+function validGeoIfaces(arr) {
+    return Array.isArray(arr) && arr.length > 0 &&
+        arr.every(i => typeof i === 'string' && IFACE_RE.test(i) &&
+            (existingIfaces().includes(i) || /^(awg|amn)[0-9]+$/.test(i)));
+}
+
 // Источники списка RU-адресов для GeoIP-блокировки.
 // OpenCCK отдаёт обычный text/cidr4 — его можно парсить тем же скриптом.
 const RU_GEOIP_SOURCES = {
@@ -2576,7 +2584,9 @@ app.get('/api/traffic/distribution', checkAuth, (req, res) => {
             source = 'unavailable';
         }
         const sum = tunnel + direct + blocked;
-        if (sum > clientTotal && sum > 0) {
+        // Если локальных клиентов нет (RU-релей каскада 2), clientTotal=0,
+        // но mangle/awg1 уже содержат реальный трафик — не обнуляем его.
+        if (clientTotal > 0 && sum > clientTotal && sum > 0) {
             tunnel = Math.round(tunnel * clientTotal / sum);
             direct = Math.round(direct * clientTotal / sum);
             blocked = Math.max(0, clientTotal - tunnel - direct);
@@ -5974,7 +5984,7 @@ app.post('/api/tools/rudrop', checkAuth, (req, res) => {
         return res.json({ success: true });
     }
 
-    if (!validIfaces(ifaces)) return res.status(400).json({ error: 'Выберите существующие интерфейсы' });
+    if (!validGeoIfaces(ifaces)) return res.status(400).json({ error: 'Выберите существующие интерфейсы' });
     const scheduleVal = String(schedule || 'weekly');
     const cronLine = scheduleVal === 'daily' ? '0 4 * * *' : (scheduleVal === 'weekly' ? '0 4 * * 1' : '');
     const ports = String((req.body && req.body.ports) || '').trim();
