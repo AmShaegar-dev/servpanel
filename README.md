@@ -92,6 +92,8 @@ curl -4 -fsSL --connect-timeout 10 --max-time 60 \
 
 Этот вариант не использует `raw.githubusercontent.com`: скрипт берётся из последнего GitHub Release, а установщик сам скачивает архив релиза. Поэтому установка не зависит от блокировок raw и от `git clone`.
 
+> Если старая команда с `raw.githubusercontent.com` зависала — это блокировка raw, а не ошибка установщика. Команда выше её не использует: при недоступности источника `curl` завершится по таймауту, а не будет висеть бесконечно.
+
 ```
 1) Установить панель
 2) Удалить панель
@@ -107,7 +109,7 @@ curl -4 -fsSL --connect-timeout 10 --max-time 60 \
 Если GitHub Releases недоступен, тот же скрипт с CDN jsDelivr:
 
 ```bash
-curl -fsSL --connect-timeout 10 --max-time 60 \
+curl -4 -fsSL --connect-timeout 10 --max-time 60 \
   https://cdn.jsdelivr.net/gh/AmShaegar-dev/servpanel@main/install.sh \
   | sudo bash
 ```
@@ -135,52 +137,10 @@ curl -4 -fsSL --connect-timeout 10 --max-time 60 \
 4. Добавит в **UFW** разрешения для SSH, порта панели и портов уже установленного AmneziaWG. Сам UFW принудительно не включается — чтобы не оборвать форвардинг существующего VPN.
 5. Запустит панель через `PM2` и добавит её в автозагрузку (`pm2 startup` / `pm2 save`).
 
-### Удаление панели из консоли
-
-Если панель установлена, проще локально:
-
-```bash
-sudo bash /root/servpanel/uninstall.sh
-```
-
-Или тем же скриптом через CDN. Есть два режима:
-
-| Режим | Что удаляется | Что остаётся |
-| --- | --- | --- |
-| **Только панель** | служба PM2 и автозагрузка, `/root/servpanel`, правила Fail2ban и logrotate, сайт Nginx и сертификат панели, порт панели в UFW | AmneziaWG с клиентами, AdGuard, WARP/Xray, MTProto-прокси |
-| **Полная очистка** | всё из первого режима плюс AmneziaWG, AdGuard Home, WARP + Xray и MTProto-прокси (Telemt, MTProxyL, MTProto.zig): службы, конфиги, ключи и их правила UFW | SSH, Node.js, UFW, Nginx, пакеты других сервисов |
-
-Перед удалением данные панели (сессии, пароли, настройки, Telegram-бот) сохраняются в `/root/backups/servpanel-before-remove-<дата>.tar.gz` с правами `600`. Полная очистка требует ввести `DELETE` — без этого сервер не меняется.
-
-Без вопросов (для скриптов):
-
-```bash
-# только панель
-curl -fsSL https://cdn.jsdelivr.net/gh/AmShaegar-dev/servpanel@main/install.sh \
-  | sudo env ACTION=panel bash
-
-# полная очистка, подтверждение одной строкой
-curl -fsSL https://cdn.jsdelivr.net/gh/AmShaegar-dev/servpanel@main/install.sh \
-  | sudo env ACTION=full CONFIRM=DELETE bash
-```
-
-Если панель ещё установлена, то же самое доступно локально:
-`bash /root/servpanel/uninstall.sh` (или `npm run uninstall`).
-
-
-После завершения установки панель будет доступна в браузере по адресу:
-👉 **`http(s)://ВАШ_IP_ИЛИ_ДОМЕН:<порт>`** — точный адрес и пароль установщик выведет в конце.
-
-**Дальше — из панели:**
-1. Войдите под `admin`.
-2. Вкладка **«Установка»** → установите **AmneziaWG** (при необходимости — каскад RU → EU).
-3. Вкладка **«Службы и DNS»** → установите **AdGuard Home**.
-4. Смените пароль администратора в панели.
-
 ---
 
 ### Способ 2: Установка из релизного архива
-Если `raw.githubusercontent.com` и CDN недоступны, скачайте последний релиз напрямую с GitHub Releases и запустите установщик локально:
+Если нужно скачать архив вручную или зафиксировать конкретную версию:
 
 ```bash
 cd /tmp
@@ -196,7 +156,7 @@ sudo bash /tmp/servpanel-*/install.sh
 ```bash
 cd /tmp
 VER=3.3.126
-curl -fL --connect-timeout 10 --max-time 180 \
+curl -4 -fL --connect-timeout 10 --max-time 180 \
   -o servpanel-${VER}.tar.gz \
   https://github.com/AmShaegar-dev/servpanel/releases/download/v${VER}/servpanel-${VER}.tar.gz
 tar -xzf servpanel-${VER}.tar.gz
@@ -221,6 +181,7 @@ sudo env ACTION=install ACCESS_TYPE=2 DOMAIN_NAME=panel.example.com PANEL_PORT=4
 
 ### Способ 3: Ручная установка (через Git)
 Если вы хотите развернуть только код панели вручную:
+
 ```bash
 apt update && apt install -y curl git nodejs npm nginx ufw zip ipset sshpass
 npm install -g pm2
@@ -232,6 +193,57 @@ echo 2999 > .panel_port && echo 2999 > .panel_public_port
 pm2 start server.js --name "awg-admin"
 pm2 save && pm2 startup
 ```
+
+---
+
+### После завершения установки
+
+Панель будет доступна в браузере по адресу:
+👉 **`http(s)://ВАШ_IP_ИЛИ_ДОМЕН:<порт>`** — точный адрес и пароль установщик выведет в конце.
+
+**Дальше — из панели:**
+1. Войдите под `admin`.
+2. Вкладка **«Установка»** → установите **AmneziaWG** (при необходимости — каскад RU → EU).
+3. Вкладка **«Службы и DNS»** → установите **AdGuard Home**.
+4. Смените пароль администратора в панели.
+
+---
+
+### Удаление панели из консоли
+
+Если панель установлена, проще локально:
+
+```bash
+sudo bash /root/servpanel/uninstall.sh
+```
+
+Или тем же установщиком из релиза. Есть два режима:
+
+| Режим | Что удаляется | Что остаётся |
+| --- | --- | --- |
+| **Только панель** | служба PM2 и автозагрузка, `/root/servpanel`, правила Fail2ban и logrotate, сайт Nginx и сертификат панели, порт панели в UFW | AmneziaWG с клиентами, AdGuard, WARP/Xray, MTProto-прокси |
+| **Полная очистка** | всё из первого режима плюс AmneziaWG, AdGuard Home, WARP + Xray и MTProto-прокси (Telemt, MTProxyL, MTProto.zig): службы, конфиги, ключи и их правила UFW | SSH, Node.js, UFW, Nginx, пакеты других сервисов |
+
+Перед удалением данные панели (сессии, пароли, настройки, Telegram-бот) сохраняются в `/root/backups/servpanel-before-remove-<дата>.tar.gz` с правами `600`. Полная очистка требует ввести `DELETE` — без этого сервер не меняется.
+
+Без вопросов (для скриптов):
+
+```bash
+# только панель
+curl -4 -fsSL --connect-timeout 10 --max-time 60 \
+  -o /tmp/servpanel-install.sh \
+  https://github.com/AmShaegar-dev/servpanel/releases/latest/download/install.sh \
+  && sudo env ACTION=panel bash /tmp/servpanel-install.sh
+
+# полная очистка, подтверждение одной строкой
+curl -4 -fsSL --connect-timeout 10 --max-time 60 \
+  -o /tmp/servpanel-install.sh \
+  https://github.com/AmShaegar-dev/servpanel/releases/latest/download/install.sh \
+  && sudo env ACTION=full CONFIRM=DELETE bash /tmp/servpanel-install.sh
+```
+
+Если панель ещё установлена, то же самое доступно локально:
+`bash /root/servpanel/uninstall.sh` (или `npm run uninstall`).
 
 ---
 
