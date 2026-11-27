@@ -8239,7 +8239,8 @@ async function runCascadeBuild(job, remote, opts) {
     // Менеджер мог переиспользовать старый ru_host.conf с публичным ключом
     // прошлого awg0. Берём ключ текущего awg0 и правим Peer.PublicKey.
     try {
-        const euConf = String((await run(remote, 'cat ' + sshBuild.AWG0_CONF, 30000, 'awg0 EU')) || '');
+        const euRead = await sshRunner.run(remote, 'cat ' + sshBuild.AWG0_CONF, 30000);
+        const euConf = String((euRead && euRead.out) || '');
         const euPriv = (euConf.match(/^\s*PrivateKey\s*=\s*(.+)$/m) || [])[1] || '';
         const euPub = euPriv ? x25519PubFromPriv(euPriv) : '';
         if (euPub) ruHost.conf = String(ruHost.conf).replace(/^\s*PublicKey\s*=.*$/m, 'PublicKey = ' + euPub);
