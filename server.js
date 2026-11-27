@@ -18928,34 +18928,53 @@ function readPublicPortFile() {
 }
 // Внутренний порт, который слушает Node. Файл важнее переменной окружения:
 // так обновление панели не сбрасывает кастомный порт.
-// Но во время обновления старый воркер ждёт панель на порту из окружения
-// (обычно 3000). Файл .panel_port мог остаться от неудачного переезда на 2999,
-// поэтому на время обновления синхронизируем его с портом воркера.
 const UPDATE_RUNNING = updateInProgress();
 const ENV_PANEL_PORT = parseInt(process.env.PANEL_PORT, 10) || 0;
 const ENV_PUBLIC_PORT = parseInt(process.env.PANEL_PUBLIC_PORT, 10) || 0;
-function readNginxProxyPort() {
-    try {
-        const text = fs.readFileSync(path.join(NGX_AVAILABLE, PANEL_SITE_NAME), 'utf8');
-        const m = text.match(/proxy_pass\s+http:\/\/127\.0\.0\.1:(\d+)/);
-        const p = m ? parseInt(m[1], 10) : 0;
-        return p > 0 && p < 65536 ? p : 0;
-    } catch (e) { return 0; }
-}
-if (UPDATE_RUNNING && ENV_PANEL_PORT > 0 && ENV_PANEL_PORT < 65536 &&
-    ENV_PANEL_PORT !== ENV_PUBLIC_PORT) {
-    const filePort = readPortFile();
-    const nginxPort = readNginxProxyPort();
-    // Переключаемся на порт воркера только если Nginx (или режим без Nginx)
-    // тоже смотрит на него. Иначе файл .panel_port верный, а порт воркера — нет.
-    if (filePort !== ENV_PANEL_PORT && (!nginxPort || nginxPort === ENV_PANEL_PORT)) {
-        try {
-            fs.writeFileSync(path.join(APP_DIR, '.panel_port'), ENV_PANEL_PORT + '\n', { mode: 0o600 });
-            console.log('Обновление: слушаю порт воркера ' + ENV_PANEL_PORT);
-        } catch (e) { /* ignore */ }
-    }
-}
 const PANEL_PORT = readPortFile() || ENV_PANEL_PORT || 2999;
+
+function panelNginxConf() {
+    return path.join(NGX_AVAILABLE, PANEL_SITE_NAME);
+}
+function readNginxProxyPorts() {
+    try {
+        const text = fs.readFileSync(panelNginxConf(), 'utf8');
+        return [...text.matchAll(/proxy_pass\s+http:\/\/127\.0\.0\.1:(\d+)/g)]
+            .map(m => Number(m[1]))
+            .filter(p => p > 0 && p < 65536);
+    } catch (e) { return []; }
+}
+function alignNginxProxy(target) {
+    const cfg = panelNginxConf();
+    if (!fs.existsSync(cfg)) return true; // Nginx не используется
+    let text;
+    try { text = fs.readFileSync(cfg, 'utf8'); } catch (e) { return false; }
+    let changed = false;
+    for (const p of [2999, 3000]) {
+        if (p === target) continue;
+        const needle = 'proxy_pass http://127.0.0.1:' + p;
+        if (text.includes(needle)) {
+            text = text.split(needle).join('proxy_pass http://127.0.0.1:' + target);
+            changed = true;
+        }
+    }
+    if (!changed) return text.includes('proxy_pass http://127.0.0.1:' + target);
+    const backup = cfg + '.port-align-bak';
+    try {
+        fs.copyFileSync(cfg, backup);
+        fs.writeFileSync(cfg, text);
+    } catch (e) { return false; }
+    const test = spawnSync(findCommand('nginx') || 'nginx', ['-t'], { encoding: 'utf8', timeout: 20000 });
+    if (test.status !== 0) {
+        try { fs.copyFileSync(backup, cfg); } catch (e) { /* ignore */ }
+        return false;
+    }
+    spawnSync('systemctl', ['reload', 'nginx'], { encoding: 'utf8', timeout: 20000 });
+    try {
+        fs.appendFileSync(UPDATE_LOG, `[${new Date().toISOString()}] Nginx: proxy_pass -> 127.0.0.1:${target}\n`);
+    } catch (e) { /* ignore */ }
+    return true;
+}
 // Прямой HTTPS без Nginx: PANEL_TLS_PORT + PANEL_TLS_CERT/PANEL_TLS_KEY.
 // При включённом TLS обычный HTTP по умолчанию не поднимается (PANEL_HTTP=1 вернёт его).
 const PANEL_TLS_PORT = parseInt(process.env.PANEL_TLS_PORT, 10) || 0;
@@ -18985,6 +19004,7 @@ if (require.main === module) {
     try {
         fs.appendFileSync(UPDATE_LOG,
             `[${new Date().toISOString()}] Старт ${PANEL_VERSION}: порт=${PANEL_PORT}, хост=${PANEL_HOST}, ` +
+            `env=${ENV_PANEL_PORT || '-'}, nginx=${readNginxProxyPorts().join(',') || '-'}, ` +
             `обновление=${updateInProgress() ? 'да' : 'нет'}, тест=${TEST_MODE ? 'да' : 'нет'}\n`);
     } catch (e) { /* журнал может быть недоступен */ }
     if (!WEB_ENABLED) console.warn('PANEL_WEB=0: веб-интерфейс выключен, доступен только /api/*.');
@@ -19036,6 +19056,46 @@ if (require.main === module) {
         listenLogged(http.createServer(app), PANEL_PORT, PANEL_HOST, 'Servpanel (FileManager 4.0)', 'http');
     } else {
         console.log('PANEL_HTTP=0 (или включён TLS): обычный HTTP-listener не запускается.');
+    }
+
+    // Старый воркер 3.2.x ждёт панель на 3000, даже если .panel_port уже 2999.
+    // На время обновления поднимаем дополнительный listener на 127.0.0.1:3000.
+    const legacyServers = [];
+    if (!TEST_MODE && UPDATE_RUNNING) {
+        const extraPorts = new Set([3000, ENV_PANEL_PORT]);
+        for (const p of extraPorts) {
+            if (!(p > 0 && p < 65536) || p === PANEL_PORT || p === PANEL_PUBLIC_PORT) continue;
+            const srv = require('http').createServer(app);
+            srv.on('error', err => {
+                console.error(`Доп. порт ${p}: ${err.message}`);
+                try { fs.appendFileSync(UPDATE_LOG, `[${new Date().toISOString()}] Доп. порт ${p}: ${err.message}\n`); } catch (e) { /* ignore */ }
+            });
+            srv.listen(p, '127.0.0.1', () => {
+                console.log(`Servpanel (доп. порт воркера): http://127.0.0.1:${p}`);
+                try { fs.appendFileSync(UPDATE_LOG, `[${new Date().toISOString()}] Доп. порт воркера слушает 127.0.0.1:${p}\n`); } catch (e) { /* ignore */ }
+            });
+            legacyServers.push(srv);
+        }
+    }
+    if (legacyServers.length && PANEL_PORT === 2999) {
+        const cleanup = setInterval(() => {
+            if (updateInProgress()) return;
+            clearInterval(cleanup);
+            const ok = alignNginxProxy(2999);
+            if (!ok) {
+                const ports = readNginxProxyPorts();
+                if (ports.includes(3000)) {
+                    try { fs.writeFileSync(path.join(APP_DIR, '.panel_port'), '3000\n', { mode: 0o600 }); } catch (e) { /* ignore */ }
+                }
+                try { fs.appendFileSync(UPDATE_LOG, `[${new Date().toISOString()}] Nginx не переключился на 2999; оставляю 3000\n`); } catch (e) { /* ignore */ }
+                return;
+            }
+            setTimeout(() => {
+                for (const srv of legacyServers) { try { srv.close(); } catch (e) { /* ignore */ } }
+                try { fs.appendFileSync(UPDATE_LOG, `[${new Date().toISOString()}] Доп. порт воркера закрыт\n`); } catch (e) { /* ignore */ }
+            }, 5000).unref();
+        }, 5000);
+        if (cleanup.unref) cleanup.unref();
     }
 
     // Прямой HTTPS без Nginx и без внешнего прокси.
