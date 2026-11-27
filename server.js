@@ -18854,6 +18854,9 @@ function applyInternalPortPlan(plan) {
         const reload = spawnSync('systemctl', ['reload', 'nginx'], { encoding: 'utf8', timeout: 20000 });
         if (reload.status !== 0) console.warn('Миграция внутреннего порта: nginx reload не удался');
         console.log('Внутренний порт панели: ' + plan.current + ' -> ' + plan.target);
+        try {
+            fs.appendFileSync(UPDATE_LOG, `[${new Date().toISOString()}] Внутренний порт: ${plan.current} -> ${plan.target}\n`);
+        } catch (e) { /* ignore */ }
         return true;
     } catch (e) {
         console.warn('Миграция внутреннего порта не выполнена: ' + (e && e.message || e));
@@ -18925,7 +18928,34 @@ function readPublicPortFile() {
 }
 // Внутренний порт, который слушает Node. Файл важнее переменной окружения:
 // так обновление панели не сбрасывает кастомный порт.
-const PANEL_PORT = readPortFile() || parseInt(process.env.PANEL_PORT, 10) || 2999;
+// Но во время обновления старый воркер ждёт панель на порту из окружения
+// (обычно 3000). Файл .panel_port мог остаться от неудачного переезда на 2999,
+// поэтому на время обновления синхронизируем его с портом воркера.
+const UPDATE_RUNNING = updateInProgress();
+const ENV_PANEL_PORT = parseInt(process.env.PANEL_PORT, 10) || 0;
+const ENV_PUBLIC_PORT = parseInt(process.env.PANEL_PUBLIC_PORT, 10) || 0;
+function readNginxProxyPort() {
+    try {
+        const text = fs.readFileSync(path.join(NGX_AVAILABLE, PANEL_SITE_NAME), 'utf8');
+        const m = text.match(/proxy_pass\s+http:\/\/127\.0\.0\.1:(\d+)/);
+        const p = m ? parseInt(m[1], 10) : 0;
+        return p > 0 && p < 65536 ? p : 0;
+    } catch (e) { return 0; }
+}
+if (UPDATE_RUNNING && ENV_PANEL_PORT > 0 && ENV_PANEL_PORT < 65536 &&
+    ENV_PANEL_PORT !== ENV_PUBLIC_PORT) {
+    const filePort = readPortFile();
+    const nginxPort = readNginxProxyPort();
+    // Переключаемся на порт воркера только если Nginx (или режим без Nginx)
+    // тоже смотрит на него. Иначе файл .panel_port верный, а порт воркера — нет.
+    if (filePort !== ENV_PANEL_PORT && (!nginxPort || nginxPort === ENV_PANEL_PORT)) {
+        try {
+            fs.writeFileSync(path.join(APP_DIR, '.panel_port'), ENV_PANEL_PORT + '\n', { mode: 0o600 });
+            console.log('Обновление: слушаю порт воркера ' + ENV_PANEL_PORT);
+        } catch (e) { /* ignore */ }
+    }
+}
+const PANEL_PORT = readPortFile() || ENV_PANEL_PORT || 2999;
 // Прямой HTTPS без Nginx: PANEL_TLS_PORT + PANEL_TLS_CERT/PANEL_TLS_KEY.
 // При включённом TLS обычный HTTP по умолчанию не поднимается (PANEL_HTTP=1 вернёт его).
 const PANEL_TLS_PORT = parseInt(process.env.PANEL_TLS_PORT, 10) || 0;
