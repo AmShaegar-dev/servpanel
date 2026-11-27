@@ -18887,15 +18887,15 @@ function updateInProgress() {
 (function scheduleInternalPortMigration() {
     const plan = internalPortPlan();
     if (!plan) return;
-    if (!updateInProgress()) {
-        applyInternalPortPlan(plan);
-        return;
-    }
+    // Первые 60 секунд не переезжаем: старые воркеры обновления (3.2.x)
+    // ждут панель на прежнем порту 3000 всего 30 секунд и иначе откатят
+    // успешное обновление. После этого переезд на 2999 выполняется штатно.
     let tries = 0;
     const timer = setInterval(() => {
         tries++;
+        if (tries <= 12) return;
         if (updateInProgress()) {
-            if (tries > 120) clearInterval(timer);
+            if (tries > 132) clearInterval(timer);
             return;
         }
         clearInterval(timer);
@@ -18952,6 +18952,11 @@ app.use((err, req, res, next) => {
 
 if (require.main === module) {
     console.log(`Режим: DEMO=${(process.env.SERVEPANEL_DEMO || process.env.SERVPANEL_DEMO || '-')} TEST=${process.env.SERVPANEL_TEST || '-'} DEMO_MODE=${DEMO_MODE}`);
+    try {
+        fs.appendFileSync(UPDATE_LOG,
+            `[${new Date().toISOString()}] Старт ${PANEL_VERSION}: порт=${PANEL_PORT}, хост=${PANEL_HOST}, ` +
+            `обновление=${updateInProgress() ? 'да' : 'нет'}, тест=${TEST_MODE ? 'да' : 'нет'}\n`);
+    } catch (e) { /* журнал может быть недоступен */ }
     if (!WEB_ENABLED) console.warn('PANEL_WEB=0: веб-интерфейс выключен, доступен только /api/*.');
     if (DEMO_MODE) console.warn('DEMO MODE: используется локальный конфиг-макет, systemd и AmneziaWG не затрагиваются.');
     if (ADMIN_PASSWORD === 'admin123') {
@@ -18980,11 +18985,17 @@ if (require.main === module) {
     const listenLogged = (srv, port, host, label, scheme) => {
         srv.on('error', err => {
             console.error(`${label}: не удалось открыть ${host}:${port} — ${err.message}`);
+            try {
+                fs.appendFileSync(UPDATE_LOG, `[${new Date().toISOString()}] ${label}: ошибка ${host}:${port} — ${err.message}\n`);
+            } catch (e) { /* ignore */ }
         });
         srv.listen(port, host, () => {
             const addr = srv.address();
             const actual = addr && typeof addr === 'object' ? addr.port : port;
             console.log(`${label}: ${scheme}://${host}:${actual}`);
+            try {
+                fs.appendFileSync(UPDATE_LOG, `[${new Date().toISOString()}] ${label} слушает ${scheme}://${host}:${actual}\n`);
+            } catch (e) { /* ignore */ }
             if (label === 'Servpanel') setLocalApi({ host, port: actual });
         });
         return srv;
