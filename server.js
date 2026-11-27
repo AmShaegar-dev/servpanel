@@ -7323,7 +7323,13 @@ app.post('/api/cascade/peer-info', checkAuth, requireAdmin, async (req, res) => 
 // Удаление каскада на ОБЕИХ сторонах из панели: правила, скрипты, туннель.
 app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
     const data = req.body || {};
-    const full = data.full === true;
+    const mode = ['full', 'keep-awg', 'cascade'].includes(String(data.mode))
+        ? String(data.mode)
+        : (data.full === true ? 'full' : 'keep-awg');
+    const full = mode === 'full';
+    const cleanAwg = mode === 'keep-awg';
+    const host = String(data.peerHost || '').replace(/^https?:\/\//i, '').replace(/[:/].*$/, '').trim();
+    const pass = String(data.peerPass || '');
     const peerClient = String(data.peerClient || 'ru_host').replace(/[^A-Za-z0-9_-]/g, '') || 'ru_host';
     const steps = [];
     const log = (title, text, ok = true) => steps.push({ title, text: String(text || ''), ok: !!ok });
@@ -7337,7 +7343,7 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
         log('Этот сервер', (local && local.error) || 'готово', !(local && local.error));
     }
     const fullPorts = new Set();
-    if (full) {
+    if (full || cleanAwg) {
         // Собираем все порты AWG и каскада ДО удаления конфигов, чтобы после
         // очистки закрыть их в UFW на обеих сторонах.
         try {
@@ -7367,16 +7373,19 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
             }
         } catch (e) { /* SSH недоступен — закроем хотя бы локальные */ }
         try {
-            rootSh('bash', ['-c', cascade2Migrate.PURGE_AWG], { timeout: 600000 });
-            log('Этот сервер', 'удалены AWG и все клиентские конфиги', true);
+            if (full) {
+                rootSh('bash', ['-c', cascade2Migrate.PURGE_AWG], { timeout: 600000 });
+                log('Этот сервер', 'удалены AWG и все клиентские конфиги', true);
+            } else {
+                rootSh('bash', ['-c', cascade2Migrate.CLEAN_AWG_KEEP], { timeout: 180000 });
+                log('Этот сервер', 'удалены клиенты, обфускация и порты AWG; AWG оставлен', true);
+            }
         } catch (e) {
-            log('Этот сервер', 'AWG: ' + ((e && e.message) || String(e)), false);
+            log('Этот сервер', (full ? 'AWG: ' : 'очистка AWG: ') + ((e && e.message) || String(e)), false);
         }
     }
 
     // 2. Вторая сторона по SSH: те же действия + удаление клиента ru_host.
-    const host = String(data.peerHost || '').replace(/^https?:\/\//i, '').replace(/[:/].*$/, '').trim();
-    const pass = String(data.peerPass || '');
     if (host && pass) {
         const remote = { host, port: Number(data.peerPort) || 22, user: String(data.peerUser || 'root'), pass };
         const cmd = [
@@ -7413,16 +7422,16 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
         } catch (e) {
             log('Вторая сторона ' + host, (e && e.message) || String(e), false);
         }
-        if (full && remoteOk) {
+        if ((full || cleanAwg) && remoteOk) {
             try {
-                const pr = await sshRunner.run(remote, cascade2Migrate.PURGE_AWG, 600000);
+                const pr = await sshRunner.run(remote, full ? cascade2Migrate.PURGE_AWG : cascade2Migrate.CLEAN_AWG_KEEP, full ? 600000 : 180000);
                 const pout = String(pr.out || '').trim();
                 const pauth = /Permission denied|Authentication failed|Access denied/i.test(pout);
                 const pok = pr.code === 0 && !pauth;
                 log('Вторая сторона ' + host,
-                    pok ? 'удалены AWG и все клиентские конфиги'
+                    pok ? (full ? 'удалены AWG и все клиентские конфиги' : 'удалены клиенты, обфускация и порты AWG; AWG оставлен')
                         : pauth ? 'AWG: неверный логин или пароль SSH'
-                            : pout.slice(0, 300) || 'ошибка удаления AWG',
+                            : pout.slice(0, 300) || (full ? 'ошибка удаления AWG' : 'ошибка очистки AWG'),
                     pok);
             } catch (e) {
                 log('Вторая сторона ' + host, 'AWG: ' + ((e && e.message) || String(e)), false);
@@ -7431,8 +7440,8 @@ app.post('/api/cascade/cleanup', checkAuth, requireAdmin, async (req, res) => {
     } else {
         log('Вторая сторона', 'не указана — почистите её так же из своей панели', false);
     }
-    // 3. Полная очистка: закрываем порты, которые использовал AWG/каскад.
-    if (full && fullPorts.size) {
+    // 3. Полная очистка или очистка с сохранением AWG: закрываем порты AWG/каскада.
+    if ((full || cleanAwg) && fullPorts.size) {
         const protectedPorts = new Set([22, 80, 443, 4444, 4446, 2999, 53]);
         const localConn = { host: '127.0.0.1' };
         const remoteConn = { host, port: Number(data.peerPort) || 22, user: String(data.peerUser || 'root'), pass };
@@ -7777,6 +7786,30 @@ function resumeCascadeJob() {
         .catch((e) => finishCascadeJob(job, null, e && e.message ? e.message : String(e)));
 }
 
+// Проверяет, есть ли в живом awg0.conf обязательные AWG-параметры.
+async function hasAwgObf(conn) {
+    const r = await sshRunner.run(conn, 'cat /etc/amnezia/amneziawg/awg0.conf 2>/dev/null', 20000);
+    const t = String(r.out || '');
+    return ['Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4']
+        .every(k => new RegExp('^' + k + '\\s*=', 'm').test(t));
+}
+
+// Параметры обфускации из awgsetup_cfg.init (режим «как у установщика»).
+async function installerObf(conn) {
+    const r = await sshRunner.run(conn,
+        "grep -E '^export AWG_(Jc|Jmin|Jmax|S1|S2|S3|S4|H1|H2|H3|H4|I1|I2|I3|I4|I5|CPA|HPK)=' /root/awg/awgsetup_cfg.init 2>/dev/null", 20000);
+    const map = { CPA: 'ContentPaddingAddition', HPK: 'HeaderProtectionKey' };
+    const out = {};
+    for (const line of String(r.out || '').split(/\r?\n/)) {
+        const m = /^export AWG_([A-Za-z0-9]+)=(.*)$/.exec(line.trim());
+        if (!m) continue;
+        let v = m[2].trim();
+        if ((v.startsWith("'") && v.endsWith("'")) || (v.startsWith('"') && v.endsWith('"'))) v = v.slice(1, -1);
+        if (v) out[map[m[1]] || m[1]] = v;
+    }
+    return Object.keys(out).length ? out : null;
+}
+
 // Принудительно выставляет UDP-порт awg0 на указанной стороне. Нужно, когда
 // AWG уже установлен с другим портом: установщик в этом случае не перезапускается.
 async function ensureAwg0Port(conn, port, updateClients, label) {
@@ -7800,7 +7833,8 @@ async function ensureAwg0Port(conn, port, updateClients, label) {
     };
     if (old === p) {
         // Порт уже верный, но клиентские конфиги могли остаться со старым.
-        await sshRunner.run(conn, `ufw allow ${p}/udp >/dev/null 2>&1 || true`, 30000);
+        // Заодно поднимаем awg0, если после очистки он был остановлен.
+        await sshRunner.run(conn, `ufw allow ${p}/udp >/dev/null 2>&1 || true; systemctl enable --now awg-quick@awg0 2>/dev/null || true`, 60000);
         await applyClients();
         return old;
     }
@@ -7905,6 +7939,16 @@ async function runCascadeBuildEu(job, remote, opts) {
         entry.listenPort = String(port);
         log('RU', 'порт AWG изменён с ' + oldEntryPort + ' на ' + port + ', клиентские конфиги обновлены');
     }
+    if (opts.obf && Object.keys(opts.obf).length) {
+        log('RU', 'Применяю параметры обфускации...');
+        await sshBuild.applyObf(remote, opts.obf, (m) => log('RU', m));
+    } else if (!(await hasAwgObf(remote))) {
+        const ip = await installerObf(remote);
+        if (ip) {
+            log('RU', 'Восстанавливаю обфускацию установщика...');
+            await sshBuild.applyObf(remote, ip, (m) => log('RU', m));
+        }
+    }
 
     // 3. AmneziaWG на выходе (этот сервер, EU).
     let exit = await sshBuild.awgInfo(local);
@@ -7949,6 +7993,12 @@ async function runCascadeBuildEu(job, remote, opts) {
     if (opts.obf && Object.keys(opts.obf).length) {
         log('EU', 'Применяю параметры обфускации...');
         await sshBuild.applyObf(local, opts.obf, (m) => log('EU', m));
+    } else if (!(await hasAwgObf(local))) {
+        const ip = await installerObf(local);
+        if (ip) {
+            log('EU', 'Восстанавливаю обфускацию установщика...');
+            await sshBuild.applyObf(local, ip, (m) => log('EU', m));
+        }
     }
 
     // 5. Клиент ru_host на выходе.
@@ -8135,6 +8185,12 @@ async function runCascadeBuild(job, remote, opts) {
     if (opts.obf && Object.keys(opts.obf).length) {
         log('EU', 'Применяю параметры обфускации...');
         await sshBuild.applyObf(remote, opts.obf, (m) => log('EU', m));
+    } else if (!(await hasAwgObf(remote))) {
+        const ip = await installerObf(remote);
+        if (ip) {
+            log('EU', 'Восстанавливаю обфускацию установщика...');
+            await sshBuild.applyObf(remote, ip, (m) => log('EU', m));
+        }
     }
 
     // 3. Клиент ru_host на второй стороне.
@@ -8206,6 +8262,12 @@ async function runCascadeBuild(job, remote, opts) {
     if (opts.obf && Object.keys(opts.obf).length) {
         log('RU', 'Применяю параметры обфускации...');
         await sshBuild.applyObf({ host: '127.0.0.1' }, opts.obf, (m) => log('RU', m));
+    } else if (!(await hasAwgObf({ host: '127.0.0.1' }))) {
+        const ip = await installerObf({ host: '127.0.0.1' });
+        if (ip) {
+            log('RU', 'Восстанавливаю обфускацию установщика...');
+            await sshBuild.applyObf({ host: '127.0.0.1' }, ip, (m) => log('RU', m));
+        }
     }
 
     // 5. Конфиг туннеля: ru_host без DNS, Table = off.

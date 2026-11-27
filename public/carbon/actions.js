@@ -24,8 +24,9 @@ function showCarbonForm(opts) {
   const fieldHtml = fields.map(f => {
     const name = escHtml(f.name);
     const value = f.value == null ? '' : String(f.value);
+    const show = f.showWhen ? ` data-show-when-field="${escHtml(f.showWhen.field)}" data-show-when-value="${escHtml(f.showWhen.value)}"` : '';
     if (f.type === 'checkbox') {
-      return `<label class="switch" style="margin:6px 0"><input type="checkbox" data-field="${name}" ${f.value ? 'checked' : ''}> ${escHtml(f.label)}</label>`;
+      return `<label class="switch" style="margin:6px 0"${show}><input type="checkbox" data-field="${name}" ${f.value ? 'checked' : ''}> ${escHtml(f.label)}</label>`;
     }
     if (f.type === 'select') {
       const options = (f.options || []).map(o => {
@@ -33,7 +34,7 @@ function showCarbonForm(opts) {
         const label = typeof o === 'string' ? o : o.label;
         return `<option value="${escHtml(val)}" ${String(val) === value ? 'selected' : ''}>${escHtml(label)}</option>`;
       }).join('');
-      return `<label class="field"><span>${escHtml(f.label)}</span><select data-field="${name}">${options}</select></label>`;
+      return `<label class="field"${show}><span>${escHtml(f.label)}</span><select data-field="${name}">${options}</select></label>`;
     }
     if (f.type === 'checkboxes') {
       const selected = new Set((Array.isArray(f.value) ? f.value : []).map(String));
@@ -42,16 +43,15 @@ function showCarbonForm(opts) {
         const label = typeof o === 'string' ? o : o.label;
         return `<label class="switch"><input type="checkbox" data-field="${name}" value="${escHtml(val)}" ${selected.has(String(val)) ? 'checked' : ''}> ${escHtml(label)}</label>`;
       }).join('');
-      const show = f.showWhen ? ` data-show-when-field="${escHtml(f.showWhen.field)}" data-show-when-value="${escHtml(f.showWhen.value)}"` : '';
       return `<div class="field check-field"${show}><span>${escHtml(f.label)}</span><div class="switch-grid">${opts || '<span class="muted">Нет других клиентов</span>'}</div></div>`;
     }
     if (f.type === 'textarea') {
-      return `<label class="field"><span>${escHtml(f.label)}</span><textarea name="carbon-${name}" data-field="${name}" rows="${f.rows || 8}" spellcheck="false" autocomplete="off" placeholder="${escHtml(f.placeholder || '')}">${escHtml(value)}</textarea></label>`;
+      return `<label class="field"${show}><span>${escHtml(f.label)}</span><textarea name="carbon-${name}" data-field="${name}" rows="${f.rows || 8}" spellcheck="false" autocomplete="off" placeholder="${escHtml(f.placeholder || '')}">${escHtml(value)}</textarea></label>`;
     }
     if (f.type === 'file') {
-      return `<label class="field file-field"><span>${escHtml(f.label)}</span><input type="file" data-field="${name}" accept="${escHtml(f.accept || '')}" onchange="carbonFilePicked(this)"><div class="file-picked">Файл не выбран</div></label>`;
+      return `<label class="field file-field"${show}><span>${escHtml(f.label)}</span><input type="file" data-field="${name}" accept="${escHtml(f.accept || '')}" onchange="carbonFilePicked(this)"><div class="file-picked">Файл не выбран</div></label>`;
     }
-    return `<label class="field"><span>${escHtml(f.label)}</span><input type="${escHtml(f.type || 'text')}" name="carbon-${name}" data-field="${name}" value="${escHtml(value)}" autocomplete="${f.type === 'password' ? 'new-password' : 'off'}" placeholder="${escHtml(f.placeholder || '')}" ${f.min != null ? `min="${escHtml(f.min)}"` : ''} ${f.max != null ? `max="${escHtml(f.max)}"` : ''} ${f.step != null ? `step="${escHtml(f.step)}"` : ''}></label>`;
+    return `<label class="field"${show}><span>${escHtml(f.label)}</span><input type="${escHtml(f.type || 'text')}" name="carbon-${name}" data-field="${name}" value="${escHtml(value)}" autocomplete="${f.type === 'password' ? 'new-password' : 'off'}" placeholder="${escHtml(f.placeholder || '')}" ${f.min != null ? `min="${escHtml(f.min)}"` : ''} ${f.max != null ? `max="${escHtml(f.max)}"` : ''} ${f.step != null ? `step="${escHtml(f.step)}"` : ''}></label>`;
   }).join('');
   modal.innerHTML = `<div class="modal-card modal-wide" role="dialog" aria-modal="true">
     <div class="modal-head"><div><div class="modal-title">${escHtml(opts.title || 'Действие')}</div><div class="modal-sub">${escHtml(opts.sub || '')}</div></div><button class="icon-btn" data-form-close aria-label="Закрыть">✕</button></div>
@@ -1356,7 +1356,7 @@ async function carbonCascade2Migrate() {
   const defRole = classicRole === 'eu' ? 'eu' : classicRole === 'ru' ? 'ru' : 'ru';
   showCarbonForm({
     title: 'Каскад 2 · установка',
-    sub: 'Мягкий перенос сохраняет клиентов и их файлы. Порты входа и туннеля панель подбирает сама: входные порты сохраняются, на EU выбираются свободные UDP-порты, старые AWG-порты закрываются. Полная установка стирает AWG и правила на обоих серверах и ставит AWG заново.',
+    sub: 'Мягкий перенос сохраняет клиентов, ключи и обфускацию: порты входа сохраняются, на EU выбираются свободные UDP-порты, старые AWG-порты закрываются. Параметры версии, порта и обфускации относятся только к полной установке и в мягком режиме скрыты.',
     fields: [
       { name: 'mode', label: 'Режим', type: 'select', value: 'soft', options: [
         { value: 'soft', label: 'Мягкий перенос (клиенты сохраняются)' },
@@ -1368,16 +1368,16 @@ async function carbonCascade2Migrate() {
       { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
       { name: 'peerPass', label: 'Пароль root', type: 'password' },
       { name: 'ifaces', label: 'Интерфейсы фильтрации на EU', value: ((st.ifaces && st.ifaces.length ? st.ifaces : ['awg0'])).join(', ') },
-      { name: 'version', label: 'Версия AWG (полная установка)', type: 'select', value: '3.1', options: ['3.1', '2.0', '1.5'] },
-      { name: 'port', label: 'UDP-порт AWG на EU (полная установка)', type: 'number', value: '3977', min: 1, max: 65535 },
-      { name: 'obfMode', label: 'Обфускация (полная установка)', type: 'select', value: 'architect', options: [{ value: 'installer', label: 'Как у установщика' }, { value: 'architect', label: 'Архитектор' }, { value: 'custom', label: 'Свои параметры' }] },
+      { name: 'version', label: 'Версия AWG (полная установка)', type: 'select', value: '3.1', options: ['3.1', '2.0', '1.5'], showWhen: { field: 'mode', value: 'clean' } },
+      { name: 'port', label: 'UDP-порт AWG на EU (полная установка)', type: 'number', value: '3977', min: 1, max: 65535, showWhen: { field: 'mode', value: 'clean' } },
+      { name: 'obfMode', label: 'Обфускация (полная установка)', type: 'select', value: 'architect', options: [{ value: 'installer', label: 'Как у установщика' }, { value: 'architect', label: 'Архитектор' }, { value: 'custom', label: 'Свои параметры' }], showWhen: { field: 'mode', value: 'clean' } },
       { name: 'obfProfile', label: 'Профиль мимикрии', type: 'select', value: 'quic', options: [
         { value: 'quic', label: 'QUIC' }, { value: 'tls', label: 'TLS 1.3' }, { value: 'dtls', label: 'DTLS 1.2' },
         { value: 'dtls13', label: 'DTLS 1.3' }, { value: 'sip', label: 'SIP' }, { value: 'dns', label: 'DNS' }, { value: 'noise', label: 'Noise' }
-      ] },
-      { name: 'obfIntensity', label: 'Интенсивность', type: 'select', value: 'medium', options: [{ value: 'low', label: 'Низкая' }, { value: 'medium', label: 'Средняя' }, { value: 'high', label: 'Высокая' }] },
-      { name: 'obfSni', label: 'SNI для TLS-мимикрии', placeholder: 'ozon.ru' },
-      { name: 'clientName', label: 'Создать клиента на EU (необязательно)', placeholder: 'my_laptop' }
+      ], showWhen: { field: 'mode', value: 'clean' } },
+      { name: 'obfIntensity', label: 'Интенсивность', type: 'select', value: 'medium', options: [{ value: 'low', label: 'Низкая' }, { value: 'medium', label: 'Средняя' }, { value: 'high', label: 'Высокая' }], showWhen: { field: 'mode', value: 'clean' } },
+      { name: 'obfSni', label: 'SNI для TLS-мимикрии', placeholder: 'ozon.ru', showWhen: { field: 'mode', value: 'clean' } },
+      { name: 'clientName', label: 'Создать клиента на EU (необязательно)', placeholder: 'my_laptop', showWhen: { field: 'mode', value: 'clean' } }
     ],
     submitText: 'Начать',
     danger: true,
@@ -1874,7 +1874,9 @@ async function carbonCascadeManual() {
   });
 }
 
-function showCarbonCleanupChecklist(host, full) {
+function showCarbonCleanupChecklist(host, mode) {
+  const full = mode === 'full';
+  const keep = mode === 'keep-awg';
   const modal = document.createElement('div');
   modal.className = 'modal';
   const peerLabel = host ? 'Вторая сторона ' + host : 'Вторая сторона';
@@ -1891,9 +1893,9 @@ function showCarbonCleanupChecklist(host, full) {
     }).join('');
   };
   paint([
-    { title: 'Этот сервер', text: full ? 'Останавливаю службы, удаляю правила, клиентов и AWG' : 'Останавливаю службы и удаляю правила', run: true },
+    { title: 'Этот сервер', text: full ? 'Останавливаю службы, удаляю правила, клиентов и AWG' : keep ? 'Останавливаю службы, удаляю правила, клиентов, обфускацию и порты; AWG остаётся' : 'Останавливаю службы и удаляю только каскад', run: true },
     host
-      ? { title: peerLabel, text: full ? 'Подключаюсь по SSH, удаляю каскад, клиентов и AWG' : 'Подключаюсь по SSH и очищаю каскад', run: true }
+      ? { title: peerLabel, text: full ? 'Подключаюсь по SSH, удаляю каскад, клиентов и AWG' : keep ? 'Подключаюсь по SSH, удаляю каскад, клиентов, обфускацию и порты; AWG остаётся' : 'Подключаюсь по SSH и удаляю только каскад', run: true }
       : { title: peerLabel, text: 'Не указана — очистится только этот сервер', ok: false }
   ]);
   return {
@@ -1914,9 +1916,13 @@ function showCarbonCleanupChecklist(host, full) {
 async function carbonCascadeCleanup() {
   showCarbonForm({
     title: 'Удалить каскад',
-    sub: 'Удаляет каскад 1 и 2: правила DNAT, пометки, ipset, туннель awg1, скрипты, состояние. При полной очистке также удаляются все клиенты и сам AWG на обоих серверах.',
+    sub: 'Удаляет каскад 1 и 2: правила DNAT, пометки, ipset, туннель awg1, скрипты, состояние. Режим можно выбрать: оставить AWG, удалить всё или снять только каскад.',
     fields: [
-      { name: 'wipeAwg', label: 'Удалить AWG и всех клиентов на обоих серверах', type: 'checkbox', value: true },
+      { name: 'mode', label: 'Что удалить', type: 'select', value: 'keep-awg', options: [
+        { value: 'keep-awg', label: 'Каскад + клиенты + обфускация + порты, AWG оставить' },
+        { value: 'full', label: 'Полностью, включая AWG' },
+        { value: 'cascade', label: 'Только каскад (клиенты и AWG остаются)' }
+      ] },
       { name: 'peerHost', label: 'IP второй стороны', placeholder: 'Необязательно' },
       { name: 'peerPort', label: 'SSH-порт', value: '22' },
       { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
@@ -1927,14 +1933,14 @@ async function carbonCascadeCleanup() {
     onSubmit: async v => {
       const peerHost = String(v.peerHost || '').trim();
       if (peerHost && !v.peerPass) throw new Error('Укажите пароль root второй стороны или очистите поле IP');
-      const full = v.wipeAwg !== false;
-      const progress = showCarbonCleanupChecklist(peerHost, full);
+      const mode = v.mode === 'full' ? 'full' : v.mode === 'cascade' ? 'cascade' : 'keep-awg';
+      const progress = showCarbonCleanupChecklist(peerHost, mode);
       try {
         const d = await api('/api/cascade/cleanup', {
           method: 'POST',
           body: {
             peerHost, peerPort: v.peerPort || '22', peerUser: v.peerUser || 'root',
-            peerPass: v.peerPass || '', peerClient: 'ru_host', full
+            peerPass: v.peerPass || '', peerClient: 'ru_host', mode
           }
         });
         progress.done(d.steps || []);
