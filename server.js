@@ -5675,14 +5675,66 @@ app.post('/api/ipv6/unblock', checkAuth, requireAdmin, (req, res) => {
 // ---------------------------------------------------------------------------
 // UFW
 // ---------------------------------------------------------------------------
+const UFW_STATUS_RE = /^\[\s*(\d+)\]\s+(.*?)\s+(ALLOW|DENY|REJECT|LIMIT)(?:\s+(IN|OUT|FWD))?\s+(.*)$/;
+
+function ufwParseStatusLine(line) {
+    const m = String(line).match(UFW_STATUS_RE);
+    if (!m) return null;
+    return {
+        id: m[1],
+        to: m[2].trim(),
+        action: (m[3] + (m[4] ? ' ' + m[4] : '')).toUpperCase(),
+        from: m[5].trim()
+    };
+}
+
+// Правила, добавленные через `ufw allow`, но ещё не применённые: при
+// выключенном UFW `ufw status` их не показывает. Читаем `ufw show added`,
+// чтобы панель не выглядела пустой.
+function ufwParseAddedLine(line) {
+    const m = String(line).trim().match(/^ufw\s+(allow|deny|reject|limit)\s+(.*)$/i);
+    if (!m) return null;
+    let action = m[1].toUpperCase();
+    let rest = m[2].trim();
+    let iface = '';
+    const dir = rest.match(/^(in|out)\s+on\s+(\S+)(?:\s+|$)/i);
+    if (dir) {
+        action += ' ' + dir[1].toUpperCase();
+        iface = dir[2];
+        rest = rest.slice(dir[0].length).trim();
+    }
+    const fromM = rest.match(/\bfrom\s+(\S+)/i);
+    const from = fromM ? fromM[1] : '';
+    const portM = rest.match(/\bport\s+(\d+)/i);
+    const protoM = rest.match(/\bproto\s+(tcp|udp|any)\b/i);
+    let to = '';
+    if (portM) to = portM[1] + (protoM ? '/' + protoM[1].toLowerCase() : '');
+    else if (/^app\s+/i.test(rest)) to = rest.replace(/^app\s+/i, '').replace(/^['"]|['"]$/g, '');
+    else if (/^from\s+/i.test(rest)) to = 'Anywhere';
+    else to = rest;
+    if (!to) to = iface ? ('on ' + iface) : 'Anywhere';
+    return { id: null, to, action, from, raw: String(line).trim() };
+}
+
+function ufwReadList() {
+    const raw = sh('sudo', ['ufw', 'status', 'numbered']);
+    const active = /^\s*Status:\s*active\b/im.test(raw);
+    const rules = raw.split('\n').map(ufwParseStatusLine).filter(Boolean);
+    if (!rules.length) {
+        let added = '';
+        try { added = String(sh('sudo', ['ufw', 'show', 'added']) || ''); } catch (e) { added = ''; }
+        for (const line of added.split('\n')) {
+            if (!/^\s*ufw\s+/i.test(line)) continue;
+            const rule = ufwParseAddedLine(line);
+            if (rule) rules.push(rule);
+        }
+    }
+    return { active, rules, raw };
+}
+
 app.get('/api/ufw', checkAuth, (req, res) => {
     try {
-        const ufwOut = sh('sudo', ['ufw', 'status', 'numbered']).split('\n');
-        const rules = [];
-        ufwOut.forEach(line => {
-            const match = line.match(/^\[\s*(\d+)\]\s+(.*?)\s+(ALLOW IN|DENY IN|REJECT IN|ALLOW|DENY|REJECT)\s+(.*)$/);
-            if (match) rules.push({ id: match[1], to: match[2].trim(), action: match[3], from: match[4].trim() });
-        });
+        const ufw = ufwReadList();
         const ssOut = sh('sudo', ['ss', '-tunlp']).trim().split('\n').slice(1);
         const ports = ssOut.filter(l => l).map(line => {
             const parts = line.trim().split(/\s+/);
@@ -5699,7 +5751,7 @@ app.get('/api/ufw', checkAuth, (req, res) => {
                 pid: pm ? Number(pm[2]) : 0
             };
         }).filter(Boolean).sort((a, b) => (a.port - b.port) || String(a.proto).localeCompare(String(b.proto)));
-        res.json({ rules, ports });
+        res.json({ rules: ufw.rules, ports, active: ufw.active });
     } catch (e) { res.status(500).json({ error: 'Ошибка' }); }
 });
 
@@ -5726,11 +5778,7 @@ function ufwNormSpec(s) {
     return String(s || '').replace(/\s*\(v6\)\s*/gi, '').trim();
 }
 function ufwStatusRows() {
-    const parse = line => {
-        const m = String(line).match(/^\[\s*(\d+)\]\s+(.*?)\s+(ALLOW IN|DENY IN|REJECT IN|ALLOW|DENY|REJECT)\s+(.*)$/);
-        return m ? { id: m[1], to: m[2].trim(), action: m[3], from: m[4].trim() } : null;
-    };
-    return sh('sudo', ['ufw', 'status', 'numbered']).split('\n').map(parse).filter(Boolean);
+    return sh('sudo', ['ufw', 'status', 'numbered']).split('\n').map(ufwParseStatusLine).filter(Boolean);
 }
 // Удаляет правило по порту/действию (вместе с IPv6-двойником) или по номеру.
 // Возвращает список реально удалённых номеров.

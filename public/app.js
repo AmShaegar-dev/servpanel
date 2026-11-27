@@ -689,13 +689,15 @@ async function loadUfwData() {
     if (res.ok) {
         const data = await res.json();
         const tbodyRules = document.getElementById('ufwTable');
-        if (data.rules.length === 0) tbodyRules.innerHTML = '<tr><td colspan="4">Нет правил</td></tr>';
+        if (data.rules.length === 0) tbodyRules.innerHTML = '<tr><td colspan="4">' + (data.active === false ? 'UFW выключен — сохранённых правил нет' : 'Нет правил') + '</td></tr>';
         else {
             tbodyRules.innerHTML = data.rules.map(r => {
                 const portMatch = r.to.match(/\d+/);
                 const desc = portMatch ? getPortDesc(portMatch[0]) : 'Маршрут / PBR';
                 const statusHtml = r.action.includes('ALLOW') ? '<span class="val-rx">Открыт</span>' : '<span class="val-sys">Закрыт</span>';
-                return `<tr><td style="white-space:normal; word-wrap:break-word;"><strong>[${r.id}]</strong> <span class="val-tx">${r.to}</span> <span class="val-sys">←</span> ${r.from}</td><td>${statusHtml}</td><td><span class="sub-text" style="font-size:13px">${desc}</span></td><td><button class="btn-dark" onclick="delUfwRule('${r.id}')">✕</button></td></tr>`;
+                const idLabel = r.id != null ? `<strong>[${r.id}]</strong> ` : '';
+                const delBtn = r.id != null ? `<button class="btn-dark" onclick="delUfwRule('${r.id}')">✕</button>` : '';
+                return `<tr><td style="white-space:normal; word-wrap:break-word;">${idLabel}<span class="val-tx">${r.to}</span> <span class="val-sys">←</span> ${r.from}</td><td>${statusHtml}</td><td><span class="sub-text" style="font-size:13px">${desc}</span></td><td>${delBtn}</td></tr>`;
             }).join('');
         }
 
