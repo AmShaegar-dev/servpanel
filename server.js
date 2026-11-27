@@ -8065,6 +8065,7 @@ async function runCascadeBuildEu(job, remote, opts) {
     if (exitPub) ruHostConf = ruHostConf.replace(/^\s*PublicKey\s*=.*$/m, 'PublicKey = ' + exitPub);
     if (euHost) ruHostConf = ruHostConf.replace(/^\s*Endpoint\s*=.*$/m, 'Endpoint = ' + euHost + ':' + (exit.listenPort || port));
     await run(local, 'systemctl restart awg-quick@awg0', 60000, 'awg0 EU');
+    await sshBuild.ensureEuExitNat(local, exitSubnet, (m) => log('EU', m));
     const innerMatch = String(ruHostConf).match(/^\s*Address\s*=\s*([0-9.]+)/m);
     const peerInner = (String(ruHostConf).match(/^\s*AllowedIPs\s*=\s*([0-9.]+)/m) || [])[1] || '';
     log('EU', 'Клиент ru_host: ' + (innerMatch ? innerMatch[1] : 'адрес неизвестен'));
@@ -8235,6 +8236,20 @@ async function runCascadeBuild(job, remote, opts) {
     // Порт EU мог быть только что изменён — жёстко ставим его в Endpoint.
     const euListenPort = info.listenPort || opts.port || 3977;
     ruHost.conf = String(ruHost.conf || '').replace(/^(Endpoint\s*=\s*[^:]+):\d+/m, '$1:' + euListenPort);
+    // Менеджер мог переиспользовать старый ru_host.conf с публичным ключом
+    // прошлого awg0. Берём ключ текущего awg0 и правим Peer.PublicKey.
+    try {
+        const euConf = String((await run(remote, 'cat ' + sshBuild.AWG0_CONF, 30000, 'awg0 EU')) || '');
+        const euPriv = (euConf.match(/^\s*PrivateKey\s*=\s*(.+)$/m) || [])[1] || '';
+        const euPub = euPriv ? x25519PubFromPriv(euPriv) : '';
+        if (euPub) ruHost.conf = String(ruHost.conf).replace(/^\s*PublicKey\s*=.*$/m, 'PublicKey = ' + euPub);
+        if (euHost) ruHost.conf = String(ruHost.conf).replace(/^\s*Endpoint\s*=.*$/m, 'Endpoint = ' + euHost + ':' + euListenPort);
+        if (!euPub) log('EU', 'Не удалось вычислить публичный ключ awg0 — оставляю PublicKey из конфига');
+    } catch (e) {
+        log('EU', 'Не удалось проверить публичный ключ awg0: ' + (e.message || e));
+    }
+    // Для выхода EU: forwarding/NAT/MSS, иначе handshake есть, а данные не идут.
+    await sshBuild.ensureEuExitNat(remote, euSubnet, (m) => log('EU', m));
     const innerMatch = String(ruHost.conf).match(/^\s*Address\s*=\s*([0-9.]+)/m);
     const peerInner = (String(ruHost.conf).match(/^\s*AllowedIPs\s*=\s*([0-9.]+)/m) || [])[1] || '';
     log('EU', 'Клиент ru_host: ' + (innerMatch ? innerMatch[1] : 'адрес неизвестен'));
