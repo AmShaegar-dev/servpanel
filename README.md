@@ -84,7 +84,7 @@ KPI, CPU/RAM, uptime, график и распределение трафика 
 Подключитесь к серверу по SSH и выполните одну команду. Скрипт покажет меню — выберите нужный пункт цифрой:
 
 ```bash
-curl -fsSL --connect-timeout 10 --max-time 60 \
+curl -4 -fsSL --connect-timeout 10 --max-time 60 \
   -o /tmp/servpanel-install.sh \
   https://github.com/AmShaegar-dev/servpanel/releases/latest/download/install.sh \
   && sudo bash /tmp/servpanel-install.sh
@@ -121,7 +121,7 @@ wget -qO- https://cdn.jsdelivr.net/gh/AmShaegar-dev/servpanel@main/install.sh | 
 Установка без вопросов, для скриптов и автоматизации:
 
 ```bash
-curl -fsSL --connect-timeout 10 --max-time 60 \
+curl -4 -fsSL --connect-timeout 10 --max-time 60 \
   -o /tmp/servpanel-install.sh \
   https://github.com/AmShaegar-dev/servpanel/releases/latest/download/install.sh \
   && sudo env ACTION=install ACCESS_TYPE=1 PANEL_PORT=2999 \
@@ -184,7 +184,7 @@ curl -fsSL https://cdn.jsdelivr.net/gh/AmShaegar-dev/servpanel@main/install.sh \
 
 ```bash
 cd /tmp
-curl -fL --connect-timeout 10 --max-time 180 \
+curl -4 -fL --connect-timeout 10 --max-time 180 \
   -o servpanel-latest.tar.gz \
   https://github.com/AmShaegar-dev/servpanel/releases/latest/download/servpanel-latest.tar.gz
 tar -xzf servpanel-latest.tar.gz
