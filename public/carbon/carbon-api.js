@@ -581,7 +581,7 @@ const TAB_DATA = {
   clients: ['/api/clients'],
   install: ['/api/modules'],
   network: ['/api/interfaces', '/api/ufw', '/api/iptables', '/api/awg/config'],
-  cascade: ['/api/cascade/status', '/api/cascade/proxy', '/api/cascade/interfaces', '/api/cascade/schedule', '/api/cascade2/status'],
+  cascade: ['/api/cascade/status', '/api/cascade/proxy', '/api/cascade/interfaces', '/api/cascade/schedule', '/api/cascade2/status', '/api/traffic/distribution', '/api/clients'],
   obfuscation: ['/api/obf/current', '/api/obf/profiles'],
   services: ['/api/services', '/api/warp/status'],
   domains: ['/api/ssl/status'],
@@ -912,10 +912,11 @@ function realTrafficDistribution() {
   let d = carbon.distribution || {};
   const c2d = carbon.cascade2 || {};
   const c2role = c2d.role || '';
+  const c2relay = !!(c2d.detected && c2d.detected.relay);
   const c2blocked = Number(d.blocked) || 0;
-  if (c2role === 'eu' && c2d.counters) {
+  if (c2relay && c2role === 'eu' && c2d.counters) {
     d = { role: 'eu2', tunnel: Number(c2d.counters.ruBytes) || 0, direct: Number(c2d.counters.euBytes) || 0, blocked: c2blocked, source: 'cascade2' };
-  } else if (c2role === 'ru' && c2d.state && c2d.state.type === 'relay' && c2d.counters) {
+  } else if (c2relay && c2role === 'ru' && c2d.counters) {
     const ru = Number(c2d.counters.ruBytes) || 0;
     const eu = Number(c2d.counters.euBytes) || 0;
     d = { role: 'relay', tunnel: ru, direct: eu, blocked: c2blocked, source: 'cascade2' };
@@ -1128,8 +1129,8 @@ function realNetwork() {
 
 function cascade2Switch(relay) {
   return relay
-    ? `<button class="btn btn-primary" data-carbon-action="cascade2-migrate">${icon('cascade')}Мастер установки 2.0</button><button class="btn" data-carbon-action="cascade2-install">${icon('cascade')}Каскад 2 · релей</button><button class="btn" data-carbon-action="cascade2-classic">${icon('cascade')}Обычный каскад</button>`
-    : `<button class="btn btn-primary" data-carbon-action="cascade2-migrate">${icon('cascade')}Мастер установки 2.0</button><button class="btn" data-carbon-action="cascade2-install">${icon('cascade')}Каскад 2 · релей</button>`;
+    ? `<button class="btn btn-primary" data-carbon-action="cascade2-migrate">${icon('cascade')}Мастер установки 2.0</button><button class="btn" data-carbon-action="cascade2-classic">${icon('cascade')}Обычный каскад</button>`
+    : `<button class="btn" data-carbon-action="cascade2-migrate">${icon('cascade')}Каскад 2</button>`;
 }
 
 function realCascadeRelay() {
@@ -1164,11 +1165,31 @@ function realCascadeRelay() {
     </div>`;
 }
 
+function realCascadeEu(c) {
+  const d = carbon.distribution || {};
+  const passed = Number(d.passed) || 0;
+  const blocked = Number(d.blocked) || 0;
+  const clients = carbon.clients || [];
+  const online = clients.filter(x => clientStatus(x)).length;
+  return `<div class="page-head"><div><div class="page-title">Каскад RU → EU</div><div class="page-sub">Этот сервер — EU-выход каскада. RU-трафик возвращается на RU, остальное выходит здесь.</div></div><div class="page-actions">${cascade2Switch(false)}<button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
+    <div class="mini-grid">${mini('Роль', 'EU-выход', c.mode || 'exit')}${mini('Выход', c.active ? 'активен' : 'не активен', 'awg0')}${mini('Прошло через EU', fmtBytes(passed), 'трафик')}${mini('GeoIP blocked', fmtBytes(blocked), 'фильтры')}${mini('Клиентов', String(clients.length), online + ' онлайн')}</div>
+    <div class="grid">
+      <section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Состояние выхода</div><div class="card-sub">/api/cascade/status</div></div>${tag(c.active ? 'активен' : 'не активен', c.active ? 'good' : 'warn')}</div>
+        <div class="list"><div class="list-row"><b>Роль</b><span class="mono">${escHtml(c.role || 'eu')}</span></div><div class="list-row"><b>Режим</b><span class="mono">${escHtml(c.mode || 'exit')}</span></div><div class="list-row"><b>Клиентский интерфейс</b><span class="mono">awg0</span></div><div class="list-row"><b>Рукопожатие</b><span class="mono">${c.handshakeAgo == null ? '—' : c.handshakeAgo + ' с назад'}</span></div></div></section>
+      <section class="card" style="grid-column:span 6"><div class="card-top"><div><div class="card-title">Распределение</div><div class="card-sub">/api/traffic/distribution</div></div></div>
+        <div class="list"><div class="list-row"><b>Прошло через EU</b><span class="mono">${fmtBytes(passed)}</span></div><div class="list-row"><b>Заблокировано</b><span class="mono">${fmtBytes(blocked)}</span></div><div class="list-row"><b>Клиентов</b><span class="mono">${clients.length} · ${online} онлайн</span></div></div></section>
+      <section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Клиенты EU-выхода</div><div class="card-sub">Терминируются на этом сервере</div></div>${tag(String(clients.length), 'muted')}</div>
+        <div class="list">${clients.slice(0, 20).map(x => `<div class="list-row"><b>${escHtml(x.name)}</b><span class="mono">${escHtml(x.ip || '—')}</span><span class="mono">${clientStatus(x) ? 'в сети' : 'не в сети'}</span></div>`).join('') || '<div class="list-row"><b>Клиентов нет</b></div>'}</div></section>
+    </div>`;
+}
+
 function realCascade() {
-  const _c2 = carbon.cascade2 && carbon.cascade2.state;
+  const c2det = carbon.cascade2 && carbon.cascade2.detected;
+  const _c2 = c2det && c2det.relay ? carbon.cascade2.state : null;
   const s = _c2 || {};
   if (_c2 && _c2.type === 'relay') return realCascadeRelay();
   const c = carbon.cascade || {};
+  if (c.role === 'eu') return realCascadeEu(c);
   const p = carbon.cascadeProxy || {};
   const ci = carbon.cascadeInterfaces || {};
   const ifaceList = Array.isArray(ci.available) ? ci.available : [];
@@ -1242,7 +1263,7 @@ function realCascade() {
     ${routeCard}
     <div class="mini-grid" style="margin-top:14px">${mini('Настроен', c.configured ? 'да' : 'нет', 'awg1')}${mini('Активен', c.active ? 'да' : 'нет', 'туннель')}${mini('Endpoint', escHtml(c.endpoint || '—'), 'EU')}${mini('Handshake', c.handshakeAgo == null ? '—' : c.handshakeAgo + ' c', 'назад')}${balanceMode ? mini('Выходы', String(exitCount), exits.filter(e => e.healthy).length + ' активны') : ''}</div>
     <div class="grid"><section class="card" style="grid-column:span 7"><div class="card-top"><div><div class="card-title">Состояние</div><div class="card-sub">/api/cascade/status</div></div>${tag(c.active ? 'активен' : 'не активен', c.active ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>Роль</b><span class="mono">${escHtml(c.role || '—')}</span></div><div class="list-row"><b>Интерфейсы</b><span class="mono">${escHtml((c.ifaces || []).join(', ') || '—')}</span></div><div class="list-row"><b>Маршрут</b><span class="mono">${escHtml(c.tableRoute || '—')}</span></div><div class="list-row"><b>ipset</b><span class="mono">${escHtml(String(c.ipsetCount || 0))}</span></div></div></section>
-    <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">MTProto через EU</div><div class="card-sub">/api/cascade/proxy</div></div>${tag(p.enabled ? 'включено' : 'выключено', p.enabled ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>middle_proxy_nat_ip</b><span class="mono">${escHtml(p.middleProxyNatIp || p.natIp || '—')}</span></div><div class="list-row"><b>Пользователи</b><span class="mono">${escHtml((p.users || []).join(', ') || '—')}</span></div></div></section><section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Интерфейсы каскада</div><div class="card-sub">${balanceMode ? 'ipset ru → напрямую · MARK 0x2000+ → выходы' : 'ipset ru → напрямую · MARK 0x1 → EU-туннель'}</div></div>${tag(String(selectedIfaces.length), selectedIfaces.length ? 'good' : 'warn')}</div><div class="chips">${ifaceList.map(i => `<label class="chip ${selectedIfaces.includes(i) ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-cascade-iface value="${escHtml(i)}" ${selectedIfaces.includes(i) ? 'checked' : ''}> ${escHtml(i)}</label>`).join('') || '<span class="muted">Интерфейсы не найдены</span>'}</div><div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="cascade-ifaces-save">${icon('check')}Применить интерфейсы</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div><div class="donut-note">К выбранным интерфейсам применяются правила RU-маршрутизации: RU-направления идут напрямую, остальное — ${balanceMode ? 'в назначенный выход каскада' : 'в EU-туннель'}.</div>${ci.reason && !ifaceList.length ? `<div class="donut-note">${escHtml(ci.reason)}</div>` : ''}</section>${c2Card}${csCard}</div>`;
+    <section class="card" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">MTProto через EU</div><div class="card-sub">/api/cascade/proxy</div></div>${tag(p.enabled ? 'включено' : 'выключено', p.enabled ? 'good' : 'warn')}</div><div class="list"><div class="list-row"><b>middle_proxy_nat_ip</b><span class="mono">${escHtml(p.middleProxyNatIp || p.natIp || '—')}</span></div><div class="list-row"><b>Пользователи</b><span class="mono">${escHtml((p.users || []).join(', ') || '—')}</span></div></div></section><section class="card" style="grid-column:span 12"><div class="card-top"><div><div class="card-title">Интерфейсы каскада</div><div class="card-sub">${balanceMode ? 'ipset ru → напрямую · MARK 0x2000+ → выходы' : 'ipset ru → напрямую · MARK 0x1 → EU-туннель'}</div></div>${tag(String(selectedIfaces.length), selectedIfaces.length ? 'good' : 'warn')}</div><div class="chips">${ifaceList.map(i => `<label class="chip ${selectedIfaces.includes(i) ? 'on' : ''}" style="cursor:pointer"><input type="checkbox" data-cascade-iface value="${escHtml(i)}" ${selectedIfaces.includes(i) ? 'checked' : ''}> ${escHtml(i)}</label>`).join('') || '<span class="muted">Интерфейсы не найдены</span>'}</div><div class="page-actions" style="margin-top:12px"><button class="btn btn-primary" data-carbon-action="cascade-ifaces-save">${icon('check')}Применить интерфейсы</button><button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div><div class="donut-note">К выбранным интерфейсам применяются правила RU-маршрутизации: RU-направления идут напрямую, остальное — ${balanceMode ? 'в назначенный выход каскада' : 'в EU-туннель'}.</div>${ci.reason && !ifaceList.length ? `<div class="donut-note">${escHtml(ci.reason)}</div>` : ''}</section>${csCard}</div>`;
 }
 
 function realObfuscation() {

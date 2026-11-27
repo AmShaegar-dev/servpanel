@@ -7305,6 +7305,18 @@ function cascadeObfParams(data, version) {
 // Состояние сборки переживает перезапуск панели (в том числе перезагрузку RU):
 // параметры и шаги лежат в файле 0600, на старте сборка продолжается.
 const CASCADE_JOB_FILE = path.join(DATA_DIR, '.cascade_job.json');
+const C2_CLEAN_FILE = path.join(DATA_DIR, '.cascade2_clean.json');
+
+function saveC2Clean(v) {
+    try { writeJson(C2_CLEAN_FILE, v, 0o600); } catch (e) { /* ignore */ }
+}
+function readC2Clean() {
+    const j = readJson(C2_CLEAN_FILE, null);
+    return j && typeof j === 'object' ? j : null;
+}
+function clearC2Clean() {
+    try { fs.unlinkSync(C2_CLEAN_FILE); } catch (e) { /* нет файла */ }
+}
 
 function saveCascadeJob(job) {
     try {
@@ -7340,6 +7352,121 @@ function finishCascadeJob(job, result, error) {
     // Оставляем последнюю сборку для чек-листа после перезагрузки панели,
     // но без пароля и параметров подключения.
     saveCascadeJob({ ...job, params: null, opts: null });
+
+    // Чистая установка каскада 2: после сборки AWG и каскада 1 автоматически
+    // переходим к переносу/сборке каскада 2.
+    const pending = readC2Clean();
+    if (pending && pending.stage === 'build') {
+        if (!error && result && result.success) {
+            pending.stage = 'migrate';
+            pending.builtAt = Date.now();
+            saveC2Clean(pending);
+            pushC2('Этап 1', 'AWG установлен, каскад 1 собран. Перехожу к каскаду 2…');
+            setTimeout(() => startC2MigrationJob(pending), 700);
+        } else {
+            if (c2MigrateJob) {
+                c2MigrateJob.running = false;
+                c2MigrateJob.ok = false;
+                c2MigrateJob.error = error || 'Сборка AWG не завершилась';
+                c2MigrateJob.finishedAt = Date.now();
+                pushC2('Ошибка', c2MigrateJob.error);
+            }
+            clearC2Clean();
+        }
+    }
+}
+
+function pushC2(title, text) {
+    if (!c2MigrateJob) return;
+    const at = Date.now();
+    c2MigrateJob.steps.push({ at, title, text: String(text || '') });
+    if (c2MigrateJob.steps.length > 400) c2MigrateJob.steps.splice(0, c2MigrateJob.steps.length - 400);
+    c2MigrateJob.log = String(c2MigrateJob.log || '') +
+        '[' + new Date().toISOString().slice(11, 19) + '] ' + title + ': ' + text + '\n';
+}
+
+// Запуск собственно каскада 2 после установки AWG (или мягкого переноса).
+function startC2MigrationJob(pending) {
+    if (!pending || !pending.migrate) return;
+    if (c2MigrateJob && c2MigrateJob.running && c2MigrateJob.startedMigration) return;
+    if (!c2MigrateJob) c2MigrateJob = { running: true, ok: false, error: '', steps: [], log: '', startedAt: Date.now(), finishedAt: null, result: null };
+    const job = c2MigrateJob;
+    job.running = true;
+    job.ok = false;
+    job.error = '';
+    job.startedMigration = true;
+    const push = (title, text) => pushC2(title, text);
+    push('Этап 2', 'Собираю каскад 2: EU-выход, туннель RU → EU и релей…');
+    (async () => {
+        try {
+            const result = await cascade2Migrate.migrate({
+                ...pending.migrate,
+                localIp: cascade2Ip(),
+                ruTunnelKeys: x25519Pair(),
+                euTunnelKeys: x25519Pair(),
+                allowEmpty: true
+            }, push);
+            cascade2Write({ ...result.state });
+            job.ok = true;
+            job.result = result;
+            push('Итог', 'Каскад 2 собран: клиентов ' + result.peers + ', порты ' + result.ports.join(',') +
+                (result.createdClient ? ', создан клиент ' + result.createdClient : ''));
+            clearC2Clean();
+        } catch (e) {
+            job.ok = false;
+            job.error = String((e && e.message) || e);
+            push('Ошибка', job.error);
+            clearC2Clean();
+        } finally {
+            job.running = false;
+            job.finishedAt = Date.now();
+        }
+    })();
+}
+
+function resumeC2Clean() {
+    const pending = readC2Clean();
+    if (!pending) return;
+    if (pending.stage === 'migrate') {
+        startC2MigrationJob(pending);
+        return;
+    }
+    if (pending.stage !== 'build') return;
+    const saved = loadCascadeJob();
+    if (saved && saved.running) return; // resumeCascadeJob уже продолжает сборку
+    if (saved && saved.result && saved.result.success) {
+        pending.stage = 'migrate';
+        saveC2Clean(pending);
+        startC2MigrationJob(pending);
+        return;
+    }
+    // Сборка не завершилась (например, панель перезагрузилась до старта).
+    startC2CleanBuild(pending);
+}
+
+// Полная установка: переустановка AWG на обоих серверах через обычную
+// сборку каскада 1 (она умеет переживать перезагрузки), затем каскад 2.
+function startC2CleanBuild(pending) {
+    if (cascadeBuildJob && cascadeBuildJob.running) return;
+    if (!pending || !pending.build || !pending.buildOpts) { clearC2Clean(); return; }
+    const job = {
+        running: true,
+        startedAt: new Date().toISOString(),
+        finishedAt: '',
+        role: 'ru',
+        peer: pending.build.host,
+        steps: [],
+        error: '',
+        result: null,
+        params: pending.build,
+        opts: pending.buildOpts
+    };
+    job.c2Mirror = c2MigrateJob;
+    cascadeBuildJob = job;
+    saveCascadeJob(job);
+    runCascadeBuild(job, pending.build, pending.buildOpts)
+        .then((result) => finishCascadeJob(job, result, ''))
+        .catch((e) => finishCascadeJob(job, null, (e && e.message) || String(e)));
 }
 
 function resumeCascadeJob() {
@@ -7370,6 +7497,12 @@ async function runCascadeBuild(job, remote, opts) {
         job.steps.push({ title, text: String(text || ''), at: new Date().toISOString() });
         if (job.steps.length > 400) job.steps.splice(0, job.steps.length - 400);
         saveCascadeJob(job);
+        if (job.c2Mirror) {
+            job.c2Mirror.steps.push({ at: Date.now(), title, text: String(text || '') });
+            if (job.c2Mirror.steps.length > 400) job.c2Mirror.steps.splice(0, job.c2Mirror.steps.length - 400);
+            job.c2Mirror.log = String(job.c2Mirror.log || '') +
+                '[' + new Date().toISOString().slice(11, 19) + '] ' + title + ': ' + text + '\n';
+        }
     };
     const { version, role } = opts;
     const euSubnet = opts.euSubnet || '172.16.61.0/24';
@@ -11961,15 +12094,82 @@ let c2MigrateJob = null;
 app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
     if (c2MigrateJob && c2MigrateJob.running) return res.status(409).json({ error: 'Миграция уже выполняется' });
     const b = req.body || {};
+    const mode = b.mode === 'clean' ? 'clean' : 'soft';
+    const role = b.role === 'eu' ? 'eu' : 'ru';
+    const version = ['3.1', '2.0', '1.5'].includes(String(b.version)) ? String(b.version) : '3.1';
+    const awgPortNum = Number(b.port);
+    const awgPort = Number.isInteger(awgPortNum) && awgPortNum >= 1 && awgPortNum <= 65535 ? awgPortNum : 3977;
+    const relayPorts = (Array.isArray(b.relayPorts) ? b.relayPorts : [])
+        .map(Number).filter(n => n > 0 && n < 65536);
+    if (!relayPorts.length) relayPorts.push(3977);
+    const tunnelPort = Number(b.tunnelPort) || 4600;
+    const ifaces = Array.isArray(b.ifaces) ? b.ifaces.filter(Boolean) : ['awg0'];
+    const host = String(b.peerHost || '').replace(/^https?:\/\//i, '').replace(/[:/].*$/, '').trim();
+    const port = Number(b.peerPort) || 22;
+    const user = String(b.peerUser || 'root').trim() || 'root';
+    const pass = String(b.peerPass || '');
+    if (!host || !pass) return res.status(400).json({ error: 'Нужны IP второй стороны и пароль root' });
+
     const job = { running: true, ok: false, error: '', steps: [], log: '', startedAt: Date.now(), finishedAt: null, result: null };
     c2MigrateJob = job;
     const push = (title, text) => {
         job.steps.push({ at: Date.now(), title, text: String(text || '') });
         job.log += '[' + new Date().toISOString().slice(11, 19) + '] ' + title + ': ' + text + '\n';
     };
+
+    if (mode === 'clean') {
+        // Полную установку запускаем только с панели входа: она ставит AWG на
+        // обе стороны и собирает каскад 1, который умеет переживать перезагрузки.
+        if (role !== 'ru') {
+            c2MigrateJob = null;
+            return res.status(400).json({ error: 'Полную установку запускайте с панели RU-входа' });
+        }
+        let obf = null;
+        try {
+            obf = cascadeObfParams(b, version);
+        } catch (e) {
+            c2MigrateJob = null;
+            return res.status(400).json({ error: 'Обфускация: ' + e.message });
+        }
+        const pending = {
+            stage: 'build',
+            createdAt: Date.now(),
+            build: { host, port, user, pass },
+            buildOpts: {
+                version, role: 'ru', euSubnet: '172.16.61.0/24', obf,
+                ifaces: ifaces.filter(i => IFACE_RE.test(i)), extraRuNets: [],
+                port: awgPort, keepPackages: true
+            },
+            migrate: {
+                role, peerHost: host, peerPort: port, peerUser: user, peerPass: pass,
+                relayPorts, tunnelPort, ifaces,
+                createClient: String(b.createClient || '').trim(),
+                cleanRu: true
+            }
+        };
+        push('Очистка', 'Удаляю AWG и правила каскада на второй стороне…');
+        (async () => {
+            try {
+                await sshRunner.run({ host, port, user, pass }, cascade2Migrate.PURGE_AWG, 600000);
+                push('Очистка', 'AWG удалён на ' + host + '. Удаляю на этом сервере…');
+                rootSh('bash', ['-c', cascade2Migrate.PURGE_AWG], { timeout: 600000 });
+                push('Установка', 'Ставлю AWG ' + version + ' и собираю каскад 1 на обоих серверах…');
+                saveC2Clean(pending);
+                startC2CleanBuild(pending);
+            } catch (e) {
+                job.running = false;
+                job.ok = false;
+                job.error = String((e && e.message) || e);
+                push('Ошибка', job.error);
+                clearC2Clean();
+            }
+        })();
+        auditLog(req, 'Каскад 2: полная установка запущена (AWG ' + version + ', порт ' + awgPort + ')');
+        return res.json({ success: true, running: true, mode: 'clean' });
+    }
+
     (async () => {
         try {
-            const role = b.role === 'eu' ? 'eu' : 'ru';
             const result = await cascade2Migrate.migrate({
                 role,
                 peerHost: b.peerHost,
@@ -11979,6 +12179,9 @@ app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
                 relayPorts: b.relayPorts,
                 tunnelPort: b.tunnelPort,
                 ifaces: b.ifaces,
+                allowEmpty: b.allowEmpty === true,
+                createClient: String(b.createClient || '').trim(),
+                cleanRu: b.cleanRu === true,
                 localIp: cascade2Ip(),
                 ruTunnelKeys: x25519Pair(),
                 euTunnelKeys: x25519Pair()
@@ -11986,7 +12189,8 @@ app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
             cascade2Write({ ...result.state });
             job.ok = true;
             job.result = result;
-            push('Итог', 'Перенос завершён: клиентов ' + result.peers + ', порты ' + result.ports.join(','));
+            push('Итог', 'Перенос завершён: клиентов ' + result.peers + ', порты ' + result.ports.join(',') +
+                (result.createdClient ? ', создан клиент ' + result.createdClient : ''));
             auditLog(req, 'Каскад 2: мягкий перенос выполнен, порты ' + result.ports.join(','));
         } catch (e) {
             job.ok = false;
@@ -17662,6 +17866,7 @@ if (require.main === module) {
     // перезагрузки RU при установке AWG), продолжаем её автоматически.
     setTimeout(() => {
         try { resumeCascadeJob(); } catch (e) { console.warn('Каскад: не удалось продолжить сборку —', e.message); }
+        try { resumeC2Clean(); } catch (e) { console.warn('Каскад 2: не удалось продолжить установку —', e.message); }
     }, 8000);
 
     // Перечитать сертификат без простоя: kill -HUP <pid> или pm2 reload.

@@ -1240,31 +1240,52 @@ async function carbonCascade2Install() {
 
 async function carbonCascade2Migrate() {
   const st = (carbon.cascade2 && carbon.cascade2.state) || {};
+  const classicRole = (carbon.cascade && carbon.cascade.role) || '';
+  const defRole = classicRole === 'eu' ? 'eu' : classicRole === 'ru' ? 'ru' : 'ru';
   showCarbonForm({
-    title: 'Каскад 2 · установка (мягкий перенос)',
-    sub: 'Переносит клиентов с RU на EU без замены конфигов: ключи, обфускация и порты остаются прежними. Нужен SSH root второй стороны.',
+    title: 'Каскад 2 · установка',
+    sub: 'Мягкий перенос сохраняет клиентов и их файлы. Полная установка стирает AWG и правила на обоих серверах, ставит AWG заново с выбранными параметрами и создаёт новый каскад.',
     fields: [
-      { name: 'role', label: 'Роль этой панели', type: 'select', options: [{ value: 'ru', label: 'Вход (RU)' }, { value: 'eu', label: 'Выход (EU)' }], value: (carbon.cascade2 && carbon.cascade2.role) || 'ru' },
+      { name: 'mode', label: 'Режим', type: 'select', value: 'soft', options: [
+        { value: 'soft', label: 'Мягкий перенос (клиенты сохраняются)' },
+        { value: 'clean', label: 'Полная очистка и установка AWG заново' }
+      ] },
+      { name: 'role', label: 'Роль этой панели', type: 'select', options: [{ value: 'ru', label: 'Вход (RU)' }, { value: 'eu', label: 'Выход (EU)' }], value: defRole },
       { name: 'peerHost', label: 'IP второй стороны', placeholder: '194.124.250.127' },
       { name: 'peerPort', label: 'SSH-порт', value: '22' },
       { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
       { name: 'peerPass', label: 'Пароль root', type: 'password' },
-      { name: 'relayPorts', label: 'Порты релея (через запятую)', value: ((st.ports && st.ports.length ? st.ports : [st.ruPort || 3977])).join(', ') },
-      { name: 'tunnelPort', label: 'Порт туннеля awg1', type: 'number', value: st.ruExitPort || 4600, min: 1, max: 65535 },
-      { name: 'ifaces', label: 'Интерфейсы фильтрации на EU', value: ((st.ifaces && st.ifaces.length ? st.ifaces : ['awg0'])).join(', ') }
+      { name: 'relayPorts', label: 'Порты входа (через запятую)', value: ((st.ports && st.ports.length ? st.ports : [st.ruPort || 3977])).join(', ') },
+      { name: 'tunnelPort', label: 'Порт туннеля RU → EU', type: 'number', value: st.ruExitPort || 4600, min: 1, max: 65535 },
+      { name: 'ifaces', label: 'Интерфейсы фильтрации на EU', value: ((st.ifaces && st.ifaces.length ? st.ifaces : ['awg0'])).join(', ') },
+      { name: 'version', label: 'Версия AWG (полная установка)', type: 'select', value: '3.1', options: ['3.1', '2.0', '1.5'] },
+      { name: 'port', label: 'UDP-порт AWG на EU (полная установка)', type: 'number', value: '3977', min: 1, max: 65535 },
+      { name: 'obfMode', label: 'Обфускация (полная установка)', type: 'select', value: 'architect', options: [{ value: 'installer', label: 'Как у установщика' }, { value: 'architect', label: 'Архитектор' }, { value: 'custom', label: 'Свои параметры' }] },
+      { name: 'obfProfile', label: 'Профиль мимикрии', type: 'select', value: 'quic', options: [
+        { value: 'quic', label: 'QUIC' }, { value: 'tls', label: 'TLS 1.3' }, { value: 'dtls', label: 'DTLS 1.2' },
+        { value: 'dtls13', label: 'DTLS 1.3' }, { value: 'sip', label: 'SIP' }, { value: 'dns', label: 'DNS' }, { value: 'noise', label: 'Noise' }
+      ] },
+      { name: 'obfIntensity', label: 'Интенсивность', type: 'select', value: 'medium', options: [{ value: 'low', label: 'Низкая' }, { value: 'medium', label: 'Средняя' }, { value: 'high', label: 'Высокая' }] },
+      { name: 'obfSni', label: 'SNI для TLS-мимикрии', placeholder: 'ozon.ru' },
+      { name: 'clientName', label: 'Создать клиента на EU (необязательно)', placeholder: 'my_laptop' }
     ],
-    submitText: 'Начать перенос',
+    submitText: 'Начать',
     danger: true,
     onSubmit: async v => {
       const peerHost = String(v.peerHost || '').trim();
       if (!peerHost) throw new Error('Укажите IP второй стороны');
       if (!v.peerPass) throw new Error('Укажите пароль root второй стороны');
       const relayPorts = String(v.relayPorts || '').split(',').map(x => Number(x.trim())).filter(n => n > 0 && n < 65536);
-      if (!relayPorts.length) throw new Error('Укажите хотя бы один порт релея');
-      const ifaces = String(v.ifaces || '').split(',').map(x => x.trim()).filter(Boolean);
+      if (!relayPorts.length) throw new Error('Укажите хотя бы один порт входа');
+      const mode = v.mode === 'clean' ? 'clean' : 'soft';
+      if (mode === 'clean' && !confirm('Полная установка удалит AWG, правила и клиентов на ОБОИХ серверах, затем поставит AWG заново. Продолжить?')) return;
       const d = await api('/api/cascade2/migrate-ssh', { method: 'POST', body: {
-        role: v.role, peerHost, peerPort: v.peerPort || '22', peerUser: v.peerUser || 'root',
-        peerPass: v.peerPass, relayPorts, tunnelPort: Number(v.tunnelPort) || 4600, ifaces
+        mode, role: v.role, peerHost, peerPort: v.peerPort || '22', peerUser: v.peerUser || 'root',
+        peerPass: v.peerPass, relayPorts, tunnelPort: Number(v.tunnelPort) || 4600,
+        ifaces: String(v.ifaces || '').split(',').map(x => x.trim()).filter(Boolean),
+        version: v.version, port: Number(v.port) || 3977,
+        obfMode: v.obfMode, obfProfile: v.obfProfile, obfIntensity: v.obfIntensity || 'medium',
+        obfSni: String(v.obfSni || '').trim(), createClient: String(v.clientName || '').trim()
       } });
       if (d.success) await carbonWatchC2Migrate();
     }
