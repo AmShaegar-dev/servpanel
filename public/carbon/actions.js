@@ -10,6 +10,9 @@ async function carbonRefresh(message) {
     if (Array.isArray(clients)) carbon.clients = mergeClientData(carbon.clients, clients);
   } catch (e) { /* обновим из /api/stats ниже */ }
   await loadCarbonData();
+  if (typeof reloadTabData === 'function' && typeof state !== 'undefined') {
+    await reloadTabData(state.tab);
+  }
   render();
   if (message) showToast(message);
 }
@@ -2803,8 +2806,12 @@ document.addEventListener('click', async event => {
       const ruleAction = btn.dataset.ruleAction || '';
       if (confirm('Удалить правило №' + name + '?')) {
         const q = '?to=' + encodeURIComponent(to) + '&action=' + encodeURIComponent(ruleAction);
-        await api('/api/ufw/' + encodeURIComponent(name) + q, { method: 'DELETE' });
-        await carbonRefresh('Правило удалено');
+        try {
+          await api('/api/ufw/' + encodeURIComponent(name) + q, { method: 'DELETE' });
+        } catch (e) {
+          showToast((e && e.message) || 'Правило уже удалено');
+        }
+        await carbonRefresh('Список UFW обновлён');
       }
     }
     else if (action === 'iptables-add') await carbonIptablesAdd();

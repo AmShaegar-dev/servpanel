@@ -608,6 +608,18 @@ function ensureTabData(tab) {
   }).catch(() => { tabDataBusy[tab] = false; });
 }
 
+// Принудительно перечитать данные текущей вкладки (кнопка «Обновить»,
+// удаление UFW и т.п.). ensureTabData не подходит: он может быть занят.
+async function reloadTabData(tab) {
+  const paths = TAB_DATA[tab];
+  if (!paths) return;
+  const results = await Promise.all(paths.map(p => api(p).catch(() => null)));
+  let got = false;
+  paths.forEach((p, i) => { if (assignCarbonPath(p, results[i])) got = true; });
+  applyShellData();
+  return got;
+}
+
 function clientStatus(c) {
   return c.status_code === 'active';
 }
@@ -1577,6 +1589,7 @@ document.addEventListener('click', async event => {
     if (action === 'refresh') {
       btn.disabled = true;
       await loadCarbonData();
+      if (typeof state !== 'undefined') await reloadTabData(state.tab);
       render();
       showToast('Данные обновлены');
     } else if (action === 'delete-client') {
