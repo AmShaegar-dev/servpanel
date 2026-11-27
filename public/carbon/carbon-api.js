@@ -943,13 +943,13 @@ function realTrafficDistribution() {
   const passed = Number(d.passed) || 0;
   const blocked = Number(d.blocked) || 0;
   const source = d.source || 'unavailable';
-  const total = role === 'relay' ? tunnel + direct : isEu ? passed + blocked : isEu2 ? tunnel + direct : tunnel + direct + blocked;
+  const total = role === 'relay' ? tunnel + blocked : isEu ? passed + blocked : isEu2 ? tunnel + direct : tunnel + direct + blocked;
   const exits = !isEu && !isEu2 && Array.isArray(d.exits) && d.exits.length ? d.exits : null;
   const exitColors = ['#5b8cff', '#8b5cf6', '#2dd4a7', '#f5b84b', '#ff6b6b', '#4dd0e1'];
   const parts = role === 'relay'
     ? [
-        { key: 'direct', label: 'На EU', short: 'на EU', value: direct, color: '#5b8cff' },
-        { key: 'tunnel', label: 'Выход с RU', short: 'с RU', value: tunnel, color: 'var(--accent)' }
+        { key: 'tunnel', label: 'Выход с RU', short: 'с RU', value: tunnel, color: 'var(--accent)' },
+        { key: 'blocked', label: 'Заблокировано GeoIP', short: 'GeoIP', value: blocked, color: '#d29922' }
       ]
     : isEu
     ? [
@@ -968,7 +968,7 @@ function realTrafficDistribution() {
         { key: 'tunnel', label: 'В EU-туннель', short: 'в EU-туннеле', value: tunnel, color: '#5b8cff' },
         { key: 'direct', label: 'RU выход', short: 'в RU-выходе', value: direct, color: 'var(--accent)' }
       ];
-  if (!isEu && !isEu2 && blocked > 0) parts.push({ key: 'blocked', label: 'GeoIP blocked', short: 'заблокировано', value: blocked, color: '#d29922' });
+  if (role !== 'relay' && !isEu && !isEu2 && blocked > 0) parts.push({ key: 'blocked', label: 'Заблокировано GeoIP', short: 'заблокировано', value: blocked, color: '#d29922' });
   const C = 2 * Math.PI * 46;
   let offset = 0;
   const rings = parts.map(p => {
@@ -986,7 +986,7 @@ function realTrafficDistribution() {
   const note = total
     ? (isEu ? 'Данные из интерфейса awg0 и правил GeoIP.' : isEu2 ? 'Данные из интерфейсов EU и туннеля в RU.' : exits ? 'Данные по каждому выходу каскада и RU-направлению.' : (source === 'mangle' ? 'Данные из счётчиков mangle (ipset ru) и awg0/awg1.' : source === 'cached' ? 'Счётчики маршрутизации пересозданы — показаны последние известные доли.' : 'Данные из счётчиков маршрутизации.'))
     : 'Нет данных: счётчики маршрутизации ещё не накоплены.';
-  return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">${role === 'relay' ? 'НА EU · ВЫХОД С RU' : isEu ? 'EU-выход · прошло / GeoIP blocked' : isEu2 ? 'EU · напрямую / через RU' : exits ? 'RU-вход · выходы / RU' : 'RU-вход · туннель / RU выход'}${!isEu && !isEu2 && blocked > 0 ? ' / GeoIP' : ''}</div></div>${tag(tagText, tagTone)}</div>
+  return `<section class="card" id="liveDistributionCard" style="grid-column:span 5"><div class="card-top"><div><div class="card-title">Распределение трафика</div><div class="card-sub">${role === 'relay' ? 'ВЫХОД С RU · GEOIP BLOCKED' : isEu ? 'EU-выход · прошло / GeoIP blocked' : isEu2 ? 'EU · напрямую / через RU' : exits ? 'RU-вход · выходы / RU' : 'RU-вход · туннель / RU выход'}${role !== 'relay' && !isEu && !isEu2 && blocked > 0 ? ' / GeoIP' : ''}</div></div>${tag(tagText, tagTone)}</div>
     <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
       <div style="position:relative;width:196px;height:196px;flex:0 0 auto">
         <svg viewBox="0 0 120 120" style="width:100%;height:100%"><circle cx="60" cy="60" r="46" fill="none" stroke="var(--surface-3)" stroke-width="12"/>${rings}</svg>
