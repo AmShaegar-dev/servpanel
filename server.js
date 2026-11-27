@@ -10160,7 +10160,10 @@ function effectiveClientEndpoint() {
     try {
         // На RU клиент всегда входит на сам RU — и в каскаде 1, и в каскаде 2.
         if (cascadeRole() === 'ru') {
-            let port = Number((cascade2Read() || {}).ruPort) || 0;
+            const c2st = cascade2Read() || {};
+            // Порт из состояния каскада 2 берём только если релей реально включён.
+            // Иначе там остаётся старый ruPort (например 3977) после удаления.
+            let port = (c2st.type === 'relay' && c2st.enabled) ? (Number(c2st.ruPort) || 0) : 0;
             if (!port) {
                 try {
                     const t = fs.readFileSync('/etc/amnezia/amneziawg/awg0.conf', 'utf8');
