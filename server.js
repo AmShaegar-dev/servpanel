@@ -12590,7 +12590,10 @@ function cascade2Detect() {
     } catch (e) { /* ignore */ }
 
     // EU: клиентский awg1 с Endpoint на RU и таблица 3001 в сторону туннеля.
-    if (ruConf && /^Endpoint\s*=/m.test(ruConf)) {
+    // Вариант A каскада 2 (RU-клиент → EU-сервер) тоже имеет Endpoint, но
+    // пир называется eu_host: это не EU-клиент, ruIp брать из Endpoint нельзя.
+    if (ruConf && /^Endpoint\s*=/m.test(ruConf) &&
+        !/#_Name\s*=\s*eu_host\b/.test(ruConf) && out.role !== 'ru') {
         const ep = ruConf.match(/^Endpoint\s*=\s*([\d.]+):(\d+)/m);
         if (ep) {
             out.role = out.role || 'eu';

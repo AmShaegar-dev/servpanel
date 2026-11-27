@@ -1367,6 +1367,7 @@ async function carbonCascade2Migrate() {
       { name: 'peerPort', label: 'SSH-порт', value: '22' },
       { name: 'peerUser', label: 'SSH-пользователь', value: 'root' },
       { name: 'peerPass', label: 'Пароль root', type: 'password' },
+      { name: 'tunnelPort', label: 'Порт туннеля RU → EU (по умолчанию вход + 1)', type: 'number', value: (() => { const p = Number(st.ruPort) || Number((st.ports || [])[0]) || 3889; return p >= 65535 ? 4600 : p + 1; })(), min: 1, max: 65535 },
       { name: 'ifaces', label: 'Интерфейсы фильтрации на EU', value: ((st.ifaces && st.ifaces.length ? st.ifaces : ['awg0'])).join(', ') },
       { name: 'version', label: 'Версия AWG (полная установка)', type: 'select', value: '3.1', options: ['3.1', '2.0', '1.5'], showWhen: { field: 'mode', value: 'clean' } },
       { name: 'port', label: 'UDP-порт AWG на EU (полная установка)', type: 'number', value: '3977', min: 1, max: 65535, showWhen: { field: 'mode', value: 'clean' } },
@@ -1390,6 +1391,7 @@ async function carbonCascade2Migrate() {
       const d = await api('/api/cascade2/migrate-ssh', { method: 'POST', body: {
         mode, role: v.role, peerHost, peerPort: v.peerPort || '22', peerUser: v.peerUser || 'root',
         peerPass: v.peerPass,
+        tunnelPort: Number(v.tunnelPort) || 0,
         ifaces: String(v.ifaces || '').split(',').map(x => x.trim()).filter(Boolean),
         version: v.version, port: Number(v.port) || 3977,
         obfMode: v.obfMode, obfProfile: v.obfProfile, obfIntensity: v.obfIntensity || 'medium',
