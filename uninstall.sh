@@ -18,6 +18,10 @@ if [ "${EUID:-$(id -u)}" -ne 0 ]; then
     exit 1
 fi
 
+if [ -r /dev/tty ]; then
+    stty sane < /dev/tty 2>/dev/null || true
+fi
+
 ask() {
     local question="$1" answer=""
     if [ -r /dev/tty ]; then

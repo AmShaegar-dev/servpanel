@@ -15,6 +15,11 @@ echo -e "AmneziaWG, AdGuard, каскад и остальные компонен
 echo -e "устанавливаются потом из самой панели."
 echo
 
+# Восстанавливаем tty: иначе Enter/стрелки могут не доходить до read.
+if [ -r /dev/tty ]; then
+    stty sane < /dev/tty 2>/dev/null || true
+fi
+
 # read от терминала: при «curl | bash» stdin занят скриптом.
 ask() {
     local question="$1" def="${2:-}" answer=""

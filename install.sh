@@ -73,6 +73,12 @@ load_part() {
     exit 1
 }
 
+# Восстанавливаем tty: после веб-консолей и raw-режима Enter не доходит
+# до read, и установка выглядит зависшей на первом вопросе.
+if [ -r /dev/tty ]; then
+    stty sane < /dev/tty 2>/dev/null || true
+fi
+
 ask() {
     # ask "вопрос" "значение по умолчанию" -> печатает ответ
     local question="$1" def="${2:-}" answer=""
