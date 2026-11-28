@@ -26,6 +26,10 @@ if [ -f /root/servpanel/.cleanup_only ]; then
     echo "=== CLEANUP ONLY $(date -Is) ==="
     df -Pm / 2>/dev/null | tail -1 || true
     echo "pre-update backups: $(ls -1 /root/backups/servpanel-pre-update-*.tar.gz 2>/dev/null | wc -l)"
+    echo "=== TOP DIRS ==="
+    du -xhd1 / 2>/dev/null | sort -h | tail -20 || true
+    echo "=== DETAIL ==="
+    du -xhd1 /root /var /usr /opt /home 2>/dev/null | sort -h | tail -30 || true
     echo "=== CLEANUP DONE ==="
     exit 0
 fi
