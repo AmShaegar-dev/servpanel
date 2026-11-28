@@ -1389,10 +1389,11 @@ async function carbonCascade2Migrate() {
   const defRole = classicRole === 'eu' ? 'eu' : classicRole === 'ru' ? 'ru' : 'ru';
   showCarbonForm({
     title: 'Каскад 2 · установка',
-    sub: 'Мягкий перенос сохраняет клиентов, ключи и обфускацию: порты входа сохраняются, на EU выбираются свободные UDP-порты, старые AWG-порты закрываются. Параметры версии, порта и обфускации относятся только к полной установке и в мягком режиме скрыты.',
+    sub: 'Мягкий перенос сохраняет клиентов, ключи и обфускацию. «Использовать установленный AWG» не делает purge и ставит/достраивает каскад поверх уже установленных пакетов. «Полная очистка» удаляет AWG и клиентов на обоих серверах. По умолчанию для новых установок берётся AWG 2.0; 3.1 включает I1–I5 и требует поддержки на клиенте.',
     fields: [
       { name: 'mode', label: 'Режим', type: 'select', value: 'soft', options: [
         { value: 'soft', label: 'Мягкий перенос (клиенты сохраняются)' },
+        { value: 'reuse', label: 'Использовать установленный AWG / пакеты (без purge)' },
         { value: 'clean', label: 'Полная очистка и установка AWG заново' }
       ] },
       { name: 'role', label: 'Роль этой панели', type: 'select', options: [{ value: 'ru', label: 'Вход (RU)' }, { value: 'eu', label: 'Выход (EU)' }], value: defRole },
@@ -1402,7 +1403,7 @@ async function carbonCascade2Migrate() {
       { name: 'peerPass', label: 'Пароль root', type: 'password' },
       { name: 'tunnelPort', label: 'Порт туннеля RU → EU (по умолчанию вход + 1)', type: 'number', value: (() => { const p = Number(st.ruPort) || Number((st.ports || [])[0]) || 3889; return p >= 65535 ? 4600 : p + 1; })(), min: 1, max: 65535 },
       { name: 'ifaces', label: 'Интерфейсы фильтрации на EU', value: ((st.ifaces && st.ifaces.length ? st.ifaces : ['awg0'])).join(', ') },
-      { name: 'version', label: 'Версия AWG (полная установка)', type: 'select', value: '3.1', options: ['3.1', '2.0', '1.5'], showWhen: { field: 'mode', value: 'clean' } },
+      { name: 'version', label: 'Версия AWG (полная установка; для reuse — 2.0 по умолчанию)', type: 'select', value: '2.0', options: ['3.1', '2.0', '1.5'], showWhen: { field: 'mode', value: 'clean' } },
       { name: 'port', label: 'UDP-порт AWG на EU (полная установка)', type: 'number', value: '3977', min: 1, max: 65535, showWhen: { field: 'mode', value: 'clean' } },
       { name: 'obfMode', label: 'Обфускация (полная установка)', type: 'select', value: 'architect', options: [{ value: 'installer', label: 'Как у установщика' }, { value: 'architect', label: 'Архитектор' }, { value: 'custom', label: 'Свои параметры' }], showWhen: { field: 'mode', value: 'clean' } },
       { name: 'obfProfile', label: 'Профиль мимикрии', type: 'select', value: 'quic', options: [

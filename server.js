@@ -13148,9 +13148,9 @@ let c2MigrateJob = null;
 app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
     if (c2MigrateJob && c2MigrateJob.running) return res.status(409).json({ error: 'Миграция уже выполняется' });
     const b = req.body || {};
-    const mode = b.mode === 'clean' ? 'clean' : 'soft';
+    const mode = b.mode === 'clean' ? 'clean' : (b.mode === 'reuse' ? 'reuse' : 'soft');
     const role = b.role === 'eu' ? 'eu' : 'ru';
-    const version = ['3.1', '2.0', '1.5'].includes(String(b.version)) ? String(b.version) : '3.1';
+    const version = ['3.1', '2.0', '1.5'].includes(String(b.version)) ? String(b.version) : '2.0';
     const awgPortNum = Number(b.port);
     const awgPort = Number.isInteger(awgPortNum) && awgPortNum >= 1 && awgPortNum <= 65535 ? awgPortNum : 3977;
     const savedC2 = cascade2Read();
@@ -13178,7 +13178,7 @@ app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
         job.log += '[' + new Date().toISOString().slice(11, 19) + '] ' + title + ': ' + text + '\n';
     };
 
-    if (mode === 'clean') {
+    if (mode === 'clean' || mode === 'reuse') {
         // Полную установку запускаем только с панели входа: она ставит AWG на
         // обе стороны и собирает каскад 1, который умеет переживать перезагрузки.
         if (role !== 'ru') {
@@ -13186,13 +13186,15 @@ app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
             return res.status(400).json({ error: 'Полную установку запускайте с панели RU-входа' });
         }
         // После полной очистки порты берём из свежего awg0, а не из старого состояния.
-        relayPorts.length = 0;
+        if (mode === 'clean') relayPorts.length = 0;
         let obf = null;
-        try {
-            obf = cascadeObfParams(b, version);
-        } catch (e) {
-            c2MigrateJob = null;
-            return res.status(400).json({ error: 'Обфускация: ' + e.message });
+        if (mode === 'clean') {
+            try {
+                obf = cascadeObfParams(b, version);
+            } catch (e) {
+                c2MigrateJob = null;
+                return res.status(400).json({ error: 'Обфускация: ' + e.message });
+            }
         }
         const pending = {
             stage: 'build',
@@ -13207,17 +13209,22 @@ app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
                 role, peerHost: host, peerPort: port, peerUser: user, peerPass: pass,
                 relayPorts, tunnelPort, ifaces, oldPorts,
                 createClient: String(b.createClient || '').trim(),
-                cleanRu: true
+                cleanRu: mode === 'clean'
             }
         };
-        push('Очистка', 'Удаляю AWG и правила каскада на второй стороне…');
+        push(mode === 'clean' ? 'Очистка' : 'Проверка',
+            mode === 'clean'
+                ? 'Удаляю AWG и правила каскада на второй стороне…'
+                : 'Пакеты AWG сохраняются: проверяю и доустанавливаю конфигурацию без purge…');
         (async () => {
             try {
-                await sshRunner.run({ host, port, user, pass }, cascade2Migrate.PURGE_AWG, 600000);
-                push('Очистка', 'AWG удалён на ' + host + '. Удаляю на этом сервере…');
-                rootSh('bash', ['-c', cascade2Migrate.PURGE_AWG], { timeout: 600000 });
-                cascade2Write({ type: 'classic', enabled: false, ports: [], euHost: '', ruIp: '' });
-                push('Установка', 'Ставлю AWG ' + version + ' и собираю каскад 1 на обоих серверах…');
+                if (mode === 'clean') {
+                    await sshRunner.run({ host, port, user, pass }, cascade2Migrate.PURGE_AWG, 600000);
+                    push('Очистка', 'AWG удалён на ' + host + '. Удаляю на этом сервере…');
+                    rootSh('bash', ['-c', cascade2Migrate.PURGE_AWG], { timeout: 600000 });
+                    cascade2Write({ type: 'classic', enabled: false, ports: [], euHost: '', ruIp: '' });
+                }
+                push('Установка', (mode === 'clean' ? 'Ставлю AWG ' : 'Использую/доустанавливаю AWG ') + version + ' и собираю каскад 1 на обоих серверах…');
                 saveC2Clean(pending);
                 startC2CleanBuild(pending);
             } catch (e) {
@@ -13228,8 +13235,8 @@ app.post('/api/cascade2/migrate-ssh', checkAuth, requireAdmin, (req, res) => {
                 clearC2Clean();
             }
         })();
-        auditLog(req, 'Каскад 2: полная установка запущена (AWG ' + version + ', порт ' + awgPort + ')');
-        return res.json({ success: true, running: true, mode: 'clean' });
+        auditLog(req, 'Каскад 2: ' + (mode === 'clean' ? 'полная установка' : 'установка с сохранением пакетов') + ' (AWG ' + version + ', порт ' + awgPort + ')');
+        return res.json({ success: true, running: true, mode });
     }
 
     (async () => {

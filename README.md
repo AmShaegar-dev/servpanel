@@ -155,7 +155,7 @@ sudo bash /tmp/servpanel-*/install.sh
 
 ```bash
 cd /tmp
-VER=3.3.133
+VER=3.3.134
 curl -4 -fL --connect-timeout 10 --max-time 180 \
   -o servpanel-${VER}.tar.gz \
   https://github.com/AmShaegar-dev/servpanel/releases/download/v${VER}/servpanel-${VER}.tar.gz
@@ -1062,7 +1062,7 @@ Certbot не переписывает конфиг Nginx: панель сама 
 ```bash
 ssh root@IP_СЕРВЕРА
 cd /root
-VER=3.3.133
+VER=3.3.134
 curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v${VER}/servpanel-${VER}.tar.gz
 curl -fLO https://github.com/AmShaegar-dev/servpanel/releases/download/v${VER}/servpanel-${VER}.tar.gz.sha256
 sha256sum -c servpanel-${VER}.tar.gz.sha256
@@ -1071,7 +1071,7 @@ bash /root/servpanel-${VER}/upgrade.sh
 node -p "require('/root/servpanel/package.json').version"
 ```
 
-Должно вывести `3.3.133`. Хеш архива лежит рядом в файле `servpanel-3.3.133.tar.gz.sha256` — `sha256sum -c` проверит его автоматически. Если `curl` не установлен:
+Должно вывести `3.3.134`. Хеш архива лежит рядом в файле `servpanel-3.3.134.tar.gz.sha256` — `sha256sum -c` проверит его автоматически. Если `curl` не установлен:
 `apt update && apt install -y curl`.
 
 Если панель ставилась через git, можно дополнительно проверить локальные изменения:

@@ -1130,6 +1130,10 @@ function realSecurity() {
 }
 
 function realUpdate() {
+  const u = carbon.update || {};
+  const st = u.status || {};
+  const backups = u.backups || [];
+  const progress = st.running ? (Number(st.progress) || 0) : (st.ok ? 100 : 0);
   const actions = `<button class="btn" data-carbon-action="update-check">${icon('search')}Проверить GitHub</button><button class="btn btn-primary" data-carbon-action="update-git">${icon('download')}Обновить с GitHub</button>`;
   return `<div class="page-head"><div><div class="page-title">Обновление</div><div class="page-sub">Только GitHub Releases: без локальных архивов и git fetch.</div></div><div class="page-actions">${actions}<button class="btn" data-api-action="refresh">${icon('refresh')}Обновить</button></div></div>
     <div class="mini-grid">${mini('Версия', escHtml(u.version || '—'), 'установлена')}${mini('Источник', 'GitHub', 'releases')}${mini('Бэкапы', String(backups.length), 'архивов')}${mini('Порт', String(u.port || '—'), 'панель')}</div>
