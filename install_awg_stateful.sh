@@ -23,13 +23,17 @@ cleanup_disk
 # Разовая очистка без установки: маркер создаёт панель через /api/restore.
 if [ -f /root/servpanel/.cleanup_only ]; then
     rm -f /root/servpanel/.cleanup_only
+    # Снимаем зависший диагностический du/установщик от прошлого запуска.
+    pkill -f '[d]u -xhd1 /' 2>/dev/null || true
+    oldest="$(pgrep -o -f 'install_awg_stateful.sh' 2>/dev/null || true)"
+    if [ -n "$oldest" ] && [ "$oldest" != "$$" ]; then kill "$oldest" 2>/dev/null || true; fi
     echo "=== CLEANUP ONLY $(date -Is) ==="
     df -Pm / 2>/dev/null | tail -1 || true
     echo "pre-update backups: $(ls -1 /root/backups/servpanel-pre-update-*.tar.gz 2>/dev/null | wc -l)"
-    echo "=== TOP DIRS ==="
-    du -xhd1 / 2>/dev/null | sort -h | tail -20 || true
     echo "=== DETAIL ==="
-    du -xhd1 /root /var /usr /opt /home 2>/dev/null | sort -h | tail -30 || true
+    timeout 30 du -xhd1 /root /var /usr /opt /home 2>/dev/null | sort -h | tail -30 || true
+    echo "=== ROOT/VAR ==="
+    timeout 20 du -xhd1 /root/backups /root/servpanel /root/awg /var/log /var/lib /opt 2>/dev/null | sort -h | tail -30 || true
     echo "=== CLEANUP DONE ==="
     exit 0
 fi
