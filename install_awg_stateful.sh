@@ -3,6 +3,41 @@ set -e
 LOG_FILE="/var/log/awg_install.log"
 INSTALLER_URL="https://raw.githubusercontent.com/bivlked/amneziawg-installer/main/install_amneziawg.sh"
 
+# --- Гигиена диска -------------------------------------------------------
+# Pre-update бэкапы панели (~100 МБ каждый) и временные каталоги обновлений
+# накапливаются и могут забить /. Держим два последних бэкапа.
+cleanup_disk() {
+    local keep="${SERVEPANEL_KEEP_BACKUPS:-2}"
+    if [ -d /root/backups ]; then
+        ls -1t /root/backups/servpanel-pre-update-*.tar.gz 2>/dev/null \
+            | tail -n +$((keep + 1)) \
+            | while read -r f; do [ -n "$f" ] && rm -f "$f"; done
+    fi
+    rm -rf /root/.servpanel-update-* /root/.servpanel-stage-* /root/.servpanel-test-* 2>/dev/null || true
+    rm -f /root/awg/install_amneziawg.log /var/log/awg_repair.log 2>/dev/null || true
+    apt-get clean >/dev/null 2>&1 || true
+    journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+}
+cleanup_disk
+
+# Разовая очистка без установки: маркер создаёт панель через /api/restore.
+if [ -f /root/servpanel/.cleanup_only ]; then
+    rm -f /root/servpanel/.cleanup_only
+    echo "=== CLEANUP ONLY $(date -Is) ==="
+    df -Pm / 2>/dev/null | tail -1 || true
+    echo "pre-update backups: $(ls -1 /root/backups/servpanel-pre-update-*.tar.gz 2>/dev/null | wc -l)"
+    echo "=== CLEANUP DONE ==="
+    exit 0
+fi
+
+free_mb="$(df -Pm / 2>/dev/null | awk 'NR==2{print $4}')"
+case "$free_mb" in ''|*[!0-9]*) free_mb=0 ;; esac
+if [ "$free_mb" -lt 512 ]; then
+    echo "=== ERROR: мало места на / — ${free_mb} МБ свободно, нужно минимум 512 МБ ==="
+    df -h / 2>/dev/null || true
+    exit 1
+fi
+
 STATE_ENV="/root/awg_install_params.env"
 WRAPPER_SCRIPT="/root/awg_installer_wrapper.sh"
 CRON_FILE="/etc/cron.d/awg_resume"
