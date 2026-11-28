@@ -268,7 +268,11 @@ echo "Команда: $INSTALL_CMD"
 echo "--- Вывод установщика ---"
 
 # Запускаем установку. При ребуте этот процесс будет убит системой.
-eval "$INSTALL_CMD"
+if ! eval "$INSTALL_CMD"; then
+    echo "=== INSTALL FAILED: установщик вернул ошибку ==="
+    tail -n 30 "$LOG_FILE" 2>/dev/null || true
+    exit 1
+fi
 
 # Этот блок выполнится только когда установщик полностью закончит работу без ребутов
 if grep -qE "Установка (полностью )?завершена" "$LOG_FILE" || grep -q "Installation complete" "$LOG_FILE"; then

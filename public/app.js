@@ -1331,9 +1331,9 @@ async function loadStats() {
             if (upEl) upEl.innerText = sys.uptime;
             if (heroUp) heroUp.innerText = 'Uptime: ' + (sys.uptime || '—');
             if (sys.disk && sys.disk.total > 0) { 
-                const du = document.getElementById('diskUsed'); if (du) du.innerText = formatBytes(sys.disk.used); 
-                const df = document.getElementById('diskFree'); if (df) df.innerText = formatBytes(sys.disk.free); 
-                const dt = document.getElementById('diskTotal'); if (dt) dt.innerText = formatBytes(sys.disk.total); 
+                const du = document.getElementById('diskUsed'); if (du) { du.style.display = 'inline'; du.innerText = formatBytes(sys.disk.used); }
+                const df = document.getElementById('diskFree'); if (df) { df.style.display = 'inline'; df.innerText = formatBytes(sys.disk.free); }
+                const dt = document.getElementById('diskTotal'); if (dt) { dt.style.display = 'inline'; dt.innerText = formatBytes(sys.disk.total); }
             }
         }
 
@@ -5670,7 +5670,12 @@ async function updGitCheck() {
         const d = await res.json();
         if (!res.ok || d.ok === false) throw new Error(d.error || ('HTTP ' + res.status));
         let text;
-        if (d.upToDate) {
+        if (d.mode === 'release') {
+            text = d.upToDate
+                ? 'Установлена последняя версия из GitHub Releases: ' + (d.current || '—') + '.'
+                : 'Доступно обновление из GitHub Releases.\nУстановлено: ' + (d.current || '—') +
+                  '\nПоследний релиз: ' + (d.latest || '—') + (d.releaseUrl ? '\n' + d.releaseUrl : '');
+        } else if (d.upToDate) {
             text = 'Установлена последняя версия из GitHub.\nКоммит: ' + (d.commit || d.current || '—');
         } else if (d.dirty && d.dirty.length) {
             text = 'Доступно обновление (' + d.behind + ' коммит(ов)), но в панели есть локальные изменения файлов.\n' +
@@ -5686,7 +5691,7 @@ async function updGitCheck() {
 }
 
 async function updGitRun() {
-    if (!confirm('Обновить панель с GitHub?\n\nGitHub-режим работает только при отсутствии локальных изменений файлов. ' +
+    if (!confirm('Обновить панель из последнего GitHub Release?\n\n' +
         'Перед обновлением создаётся бэкап, при ошибке выполняется автоматический откат. Продолжить?')) return;
     updSetBusy(true);
     updSawRunning = true;

@@ -292,6 +292,10 @@ hash_files > "$BACKUP_DIR/config-hashes-before-$STAMP.txt" 2>/dev/null || true
 log "Останавливаю панель…"
 "$PM2" stop "$PM2_NAME" >/dev/null 2>&1 || true
 
+# Старые pre-update бэкапы ~100 МБ quickly заполняют /. Оставляем два.
+ls -1t "$BACKUP_DIR"/servpanel-pre-update-*.tar.gz 2>/dev/null | tail -n +2 \
+    | while read -r f; do [ -n "$f" ] && rm -f "$f"; done || true
+
 BACKUP="$BACKUP_DIR/servpanel-pre-update-$STAMP.tar.gz"
 log "Делаю бэкап панели: $BACKUP"
 if ! "$TAR" -czf "$BACKUP" -C "$(dirname "$APP_DIR")" "$(basename "$APP_DIR")"; then
@@ -300,6 +304,9 @@ if ! "$TAR" -czf "$BACKUP" -C "$(dirname "$APP_DIR")" "$(basename "$APP_DIR")"; 
     die "обновление отменено: не удалось создать бэкап"
 fi
 [ -s "$BACKUP" ] || { pm2_start || true; die "обновление отменено: бэкап пустой"; }
+# Оставляем новый и один предыдущий.
+ls -1t "$BACKUP_DIR"/servpanel-pre-update-*.tar.gz 2>/dev/null | tail -n +3 \
+    | while read -r f; do [ -n "$f" ] && rm -f "$f"; done || true
 
 restore_backup() {
     log "Останавливаю панель для отката…"

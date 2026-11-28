@@ -529,7 +529,16 @@ async function pollUpdate() {
 async function carbonUpdateCheck() {
   const d = await api('/api/update/check-git');
   let text = '';
-  if (d.upToDate) text = 'Установлена последняя версия из GitHub.\nКоммит: ' + (d.commit || d.current || '—');
+  if (d.mode === 'release') {
+    if (d.upToDate) {
+      text = 'Установлена последняя версия: ' + (d.current || '—') + '.\nИсточник: GitHub Releases.';
+    } else {
+      text = 'Доступно обновление из GitHub Releases.\n' +
+        'Установлено: ' + (d.current || '—') + '\n' +
+        'Последний релиз: ' + (d.latest || '—') + '\n' +
+        (d.releaseUrl ? 'Релиз: ' + d.releaseUrl : '');
+    }
+  } else if (d.upToDate) text = 'Установлена последняя версия из GitHub.\nКоммит: ' + (d.commit || d.current || '—');
   else if (d.dirty && d.dirty.length) text = 'Доступно обновление (' + d.behind + ' коммит(ов)), но есть локальные изменения.\nМожно выполнить «Сбросить и обновить».';
   else text = 'Доступно обновление: ' + d.behind + ' коммит(ов).\nПоследний: ' + (d.commit || '—');
   showCarbonTextModal('Проверка GitHub', text);
@@ -564,6 +573,13 @@ async function carbonUpdateFromUrl() {
       pollUpdate();
     }
   });
+}
+
+async function carbonUpdateCleanup() {
+  if (!confirm('Удалить старые pre-update бэкапы и временные каталоги обновлений?\n\nОстанутся два последних бэкапа для отката.')) return;
+  const d = await api('/api/update/cleanup', { method: 'POST', body: {} });
+  await carbonRefresh('Очищено: ' + (d.removed || 0) + ', свободно ' + fmtBytes(d.free || 0));
+  showToast('Очистка завершена: удалено ' + (d.removed || 0));
 }
 
 async function carbonUpdateRollback() {
@@ -1243,6 +1259,23 @@ async function carbonUfwBulkDelete() {
   }
   carbon.ufwSelected = new Map();
   await carbonRefresh('Выбранные правила удалены');
+}
+
+async function carbonUfwFail2banShow() {
+  const f2b = (carbon.ufw && carbon.ufw.fail2ban) || {};
+  const ips = Array.isArray(f2b.ips) ? f2b.ips : [];
+  showCarbonTextModal('Fail2Ban: забаненные IP',
+    ips.length
+      ? ips.join('\n') + '\n\nВсего: ' + ips.length
+      : 'Активных банов Fail2Ban нет.');
+}
+
+async function carbonUfwFail2banClear() {
+  if (!confirm('Разбанить все IP Fail2Ban и удалить оставшиеся UFW-правила?\n\n' +
+    'Доступ к серверу не изменится, но забаненные сейчас адреса снова смогут подключаться.')) return;
+  const d = await api('/api/fail2ban/unban-all', { method: 'POST', body: {} });
+  await carbonRefresh('Fail2Ban: разбанено ' + (d.unbanned || 0) + ', удалено правил ' + (d.removedRules || 0));
+  showToast('Fail2Ban очищен: разбанено ' + (d.unbanned || 0) + ', правил ' + (d.removedRules || 0));
 }
 
 async function carbonUfwAdd() {
@@ -2291,8 +2324,10 @@ async function carbonFail2banUnban(ip) {
 async function carbonFail2ban() {
   let d = {};
   try { d = await api('/api/fail2ban/status'); } catch (e) {}
+  const banned = Array.isArray(d.banned) ? d.banned : [];
+  const jailText = (d.jails || []).map(j => j.name + ': ' + (j.banned || []).length).join(', ');
   const text = d.installed
-    ? 'Jail: ' + (d.jail ? 'активен' : 'не найден') + '\nНеудачных попыток: ' + (d.currentlyFailed || 0) + ' / всего ' + (d.totalFailed || 0) + '\nЗабанено: ' + ((d.banned || []).join(', ') || '—') + '\nЛог: ' + (d.log || '—')
+    ? 'Jail: ' + (d.jail ? 'активен' : 'не найден') + '\nНеудачных попыток: ' + (d.currentlyFailed || 0) + ' / всего ' + (d.totalFailed || 0) + '\nЗабанено: ' + banned.length + (jailText ? ' (' + jailText + ')' : '') + '\n' + (banned.slice(0, 50).join(', ') || '—') + (banned.length > 50 ? '\n… и ещё ' + (banned.length - 50) : '') + '\nЛог: ' + (d.log || '—')
     : 'fail2ban не установлен.';
   showCarbonForm({
     title: 'Fail2Ban',
@@ -2880,7 +2915,8 @@ document.addEventListener('click', async event => {
   try {
     if (action === 'download') await carbonDownload(btn.dataset.url, { filename: btn.dataset.name || '' });
     else if (action === 'update-check') await carbonUpdateCheck();
-    else if (action === 'update-git') { if (confirm('Обновить панель с GitHub? Перед обновлением создаётся бэкап.')) { await api('/api/update/git', { method: 'POST', body: {} }); pollUpdate(); } }
+    else if (action === 'update-git') { if (confirm('Обновить панель из последнего GitHub Release? Перед обновлением создаётся бэкап.')) { await api('/api/update/git', { method: 'POST', body: {} }); pollUpdate(); } }
+    else if (action === 'update-cleanup') await carbonUpdateCleanup();
     else if (action === 'update-git-force') { if (confirm('Сбросить локальные изменения кода и обновить с GitHub?')) { await api('/api/update/git-force', { method: 'POST', body: {} }); pollUpdate(); } }
     else if (action === 'update-url') await carbonUpdateFromUrl();
     else if (action === 'update-upload') {
@@ -2927,6 +2963,8 @@ document.addEventListener('click', async event => {
     else if (action === 'proxy-diag') await carbonProxyDiag();
     else if (action === 'proxy-log') await carbonProxyLog();
     else if (action === 'ufw-add') await carbonUfwAdd();
+    else if (action === 'ufw-f2b-show') await carbonUfwFail2banShow();
+    else if (action === 'ufw-f2b-clear') await carbonUfwFail2banClear();
     else if (action === 'ipv6-toggle') await carbonIpv6Toggle();
     else if (action === 'ufw-delete') carbonUfwShowConfirm(btn);
     else if (action === 'ufw-delete-cancel') carbonUfwCancelConfirm(btn);

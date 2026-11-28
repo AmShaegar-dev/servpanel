@@ -2938,19 +2938,55 @@ app.get('/api/audit', checkAuth, requireAdmin, (req, res) => {
 });
 
 // --- Fail2ban ---
-function fail2banStatus() {
-    const jail = 'servpanel';
-    const installed = ['/usr/bin/fail2ban-client', '/usr/sbin/fail2ban-client', '/usr/local/bin/fail2ban-client']
+function fail2banClientInstalled() {
+    return ['/usr/bin/fail2ban-client', '/usr/sbin/fail2ban-client', '/usr/local/bin/fail2ban-client']
         .some(p => { try { return fs.existsSync(p); } catch (e) { return false; } });
-    if (!installed) return { installed: false, jail: false, banned: [], currentlyFailed: 0, totalFailed: 0 };
-    let out = '';
-    try { out = shTry('sudo', ['fail2ban-client', 'status', jail]); } catch (e) { out = ''; }
-    const banned = [];
-    const mBan = out.match(/Banned IP list:\s*(.*)/);
-    if (mBan && mBan[1].trim()) banned.push(...mBan[1].trim().split(/\s+/));
-    const current = parseInt((out.match(/Currently failed:\s*(\d+)/) || [])[1], 10) || 0;
-    const total = parseInt((out.match(/Total failed:\s*(\d+)/) || [])[1], 10) || 0;
-    return { installed: true, jail: /Status for the jail/.test(out), banned, currentlyFailed: current, totalFailed: total };
+}
+
+function fail2banParseJail(name, out) {
+    const text = String(out || '');
+    const ips = [];
+    const mBan = text.match(/Banned IP list:\s*(.*)/);
+    if (mBan && mBan[1].trim()) ips.push(...mBan[1].trim().split(/\s+/).filter(Boolean));
+    return {
+        name,
+        banned: [...new Set(ips)],
+        currentlyFailed: parseInt((text.match(/Currently failed:\s*(\d+)/) || [])[1], 10) || 0,
+        totalFailed: parseInt((text.match(/Total failed:\s*(\d+)/) || [])[1], 10) || 0,
+        currentlyBanned: parseInt((text.match(/Currently banned:\s*(\d+)/) || [])[1], 10) || 0,
+        totalBanned: parseInt((text.match(/Total banned:\s*(\d+)/) || [])[1], 10) || 0
+    };
+}
+
+function fail2banStatus() {
+    if (!fail2banClientInstalled()) {
+        return { installed: false, jail: false, banned: [], jails: [], currentlyFailed: 0, totalFailed: 0 };
+    }
+    let listOut = '';
+    try { listOut = shTry('sudo', ['fail2ban-client', 'status']); } catch (e) { listOut = ''; }
+    const listMatch = String(listOut || '').match(/Jail list:\s*(.*)/i);
+    let names = listMatch && listMatch[1].trim()
+        ? listMatch[1].trim().split(/[,\s]+/).filter(Boolean)
+        : [];
+    if (!names.length && /Status for the jail/i.test(String(listOut || ''))) names = ['servpanel'];
+    if (!names.length) names = ['servpanel'];
+
+    const jails = [];
+    for (const name of names) {
+        let out = '';
+        try { out = shTry('sudo', ['fail2ban-client', 'status', name]); } catch (e) { out = ''; }
+        if (!/Status for the jail/i.test(String(out || ''))) continue;
+        jails.push(fail2banParseJail(name, out));
+    }
+    const banned = [...new Set(jails.flatMap(j => j.banned))];
+    return {
+        installed: true,
+        jail: jails.some(j => j.name === 'servpanel'),
+        banned,
+        jails,
+        currentlyFailed: jails.reduce((n, j) => n + j.currentlyFailed, 0),
+        totalFailed: jails.reduce((n, j) => n + j.totalFailed, 0)
+    };
 }
 
 app.get('/api/fail2ban/status', checkAuth, requireAdmin, (req, res) => {
@@ -2961,10 +2997,38 @@ app.post('/api/fail2ban/unban', checkAuth, requireAdmin, (req, res) => {
     const ip = String((req.body && req.body.ip) || '').trim();
     if (!IPV4_RE.test(ip)) return res.status(400).json({ error: 'Неверный IP' });
     try {
-        sh('sudo', ['fail2ban-client', 'set', 'servpanel', 'unbanip', ip]);
-        auditLog(req, `Fail2ban: разбанен ${ip}`);
-        res.json({ success: true });
+        const st = fail2banStatus();
+        const targets = (st.jails || []).filter(j => j.banned.includes(ip)).map(j => j.name);
+        if (!targets.length) targets.push('servpanel');
+        let ok = 0;
+        for (const jail of targets) {
+            try { sh('sudo', ['fail2ban-client', 'set', jail, 'unbanip', ip]); ok++; } catch (e) { /* jail мог не знать IP */ }
+        }
+        if (!ok) throw new Error('fail2ban не разбанил IP');
+        auditLog(req, `Fail2ban: разбанен ${ip} (${targets.join(', ')})`);
+        res.json({ success: true, jails: targets });
     } catch (e) { res.status(500).json({ error: 'Не удалось разбанить (fail2ban установлен?)' }); }
+});
+
+// Разбанить все IP во всех jail и убрать оставшиеся UFW-правила Fail2Ban.
+app.post('/api/fail2ban/unban-all', checkAuth, requireAdmin, (req, res) => {
+    try {
+        const st = fail2banStatus();
+        let unbanned = 0;
+        for (const jail of (st.jails || [])) {
+            for (const ip of (jail.banned || [])) {
+                try {
+                    sh('sudo', ['fail2ban-client', 'set', jail.name, 'unbanip', ip]);
+                    unbanned++;
+                } catch (e) { /* ignore */ }
+            }
+        }
+        const removed = clearFail2banUfwRules();
+        auditLog(req, `Fail2ban: разбанено ${unbanned} IP, удалено UFW-правил ${removed}`);
+        res.json({ success: true, unbanned, removedRules: removed });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось очистить баны: ' + e.message });
+    }
 });
 
 // --- Telegram-уведомления ---
@@ -5751,7 +5815,16 @@ app.get('/api/ufw', checkAuth, (req, res) => {
                 pid: pm ? Number(pm[2]) : 0
             };
         }).filter(Boolean).sort((a, b) => (a.port - b.port) || String(a.proto).localeCompare(String(b.proto)));
-        res.json({ rules: ufw.rules, ports, active: ufw.active });
+        const f2b = ufw.rules.filter(ufwIsFail2banRow);
+        const rules = ufw.rules.filter(r => !ufwIsFail2banRow(r));
+        const ips = [...new Set(f2b.map(r => String(r.from || '').split('#')[0].trim()).filter(Boolean))];
+        res.json({
+            rules,
+            fail2banRules: f2b,
+            fail2ban: { count: f2b.length, ips },
+            ports,
+            active: ufw.active
+        });
     } catch (e) { res.status(500).json({ error: 'Ошибка' }); }
 });
 
@@ -5777,8 +5850,23 @@ app.post('/api/ufw', checkAuth, (req, res) => {
 function ufwNormSpec(s) {
     return String(s || '').replace(/\s*\(v6\)\s*/gi, '').trim();
 }
+function ufwIsFail2banRow(row) {
+    return /#\s*by\s*Fail2Ban/i.test(String((row && row.from) || ''));
+}
 function ufwStatusRows() {
     return sh('sudo', ['ufw', 'status', 'numbered']).split('\n').map(ufwParseStatusLine).filter(Boolean);
+}
+// Удаляет только оставшиеся UFW-правила Fail2Ban (после unban).
+function clearFail2banUfwRules() {
+    const rows = ufwStatusRows().filter(ufwIsFail2banRow);
+    const ids = [...new Set(rows.map(r => r.id))].sort((a, b) => Number(b) - Number(a));
+    for (const id of ids) {
+        try { sh('sudo', ['ufw', '--force', 'delete', id]); } catch (e) { /* ignore */ }
+    }
+    if (ids.length) {
+        try { sh('sudo', ['ufw', 'reload'], { timeout: 60000 }); } catch (e) { /* ignore */ }
+    }
+    return ids.length;
 }
 // Удаляет правило по порту/действию (вместе с IPv6-двойником) или по номеру.
 // Возвращает список реально удалённых номеров.
@@ -5793,7 +5881,9 @@ function deleteUfwSpecs(specs) {
             target = rows.find(r => r.id === String(spec.id));
         }
         if (!target) continue;
+        const targetF2b = ufwIsFail2banRow(target);
         for (const r of rows) {
+            if (ufwIsFail2banRow(r) !== targetF2b) continue;
             if (ufwNormSpec(r.to) === ufwNormSpec(target.to) && r.action === target.action) ids.add(r.id);
         }
     }
@@ -8075,6 +8165,11 @@ async function runCascadeBuildEu(job, remote, opts) {
             } else if (i > 0 && i % 24 === 0) {
                 log('EU', 'Установка AmneziaWG на выходе продолжается' + (st.progress ? ' (' + st.progress + '%)' : '') + '...');
             }
+            const logText = readTextSafe(sshBuild.INSTALL_LOG);
+            if (/No space left on device|КРИТИЧЕСКАЯ ОШИБКА|Установка прервана|Не удалось установить/i.test(logText)) {
+                const tail = logText.trim().split(/\r?\n/).slice(-6).join(' | ');
+                throw new Error('Установка AmneziaWG на выходе прервалась: ' + tail.slice(-500));
+            }
         }
         if (!exit.installed) throw new Error('AmneziaWG на выходе не установился за 15 минут');
     }
@@ -8357,6 +8452,11 @@ async function runCascadeBuild(job, remote, opts) {
                 } else if (i > 0 && i % 24 === 0) {
                     log('RU', 'Установка AmneziaWG на входе продолжается' +
                         (st.progress ? ' (' + st.progress + '%)' : '') + '...');
+                }
+                const logText = readTextSafe(sshBuild.INSTALL_LOG);
+                if (/No space left on device|КРИТИЧЕСКАЯ ОШИБКА|Установка прервана|Не удалось установить/i.test(logText)) {
+                    const tail = logText.trim().split(/\r?\n/).slice(-6).join(' | ');
+                    throw new Error('Установка AmneziaWG на входе прервалась: ' + tail.slice(-500));
                 }
             }
             if (!local.installed) throw new Error('AmneziaWG на входе не установился за 15 минут');
@@ -15173,12 +15273,16 @@ async function panelReleaseInfo() {
     if (!r.ok) throw new Error('GitHub API: HTTP ' + r.status);
     const j = await r.json();
     const assets = Array.isArray(j.assets) ? j.assets : [];
-    const tar = assets.find(a => /\.tar\.gz$/i.test(String(a.name || '')) && !/\.sha256$/i.test(String(a.name || '')));
-    const sha = assets.find(a => /\.tar\.gz\.sha256$/i.test(String(a.name || '')));
+    const tagVersion = String(j.tag_name || '').replace(/^v/i, '');
+    const isTar = a => /^servpanel-.*\.tar\.gz$/i.test(String(a.name || '')) && !/\.sha256$/i.test(String(a.name || ''));
+    const tar = assets.find(a => isTar(a) && tagVersion && String(a.name) === `servpanel-${tagVersion}.tar.gz`)
+        || assets.find(a => isTar(a) && String(a.name) !== 'servpanel-latest.tar.gz')
+        || assets.find(isTar);
+    const sha = tar ? assets.find(a => String(a.name) === String(tar.name) + '.sha256') : null;
     return {
         tag: String(j.tag_name || ''),
         name: String(j.name || j.tag_name || ''),
-        version: String(j.tag_name || '').replace(/^v/i, ''),
+        version: tagVersion,
         htmlUrl: String(j.html_url || ''),
         assetUrl: tar ? String(tar.browser_download_url || '') : '',
         assetName: tar ? String(tar.name || '') : '',
@@ -15313,14 +15417,9 @@ app.get('/api/update/status', checkAuth, requireAdmin, (req, res) => {
 
 app.get('/api/update/check-git', checkAuth, requireAdmin, async (req, res) => {
     try {
-        if (!fs.existsSync(path.join(APP_DIR, '.git'))) {
-            return res.json(await panelReleaseCheck());
-        }
-        const g = updater.gitCheck(APP_DIR, 'origin', 'main');
-        if (!g.ok && /not a git repository|does not appear to be a git repository/i.test(String(g.error || ''))) {
-            return res.json(await panelReleaseCheck());
-        }
-        res.json(g);
+        // Всегда проверяем последний GitHub Release. Это одинаково работает
+        // и для git-установок, и для распакованных архивов.
+        res.json(await panelReleaseCheck());
     } catch (e) {
         safeUpdateError(res, e);
     }
@@ -15416,30 +15515,51 @@ app.post('/api/update/url', checkAuth, requireAdmin, async (req, res) => {
 
 // GitHub-обновление: только fast-forward, без reset --hard.
 app.post('/api/update/git', checkAuth, requireAdmin, async (req, res) => {
-    if (!fs.existsSync(path.join(APP_DIR, '.git'))) {
-        return startReleaseUpdate(req, res, 'Запущено обновление панели из последнего релиза GitHub');
-    }
-    startUpdateWorker(res, req, { mode: 'git', branch: 'main', remote: 'origin' },
-        'Запущено обновление панели с GitHub');
+    return startReleaseUpdate(req, res, 'Запущено обновление панели из последнего релиза GitHub');
 });
 
-// Принудительное GitHub-обновление: сбрасывает только отслеживаемые файлы кода
-// к origin/main. Для установки из архива обновляем из последнего релиза.
+// Оставлено для совместимости со старой панелью: теперь это тоже обновление
+// из последнего GitHub Release, без git fetch и сброса локальных файлов.
 app.post('/api/update/git-force', checkAuth, requireAdmin, async (req, res) => {
-    if (!fs.existsSync(path.join(APP_DIR, '.git'))) {
-        return startReleaseUpdate(req, res, 'Запущено обновление панели из последнего релиза GitHub');
-    }
-    startUpdateWorker(res, req, { mode: 'git-force', branch: 'main', remote: 'origin' },
-        'Запущено принудительное обновление панели с GitHub (сброс локальных изменений кода)');
+    return startReleaseUpdate(req, res, 'Запущено обновление панели из последнего релиза GitHub');
 });
 
-// Старый вызов оставлен совместимым, но теперь он тоже безопасный.
+// Старый вызов оставлен совместимым.
 app.post('/api/update', checkAuth, requireAdmin, async (req, res) => {
-    if (!fs.existsSync(path.join(APP_DIR, '.git'))) {
-        return startReleaseUpdate(req, res, 'Запущено обновление панели из последнего релиза GitHub');
+    return startReleaseUpdate(req, res, 'Запущено обновление панели из последнего релиза GitHub');
+});
+
+app.post('/api/update/cleanup', checkAuth, requireAdmin, (req, res) => {
+    try {
+        let removed = 0;
+        let files = [];
+        try {
+            files = fs.readdirSync(UPDATE_BACKUP_DIR)
+                .filter(n => /^servpanel-pre-update-.*\.tar\.gz$/.test(n))
+                .map(n => {
+                    const p = path.join(UPDATE_BACKUP_DIR, n);
+                    let t = 0;
+                    try { t = fs.statSync(p).mtimeMs; } catch (e) { /* ignore */ }
+                    return { p, t };
+                })
+                .sort((a, b) => b.t - a.t);
+        } catch (e) { files = []; }
+        for (const f of files.slice(2)) {
+            try { fs.unlinkSync(f.p); removed++; } catch (e) { /* ignore */ }
+        }
+        // Временные каталоги обновлений, оставшиеся после сбоев.
+        try {
+            for (const n of fs.readdirSync('/root')) {
+                if (/^\.servpanel-(update|stage|test)-/.test(n)) {
+                    try { fs.rmSync(path.join('/root', n), { recursive: true, force: true }); removed++; } catch (e) { /* ignore */ }
+                }
+            }
+        } catch (e) { /* ignore */ }
+        auditLog(req, `Очистка обновлений: удалено ${removed}, бэкапов оставлено 2`);
+        res.json({ success: true, removed, kept: Math.min(files.length, 2), free: diskUsageCached().free });
+    } catch (e) {
+        res.status(500).json({ error: 'Не удалось очистить: ' + e.message });
     }
-    startUpdateWorker(res, req, { mode: 'git', branch: 'main', remote: 'origin' },
-        'Запущено обновление панели с GitHub (совместимый вызов)');
 });
 
 app.post('/api/update/rollback', checkAuth, requireAdmin, (req, res) => {
